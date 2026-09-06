@@ -1481,17 +1481,21 @@ export const calculateSRAWeekLabel = (dateInput = new Date()) => {
   return `Week ${boundedWeek} ${monthName}`;
 };
 
-export const publishSraPrice = async ({ price, molasses, week, circular, source }) => {
+export const publishSraPrice = async ({ price, molasses, week, circular, source, effectiveDate }) => {
   const sorted = getSortedPrices();
   const prevPrice = (sorted.length > 0 && sorted[0].price !== undefined) ? sorted[0].price : price;
   const prevMol = (sorted.length > 0 && sorted[0].molasses !== undefined) ? sorted[0].molasses : molasses;
   const change = price - prevPrice;
   const molChange = molasses - prevMol;
 
-  const now = new Date();
+  let targetDate = new Date();
+  if (effectiveDate) {
+    const parsed = new Date(effectiveDate);
+    if (!isNaN(parsed.getTime())) targetDate = parsed;
+  }
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const formattedDate = `${months[now.getMonth()]} ${String(now.getDate()).padStart(2, '0')}, ${now.getFullYear()}`;
-  const isoDate = now.toISOString().split('T')[0];
+  const formattedDate = `${months[targetDate.getMonth()]} ${String(targetDate.getDate()).padStart(2, '0')}, ${targetDate.getFullYear()}`;
+  const isoDate = targetDate.toISOString().split('T')[0];
 
   const pId = `PRC-${Date.now()}`;
   const newPost = {
@@ -1504,9 +1508,9 @@ export const publishSraPrice = async ({ price, molasses, week, circular, source 
     timestamp: Date.now(),
     change,
     molassesChange: molChange,
-    source: source || circular || 'SRA Official Circular (HPCo Silay Millsite)',
-    circular: circular || 'SRA Circular',
-    createdAt: now.toISOString()
+    source: source || circular || 'SRA Circular #105 (Official SRA Millsite Notice)',
+    circular: circular || 'SRA Circular #105',
+    createdAt: new Date().toISOString()
   };
 
   priceHistory.unshift(newPost);

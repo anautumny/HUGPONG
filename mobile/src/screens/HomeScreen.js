@@ -132,9 +132,10 @@ export default function HomeScreen({ navigation }) {
 
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [inputWeek, setInputWeek] = useState(() => calculateSRAWeekLabel(new Date()));
+  const [inputEffectiveDate, setInputEffectiveDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [inputBag, setInputBag] = useState('2950');
   const [inputMol, setInputMol] = useState('4400');
-  const [inputCircular, setInputCircular] = useState('SRA Circular #105');
+  const [inputCircular, setInputCircular] = useState('SRA Circular #105 (Official SRA Millsite Notice)');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
 
@@ -230,11 +231,13 @@ export default function HomeScreen({ navigation }) {
 
   const handleOpenPriceModal = () => {
     if (session.role === 'SRA (Admin)') {
-      const autoWeek = calculateSRAWeekLabel(new Date());
+      const today = new Date().toISOString().split('T')[0];
+      const autoWeek = calculateSRAWeekLabel(today);
       setInputBag(livePrice.toString());
       setInputMol(liveMol.toString());
       setInputWeek(autoWeek);
-      setInputCircular('SRA Circular #105');
+      setInputEffectiveDate(today);
+      setInputCircular('SRA Circular #105 (Official SRA Millsite Notice)');
       setShowPriceModal(true);
     }
   };
@@ -507,105 +510,210 @@ export default function HomeScreen({ navigation }) {
 
       </ScrollView>
 
-      {/* ── SRA Price Edit Modal ── */}
+      {/* ── SRA Price Edit Modal (Web Aligned) ── */}
       <Modal visible={showPriceModal} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
+            {/* Header with Regulatory Badge */}
             <View style={s.modalHeader}>
-              <View>
-                <Text style={s.modalTitle}>{t('sra_publish_title', 'Publish Official SRA Price')}</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
-                  HPCo Silay Millsite Circular · Official SRA Notice
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={s.modalBadge}>
+                  <Text style={s.modalBadgeText}>{t('sra_publish_badge', 'SRA REGULATORY BROADCAST')}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                  <Ionicons name="trending-up" size={18} color={COLORS.primary} />
+                  <Text style={s.modalTitle}>{t('sra_publish_title', 'Post Official Weekly Millsite Price')}</Text>
+                </View>
+                <Text style={s.modalSub}>
+                  {t('sra_publish_sub', 'Publish official SRA circular price records to synchronize all block farms & mobile apps.')}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowPriceModal(false)}>
+              <TouchableOpacity onPress={() => setShowPriceModal(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={22} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, marginBottom: 4 }}>
-              <Text style={[s.inputLabel, { marginBottom: 0 }]}>{t('sra_circ_week', 'Circular / Week')}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EBF3E8', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                <Ionicons name="sparkles-outline" size={10} color={COLORS.primary} />
-                <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>Auto-detected</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 4 }}>
+              {/* Row: Week Label (Auto-detected) & Effective Date */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={[s.inputLabel, { marginTop: 0, marginBottom: 0 }]}>
+                      {t('sra_circ_week', 'Week Label')} <Text style={{ color: COLORS.danger }}>*</Text>
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#EBF3E8', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: COLORS.primary }}>Auto</Text>
+                    </View>
+                  </View>
+                  <TextInput
+                    style={s.input}
+                    value={inputWeek}
+                    onChangeText={setInputWeek}
+                    placeholder="e.g. Week 1 Sep"
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.inputLabel, { marginTop: 0, marginBottom: 4 }]}>
+                    {t('sra_effective_date', 'Effective Date')} <Text style={{ color: COLORS.danger }}>*</Text>
+                  </Text>
+                  <TextInput
+                    style={s.input}
+                    value={inputEffectiveDate}
+                    onChangeText={(val) => {
+                      setInputEffectiveDate(val);
+                      if (val && val.length >= 8) {
+                        setInputWeek(calculateSRAWeekLabel(val));
+                      }
+                    }}
+                    placeholder="YYYY-MM-DD"
+                  />
+                </View>
               </View>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              <TextInput style={[s.input, { flex: 1 }]} value={inputWeek} onChangeText={setInputWeek} placeholder="e.g. Week 1 Sep" />
+
+              {/* Side-by-Side: Raw Sugar & Molasses */}
+              <View style={s.priceBoxContainer}>
+                {/* Raw Sugar */}
+                <View style={s.priceBoxItem}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>{t('sra_raw_sugar_price', 'Raw Sugar Price')}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>₱ / Lkg</Text>
+                  </View>
+                  <View style={s.priceInputWrap}>
+                    <Text style={s.currencySymbol}>₱</Text>
+                    <TextInput
+                      style={s.priceInput}
+                      value={inputBag}
+                      onChangeText={setInputBag}
+                      keyboardType="numeric"
+                      placeholder="2950"
+                    />
+                  </View>
+                  {(() => {
+                    const b = parseFloat(inputBag) || 0;
+                    const prev = currentPrice.value || 0;
+                    const diff = b - prev;
+                    return (
+                      <Text style={s.priceDeltaText}>
+                        {diff === 0 ? 'Steady (₱0 / Lkg)' : `${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} / Lkg`}
+                      </Text>
+                    );
+                  })()}
+                </View>
+
+                {/* Molasses */}
+                <View style={s.priceBoxItem}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>{t('sra_molasses_price', 'Molasses Price')}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.success }}>₱ / MT</Text>
+                  </View>
+                  <View style={s.priceInputWrap}>
+                    <Text style={s.currencySymbol}>₱</Text>
+                    <TextInput
+                      style={s.priceInput}
+                      value={inputMol}
+                      onChangeText={setInputMol}
+                      keyboardType="numeric"
+                      placeholder="4400"
+                    />
+                  </View>
+                  {(() => {
+                    const m = parseFloat(inputMol) || 0;
+                    const prevM = currentMarketObservation.value || 0;
+                    const diffM = m - prevM;
+                    return (
+                      <Text style={s.priceDeltaText}>
+                        {diffM === 0 ? 'Steady (₱0 / MT)' : `${diffM > 0 ? '+' : ''}₱${diffM.toLocaleString()} / MT`}
+                      </Text>
+                    );
+                  })()}
+                </View>
+              </View>
+
+              {/* Official Source / Circular Reference */}
+              <Text style={s.inputLabel}>
+                {t('sra_circ_source', 'Official Source / Circular Reference')} <Text style={{ color: COLORS.danger }}>*</Text>
+              </Text>
+              <TextInput
+                style={s.input}
+                value={inputCircular}
+                onChangeText={setInputCircular}
+                placeholder="e.g. SRA Circular #105 (Official SRA Millsite Notice)"
+              />
+
+              {/* Informational Sync Banner */}
+              <View style={s.noticeBox}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={{ marginTop: 1 }} />
+                <Text style={s.noticeText}>
+                  {t('sra_publish_notice', 'Publishing updates the live SRA official price ledger, syncs with Firestore cloud instantly, and updates all mobile app price cards in real time.')}
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Action Buttons: Cancel + Publish Weekly Price */}
+            <View style={s.modalActionRow}>
               <TouchableOpacity
-                onPress={() => setInputWeek(calculateSRAWeekLabel(new Date()))}
-                style={{ backgroundColor: COLORS.background, paddingHorizontal: 12, paddingVertical: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border }}
+                onPress={() => setShowPriceModal(false)}
+                style={s.cancelBtn}
               >
-                <Ionicons name="refresh" size={16} color={COLORS.primary} />
+                <Text style={s.cancelBtnText}>{t('btn_cancel', 'Cancel')}</Text>
               </TouchableOpacity>
-            </View>
 
-            <Text style={s.inputLabel}>{t('sra_circ_num', 'SRA Circular Number')}</Text>
-            <TextInput
-              style={s.input}
-              value={inputCircular}
-              onChangeText={setInputCircular}
-              placeholder="e.g. SRA Circular #105 (HPCo Silay Millsite)"
-            />
+              <TouchableOpacity
+                style={s.publishBtn}
+                onPress={() => {
+                  const b = parseFloat(inputBag);
+                  const m = parseFloat(inputMol);
+                  if (isNaN(b) || isNaN(m)) {
+                    Alert.alert(t('error_title', 'Error'), t('invalid_numbers_error', 'Please enter valid numbers'));
+                    return;
+                  }
 
-            <Text style={s.inputLabel}>{t('sra_raw_sugar_price', 'Raw Sugar (₱ / Lkg Bag)')}</Text>
-            <TextInput style={s.input} value={inputBag} onChangeText={setInputBag} keyboardType="numeric" placeholder="2950" />
+                  Alert.alert(
+                    'Publish SRA Sugar & Molasses Price?',
+                    `You are about to broadcast the official SRA Circular prices for ${inputWeek || 'Current Week'} (Effective: ${inputEffectiveDate}):\n\n• Raw Sugar: ₱${b.toLocaleString()}/Lkg\n• Molasses: ₱${m.toLocaleString()}/MT\n\nThis will update market benchmarks across all cooperative dashboards and mobile applications.`,
+                    [
+                      { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
+                      {
+                        text: 'Publish Official Circular',
+                        onPress: async () => {
+                          try {
+                            const newPost = await publishSraPrice({
+                              price: b,
+                              molasses: m,
+                              week: inputWeek || 'Current Week',
+                              circular: inputCircular || 'SRA Circular #105',
+                              source: inputCircular || 'SRA Circular #105 (Official SRA Millsite Notice)',
+                              effectiveDate: inputEffectiveDate
+                            });
 
-            <Text style={s.inputLabel}>{t('sra_molasses_price', 'Molasses (₱ / Metric Ton)')}</Text>
-            <TextInput style={s.input} value={inputMol} onChangeText={setInputMol} keyboardType="numeric" placeholder="4400" />
+                            setPriceData({
+                              livePrice: b,
+                              liveMol: m,
+                              liveWeek: inputWeek || 'Current Week',
+                              liveDate: newPost.date,
+                              liveChange: b - (currentPrice.value || b)
+                            });
 
-            <TouchableOpacity 
-              style={s.saveModalBtn}
-              onPress={() => {
-                const b = parseFloat(inputBag);
-                const m = parseFloat(inputMol);
-                if (isNaN(b) || isNaN(m)) {
-                  Alert.alert(t('error_title', 'Error'), t('invalid_numbers_error', 'Please enter valid numbers'));
-                  return;
-                }
-
-                Alert.alert(
-                  t('confirm_broadcast_title', 'Publish SRA Circular Price?'),
-                  `You are about to broadcast the official SRA Circular prices for ${inputWeek || 'Current Week'}:\n\n• Raw Sugar: ₱${b.toLocaleString()}/Lkg\n• Molasses: ₱${m.toLocaleString()}/MT\n\nThis benchmark will synchronize across all cooperative web dashboards and member mobile apps.`,
-                  [
-                    { text: t('cancel', 'Cancel'), style: 'cancel' },
-                    {
-                      text: t('confirm_publish', 'Publish & Broadcast'),
-                      onPress: async () => {
-                        try {
-                          await publishSraPrice({
-                            price: b,
-                            molasses: m,
-                            week: inputWeek || 'Current Week',
-                            circular: inputCircular || 'SRA Circular #105',
-                            source: inputCircular ? `${inputCircular} (HPCo Silay Millsite)` : 'HPCo Silay Millsite'
-                          });
-
-                          setPriceData({
-                            livePrice: b,
-                            liveMol: m,
-                            liveWeek: inputWeek || 'Current Week',
-                            liveDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-                            liveChange: b - (currentPrice.value || b)
-                          });
-
-                          setShowPriceModal(false);
-                          Alert.alert(
-                            t('price_posted_title', 'Price Posted ✓'),
-                            `${inputCircular || 'SRA Circular'} benchmark updated to ₱${b.toLocaleString()}/Lkg and broadcasted to all cooperative portals & mobile apps.`
-                          );
-                        } catch (err) {
-                          console.warn('[HomeScreen] Error posting price:', err);
-                          Alert.alert('Broadcast Error', 'Could not broadcast price update.');
+                            setShowPriceModal(false);
+                            Alert.alert(
+                              'Price Posted ✓',
+                              `Official SRA benchmark for ${inputWeek || 'Current Week'} updated to ₱${b.toLocaleString()}/Lkg and broadcasted to all cooperative portals & mobile apps.`
+                            );
+                          } catch (err) {
+                            console.warn('[HomeScreen] Error posting price:', err);
+                            Alert.alert('Broadcast Error', 'Could not broadcast price update.');
+                          }
                         }
                       }
-                    }
-                  ]
-                );
-              }}
-            >
-              <Text style={s.saveModalBtnText}>{t('sra_btn_broadcast', 'Broadcast Benchmark Price')}</Text>
-            </TouchableOpacity>
+                    ]
+                  );
+                }}
+              >
+                <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
+                <Text style={s.publishBtnText}>{t('sra_btn_publish', 'Publish Weekly Price')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -780,12 +888,28 @@ const s = StyleSheet.create({
   analyticsBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.primaryLight },
 
   // Modals
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: SPACING.lg },
-  modalCard: { backgroundColor: '#FFF', borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: SPACING.md },
+  modalCard: { backgroundColor: '#FFF', borderRadius: RADIUS.xl, padding: SPACING.lg, maxHeight: '92%', ...SHADOW.lg },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalBadge: { alignSelf: 'flex-start', backgroundColor: '#EBF3E8', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, marginBottom: 4 },
+  modalBadgeText: { fontSize: 9.5, fontWeight: '900', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.5 },
   modalTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },
+  modalSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 2, lineHeight: 15 },
   inputLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', color: COLORS.textMuted, marginTop: 8, marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.text, backgroundColor: '#F9FAF7' },
+  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.text, backgroundColor: '#FFF' },
+  priceBoxContainer: { flexDirection: 'row', gap: 10, backgroundColor: '#F8FAF5', padding: 12, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, marginTop: 4 },
+  priceBoxItem: { flex: 1 },
+  priceInputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 8 },
+  currencySymbol: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginRight: 2 },
+  priceInput: { flex: 1, paddingVertical: 8, fontSize: 13, fontWeight: '700', color: COLORS.text },
+  priceDeltaText: { fontSize: 10.5, fontWeight: '600', color: COLORS.textMuted, marginTop: 4 },
+  noticeBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#EBF3E8', padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#C8E6C9', marginTop: 4 },
+  noticeText: { fontSize: 11, color: COLORS.primary, flex: 1, lineHeight: 15 },
+  modalActionRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: SPACING.md, paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.border },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border },
+  cancelBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
+  publishBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 16, borderRadius: RADIUS.md },
+  publishBtnText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   saveModalBtn: { backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: RADIUS.lg, alignItems: 'center', marginTop: SPACING.lg },
   saveModalBtnText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
   notifItem: { flexDirection: 'row', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
