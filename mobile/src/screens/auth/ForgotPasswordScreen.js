@@ -180,6 +180,17 @@ export default function ForgotPasswordScreen({ navigation }) {
                   <Text style={s.btnText}>Send Verification Code via SMS</Text>
                 )}
               </TouchableOpacity>
+
+              {/* Lost SIM / Inaccessible Phone Advisory */}
+              <View style={s.lostSimHelpBox}>
+                <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.lostSimHelpTitle}>Lost your SIM card?</Text>
+                  <Text style={s.lostSimHelpText}>
+                    If you lost your phone or cannot receive SMS verification codes, please visit your Block Farm Manager or SRA District Administrator. They can verify your identity and update your registered mobile number or reset your password directly from the cooperative portal.
+                  </Text>
+                </View>
+              </View>
             </>
           )}
 
@@ -223,6 +234,17 @@ export default function ForgotPasswordScreen({ navigation }) {
               >
                 <Text style={s.btnText}>Verify Code &amp; Continue</Text>
               </TouchableOpacity>
+
+              {/* SMS Troubleshooting Note */}
+              <View style={[s.lostSimHelpBox, { marginTop: 8 }]}>
+                <Ionicons name="shield-outline" size={18} color={COLORS.textMuted} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.lostSimHelpTitle}>Didn't receive the SMS?</Text>
+                  <Text style={s.lostSimHelpText}>
+                    Check your cellular signal. If you no longer have access to this SIM card, please visit your Block Farm Manager for in-person identity verification.
+                  </Text>
+                </View>
+              </View>
             </>
           )}
 
@@ -336,4 +358,7 @@ const s = StyleSheet.create({
   successIcon: { width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.successLight, justifyContent: 'center', alignItems: 'center' },
   successTitle: { fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
   successSub: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: 20 },
+  lostSimHelpBox: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', padding: 14, borderRadius: RADIUS.lg },
+  lostSimHelpTitle: { fontSize: 12.5, fontWeight: '700', color: COLORS.primary, marginBottom: 2 },
+  lostSimHelpText: { fontSize: 11.5, color: COLORS.textSecondary, lineHeight: 17 },
 });

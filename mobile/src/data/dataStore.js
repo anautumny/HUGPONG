@@ -62,6 +62,9 @@ export const operationLogs = [
     date: 'May 02, 2026',
     period: 'May 02, 2026',
     status: 'Recorded',
+    compiled: true,
+    compiledReportId: 'RPT-2026-05-NCY01',
+    compiledAt: '2026-05-30T14:30:00Z',
     loggedBy: 'Juan dela Cruz (Member)',
     loggedById: '04000001',
     subItems: [
@@ -87,6 +90,9 @@ export const operationLogs = [
     date: 'May 08, 2026',
     period: 'May 08, 2026',
     status: 'Recorded',
+    compiled: true,
+    compiledReportId: 'RPT-2026-05-NCY01',
+    compiledAt: '2026-05-30T14:30:00Z',
     loggedBy: 'Pedro Reyes (Member)',
     loggedById: '04000002',
     subItems: [
@@ -110,6 +116,9 @@ export const operationLogs = [
     date: 'May 12, 2026',
     period: 'May 12, 2026',
     status: 'Recorded',
+    compiled: true,
+    compiledReportId: 'RPT-2026-05-NCY01',
+    compiledAt: '2026-05-30T14:30:00Z',
     loggedBy: 'Corazon Santos (Member)',
     loggedById: '04000003',
     subItems: [
@@ -136,6 +145,9 @@ export const operationLogs = [
     date: 'May 18, 2026',
     period: 'May 18, 2026',
     status: 'Recorded',
+    compiled: true,
+    compiledReportId: 'RPT-2026-05-NCY01',
+    compiledAt: '2026-05-30T14:30:00Z',
     loggedBy: 'Roberto Tan (Member)',
     loggedById: '04000004',
     subItems: [
@@ -160,6 +172,9 @@ export const operationLogs = [
     date: 'May 22, 2026',
     period: 'May 22, 2026',
     status: 'Recorded',
+    compiled: true,
+    compiledReportId: 'RPT-2026-05-NCY01',
+    compiledAt: '2026-05-30T14:30:00Z',
     loggedBy: 'Ana Gomez (Member)',
     loggedById: '04000005',
     subItems: [
@@ -300,6 +315,8 @@ export const auditReports = [
     fieldsReported: 5,
     logsCount: 5,
     status: 'Certified',
+    cloudQueueStatus: 'transmitted',
+    cloudQueuedAt: '2026-05-30T14:30:00Z',
     dateGenerated: 'May 30, 2026 02:30 PM',
     qrSignature: 'HUG-202605-A3F9',
     verifiedBy: 'Engr. Maria Santos (SRA Officer)',
@@ -322,6 +339,8 @@ export const auditReports = [
     fieldsReported: 5,
     logsCount: 6,
     status: 'Certified',
+    cloudQueueStatus: 'transmitted',
+    cloudQueuedAt: '2026-04-30T16:15:00Z',
     dateGenerated: 'Apr 30, 2026 04:15 PM',
     qrSignature: 'HUG-202604-B8E2',
     verifiedBy: 'Engr. Maria Santos (SRA Officer)',
@@ -341,6 +360,8 @@ export const auditReports = [
     fieldsReported: 5,
     logsCount: 5,
     status: 'Certified',
+    cloudQueueStatus: 'transmitted',
+    cloudQueuedAt: '2026-03-31T15:00:00Z',
     dateGenerated: 'Mar 31, 2026 03:00 PM',
     qrSignature: 'HUG-202603-C1D4',
     verifiedBy: 'Engr. Maria Santos (SRA Officer)',
@@ -494,6 +515,217 @@ export const resolveAssignmentRequest = (requestId, approved = true) => {
     notifyDataUpdate();
   }
   return req;
+};
+
+// ── Pending Member Registrations ──
+export const pendingUsers = [
+  {
+    name: 'Danilo Villanueva',
+    contact: '09187654321',
+    role: 'Member',
+    blockFarm: 'Nacayao Block Farm',
+    fieldId: 'FLD-NCY-005',
+    area: '1.25 Ha',
+    regDate: '2026-05-28'
+  },
+  {
+    name: 'Elena Rostro',
+    contact: '09223344556',
+    role: 'Member',
+    blockFarm: 'Nacayao Block Farm',
+    fieldId: 'FLD-NCY-006',
+    area: '1.50 Ha',
+    regDate: '2026-05-29'
+  },
+  {
+    name: 'Ramon Dela Cruz',
+    contact: '09334455667',
+    role: 'Member',
+    blockFarm: 'Silay Central Block Farm',
+    fieldId: 'FLD-SC-001',
+    area: '2.00 Ha',
+    regDate: '2026-05-30'
+  }
+];
+
+export const approvePendingRegistration = async (contact, options = {}) => {
+  const cleanContact = String(contact || '').replace(/\D/g, '');
+  const idx = pendingUsers.findIndex(u => (u.contact || '').replace(/\D/g, '') === cleanContact);
+  if (idx === -1) return { success: false, message: 'Applicant not found in pending list.' };
+
+  const applicant = pendingUsers[idx];
+  pendingUsers.splice(idx, 1);
+
+  // Determine plot ID & Hectares
+  const assignedPlotId = options.fieldId || applicant.fieldId || `FLD-NCY-${String(fields.length + 1).padStart(3, '0')}`;
+  const rawHa = options.area || applicant.area || '1.5';
+  const assignedHa = parseFloat(String(rawHa).replace(/[^0-9.]/g, '')) || 1.5;
+  const empId = applicant.employeeId || ('04' + cleanContact.slice(-6).padStart(6, '0'));
+
+  // Update or create active user account
+  const existingUser = users.find(u => (u.contact || '').replace(/\D/g, '') === cleanContact || u.employeeId === empId);
+  if (existingUser) {
+    existingUser.fieldId = assignedPlotId;
+    existingUser.status = 'Active';
+    existingUser.blockFarm = applicant.blockFarm || 'Nacayao Block Farm';
+  } else {
+    users.push({
+      employeeId: empId,
+      name: applicant.name,
+      contact: cleanContact,
+      role: applicant.role || 'Member',
+      roleKey: 'member',
+      blockFarmId: 'BLK-NCY-01',
+      blockFarm: applicant.blockFarm || 'Nacayao Block Farm',
+      fieldId: assignedPlotId,
+      status: 'Active',
+      regDate: applicant.regDate || new Date().toISOString().split('T')[0],
+      passwordHash: hashPassword('hugpong2026')
+    });
+  }
+
+  // Allocate field in fields registry
+  const existingField = fields.find(f => f.id === assignedPlotId);
+  if (existingField) {
+    existingField.member = applicant.name;
+    existingField.memberName = applicant.name;
+    existingField.userId = empId;
+    existingField.memberId = empId;
+    existingField.memberContact = cleanContact;
+    existingField.ha = assignedHa;
+  } else {
+    fields.push({
+      id: assignedPlotId,
+      name: `Field ${assignedPlotId}`,
+      member: applicant.name,
+      memberName: applicant.name,
+      userId: empId,
+      memberId: empId,
+      memberContact: cleanContact,
+      ha: assignedHa,
+      stage: 'Pre-Planting & Land Preparation',
+      stageNumber: 1,
+      month: 0,
+      synced: false,
+      lastSync: 'Just now',
+      blockFarm: applicant.blockFarm || 'Nacayao Block Farm',
+      blockFarmId: 'BLK-NCY-01',
+      variety: 'VMC 84-524',
+      soilType: 'Clay Loam'
+    });
+  }
+
+  // Persist to storage
+  await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+  await saveItem(STORAGE_KEYS.USERS, users);
+  await saveItem(STORAGE_KEYS.FIELDS, fields);
+
+  // Sync to Firestore if online
+  if (db) {
+    try {
+      await setDoc(doc(db, 'users', empId), {
+        employeeId: empId,
+        name: applicant.name,
+        contact: cleanContact,
+        role: applicant.role || 'Member',
+        roleKey: 'member',
+        blockFarm: applicant.blockFarm || 'Nacayao Block Farm',
+        fieldId: assignedPlotId,
+        status: 'Active',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {}
+  }
+
+  notifyDataUpdate();
+  return { success: true, applicant, fieldId: assignedPlotId };
+};
+
+export const rejectPendingRegistration = async (contact) => {
+  const cleanContact = String(contact || '').replace(/\D/g, '');
+  const idx = pendingUsers.findIndex(u => (u.contact || '').replace(/\D/g, '') === cleanContact);
+  if (idx === -1) return { success: false, message: 'Applicant not found.' };
+
+  pendingUsers.splice(idx, 1);
+  await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+  notifyDataUpdate();
+  return { success: true };
+};
+
+/**
+ * Unified Field Plot Persistence & Cloud Synchronization
+ * Supports Adding new field plots or Editing existing allocations.
+ */
+export const saveFieldPlot = async (fieldData, isNew = false) => {
+  if (!fieldData || !fieldData.id) return { success: false, message: 'Invalid field data' };
+  
+  const existingIdx = fields.findIndex(f => f.id === fieldData.id);
+  const nowIso = new Date().toISOString();
+  
+  const formattedField = {
+    id: fieldData.id,
+    blockFarmId: fieldData.blockFarmId || 'BLK-NCY-01',
+    blockFarm: fieldData.blockFarm || 'Nacayao Block Farm',
+    memberId: fieldData.memberId || fieldData.userId || '',
+    memberName: fieldData.memberName || fieldData.member || 'Unassigned',
+    member: fieldData.member || fieldData.memberName || 'Unassigned',
+    memberContact: fieldData.memberContact || '',
+    ha: Number(fieldData.ha) || 1.5,
+    stage: fieldData.stage || 'Pre-Planting & Land Preparation',
+    stageNumber: fieldData.stageNumber || 1,
+    month: fieldData.month !== undefined ? fieldData.month : 0,
+    batchMonth: fieldData.batchMonth || 1,
+    synced: fieldData.synced !== undefined ? fieldData.synced : true,
+    lastSync: fieldData.lastSync || 'Just now',
+    variety: fieldData.variety || 'VMC 84-524',
+    soilType: fieldData.soilType || 'Clay Loam',
+    createdAt: fieldData.createdAt || nowIso,
+    updatedAt: nowIso
+  };
+
+  if (existingIdx >= 0) {
+    fields[existingIdx] = { ...fields[existingIdx], ...formattedField };
+  } else {
+    fields.push(formattedField);
+  }
+
+  // Update matching user profile fieldId in users array
+  const uId = formattedField.memberId;
+  const uContact = (formattedField.memberContact || '').replace(/\D/g, '');
+  const matchedUser = users.find(u => 
+    (uId && (u.employeeId === uId || u.contact === uId)) ||
+    (uContact && u.contact.replace(/\D/g, '') === uContact)
+  );
+
+  if (matchedUser) {
+    matchedUser.fieldId = formattedField.id;
+    matchedUser.blockFarm = formattedField.blockFarm;
+    matchedUser.blockFarmId = formattedField.blockFarmId;
+  }
+
+  // Persist to offline AsyncStorage
+  await saveItem(STORAGE_KEYS.FIELDS, fields);
+  await saveItem(STORAGE_KEYS.USERS, users);
+
+  // Sync to Cloud Firestore if online
+  if (db) {
+    try {
+      await setDoc(doc(db, 'fields', formattedField.id), formattedField, { merge: true });
+      if (matchedUser && matchedUser.employeeId) {
+        await setDoc(doc(db, 'users', matchedUser.employeeId), {
+          fieldId: formattedField.id,
+          blockFarm: formattedField.blockFarm,
+          blockFarmId: formattedField.blockFarmId,
+          updatedAt: nowIso
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn('[dataStore] saveFieldPlot Firestore sync fallback to offline:', e);
+    }
+  }
+
+  notifyDataUpdate();
+  return { success: true, field: formattedField };
 };
 
 // Backward-compatible architectural aliases
@@ -805,6 +1037,15 @@ export const updateUserMobileNumber = async (newMobile, passwordVerification) =>
     users.push({ ...CURRENT_SESSION });
   }
 
+  // Synchronize memberContact on user's assigned plots while preserving permanent memberId
+  if (uEmp) {
+    fields.forEach(f => {
+      if (f.memberId === uEmp || f.userId === uEmp || f.member === CURRENT_SESSION.name) {
+        f.memberContact = formatted;
+      }
+    });
+  }
+
   if (db) {
     try {
       const docId = CURRENT_SESSION.employeeId || formatted;
@@ -1002,6 +1243,7 @@ const persistAllToStorage = () => {
         [STORAGE_KEYS.TICKETS, supportTickets],
         [STORAGE_KEYS.PREFS, SECURITY_PREFERENCES],
         [STORAGE_KEYS.PENDING_ASSIGNMENTS, assignmentRequests],
+        [STORAGE_KEYS.PENDING_USERS, pendingUsers],
         [STORAGE_KEYS.AUDIT_REPORTS, auditReports],
         [STORAGE_KEYS.SYSTEM_HISTORY, systemHistory],
       ]);
@@ -1862,18 +2104,9 @@ export const listenToCloudSync = () => {
 };
 
 export const performMobileSync = async () => {
+  const res = await flushOutboxToFirestore();
   IS_SYNCED = true;
-  MEMBER_SYNC_LAG_DAYS = 0;
-  MEMBER_LAST_SYNC_STR = 'Just now';
-  
-  await flushOutboxToFirestore();
-
-  CURRENT_SESSION.syncedLogs = (CURRENT_SESSION.syncedLogs || 0) + (CURRENT_SESSION.pendingLogs || 0);
   CURRENT_SESSION.pendingLogs = 0;
-  
-  operationLogs.forEach(log => {
-    if (log.isOffline) log.isOffline = false;
-  });
   
   fields.forEach(f => {
     f.synced = true;
@@ -1895,12 +2128,16 @@ export const performMobileSync = async () => {
               rep.certifiedBy = snap.data().certifiedBy || rep.certifiedBy;
               rep.certifiedRole = snap.data().certifiedRole || rep.certifiedRole;
               rep.certifiedAt = snap.data().certifiedAt || rep.certifiedAt;
+              rep.cloudQueueStatus = 'transmitted';
               continue;
             }
           } catch (ge) {}
           await setDoc(docRef, { ...rep, updatedAt: new Date().toISOString() }, { merge: true });
+          rep.cloudQueueStatus = 'transmitted';
+          rep.cloudQueuedAt = new Date().toISOString();
         }
       }
+      saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
     }
   } catch (e) {
     console.warn('[performMobileSync] auditReports push error:', e);
@@ -1946,6 +2183,12 @@ export const initializeOfflineStorage = async () => {
     if (Array.isArray(stored[STORAGE_KEYS.PRICES]) && stored[STORAGE_KEYS.PRICES].length > 0) {
       priceHistory.length = 0;
       stored[STORAGE_KEYS.PRICES].forEach(p => priceHistory.push(p));
+    }
+
+    // Hydrate cached pending member registrations
+    if (Array.isArray(stored[STORAGE_KEYS.PENDING_USERS]) && stored[STORAGE_KEYS.PENDING_USERS].length > 0) {
+      pendingUsers.length = 0;
+      stored[STORAGE_KEYS.PENDING_USERS].forEach(u => pendingUsers.push(u));
     }
 
     // Hydrate cached audit reports

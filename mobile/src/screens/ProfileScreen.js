@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, Alert, Switch, TextInput,
+  Modal, Dimensions, Alert, Switch, TextInput, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser, performMobileSync } from '../data/dataStore';
 import { useTranslation, LANGUAGES } from '../services/i18n';
 
 const { height } = Dimensions.get('window');
@@ -33,6 +33,19 @@ export default function ProfileScreen({ navigation }) {
     });
     return unsubscribe;
   }, []);
+
+  const doSync = async () => {
+    setSyncing(true);
+    try {
+      await performMobileSync();
+      setSyncedState(true);
+      Alert.alert(t('sync_complete_title', 'Sync Complete'), t('sync_complete_msg', 'Your records have been synchronized with the cloud server.'));
+    } catch (e) {
+      Alert.alert(t('sync_error_title', 'Sync Failed'), e.message || 'Unable to complete sync.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const clearCache = () => {
     Alert.alert(

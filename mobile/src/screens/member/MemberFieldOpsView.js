@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
@@ -50,7 +50,12 @@ function MemberFieldOpsView({
           <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField.id || 'No Field'}</Text></View>
           <Text style={s.fieldHa}>{safeField.ha ? `${safeField.ha} Ha` : ''}</Text>
         </View>
-        <Text style={s.fieldMember}>{t('member_label', 'Member')}: {safeField.member || session?.name}</Text>
+        <Text style={s.fieldMember}>
+          {t('member_label', 'Member')}: <Text style={{ fontWeight: '700' }}>{safeField.member || session?.name}</Text>
+          {(safeField.memberId || session?.employeeId) ? (
+            <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {safeField.memberId || session?.employeeId}</Text>
+          ) : null}
+        </Text>
         <Text style={s.fieldSync}>
           <Ionicons name={safeField.synced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={14} color={safeField.synced ? '#267326' : '#C97A00'} />
           {' '}{safeField.synced ? `${t('synced', 'Synced')} ${formatSyncTime(safeField.lastSync)}` : `${t('not_synced', 'Not synced')} (${formatSyncTime(safeField.lastSync)})`}

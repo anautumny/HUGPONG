@@ -7,7 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, deletePastLogsForField, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, SRA_PRICE_HISTORY, addSRAPrice, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail } from '../data/dataStore';
+import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, deletePastLogsForField, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, SRA_PRICE_HISTORY, addSRAPrice, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot } from '../data/dataStore';
+import { saveItem, STORAGE_KEYS } from '../services/storageService';
 import { enqueueOutboxItem, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { db } from '../firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
@@ -614,6 +615,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [selectedField, setSelectedField] = useState(fields[0]);
   const [showAuditHistoryModal, setShowAuditHistoryModal] = useState(false);
   const [selectedManagerAuditId, setSelectedManagerAuditId] = useState('AUD-2026-05');
+  const [compileMonth, setCompileMonth] = useState('May 2026');
 
   useEffect(() => {
     const targetFieldId = route?.params?.fieldId || route?.params?.initialFieldId || route?.params?.takeOverFieldId;
@@ -698,6 +700,9 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
   };
   const [requests, setRequests] = useState(assignmentRequests);
+  const [pendingUsersList, setPendingUsersList] = useState(pendingUsers);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [pendingActionLoading, setPendingActionLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date(2026, 4, 21));
   const [showAddField, setShowAddField] = useState(false);
@@ -718,7 +723,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const openAssignModal = (fieldToEdit = null) => {
     if (fieldToEdit) {
       setManagerAssignForm({
-        userId: fieldToEdit.memberContact || fieldToEdit.userId || fieldToEdit.member || '',
+        userId: fieldToEdit.memberId || fieldToEdit.userId || fieldToEdit.memberContact || fieldToEdit.member || '',
         fieldId: fieldToEdit.id,
         ha: String(fieldToEdit.ha || '1.5'),
         isEditing: true
@@ -746,13 +751,120 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showLogAuditModal, setShowLogAuditModal] = useState(false);
   const [activeLogForAudit, setActiveLogForAudit] = useState(null);
 
+  // Helper: check if an operation log falls within the target month (e.g. 'May 2026')
+  const isLogFromMonth = (log, targetMonthStr) => {
+    if (!targetMonthStr) return true;
+    const dateStr = String(log?.date || log?.period || '').trim();
+    if (!dateStr) return false;
+
+    // Direct match (e.g. 'May 2026' in 'May 08, 2026')
+    if (dateStr.toLowerCase().includes(targetMonthStr.toLowerCase())) {
+      return true;
+    }
+
+    // Date object parse fallback
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const parts = targetMonthStr.split(' ');
+      const targetMonthName = parts[0];
+      const targetYear = parts[1] ? parseInt(parts[1], 10) : null;
+      
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const fullMonthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const logMonthIdx = d.getMonth();
+      const logYear = d.getFullYear();
+
+      if (!targetYear || targetYear === logYear) {
+        if (
+          monthNames[logMonthIdx]?.toLowerCase() === targetMonthName?.toLowerCase() ||
+          fullMonthNames[logMonthIdx]?.toLowerCase() === targetMonthName?.toLowerCase()
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  // Helper: detect member devices in the block farm that have not synced for >= 3 days
+  const getLaggingMembers = (targetFarm) => {
+    const farmFields = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+    return farmFields.filter(f => {
+      if (!f.synced) return true;
+      if (typeof f.lastSync === 'string') {
+        const match = f.lastSync.match(/(\d+)\s*days?/i);
+        if (match && parseInt(match[1], 10) >= 3) return true;
+        const lower = f.lastSync.toLowerCase();
+        if (lower.includes('critical') || lower.includes('lag') || lower.includes('4 days') || lower.includes('8 days')) return true;
+      }
+      return false;
+    });
+  };
+
+  // Preview QR code specifically for an existing or historical audit report
+  const handleViewHistoricalAuditQR = (audit) => {
+    if (!audit) return;
+    const session = getCurrentSession();
+    const hash = audit.qrSignature || audit.qrHash || 'HUG-202605-A3F9';
+    const reportId = audit.reportId || audit.id || 'RPT-2026-05-NCY01';
+    const envelope = audit.envelope || `HUGPONG|${reportId}|${audit.blockFarmId || 'BLK-NCY-01'}|${(audit.month || 'MAY2026').replace(' ', '').toUpperCase()}|${Number(audit.totalHectares || 15.25).toFixed(2)}|${audit.logsCount || 5}|${audit.totalCost || 145225}|${hash.split('-').pop() || 'A3F9'}`;
+
+    setActiveQRData({
+      reportId: reportId,
+      month: audit.month || compileMonth,
+      blockFarm: audit.blockFarm || session?.farm || 'Nacayao Block Farm',
+      totalCost: audit.totalCost,
+      totalHectares: audit.totalHectares || 15.25,
+      totalFields: audit.fieldsReported || 5,
+      totalLogs: audit.logsCount || 5,
+      hash: hash,
+      envelope: envelope
+    });
+    setShowQR(true);
+  };
+
   // Dynamic calculations & compilation for month-level Hybrid Cloud-Anchored QR package
   const handleGenerateAudit = () => {
-    // Offline-first: do NOT block generation when offline!
+    const session = getCurrentSession();
+    const targetFarm = session?.farm || 'Nacayao Block Farm';
+
+    // 1. Check for lagging member devices (>= 3 days without sync)
+    const lagging = getLaggingMembers(targetFarm);
+    if (lagging.length > 0) {
+      const laggingSummary = lagging.map(f => `• ${f.id} (${f.member || 'Member'}): Last synced ${f.lastSync || '4 days ago'}`).join('\n');
+      Alert.alert(
+        'Member Sync Lag Warning',
+        `The following member(s) have not synchronized their devices for 3 or more days:\n\n${laggingSummary}\n\nTheir locally recorded operations are still stored on their phones and cannot be included in this monthly report until they sync or you take over their plots.`,
+        [
+          { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
+          {
+            text: 'Review in Sync Monitor',
+            onPress: () => {
+              if (navigation && navigation.navigate) {
+                navigation.navigate('SyncMonitor');
+              }
+            }
+          },
+          {
+            text: 'Compile Anyway',
+            style: 'destructive',
+            onPress: () => checkLocalOfflineLogs()
+          }
+        ]
+      );
+      return;
+    }
+
+    checkLocalOfflineLogs();
+  };
+
+  const checkLocalOfflineLogs = () => {
+    // 2. Offline-first: check manager's own local unsynced logs
     const offlineLogs = logs.filter(l => l.isOffline);
     
     if (offlineLogs.length > 0) {
-      const warningMessage = `There are ${offlineLogs.length} offline logs stored locally. They will be included in your compiled monthly audit package.`;
+      const warningMessage = `There are ${offlineLogs.length} offline logs stored on your device. They will be included in your compiled monthly audit package.`;
 
       Alert.alert(
         'Compiled Local Operations',
@@ -768,6 +880,184 @@ export default function FieldOpsScreen({ navigation, route }) {
     checkMissingFields();
   };
 
+  const handleViewExistingAudit = () => {
+    const session = getCurrentSession();
+    const targetFarm = session?.farm || 'Nacayao Block Farm';
+    const existing = auditReports.find(a => 
+      (a.month && a.month.toLowerCase() === compileMonth.toLowerCase()) || 
+      (a.id && a.id.includes(compileMonth.includes('April') ? '04' : (compileMonth.includes('May') ? '05' : '03')))
+    );
+    if (existing) {
+      setActiveQRData({
+        reportId: existing.reportId || `RPT-2026-05-NCY01`,
+        month: existing.month || compileMonth,
+        blockFarm: existing.blockFarm || targetFarm,
+        totalCost: existing.totalCost || 145225,
+        totalHectares: existing.totalHectares || 15.25,
+        totalFields: existing.fieldsReported || 5,
+        totalLogs: existing.logsCount || 5,
+        hash: existing.qrSignature || 'HUG-202605-A3F9',
+        envelope: existing.envelope || `HUGPONG|${existing.reportId || 'RPT-2026-05-NCY01'}|BLK-NCY-01|MAY2026|15.25|5|145225|A3F9`,
+        cloudQueueStatus: existing.cloudQueueStatus || (existing.status === 'Certified' ? 'transmitted' : 'offline_queued'),
+        cloudQueuedAt: existing.cloudQueuedAt || existing.dateGenerated
+      });
+      setShowQR(true);
+    } else {
+      handleGenerateAudit();
+    }
+  };
+
+  const compileAndShow = async () => {
+    const session = getCurrentSession();
+    const targetFarm = session?.farm || 'Nacayao Block Farm';
+    const farmFields = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+    const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 15.25;
+    
+    // Filter logs by selected month & active status
+    const farmLogs = logs.filter(l => 
+      !l.declined && 
+      !l.isArchived && 
+      !l.isPastCycle && 
+      isLogFromMonth(l, compileMonth)
+    );
+
+    const uncompiledLogs = farmLogs.filter(l => !l.compiled && !l.compiledReportId);
+    const alreadyCompiledLogs = farmLogs.filter(l => l.compiled || l.compiledReportId);
+
+    const totalCost = farmLogs.length > 0
+      ? farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0)
+      : (compileMonth === 'May 2026' ? 145225 : (compileMonth === 'April 2026' ? 128400 : 94500));
+    const logsCount = farmLogs.length > 0 ? farmLogs.length : 5;
+
+    // Dynamic IDs based on selected month
+    const monthParts = compileMonth.split(' ');
+    const monthName = monthParts[0] || 'May';
+    const yearStr = monthParts[1] || '2026';
+    const monthMap = {
+      Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+      Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+      January: '01', February: '02', March: '03', April: '04', June: '06',
+      July: '07', August: '08', September: '09', October: '10', November: '11', December: '12'
+    };
+    const monthNum = monthMap[monthName] || '05';
+    const farmShort = (session?.blockFarmId || 'BLK-NCY-01').replace('BLK-', '').replace('-', '');
+    const reportId = `RPT-${yearStr}-${monthNum}-${farmShort}`;
+    const auditId = `AUD-${yearStr}-${monthNum}`;
+    const hashSuffix = ((totalCost * 17 + logsCount * 31) % 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    const hash = `HUG-${yearStr}${monthNum}-${hashSuffix || 'A3F9'}`;
+    const monthCode = `${monthName.substring(0, 3).toUpperCase()}${yearStr}`;
+    const envelope = `HUGPONG|${reportId}|${session?.blockFarmId || 'BLK-NCY-01'}|${monthCode}|${totalHa.toFixed(2)}|${logsCount}|${totalCost}|${hashSuffix || 'A3F9'}`;
+
+    // Mark newly compiled logs as compiled
+    const nowIso = new Date().toISOString();
+    if (uncompiledLogs.length > 0) {
+      uncompiledLogs.forEach(l => {
+        l.compiled = true;
+        l.compiledReportId = reportId;
+        l.compiledAt = nowIso;
+      });
+      saveItem(STORAGE_KEYS.LOGS, logs);
+      setLogs([...logs]);
+    }
+
+    // Build stage breakdown dynamically
+    const stageGroups = {};
+    farmLogs.forEach(l => {
+      const stName = l.stageName || `Stage ${l.stageNumber || 1}`;
+      if (!stageGroups[stName]) stageGroups[stName] = { cost: 0, fields: new Set() };
+      stageGroups[stName].cost += Number(l.totalCost || l.cost || 0);
+      if (l.fieldId) stageGroups[stName].fields.add(l.fieldId);
+    });
+    const stageBreakdown = Object.keys(stageGroups).map(st => ({
+      stage: st,
+      cost: stageGroups[st].cost,
+      pct: totalCost > 0 ? `${Math.round((stageGroups[st].cost / totalCost) * 100)}%` : '0%',
+      fields: Array.from(stageGroups[st].fields).join(', ')
+    }));
+
+    // Save / update compiled report in auditReports
+    let cloudQueueStatus = 'offline_queued';
+    let cloudQueuedAt = null;
+
+    const newReport = {
+      id: auditId,
+      reportId: reportId,
+      month: compileMonth,
+      blockFarm: targetFarm,
+      blockFarmId: session?.blockFarmId || 'BLK-NCY-01',
+      totalCost: totalCost,
+      totalHectares: totalHa,
+      fieldsReported: farmFields.length || 5,
+      logsCount: logsCount,
+      status: 'Pending',
+      cloudQueueStatus: 'offline_queued',
+      dateGenerated: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      qrSignature: hash,
+      envelope: envelope,
+      verifiedBy: null,
+      stageBreakdown: stageBreakdown.length > 0 ? stageBreakdown : undefined,
+      notes: `Compiled by Farm Manager ${session?.name || 'Jose Reyes'}. Awaiting SRA District inspection.`
+    };
+
+    // Sync to Firestore if online (Cloud Audit Queue)
+    if (db) {
+      try {
+        const docRef = doc(db, 'audit_reports', newReport.reportId);
+        await setDoc(docRef, { 
+          ...newReport, 
+          cloudQueueStatus: 'transmitted',
+          cloudQueuedAt: nowIso,
+          updatedAt: nowIso 
+        }, { merge: true });
+        cloudQueueStatus = 'transmitted';
+        cloudQueuedAt = nowIso;
+        newReport.cloudQueueStatus = 'transmitted';
+        newReport.cloudQueuedAt = nowIso;
+      } catch (e) {
+        console.warn('[FieldOpsScreen] Firestore sync fallback to offline queue:', e);
+      }
+    }
+
+    const existingIdx = auditReports.findIndex(a => a.id === newReport.id || a.reportId === newReport.reportId);
+    if (existingIdx >= 0) {
+      auditReports[existingIdx] = { ...auditReports[existingIdx], ...newReport };
+    } else {
+      auditReports.unshift(newReport);
+    }
+    saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+
+    setActiveQRData({
+      reportId,
+      month: compileMonth,
+      blockFarm: targetFarm,
+      totalCost,
+      totalHectares: totalHa,
+      totalFields: farmFields.length || 5,
+      totalLogs: logsCount,
+      hash,
+      envelope,
+      cloudQueueStatus,
+      cloudQueuedAt
+    });
+
+    const deltaCount = uncompiledLogs.length > 0 ? uncompiledLogs.length : logsCount;
+    const countLabel = `${deltaCount} operation log${deltaCount !== 1 ? 's' : ''}`;
+
+    if (cloudQueueStatus === 'transmitted') {
+      Alert.alert(
+        'Audit Transmitted ☁️',
+        `Successfully compiled ${countLabel} for ${compileMonth}.\n\n☁️ Sent to Cloud Audit Queue!\nSRA District Officers can review remotely on the district portal or verify via QR.`,
+        [{ text: 'View SRA QR Code', onPress: () => setShowQR(true) }]
+      );
+    } else {
+      Alert.alert(
+        'Audit Stored in Offline Queue 📦',
+        `Successfully compiled ${countLabel} for ${compileMonth}.\n\n📦 Stored in Local Offline Queue.\nWill automatically sync to SRA Cloud Queue once online. Regulators can scan this offline QR code immediately.`,
+        [{ text: 'View SRA QR Code', onPress: () => setShowQR(true) }]
+      );
+    }
+  };
+
   const checkMissingFields = () => {
     const missingFields = [];
     fields.forEach(field => {
@@ -780,66 +1070,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         }
       }
     });
-
-    const compileAndShow = () => {
-      const session = getCurrentSession();
-      const targetFarm = session?.farm || 'Nacayao Block Farm';
-      const farmFields = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
-      const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 15.25;
-      const farmLogs = logs.filter(l => !l.declined && !l.isArchived);
-      const totalCost = farmLogs.reduce((sum, l) => sum + (Number(l.totalCost) || 0), 0) || 145225;
-      const logsCount = farmLogs.length || 14;
-      const reportId = 'RPT-2026-05-NCY01';
-      const hash = 'HUG-202605-A3F9';
-      const envelope = `HUGPONG|${reportId}|BLK-NCY-01|MAY2026|${totalHa.toFixed(2)}|${logsCount}|${totalCost}|A3F9`;
-
-      // Save / update compiled report in auditReports
-      const newReport = {
-        id: 'AUD-2026-05',
-        reportId: reportId,
-        month: 'May 2026',
-        blockFarm: targetFarm,
-        blockFarmId: session?.blockFarmId || 'BLK-NCY-01',
-        totalCost: totalCost,
-        totalHectares: totalHa,
-        fieldsReported: farmFields.length || 5,
-        logsCount: logsCount,
-        status: 'Pending',
-        dateGenerated: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        qrSignature: hash,
-        envelope: envelope,
-        verifiedBy: null,
-        notes: 'Compiled by Farm Manager Jose Reyes. Awaiting SRA District inspection.'
-      };
-
-      const existingIdx = auditReports.findIndex(a => a.id === newReport.id || a.reportId === newReport.reportId);
-      if (existingIdx >= 0) {
-        auditReports[existingIdx] = { ...auditReports[existingIdx], ...newReport };
-      } else {
-        auditReports.unshift(newReport);
-      }
-
-      // Sync to Firestore if online
-      try {
-        if (db) {
-          const docRef = doc(db, 'audit_reports', newReport.reportId);
-          setDoc(docRef, { ...newReport, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
-        }
-      } catch (e) {}
-
-      setActiveQRData({
-        reportId,
-        month: 'May 2026',
-        blockFarm: targetFarm,
-        totalCost,
-        totalHectares: totalHa,
-        totalFields: farmFields.length || 5,
-        totalLogs: logsCount,
-        hash,
-        envelope
-      });
-      setShowQR(true);
-    };
 
     if (missingFields.length > 0) {
       Alert.alert(
@@ -854,6 +1084,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       compileAndShow();
     }
   };
+
 
   const handleScanOrSubmitCode = (code) => {
     const raw = (code || '').trim().toUpperCase();
@@ -1076,6 +1307,11 @@ export default function FieldOpsScreen({ navigation, route }) {
       if (mf) {
         mf.stage = newStageLabel;
         mf.stageNumber = stageNum;
+        if (isTakeOver) {
+          mf.synced = true;
+          mf.lastSync = 'Just now (Manager Take Over)';
+          saveFieldPlot(mf, false);
+        }
       }
 
       setCycleTasksByField(prev => ({ ...prev, [selectedField.id]: updated }));
@@ -1234,6 +1470,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
       setSyncedState(getIsSynced());
       setRequests([...assignmentRequests]);
+      setPendingUsersList([...pendingUsers]);
       setLogs([...operationLogs]);
       setDraftLogs([...draftLogsStore]);
     });
@@ -1506,14 +1743,32 @@ export default function FieldOpsScreen({ navigation, route }) {
       status: 'Recorded',
       loggedBy: loggedByStr,
       loggedById: getCurrentSession()?.employeeId || '',
+      isTakeover: isTakeOver,
       taskId: logForm.taskId || `S${parentStageNum}`,
       isOffline: !synced,
       isPastCycle: false,
-      editHistory: [],
+      editHistory: isTakeOver ? [{
+        editedBy: `Manager (${getCurrentSession().name} - Takeover)`,
+        editedAt: new Date().toLocaleString('en-PH'),
+        note: 'Supervisor direct operation entry'
+      }] : [],
     };
 
     if (!fields.find(f => f.id === submittedFieldId)) {
-      fields.push({ id: submittedFieldId, memberName: getCurrentSession().name || 'Current User', member: getCurrentSession().name || 'Current User', ha: parseFloat(logForm.hectares) || 0.0, stage: logForm.operationName || 'Newly Logged', month: 0, synced: false, lastSync: 'Just now', customStages: [] });
+      const curSess = getCurrentSession();
+      fields.push({
+        id: submittedFieldId,
+        memberName: curSess?.name || 'Current User',
+        member: curSess?.name || 'Current User',
+        memberId: curSess?.employeeId || '',
+        userId: curSess?.employeeId || '',
+        ha: parseFloat(logForm.hectares) || 0.0,
+        stage: logForm.operationName || 'Newly Logged',
+        month: 0,
+        synced: false,
+        lastSync: 'Just now',
+        customStages: []
+      });
     }
 
     if (asSubmit) {
@@ -1566,6 +1821,18 @@ export default function FieldOpsScreen({ navigation, route }) {
       operationLogs.unshift(newLog);
       setLogs([...operationLogs]);
       setLogTab('submitted');
+
+      if (isTakeOver) {
+        const targetField = fields.find(f => f.id === submittedFieldId) || selectedField;
+        if (targetField) {
+          targetField.synced = true;
+          targetField.lastSync = 'Just now (Manager Take Over)';
+          saveFieldPlot(targetField, false);
+          if (selectedField.id === targetField.id) {
+            setSelectedField({ ...targetField });
+          }
+        }
+      }
       
       // Keep stage active and allow multiple operations per stage
       if (logForm.taskId && logForm.taskId !== 'Emergency') {
@@ -1889,8 +2156,8 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const unsynced = React.useMemo(() => {
-    return fields.filter(f => !f.synced);
-  }, []);
+    return fields.filter(f => !f.synced || (typeof f.lastSync === 'string' && f.lastSync.includes('days')));
+  }, [fields, synced]);
 
   // Dynamic calculations for month-level QR code compilation
   const { activeCycleLogs, uniqueFieldsCount, totalLogsCount, totalOperationalCost } = React.useMemo(() => {
@@ -2560,9 +2827,25 @@ export default function FieldOpsScreen({ navigation, route }) {
               const targetFarm = session?.farm || 'Nacayao Block Farm';
               const farmFields = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
               const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 15.25;
-              const farmLogs = logs.filter(l => !l.declined && !l.isArchived);
-              const totalCost = farmLogs.reduce((sum, l) => sum + (Number(l.totalCost) || 0), 0) || 145225;
-              const logsCount = farmLogs.length || 14;
+              const farmLogs = logs.filter(l => 
+                !l.declined && 
+                !l.isArchived && 
+                !l.isPastCycle && 
+                isLogFromMonth(l, compileMonth)
+              );
+              const uncompiledLogs = farmLogs.filter(l => !l.compiled && !l.compiledReportId);
+              const compiledLogs = farmLogs.filter(l => l.compiled || l.compiledReportId);
+              const monthReport = auditReports.find(a => 
+                (a.month && a.month.toLowerCase() === compileMonth.toLowerCase()) || 
+                (a.id && a.id.includes(compileMonth.includes('April') ? '04' : (compileMonth.includes('May') ? '05' : '03')))
+              );
+              const isAllCompiled = uncompiledLogs.length === 0 && (compiledLogs.length > 0 || !!monthReport);
+              const isCloudSent = monthReport?.cloudQueueStatus === 'transmitted' || monthReport?.status === 'Certified';
+              const isOfflineQueued = monthReport && !isCloudSent;
+              const totalCost = farmLogs.length > 0
+                ? farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0)
+                : (compileMonth === 'May 2026' ? 145225 : (compileMonth === 'April 2026' ? 128400 : 94500));
+              const logsCount = farmLogs.length > 0 ? farmLogs.length : 5;
 
               return (
                 /* Elevated Monthly Regulatory Audit Card */
@@ -2576,7 +2859,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   ...SHADOW.card,
                 }}>
                   {/* Card Header & Badge */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                     <View style={{ flex: 1, marginRight: 8 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary }} />
@@ -2588,30 +2871,125 @@ export default function FieldOpsScreen({ navigation, route }) {
                         {targetFarm}
                       </Text>
                       <Text style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 1 }}>
-                        {t('audit_period_label', 'Period')}: <Text style={{ fontWeight: '700', color: COLORS.text }}>May 2026</Text> · Farm: 30.11 Ha
+                        {t('audit_period_label', 'Period')}: <Text style={{ fontWeight: '700', color: COLORS.text }}>{compileMonth}</Text> · Farm: {totalHa.toFixed(2)} Ha
                       </Text>
                     </View>
-                    <View style={{ backgroundColor: '#EBF7EE', paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#B7E4C7', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <Ionicons name="shield-checkmark" size={12} color={COLORS.success} />
-                      <Text style={{ fontSize: 10.5, fontWeight: '800', color: COLORS.success }}>
-                        {t('compile_ready_badge', 'Ready to Compile')}
+                    <View style={{
+                      backgroundColor: isAllCompiled ? '#EBF7EE' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FEF3C7' : '#EBF7EE'),
+                      paddingHorizontal: 9,
+                      paddingVertical: 4,
+                      borderRadius: RADIUS.full,
+                      borderWidth: 1,
+                      borderColor: isAllCompiled ? '#B7E4C7' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FDE68A' : '#B7E4C7'),
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5
+                    }}>
+                      <Ionicons 
+                        name={isAllCompiled ? "checkmark-circle" : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? "time-outline" : "shield-checkmark")} 
+                        size={12} 
+                        color={isAllCompiled ? COLORS.success : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#B45309' : COLORS.success)} 
+                      />
+                      <Text style={{ 
+                        fontSize: 10.5, 
+                        fontWeight: '800', 
+                        color: isAllCompiled ? COLORS.success : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#B45309' : COLORS.success) 
+                      }}>
+                        {isAllCompiled 
+                          ? '✓ Audit Package Up to Date' 
+                          : (uncompiledLogs.length > 0 && compiledLogs.length > 0 
+                            ? `● ${uncompiledLogs.length} New Ops Pending` 
+                            : `● ${uncompiledLogs.length > 0 ? uncompiledLogs.length : logsCount} Ready to Compile`)}
                       </Text>
                     </View>
                   </View>
 
+                  {/* Month Selection Switcher */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }}>Month:</Text>
+                    {['March 2026', 'April 2026', 'May 2026'].map(m => (
+                      <TouchableOpacity
+                        key={m}
+                        onPress={() => setCompileMonth(m)}
+                        activeOpacity={0.7}
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: RADIUS.full,
+                          backgroundColor: compileMonth === m ? COLORS.primary : '#F0F4EC',
+                          borderWidth: 1,
+                          borderColor: compileMonth === m ? COLORS.primary : '#DEE7D7'
+                        }}
+                      >
+                        <Text style={{
+                          fontSize: 10.5,
+                          fontWeight: compileMonth === m ? '800' : '600',
+                          color: compileMonth === m ? '#fff' : COLORS.textMuted
+                        }}>
+                          {m}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   {/* 3 Metric Summary Pills */}
-                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                     <View style={{ flex: 1, backgroundColor: '#F6FAF3', paddingVertical: 9, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E3EFE0' }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' }}>{t('stat_recorded_logs', 'Compiled Logs')}</Text>
-                      <Text style={{ fontSize: 15, fontWeight: '900', color: COLORS.primary, marginTop: 2 }}>{logsCount} logs</Text>
+                      <Text style={{ fontSize: 13.5, fontWeight: '900', color: COLORS.primary, marginTop: 2 }}>
+                        {isAllCompiled 
+                          ? `${compiledLogs.length > 0 ? compiledLogs.length : logsCount} logs (Up to Date)`
+                          : (compiledLogs.length > 0 
+                            ? `${compiledLogs.length} comp · ${uncompiledLogs.length} new`
+                            : `${uncompiledLogs.length > 0 ? uncompiledLogs.length : logsCount} logs ready`)}
+                      </Text>
                     </View>
                     <View style={{ flex: 1, backgroundColor: '#F6FAF3', paddingVertical: 9, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E3EFE0' }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' }}>Active Plot Area</Text>
-                      <Text style={{ fontSize: 15, fontWeight: '900', color: COLORS.text, marginTop: 2 }}>{totalHa.toFixed(2)} Ha</Text>
+                      <Text style={{ fontSize: 14.5, fontWeight: '900', color: COLORS.text, marginTop: 2 }}>{totalHa.toFixed(2)} Ha</Text>
                     </View>
-                    <View style={{ flex: 1.2, backgroundColor: '#F6FAF3', paddingVertical: 9, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E3EFE0' }}>
+                    <View style={{ flex: 1.1, backgroundColor: '#F6FAF3', paddingVertical: 9, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E3EFE0' }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' }}>{t('report_total_cost', 'Total Cost')}</Text>
-                      <Text style={{ fontSize: 14.5, fontWeight: '900', color: COLORS.primary, marginTop: 2 }} numberOfLines={1}>₱{totalCost.toLocaleString()}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary, marginTop: 2 }} numberOfLines={1}>₱{totalCost.toLocaleString()}</Text>
+                    </View>
+                  </View>
+
+                  {/* Cloud Audit Queue Real-time Status Indicator */}
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: isCloudSent ? '#F0F8EC' : (isOfflineQueued ? '#FFFBEB' : '#F4F7F2'),
+                    borderWidth: 1,
+                    borderColor: isCloudSent ? '#B7E4C7' : (isOfflineQueued ? '#FDE68A' : '#E2EBDC'),
+                    borderRadius: RADIUS.md,
+                    paddingHorizontal: 10,
+                    paddingVertical: 7,
+                    marginBottom: 10
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <Ionicons 
+                        name={isCloudSent ? "cloud-done" : (isOfflineQueued ? "archive" : "cloud-outline")} 
+                        size={15} 
+                        color={isCloudSent ? COLORS.primary : (isOfflineQueued ? '#B45309' : COLORS.textMuted)} 
+                      />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: isCloudSent ? COLORS.primary : (isOfflineQueued ? '#92400E' : COLORS.textMuted) }} numberOfLines={1}>
+                        {isCloudSent 
+                          ? `Cloud Audit Queue: Transmitted to SRA District` 
+                          : (isOfflineQueued 
+                            ? `Offline Queue: Stored on Device (Pending Sync)` 
+                            : `Cloud Audit Queue: Ready to Transmit on Compile`)}
+                      </Text>
+                    </View>
+                    <View style={{
+                      backgroundColor: isCloudSent ? '#D1F2D9' : (isOfflineQueued ? '#FEF3C7' : '#E8EFE3'),
+                      paddingHorizontal: 7,
+                      paddingVertical: 2,
+                      borderRadius: RADIUS.full
+                    }}>
+                      <Text style={{ fontSize: 9, fontWeight: '900', color: isCloudSent ? '#15803D' : (isOfflineQueued ? '#B45309' : COLORS.textMuted) }}>
+                        {isCloudSent ? 'LIVE IN QUEUE' : (isOfflineQueued ? 'QUEUED OFFLINE' : 'READY')}
+                      </Text>
                     </View>
                   </View>
 
@@ -2620,10 +2998,10 @@ export default function FieldOpsScreen({ navigation, route }) {
                     {t('compile_card_desc', 'Compiles all member operation logs into a tamper-evident, offline vector SRA QR package for district regulatory inspection.')}
                   </Text>
 
-                  {/* Elevated Primary Action: Compile & Generate SRA QR */}
+                  {/* Elevated Primary Action: Compile & Generate SRA QR OR View Compiled QR */}
                   <TouchableOpacity
                     style={{
-                      backgroundColor: COLORS.primary,
+                      backgroundColor: isAllCompiled ? '#2D5A27' : COLORS.primary,
                       paddingVertical: 14,
                       paddingHorizontal: 16,
                       borderRadius: RADIUS.lg,
@@ -2633,41 +3011,70 @@ export default function FieldOpsScreen({ navigation, route }) {
                       gap: 8,
                       ...SHADOW.card
                     }}
-                    onPress={handleGenerateAudit}
+                    onPress={isAllCompiled ? handleViewExistingAudit : handleGenerateAudit}
                     activeOpacity={0.85}
                   >
                     <Ionicons name="qr-code-outline" size={19} color="#fff" />
-                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 0.3 }}>
-                      {t('btn_compile_generate_qr', 'Compile & Generate SRA QR')}
+                    <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '900', letterSpacing: 0.3 }}>
+                      {isAllCompiled 
+                        ? 'View Compiled SRA QR'
+                        : (uncompiledLogs.length > 0 
+                          ? `Compile ${uncompiledLogs.length} New Operations & QR` 
+                          : t('btn_compile_generate_qr', 'Compile & Generate SRA QR'))}
                     </Text>
                     <Ionicons name="arrow-forward" size={16} color="#fff" style={{ opacity: 0.85, marginLeft: 2 }} />
-                  </TouchableOpacity>
-
-                  {/* Secondary Action: Assign New Field */}
-                  <TouchableOpacity 
-                    style={{
-                      marginTop: 8,
-                      backgroundColor: 'transparent',
-                      borderWidth: 1,
-                      borderColor: COLORS.border,
-                      paddingVertical: 10,
-                      borderRadius: RADIUS.md,
-                      flexDirection: 'row',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      gap: 6
-                    }} 
-                    onPress={openAssignModal}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="person-add-outline" size={14} color={COLORS.textSecondary} />
-                    <Text style={{ color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                      {t('btn_assign_field', 'Assign New Field')}
-                    </Text>
                   </TouchableOpacity>
                 </View>
               );
             })()}
+
+            {/* Pending Member Registrations Alert Banner */}
+            {pendingUsersList && pendingUsersList.length > 0 && (
+              <View style={{
+                backgroundColor: '#FFFBEB',
+                borderWidth: 1.5,
+                borderColor: '#FDE68A',
+                borderRadius: RADIUS.lg,
+                padding: 12,
+                marginBottom: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                ...SHADOW.xs
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="people" size={18} color="#B45309" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={{ fontSize: 12.5, fontWeight: '800', color: '#92400E' }}>
+                        {pendingUsersList.length} Pending Registration{pendingUsersList.length !== 1 ? 's' : ''}
+                      </Text>
+                      <View style={{ backgroundColor: '#B45309', paddingHorizontal: 5, paddingVertical: 1, borderRadius: RADIUS.full }}>
+                        <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>ACTION</Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 11, color: '#B45309', marginTop: 1 }} numberOfLines={1}>
+                      {pendingUsersList.map(u => u.name).join(' · ')}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowPendingModal(true)}
+                  activeOpacity={0.8}
+                  style={{
+                    backgroundColor: '#B45309',
+                    paddingHorizontal: 11,
+                    paddingVertical: 7,
+                    borderRadius: RADIUS.md
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>Review →</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Sync Status Warning */}
             {unsynced.length > 0 && (
@@ -2703,10 +3110,32 @@ export default function FieldOpsScreen({ navigation, route }) {
 
               return (
                 <View style={{ marginBottom: 4 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <Text style={[s.sectionLabel, { marginBottom: 0 }]}>
-                      {managerFieldFilter === 'my' ? t('my_fields', 'My Managed Plot') : t('view_all_fields', 'All Block Farm Fields')}
-                    </Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={[s.sectionLabel, { marginBottom: 0 }]}>
+                        {managerFieldFilter === 'my' ? t('my_fields', 'My Managed Plot') : t('view_all_fields', 'All Block Farm Fields')}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => openAssignModal()}
+                        activeOpacity={0.7}
+                        style={{
+                          backgroundColor: '#EBF7EE',
+                          borderWidth: 1,
+                          borderColor: COLORS.primary + '60',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3.5,
+                          borderRadius: RADIUS.sm,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <Ionicons name="add-circle" size={13} color={COLORS.primary} />
+                        <Text style={{ fontSize: 10.5, fontWeight: '800', color: COLORS.primary }}>
+                          + Register Plot
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     
                     {/* Sleek Segmented Pill Switcher matching Planner UI */}
                     <View style={{ flexDirection: 'row', backgroundColor: '#EEF2E6', borderRadius: RADIUS.sm, padding: 2 }}>
@@ -2768,6 +3197,46 @@ export default function FieldOpsScreen({ navigation, route }) {
                 </View>
               );
             })()}
+
+            {/* Active Supervisor Takeover Banner */}
+            {activeRole === 'Farm Manager' && isTakeOver && (
+              <View style={{
+                backgroundColor: '#FEF2F2',
+                borderWidth: 1.5,
+                borderColor: '#F87171',
+                borderRadius: RADIUS.lg,
+                padding: 12,
+                marginBottom: 10,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                ...SHADOW.xs
+              }}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="warning" size={20} color="#DC2626" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#991B1B' }}>
+                      Active Supervisor Takeover Mode
+                    </Text>
+                    <Text style={{ fontSize: 10.5, color: '#B91C1C', marginTop: 1 }}>
+                      Logging operations on behalf of {selectedField?.member || 'Member'} ({selectedField?.id})
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setIsTakeOver(false)}
+                  style={{
+                    backgroundColor: '#DC2626',
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: RADIUS.md,
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>Exit Takeover</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Selected Field Detail */}
             <View style={s.fieldCard}>
@@ -3395,6 +3864,37 @@ export default function FieldOpsScreen({ navigation, route }) {
           <View style={s.qrModal}>
             <Text style={s.qrModalTitle}>SRA Monthly Audit QR</Text>
             <Text style={s.qrModalSub}>{activeQRData?.month || 'May 2026'} — {activeQRData?.blockFarm || 'Nacayao Block Farm'}, Silay</Text>
+
+            {/* Cloud Audit Queue Status Chip */}
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              backgroundColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FFFBEB' : '#EBF7EE',
+              borderWidth: 1,
+              borderColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FDE68A' : '#B7E4C7',
+              paddingHorizontal: 10,
+              paddingVertical: 7,
+              borderRadius: RADIUS.md,
+              marginBottom: 10,
+              width: '100%'
+            }}>
+              <Ionicons 
+                name={activeQRData?.cloudQueueStatus === 'offline_queued' ? "archive" : "cloud-done"} 
+                size={16} 
+                color={activeQRData?.cloudQueueStatus === 'offline_queued' ? '#B45309' : COLORS.success} 
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#92400E' : COLORS.success }}>
+                  {activeQRData?.cloudQueueStatus === 'offline_queued' ? 'Stored in Local Offline Queue' : 'Transmitted to SRA Cloud Audit Queue'}
+                </Text>
+                <Text style={{ fontSize: 9.5, color: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#B45309' : COLORS.textMuted }}>
+                  {activeQRData?.cloudQueueStatus === 'offline_queued' 
+                    ? 'Saved on phone · Will auto-push when online · SRA can inspect offline via QR'
+                    : 'Report is live on District SRA Portal queue for verification.'}
+                </Text>
+              </View>
+            </View>
             {/* Real Scannable Vector SVG QR Code */}
             <View style={[s.qrBox, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: '#e2e8dc' }]}>
               <OfflineQRCode
@@ -3721,7 +4221,12 @@ export default function FieldOpsScreen({ navigation, route }) {
             </View>
           </View>
           {(() => {
-            const filtered = fields.filter(f => f.id.toLowerCase().includes(fieldSearch.toLowerCase()) || f.member.toLowerCase().includes(fieldSearch.toLowerCase()));
+            const q = fieldSearch.toLowerCase();
+            const filtered = fields.filter(f => 
+              (f.id || '').toLowerCase().includes(q) || 
+              (f.member || '').toLowerCase().includes(q) ||
+              (f.memberId && f.memberId.toLowerCase().includes(q))
+            );
             const pageSize = 4;
             const totalPages = Math.ceil(filtered.length / pageSize) || 1;
             const curPage = Math.min(fieldsModalPage, totalPages);
@@ -3746,7 +4251,12 @@ export default function FieldOpsScreen({ navigation, route }) {
                           <Text style={[s.receiptTitle, { color: COLORS.text }]}>{field.id}</Text>
                           <Text style={s.receiptId}>{field.ha} Ha</Text>
                         </View>
-                        <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>Member: <Text style={{ color: COLORS.text, fontWeight: '700' }}>{field.member}</Text></Text>
+                        <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>
+                          Member: <Text style={{ color: COLORS.text, fontWeight: '700' }}>{field.member}</Text>
+                          {field.memberId ? (
+                            <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {field.memberId}</Text>
+                          ) : null}
+                        </Text>
                         <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>Stage: <Text style={{ color: COLORS.text }}>{field.stage}</Text></Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                           <View style={[s.syncDot, { backgroundColor: field.synced ? COLORS.success : '#C97A00' }]} />
@@ -4116,8 +4626,41 @@ export default function FieldOpsScreen({ navigation, route }) {
               </View>
             </View>
             <View style={{ gap: 4 }}>
-              <Text style={s.formLabel}>Assigned Member User ID <Text style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: '400' }}>(Phone / Account ID)</Text></Text>
-              <TextInput style={s.formInput} placeholder="e.g. 09176543210" value={managerAssignForm.userId} onChangeText={t => setManagerAssignForm({...managerAssignForm, userId: t})} keyboardType="phone-pad" />
+              <Text style={s.formLabel}>Assigned Member User ID <Text style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: '400' }}>(8-digit User ID or Mobile)</Text></Text>
+              <TextInput 
+                style={s.formInput} 
+                placeholder="e.g. 04000001 or 0917 123 4567" 
+                value={managerAssignForm.userId} 
+                onChangeText={t => setManagerAssignForm({...managerAssignForm, userId: t})} 
+                keyboardType="default"
+                autoCapitalize="none"
+              />
+              {(() => {
+                const q = (managerAssignForm.userId || '').trim();
+                if (!q) return null;
+                const matched = findUserByIdOrContact(q);
+                if (matched) {
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '40', paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, marginTop: 4 }}>
+                      <Ionicons name="checkmark-circle" size={14} color={COLORS.primary} />
+                      <Text style={{ fontSize: 11, color: COLORS.primary, fontWeight: '700' }} numberOfLines={1}>
+                        {matched.name} · Permanent ID: {matched.employeeId} ({matched.contact || 'No phone'})
+                      </Text>
+                    </View>
+                  );
+                }
+                if (q.replace(/\D/g, '').length >= 7) {
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, marginTop: 4 }}>
+                      <Ionicons name="alert-circle-outline" size={14} color="#B45309" />
+                      <Text style={{ fontSize: 11, color: '#B45309', fontWeight: '600' }}>
+                        No registered member matches this identifier.
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
             </View>
             <View style={{ gap: 4 }}>
               <Text style={s.formLabel}>Declared Area (Ha)</Text>
@@ -4149,29 +4692,34 @@ export default function FieldOpsScreen({ navigation, route }) {
                   existing.userId = memberIdVal;
                   existing.memberId = memberIdVal;
                   existing.memberContact = memberContactVal;
-                  existing.ha = managerAssignForm.ha;
+                  existing.ha = parseFloat(managerAssignForm.ha) || existing.ha;
                   if (selectedField.id === existing.id) {
-                    setSelectedField({ ...selectedField, member: memberDisplayName, memberName: memberDisplayName, userId: memberIdVal, memberId: memberIdVal, memberContact: memberContactVal, ha: managerAssignForm.ha });
+                    setSelectedField({ ...selectedField, member: memberDisplayName, memberName: memberDisplayName, userId: memberIdVal, memberId: memberIdVal, memberContact: memberContactVal, ha: existing.ha });
                   }
+                  saveFieldPlot(existing, false);
                 } else {
                   const newField = {
                     id: managerAssignForm.fieldId,
-                    member: memberDisplayName,
-                    memberName: memberDisplayName,
-                    userId: memberIdVal,
+                    blockFarmId: session?.blockFarmId || 'BLK-NCY-01',
+                    blockFarm: session?.farm || 'Nacayao Block Farm',
                     memberId: memberIdVal,
+                    userId: memberIdVal,
+                    memberName: memberDisplayName,
+                    member: memberDisplayName,
                     memberContact: memberContactVal,
-                    ha: managerAssignForm.ha,
-                    stage: 'Land Preparation',
+                    ha: parseFloat(managerAssignForm.ha) || 1.5,
+                    stage: 'Pre-Planting & Land Preparation',
+                    stageNumber: 1,
                     month: 0,
-                    synced: false,
+                    batchMonth: 1,
+                    synced: true,
                     lastSync: 'Just now',
-                    blockFarm: session.farm || 'Nacayao Block Farm'
+                    variety: 'VMC 84-524',
+                    soilType: 'Clay Loam'
                   };
-                  fields.push(newField);
+                  saveFieldPlot(newField, true);
                   setSelectedField(newField);
                 }
-                notifyDataUpdate();
                 Alert.alert('Success', `Field plot ${managerAssignForm.fieldId} assigned to ${memberDisplayName} (${memberIdVal}).`);
                 setShowManagerAssignModal(false);
                 setManagerAssignForm({ userId: '', fieldId: '', ha: '', isEditing: false });
@@ -4180,6 +4728,146 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* ── Pending Farmer Registrations Modal ── */}
+      <Modal visible={showPendingModal} transparent animationType="slide">
+        <View style={s.overlay} />
+        <View style={[s.sheet, { maxHeight: height * 0.85 }]}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetHeader}>
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={s.sheetTitle}>Pending Registrations</Text>
+                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#FDE68A' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>{pendingUsersList.length} Awaiting</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                Review member applications and allocate farm plots
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowPendingModal(false)}>
+              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ paddingHorizontal: SPACING.lg, paddingBottom: 20 }}>
+            {pendingUsersList.length === 0 ? (
+              <View style={{ padding: 28, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="checkmark-circle-outline" size={44} color={COLORS.success} />
+                <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text, marginTop: 8 }}>All Registrations Processed</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4 }}>
+                  No pending farmer applications in queue.
+                </Text>
+              </View>
+            ) : (
+              pendingUsersList.map(u => (
+                <View key={u.contact} style={{
+                  backgroundColor: '#fff',
+                  borderWidth: 1.5,
+                  borderColor: '#E2EBDC',
+                  borderRadius: RADIUS.lg,
+                  padding: 14,
+                  marginBottom: 10,
+                  ...SHADOW.xs
+                }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '900', color: COLORS.text }}>{u.name}</Text>
+                      <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 1 }}>
+                        <Ionicons name="call-outline" size={12} color={COLORS.textMuted} /> {u.contact}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: '#EBF7EE', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: '#B7E4C7' }}>
+                      <Text style={{ fontSize: 10.5, fontWeight: '800', color: COLORS.primary }}>{u.role || 'Member'}</Text>
+                    </View>
+                  </View>
+
+                  <View style={{ backgroundColor: '#F9FAF7', padding: 8, borderRadius: RADIUS.md, marginVertical: 6, gap: 4 }}>
+                    <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
+                      <Text style={{ fontWeight: '700' }}>Block Farm:</Text> {u.blockFarm || 'Nacayao Block Farm'}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
+                      <Text style={{ fontWeight: '700' }}>Requested Plot / Area:</Text> {u.fieldId || 'Auto-assign'} ({u.area || '1.5 Ha'})
+                    </Text>
+                    <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
+                      <Text style={{ fontWeight: '700' }}>Applied:</Text> {u.regDate || 'Recently'}
+                    </Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <TouchableOpacity
+                      disabled={pendingActionLoading}
+                      onPress={async () => {
+                        setPendingActionLoading(true);
+                        try {
+                          const res = await approvePendingRegistration(u.contact, { fieldId: u.fieldId, area: u.area });
+                          setPendingActionLoading(false);
+                          if (res.success) {
+                            Alert.alert('Registration Approved', `Farmer ${u.name} activated and allocated plot ${res.fieldId}!`);
+                            setPendingUsersList([...pendingUsers]);
+                          }
+                        } catch (e) {
+                          setPendingActionLoading(false);
+                          Alert.alert('Error', 'Could not approve registration.');
+                        }
+                      }}
+                      style={{
+                        flex: 1.4,
+                        backgroundColor: COLORS.primary,
+                        paddingVertical: 10,
+                        borderRadius: RADIUS.md,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
+                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>Approve & Assign Plot</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      disabled={pendingActionLoading}
+                      onPress={() => {
+                        Alert.alert(
+                          'Decline Application',
+                          `Are you sure you want to decline registration for ${u.name}?`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Decline',
+                              style: 'destructive',
+                              onPress: async () => {
+                                setPendingActionLoading(true);
+                                await rejectPendingRegistration(u.contact);
+                                setPendingActionLoading(false);
+                                setPendingUsersList([...pendingUsers]);
+                              }
+                            }
+                          ]
+                        );
+                      }}
+                      style={{
+                        flex: 0.8,
+                        backgroundColor: '#fff',
+                        borderWidth: 1,
+                        borderColor: '#E5E7EB',
+                        paddingVertical: 10,
+                        borderRadius: RADIUS.md,
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Text style={{ color: '#6B7280', fontSize: 12, fontWeight: '700' }}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
         </View>
       </Modal>
 
@@ -4685,7 +5373,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
                       <TouchableOpacity
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 10, borderRadius: RADIUS.md }}
-                        onPress={handleGenerateAudit}
+                        onPress={() => handleViewHistoricalAuditQR(audit)}
                         activeOpacity={0.8}
                       >
                         <Ionicons name="qr-code-outline" size={14} color="#fff" />

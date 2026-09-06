@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ScrollView, Alert,
+  KeyboardAvoidingView, Platform, ScrollView, Alert, Modal, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -99,6 +99,8 @@ export default function RegisterScreen({ navigation }) {
   const [verificationCode, setVerificationCode] = useState('');
   const [expectedCode, setExpectedCode] = useState('');
   const [countdown, setCountdown] = useState(0);
+  const [registeredAccount, setRegisteredAccount] = useState(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { score: 0, level: '', color: COLORS.border, pct: 0, hasMin: false, hasLetter: false, hasNum: false, hasUpper: false };
@@ -135,7 +137,7 @@ export default function RegisterScreen({ navigation }) {
     { title: t('reg_step_farm', 'Select Block Farm'), sub: t('reg_step_farm_sub', 'Assign your sugarcane block farm cooperative') },
     { 
       title: t('reg_step_contact', 'Contact Number'), 
-      sub: codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : t('reg_step_contact_sub', 'Used as your mobile login credential') 
+      sub: codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : 'Used for SMS verification. Permanent User ID issued upon signup' 
     },
     { title: t('reg_step_password', 'Set Password'), sub: t('reg_step_password_sub', 'Secure your HUGPONG account') },
   ];
@@ -229,18 +231,26 @@ export default function RegisterScreen({ navigation }) {
     return Object.keys(e).length === 0;
   };
 
-  const next = () => {
+  const next = async () => {
     if (!validateStep()) return;
     if (step < totalSteps) { setStep(s => s + 1); return; }
     setLoading(true);
 
-    setTimeout(() => {
-      registerUser(form);
+    try {
+      const res = await registerUser(form);
       setLoading(false);
-      Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your farmer member account is now active.`, [
-        { text: 'Go to Dashboard', onPress: () => navigation.replace('MainTabs') }
-      ]);
-    }, 800);
+      if (res && res.user) {
+        setRegisteredAccount(res.user);
+        setShowSuccessModal(true);
+      } else {
+        Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your farmer member account is now active.`, [
+          { text: 'Go to Dashboard', onPress: () => navigation.replace('MainTabs') }
+        ]);
+      }
+    } catch (err) {
+      setLoading(false);
+      Alert.alert('Registration Error', 'An error occurred while creating your account. Please try again.');
+    }
   };
 
   const handleMainButtonPress = () => {
@@ -531,6 +541,83 @@ export default function RegisterScreen({ navigation }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Registration Success Credential Modal */}
+      <Modal visible={showSuccessModal} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <View style={s.successCard}>
+            <View style={s.successIconWrap}>
+              <Ionicons name="checkmark-circle" size={46} color={COLORS.primary} />
+            </View>
+
+            <Text style={s.successTitle}>Registration Successful!</Text>
+            <Text style={s.successSub}>
+              Welcome to HUGPONG, <Text style={{ fontWeight: '700', color: COLORS.text }}>{registeredAccount?.name || `${form.firstName} ${form.lastName}`}</Text>
+            </Text>
+
+            {/* Permanent User ID Display */}
+            <View style={s.credIdBox}>
+              <Text style={s.credIdLabel}>OFFICIAL PERMANENT USER ID</Text>
+              <Text selectable style={s.credIdVal}>{registeredAccount?.employeeId || '04000006'}</Text>
+              <Text style={s.credIdSub}>Immutable 8-digit Login Credential</Text>
+            </View>
+
+            {/* Credential Metadata */}
+            <View style={s.metaRow}>
+              <View style={s.metaCol}>
+                <Text style={s.metaLabel}>Registered Mobile</Text>
+                <Text style={s.metaVal}>{registeredAccount?.contact || form.contactNumber}</Text>
+              </View>
+              <View style={s.metaCol}>
+                <Text style={s.metaLabel}>Block Farm</Text>
+                <Text style={s.metaVal} numberOfLines={1}>{registeredAccount?.blockFarm || form.blockFarm}</Text>
+              </View>
+            </View>
+
+            {/* Lost SIM Advisory */}
+            <View style={s.lostSimCard}>
+              <Ionicons name="shield-checkmark" size={18} color={COLORS.primary} style={{ marginTop: 1 }} />
+              <Text style={s.lostSimText}>
+                <Text style={{ fontWeight: '700' }}>Important Notice:</Text> Write down or screenshot your 8-digit User ID. Even if you lose or replace your SIM card in the future, this User ID is permanently linked to your plot and will always work to sign in.
+              </Text>
+            </View>
+
+            {/* Actions */}
+            <View style={s.modalActionCol}>
+              <TouchableOpacity
+                style={s.shareCredBtn}
+                onPress={async () => {
+                  const id = registeredAccount?.employeeId || '04000006';
+                  try {
+                    await Share.share({
+                      message: `HUGPONG Farmer Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
+                      title: 'HUGPONG Farmer Credentials'
+                    });
+                  } catch (e) {
+                    Alert.alert('Farmer User ID', id);
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="share-social-outline" size={16} color={COLORS.primary} />
+                <Text style={s.shareCredBtnText}>Share / Save Credentials</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.proceedBtn}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  navigation.replace('MainTabs');
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={s.proceedBtnText}>Go to Dashboard</Text>
+                <Ionicons name="arrow-forward" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -581,4 +668,24 @@ const s = StyleSheet.create({
   pwRuleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pwRuleText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
   pwRuleTextMet: { color: COLORS.text, fontWeight: '600' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: SPACING.lg },
+  successCard: { width: '100%', backgroundColor: '#fff', borderRadius: RADIUS.xl, padding: 22, alignItems: 'center', ...SHADOW.lg },
+  successIconWrap: { width: 66, height: 66, borderRadius: 33, backgroundColor: COLORS.primaryBg, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  successTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  successSub: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', marginTop: 3, marginBottom: 16 },
+  credIdBox: { width: '100%', backgroundColor: '#F0F8EC', borderRadius: RADIUS.lg, borderWidth: 1.5, borderColor: COLORS.primary, padding: 14, alignItems: 'center', marginBottom: 12 },
+  credIdLabel: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1, color: COLORS.primary, marginBottom: 4 },
+  credIdVal: { fontSize: 28, fontWeight: '900', color: COLORS.primary, letterSpacing: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  credIdSub: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
+  metaRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', backgroundColor: COLORS.background, padding: 10, borderRadius: RADIUS.md, marginBottom: 12, gap: 10 },
+  metaCol: { flex: 1 },
+  metaLabel: { fontSize: 10, color: COLORS.textMuted, fontWeight: '600' },
+  metaVal: { fontSize: 12.5, fontWeight: '700', color: COLORS.text, marginTop: 2 },
+  lostSimCard: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', padding: 12, borderRadius: RADIUS.md, marginBottom: 16 },
+  lostSimText: { flex: 1, fontSize: 11.5, color: '#1E40AF', lineHeight: 17 },
+  modalActionCol: { width: '100%', gap: 8 },
+  shareCredBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primary + '40', paddingVertical: 12, borderRadius: RADIUS.md },
+  shareCredBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+  proceedBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md },
+  proceedBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Modal, TextInput } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Modal, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
@@ -1158,9 +1158,10 @@ export default function AnalyticsScreen({ navigation, route }) {
                 const q = plotSearchQuery.toLowerCase();
                 const idMatch = (f.id || '').toLowerCase().includes(q);
                 const memberMatch = (f.member || '').toLowerCase().includes(q);
+                const memberIdMatch = (f.memberId || '').toLowerCase().includes(q);
                 const varietyMatch = (f.variety || '').toLowerCase().includes(q);
                 const stageMatch = (f.stage || '').toLowerCase().includes(q);
-                return idMatch || memberMatch || varietyMatch || stageMatch;
+                return idMatch || memberMatch || memberIdMatch || varietyMatch || stageMatch;
               })
               .map(f => {
                 const isSelected = selectedFieldId === f.id;
@@ -1196,6 +1197,9 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                       <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textSecondary }}>
                         Member: {f.member || 'Assigned Farmer'}
+                        {f.memberId ? (
+                          <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {f.memberId}</Text>
+                        ) : null}
                       </Text>
                       {f.stage && (
                         <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>

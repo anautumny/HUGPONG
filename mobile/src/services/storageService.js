@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   TICKETS: '@hugpong_tickets',
   PREFS: '@hugpong_prefs',
   PENDING_ASSIGNMENTS: '@hugpong_pending_assignments',
+  PENDING_USERS: '@hugpong_pending_users',
   CUSTOM_STAGES: '@hugpong_custom_stages',
   LAST_SYNC: '@hugpong_last_sync',
   AUDIT_REPORTS: '@hugpong_audit_reports',

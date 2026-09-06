@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
@@ -31,7 +31,12 @@ function MemberHomeView({
       <View style={s.fieldCard}>
         <View style={s.fieldCardHeader}>
           <View>
-            <Text style={s.fieldId}>{primaryField.id}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={s.fieldId}>{primaryField.id}</Text>
+              <View style={s.memberIdBadge}>
+                <Text style={s.memberIdBadgeText}>ID: {session?.employeeId || primaryField.memberId || '04000001'}</Text>
+              </View>
+            </View>
             <Text style={s.fieldFarm}>{session?.farm || 'Nacayao Block Farm'}</Text>
           </View>
           <View style={s.haBadge}>
@@ -79,6 +84,8 @@ const s = StyleSheet.create({
   },
   fieldCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm },
   fieldId: { fontSize: 16, fontWeight: '800', color: COLORS.text },
+  memberIdBadge: { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs },
+  memberIdBadgeText: { fontSize: 10, fontWeight: '800', color: COLORS.primary, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
   fieldFarm: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
   haBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full },
   haText: { fontSize: 11, fontWeight: '800', color: COLORS.primary },

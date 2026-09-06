@@ -272,7 +272,35 @@ var INITIAL_DATABASE = {
       status: 'Recorded'
     }
   ],
-  pendingUsers: [],
+  pendingUsers: [
+    {
+      name: 'Danilo Villanueva',
+      contact: '09187654321',
+      role: 'Member',
+      blockFarm: 'Nacayao Block Farm',
+      fieldId: 'FLD-NCY-005',
+      area: '1.25 Ha',
+      regDate: '2026-05-28'
+    },
+    {
+      name: 'Elena Rostro',
+      contact: '09223344556',
+      role: 'Member',
+      blockFarm: 'Nacayao Block Farm',
+      fieldId: 'FLD-NCY-006',
+      area: '1.50 Ha',
+      regDate: '2026-05-29'
+    },
+    {
+      name: 'Ramon Dela Cruz',
+      contact: '09334455667',
+      role: 'Member',
+      blockFarm: 'Silay Central Block Farm',
+      fieldId: 'FLD-SC-001',
+      area: '2.00 Ha',
+      regDate: '2026-05-30'
+    }
+  ],
   securityLogs: [
     { id: 'SEC-2026-0001', time: '2026-05-30 14:30', user: 'Engr. Maria Santos (SRA Officer)', event: 'Certified Monthly Block Farm Agronomic Audit Report (RPT-2026-05-NCY01)' },
     { id: 'SEC-2026-0002', time: '2026-05-25 10:15', user: 'Capstone Group (Super Admin)', event: 'Exported Cold Database Snapshot Backup (.JSON 148.4 KB)' },

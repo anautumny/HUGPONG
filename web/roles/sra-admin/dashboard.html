@@ -262,11 +262,11 @@
       </button>
       <button class="manager-only hidden nav-item flex items-center gap-2.5 w-full px-3 py-2.5 rounded-lg text-sm text-hug-text2 hover:bg-bg hover:text-primary transition-all text-left" data-page="operations" id="nav-operations" onclick="navigate('operations')">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="flex-shrink-0"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-        Field Operations &amp; Take Over
+        Field Operations
       </button>
       <button class="manager-only hidden nav-item flex items-center gap-2.5 w-full px-3 py-2.5 rounded-lg text-sm text-hug-text2 hover:bg-bg hover:text-primary transition-all text-left" data-page="synctelemetry" id="nav-synctelemetry" onclick="navigate('synctelemetry')">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="flex-shrink-0"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        Member Sync &amp; Telemetry
+        Sync Monitor
       </button>
       <button class="manager-only hidden nav-item flex items-center gap-2.5 w-full px-3 py-2.5 rounded-lg text-sm text-hug-text2 hover:bg-bg hover:text-primary transition-all text-left" data-page="users" id="nav-mgr-users" onclick="navigate('users')">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="flex-shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -1124,7 +1124,7 @@
           <div>
             <h2 class="text-xl font-bold text-hug-text flex items-center gap-2">
               <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-primary"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-              Field Operations &amp; Take Over Console
+              Field Operations Console
             </h2>
             <p class="text-xs text-hug-muted">Supervise crop cycle stages, view submitted operation logs, or take over field management directly.</p>
           </div>
@@ -1397,8 +1397,8 @@
             </div>
             <div class="overflow-x-auto"><table class="w-full text-sm">
               <thead class="bg-bg"><tr>
-                <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Contact Number</th>
-                <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Full Name</th>
+                <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">User ID</th>
+                <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Full Name &amp; Contact</th>
                 <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Block Farm &amp; Plot</th>
                 <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Core Role</th>
                 <th class="text-left px-4 py-3 text-hug-muted font-semibold text-xs border-b border-border">Logs Handled</th>
@@ -1750,7 +1750,7 @@
         <div class="bg-white rounded-2xl border border-border shadow-xs p-6 flex flex-col gap-4">
           <div class="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-border">
             <div>
-              <h3 class="text-base font-bold text-hug-text">Nacayao Block Farm Member Sync &amp; Inactivity Telemetry</h3>
+              <h3 class="text-base font-bold text-hug-text">Nacayao Block Farm Sync Monitor</h3>
               <p class="text-xs text-hug-muted">Full telemetry health hub for all registered member farmers in Nacayao Block Farm</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
@@ -2954,9 +2954,9 @@
 
       <!-- User ID / Contact Input (Member User ID for plots, Manager User ID for block farms) -->
       <div id="dash-modal-farm-contact-wrapper">
-        <label id="dash-modal-lbl-farm-contact" class="block text-xs font-semibold text-hug-text2 mb-1.5">Assigned Member User ID <span class="text-danger">*</span></label>
-        <input type="text" id="dash-farm-contact" placeholder="e.g. 03000001 / 04000001 or 0917-123-4567" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary outline-none transition-all" />
-        <p class="text-[11px] text-hug-muted mt-1" id="dash-modal-sub-farm-contact">Enter the registered 8-digit User ID (e.g. 03000001, 04000001) or 11-digit mobile number.</p>
+        <label id="dash-modal-lbl-farm-contact" class="block text-xs font-semibold text-hug-text2 mb-1.5">Assigned Member User ID / Mobile <span class="text-danger">*</span></label>
+        <input type="text" id="dash-farm-contact" list="registered-members-datalist" placeholder="e.g. 03000001 / 04000001 or 0917-123-4567" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary outline-none transition-all" />
+        <p class="text-[11px] text-hug-muted mt-1" id="dash-modal-sub-farm-contact">Enter or select the registered 8-digit User ID (e.g. 03000001, 04000001) or 11-digit mobile number.</p>
       </div>
 
       <!-- Total Declared Hectarage -->
@@ -2999,6 +2999,15 @@
 
     <!-- Form Inputs -->
     <div class="flex flex-col gap-3.5">
+      <!-- Permanent User ID Badge -->
+      <div class="flex items-center justify-between p-3 bg-bg border border-border rounded-xl">
+        <div>
+          <span class="text-[10px] text-hug-muted uppercase font-bold tracking-wider block">Permanent User ID</span>
+          <span class="font-mono text-sm font-black text-primary" id="edit-user-display-employee-id">04000001</span>
+        </div>
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary border border-primary/20">Permanent &amp; Immutable</span>
+      </div>
+      <input type="hidden" id="edit-user-orig-employee-id" />
       <input type="hidden" id="edit-user-orig-contact" />
       <div>
         <label class="block text-xs font-semibold text-hug-text2 mb-1">Full Name <span class="text-danger">*</span></label>
@@ -3007,7 +3016,10 @@
 
       <div>
         <label class="block text-xs font-semibold text-hug-text2 mb-1">Contact Number <span class="text-danger">*</span></label>
-        <input type="tel" id="edit-user-contact" class="w-full text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+        <input type="tel" id="edit-user-contact" oninput="handlePersonnelContactInput(this, 'edit-user-contact-feedback', 'edit')" maxlength="13" class="w-full text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none transition-colors" />
+        <div id="edit-user-contact-feedback" class="text-[11px] text-hug-muted mt-1 flex items-center gap-1.5 font-medium">
+          <span>If the member changed or lost their SIM, update their phone number here. Their permanent User ID and plot allocations remain safe.</span>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-3">
@@ -3017,7 +3029,6 @@
             <option value="Member">Member</option>
             <option value="Farm Manager">Farm Manager</option>
             <option value="SRA (Admin)">SRA (Admin)</option>
-            <option value="Super Admin">Super Admin</option>
           </select>
         </div>
         <div>
@@ -3053,9 +3064,9 @@
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-border pb-3">
       <div>
-        <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 uppercase tracking-wider">Administrative Provisioning</span>
-        <h3 class="text-base font-bold text-hug-text mt-1">Register New Officer / Personnel</h3>
-        <p class="text-xs text-hug-muted">Super Admin &amp; SRA leadership can create accounts for new officers, managers, and system administrators.</p>
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-primary-bg text-primary uppercase tracking-wider">SRA District Provisioning</span>
+        <h3 class="text-base font-bold text-hug-text mt-1">Register Farm Manager / Member</h3>
+        <p class="text-xs text-hug-muted">Authorize new cooperative Farm Managers, Member farmers, or SRA regulatory officers.</p>
       </div>
       <button onclick="closeCreateUserModal()" class="w-8 h-8 rounded-full bg-bg hover:bg-border flex items-center justify-center text-hug-muted hover:text-hug-text cursor-pointer transition-all">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -3066,31 +3077,83 @@
     <div class="flex flex-col gap-3.5">
       <div>
         <label class="block text-xs font-semibold text-hug-text2 mb-1">Full Official Name <span class="text-danger">*</span></label>
-        <input type="text" id="create-user-name" placeholder="e.g. Atty. Roberto Gomez" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+        <input type="text" id="create-user-name" placeholder="e.g. Juan De La Cruz" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none" />
       </div>
 
       <div>
-        <label class="block text-xs font-semibold text-hug-text2 mb-1">Contact / Login Phone Number <span class="text-danger">*</span></label>
-        <input type="tel" id="create-user-contact" placeholder="0917-555-4321" class="w-full text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+        <label class="block text-xs font-semibold text-hug-text2 mb-1">Contact / Login Mobile Number <span class="text-danger">*</span></label>
+        <div class="flex gap-2">
+          <input type="tel" id="create-user-contact" placeholder="0917-555-4321" oninput="handlePersonnelContactInput(this, 'create-user-contact-feedback', 'create')" maxlength="13" class="flex-1 text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none transition-colors" />
+          <button type="button" id="btn-send-personnel-otp" onclick="handleSendPersonnelOtp()" class="px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 border border-primary/20">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Send Code</span>
+          </button>
+        </div>
+        <div id="create-user-contact-feedback" class="text-[10px] text-hug-muted mt-1 flex items-center gap-1.5 font-medium">
+          <span>11-digit Philippine mobile number starting with 09</span>
+        </div>
+
+        <!-- In-Modal On-the-Spot SMS OTP Section -->
+        <div id="create-user-otp-box" class="hidden mt-2.5 p-3 bg-primary-bg/60 border border-primary/25 rounded-xl flex flex-col gap-2">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="font-bold text-primary flex items-center gap-1.5">
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+              SMS Verification Sent
+            </span>
+            <span id="create-user-otp-timer" class="text-hug-muted text-[10px] font-mono">Expires in 5:00</span>
+          </div>
+          <div class="flex gap-2 items-center">
+            <input type="text" id="create-user-otp" placeholder="Enter 6-digit code" maxlength="6" class="flex-1 text-xs font-mono font-bold tracking-widest text-center px-3 py-2 bg-white border border-border rounded-lg outline-none focus:border-primary" />
+            <button type="button" onclick="handleVerifyPersonnelOtp()" class="px-3.5 py-2 bg-primary text-white text-xs font-bold rounded-lg hover:bg-primary-light transition-all cursor-pointer shadow-xs">
+              Verify SIM
+            </button>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-hug-muted pt-0.5">
+            <span>Ask personnel for the 6-digit code received on their phone</span>
+            <button type="button" onclick="handleSendPersonnelOtp()" class="text-primary font-bold hover:underline cursor-pointer">Resend Code</button>
+          </div>
+        </div>
+
+        <!-- SIM Verified Badge -->
+        <div id="create-user-verified-badge" class="hidden mt-2 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-xl flex items-center gap-1.5">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span>SIM Verified & Active via Real SMS OTP</span>
+        </div>
+
+        <!-- Defer Verification Option -->
+        <div class="mt-2.5 flex items-start gap-2.5 bg-bg/80 p-2.5 rounded-xl border border-border">
+          <input type="checkbox" id="create-user-defer-verification" class="mt-0.5 rounded cursor-pointer accent-primary" />
+          <label for="create-user-defer-verification" class="text-[11px] text-hug-text2 cursor-pointer select-none">
+            <span class="font-bold block text-hug-text">Defer verification to first login</span>
+            Require personnel to verify their phone via SMS when they log in for the first time (recommended for remote staff).
+          </label>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-semibold text-hug-text2 mb-1">Assigned Role <span class="text-danger">*</span></label>
-          <select id="create-user-role" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
-            <option value="SRA (Admin)">SRA (Admin)</option>
-            <option value="Super Admin">Super Admin</option>
+          <select id="create-user-role" onchange="handleCreateUserRoleChange()" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
             <option value="Farm Manager">Farm Manager</option>
             <option value="Member">Member</option>
+            <option value="SRA (Admin)">SRA (Admin)</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-hug-text2 mb-1">Assigned Block Farm / Station</label>
-          <select id="create-user-blockfarm" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
-            <option value="">District Oversight / Central</option>
+          <label class="block text-xs font-semibold text-hug-text2 mb-1">Assigned Block Farm <span class="text-danger">*</span></label>
+          <select id="create-user-blockfarm" onchange="handleCreateUserRoleChange()" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
             <option value="Nacayao Block Farm">Nacayao Block Farm</option>
-            </select>
+          </select>
         </div>
+      </div>
+
+      <!-- Conditional Plot Assignment for Member Role -->
+      <div id="create-user-plot-container" class="hidden flex flex-col gap-1">
+        <label class="block text-xs font-semibold text-hug-text2">Assigned Field Plot <span class="text-danger">*</span></label>
+        <select id="create-user-plot" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
+          <option value="auto">Auto-assign next available plot (FLD-NCY-NNN)</option>
+        </select>
+        <span class="text-[10px] text-hug-muted">Specifies the member's allocated cooperative sugarcane plot.</span>
       </div>
 
       <div>
@@ -3106,7 +3169,7 @@
       </button>
       <button onclick="submitCreateUser()" class="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-light transition-all flex items-center gap-1.5 cursor-pointer shadow-sm">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Register Officer Account
+        Register Account
       </button>
     </div>
   </div>
@@ -3156,9 +3219,10 @@
 
       <!-- Member Input -->
       <div>
-        <label class="block text-xs font-semibold text-hug-text2 mb-1.5">Assigned Member User ID <span class="text-danger">*</span></label>
-        <input type="text" id="edit-plot-member-id" placeholder="e.g. 04000001 or 0917-123-4567" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary outline-none transition-all" />
-        <p class="text-[11px] text-hug-muted mt-1">Enter the registered 8-digit User ID (e.g. 04000001) or 11-digit mobile number of the member managing this field plot.</p>
+        <label class="block text-xs font-semibold text-hug-text2 mb-1.5">Assigned Member User ID / Mobile <span class="text-danger">*</span></label>
+        <input type="text" id="edit-plot-member-id" list="registered-members-datalist" placeholder="e.g. 04000001 or 0917-123-4567" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary outline-none transition-all" />
+        <datalist id="registered-members-datalist"></datalist>
+        <p class="text-[11px] text-hug-muted mt-1">Enter or select the 8-digit User ID (permanent) or 11-digit mobile number of the member managing this field plot.</p>
       </div>
 
       <!-- Hectares -->
@@ -3671,6 +3735,44 @@
       </button>
       <button onclick="closeTabHistoryModal()" class="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-light transition-all cursor-pointer">
         Close History
+      </button>
+    </div>
+  </div>
+<!-- Modal: First-Login Phone Verification -->
+<div id="modal-first-login-verify" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 hidden backdrop-blur-xs">
+  <div class="bg-white border border-border rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in flex flex-col gap-4">
+    <div class="flex items-start gap-3">
+      <div class="w-10 h-10 rounded-xl bg-primary-bg text-primary flex items-center justify-center shrink-0 border border-primary/20">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+      </div>
+      <div class="flex-1">
+        <h3 class="text-base font-bold text-hug-text">One-Time Mobile SIM Verification</h3>
+        <p class="text-xs text-hug-muted mt-0.5">Please verify ownership of your registered mobile number before accessing your HUGPONG portal.</p>
+      </div>
+    </div>
+
+    <div class="p-3 bg-bg rounded-xl border border-border text-xs text-hug-text2 flex flex-col gap-1">
+      <span class="text-[10px] uppercase font-bold text-hug-muted">Registered Phone Number</span>
+      <span id="first-login-verify-phone" class="font-mono font-bold text-primary text-sm">+63 9XX XXX XXXX</span>
+      <span class="text-[11px] text-hug-muted mt-0.5">A 6-digit SMS verification code was dispatched to this device.</span>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-semibold text-hug-text2">Enter 6-Digit SMS Verification Code</label>
+      <input type="text" id="first-login-verify-otp" maxlength="6" placeholder="• • • • • •" class="w-full text-center text-lg font-mono font-bold tracking-widest px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+    </div>
+
+    <div class="flex items-center justify-between text-xs text-hug-muted">
+      <span id="first-login-verify-timer" class="font-mono">Expires in 5:00</span>
+      <button type="button" onclick="resendFirstLoginOtp()" class="text-primary font-bold hover:underline cursor-pointer">Resend SMS Code</button>
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2 border-t border-border">
+      <button type="button" onclick="cancelFirstLoginVerify()" class="px-4 py-2 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg transition-all cursor-pointer">
+        Sign Out
+      </button>
+      <button type="button" onclick="submitFirstLoginVerify()" class="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-light transition-all cursor-pointer shadow-sm">
+        Verify & Continue
       </button>
     </div>
   </div>
