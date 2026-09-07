@@ -36,13 +36,50 @@ export const users = [
   { employeeId: '04000005', contact: '09555444333', name: 'Ana Gomez', role: 'Member', roleKey: 'member', blockFarmId: 'BLK-NCY-01', fieldId: 'FLD-NCY-005', regDate: '2026-03-01', passwordHash: DEFAULT_SEED_PASSWORD_HASH }
 ];
 
-export const fields = [
+export const SEED_FIELDS = [
   { id: 'FLD-NCY-001', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', memberId: '04000001', memberName: 'Juan dela Cruz', member: 'Juan dela Cruz', ha: 1.5, stage: 'Pre-Planting & Land Preparation', stageNumber: 1, month: 0.5, batchMonth: 1, synced: true, lastSync: '10 mins ago', variety: 'VMC 84-524', soilType: 'Clay Loam' },
   { id: 'FLD-NCY-002', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', memberId: '04000002', memberName: 'Pedro Reyes', member: 'Pedro Reyes', ha: 2.5, stage: 'Planting & Crop Establishment', stageNumber: 2, month: 1.0, batchMonth: 1, synced: true, lastSync: '15 mins ago', variety: 'Phil 99-1793', soilType: 'Sandy Loam' },
   { id: 'FLD-NCY-003', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', memberId: '04000003', memberName: 'Corazon Santos', member: 'Corazon Santos', ha: 4.5, stage: 'Basal Nutrition & Early Care', stageNumber: 3, month: 1.5, batchMonth: 1, synced: true, lastSync: '1 hr ago', variety: 'Phil 2006-2289', soilType: 'Clay Loam' },
   { id: 'FLD-NCY-004', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', memberId: '04000004', memberName: 'Roberto Tan', member: 'Roberto Tan', ha: 3.5, stage: 'Cultivation & Weed Management', stageNumber: 4, month: 2.5, batchMonth: 2, synced: true, lastSync: '2 hrs ago', variety: 'VMC 84-524', soilType: 'Loam' },
   { id: 'FLD-NCY-005', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', memberId: '04000005', memberName: 'Ana Gomez', member: 'Ana Gomez', ha: 3.25, stage: 'Crop Maintenance & Final Hilling-Up', stageNumber: 5, month: 3.5, batchMonth: 2, synced: true, lastSync: '3 hrs ago', variety: 'Phil 99-1793', soilType: 'Clay Loam' },
 ];
+
+export const mergeFieldsWithSeeds = (incomingFields = []) => {
+  const merged = SEED_FIELDS.map(seed => {
+    const found = incomingFields.find(f => f.id === seed.id);
+    if (!found) return { ...seed };
+    return {
+      ...seed,
+      ...found,
+      ha: Number(found.ha) || seed.ha,
+      member: found.member || found.memberName || seed.member,
+      memberName: found.memberName || found.member || seed.memberName,
+      memberId: found.memberId || seed.memberId,
+      blockFarm: found.blockFarm || seed.blockFarm,
+      blockFarmId: found.blockFarmId || seed.blockFarmId,
+      variety: found.variety || seed.variety,
+      soilType: found.soilType || seed.soilType,
+      lastSync: found.lastSync || seed.lastSync,
+      synced: found.synced !== undefined ? found.synced : seed.synced,
+    };
+  });
+  // Also preserve custom fields not in SEED_FIELDS
+  (incomingFields || []).forEach(f => {
+    if (f && f.id && !merged.some(m => m.id === f.id)) {
+      merged.push({
+        ...f,
+        ha: Number(f.ha) || 1.5,
+        member: f.member || f.memberName || 'Member Farmer',
+        memberName: f.memberName || f.member || 'Member Farmer',
+        lastSync: f.lastSync || 'Just now',
+        synced: f.synced !== undefined ? f.synced : true
+      });
+    }
+  });
+  return merged;
+};
+
+export const fields = SEED_FIELDS.map(f => ({ ...f }));
 
 export const operationLogs = [
   // ── Active Cycle Logs (CY 2025–2026) ──
@@ -72,7 +109,26 @@ export const operationLogs = [
       { id: 'SI-001-2', description: '2nd Pass Disc Harrowing', qty: 1.5, unit: 'ha', unitCost: 4000, subTotal: 6000 },
       { id: 'SI-001-3', description: 'Furrowing / Tudling', qty: 1.5, unit: 'ha', unitCost: 3000, subTotal: 4500 }
     ],
-    editHistory: []
+    isAmended: true,
+    editHistory: [
+      {
+        id: 'EDT-2026-0504-01',
+        editedBy: 'Jose Reyes (Farm Manager)',
+        editedRole: 'Farm Manager',
+        editedAt: 'May 04, 2026, 03:45 PM',
+        reason: 'Adjusted harrowing passes to match actual tractor rental meter and attached operator labor voucher',
+        previousValues: {
+          cost: 15000,
+          people: '1',
+          activity: 'Land Preparation'
+        },
+        newValues: {
+          cost: 18000,
+          people: '2',
+          activity: 'Land Preparation (Disc Plowing & Furrowing)'
+        }
+      }
+    ]
   },
   {
     id: 'LOG-2026-NCY-002-001',
@@ -314,13 +370,13 @@ export const auditReports = [
     totalCost: 145225,
     fieldsReported: 5,
     logsCount: 5,
-    status: 'Certified',
+    status: 'Pending SRA',
     cloudQueueStatus: 'transmitted',
     cloudQueuedAt: '2026-05-30T14:30:00Z',
     dateGenerated: 'May 30, 2026 02:30 PM',
     qrSignature: 'HUG-202605-A3F9',
-    verifiedBy: 'Engr. Maria Santos (SRA Officer)',
-    notes: 'Fully audited against SRA S1-S14 Sugar Agronomic Benchmark standards.',
+    verifiedBy: 'Pending SRA Inspector Review',
+    notes: 'Compiled by Farm Manager Jose Reyes. Transmitted to SRA District Cloud Queue for Official SRA Review & Certification.',
     stageBreakdown: [
       { stage: 'Stage 1: Pre-Planting & Land Preparation', cost: 18000, pct: '12%', fields: 'FLD-NCY-001 (Juan dela Cruz - 1.5 Ha)' },
       { stage: 'Stage 2: Planting & Crop Establishment', cost: 37500, pct: '26%', fields: 'FLD-NCY-002 (Pedro Reyes - 2.5 Ha)' },
@@ -662,23 +718,24 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   const existingIdx = fields.findIndex(f => f.id === fieldData.id);
   const nowIso = new Date().toISOString();
   
+  const seed = SEED_FIELDS.find(s => s.id === fieldData.id) || {};
   const formattedField = {
     id: fieldData.id,
-    blockFarmId: fieldData.blockFarmId || 'BLK-NCY-01',
-    blockFarm: fieldData.blockFarm || 'Nacayao Block Farm',
-    memberId: fieldData.memberId || fieldData.userId || '',
-    memberName: fieldData.memberName || fieldData.member || 'Unassigned',
-    member: fieldData.member || fieldData.memberName || 'Unassigned',
-    memberContact: fieldData.memberContact || '',
-    ha: Number(fieldData.ha) || 1.5,
-    stage: fieldData.stage || 'Pre-Planting & Land Preparation',
-    stageNumber: fieldData.stageNumber || 1,
-    month: fieldData.month !== undefined ? fieldData.month : 0,
-    batchMonth: fieldData.batchMonth || 1,
+    blockFarmId: fieldData.blockFarmId || seed.blockFarmId || 'BLK-NCY-01',
+    blockFarm: fieldData.blockFarm || seed.blockFarm || 'Nacayao Block Farm',
+    memberId: fieldData.memberId || fieldData.userId || seed.memberId || '',
+    memberName: fieldData.memberName || fieldData.member || seed.memberName || 'Unassigned',
+    member: fieldData.member || fieldData.memberName || seed.member || 'Unassigned',
+    memberContact: fieldData.memberContact || seed.memberContact || '',
+    ha: Number(fieldData.ha) || seed.ha || 1.5,
+    stage: fieldData.stage || seed.stage || 'Pre-Planting & Land Preparation',
+    stageNumber: fieldData.stageNumber || seed.stageNumber || 1,
+    month: fieldData.month !== undefined ? fieldData.month : (seed.month !== undefined ? seed.month : 0),
+    batchMonth: fieldData.batchMonth || seed.batchMonth || 1,
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
-    lastSync: fieldData.lastSync || 'Just now',
-    variety: fieldData.variety || 'VMC 84-524',
-    soilType: fieldData.soilType || 'Clay Loam',
+    lastSync: fieldData.lastSync || seed.lastSync || 'Just now',
+    variety: fieldData.variety || seed.variety || 'VMC 84-524',
+    soilType: fieldData.soilType || seed.soilType || 'Clay Loam',
     createdAt: fieldData.createdAt || nowIso,
     updatedAt: nowIso
   };
@@ -1292,7 +1349,8 @@ export const updateFieldStageAndCycle = async (fieldId, updates) => {
 
   if (db && fieldId) {
     try {
-      await setDoc(doc(db, 'fields', fieldId), updates, { merge: true });
+      const fullField = fields.find(f => f.id === fieldId);
+      await setDoc(doc(db, 'fields', fieldId), fullField ? { ...fullField, ...updates } : updates, { merge: true });
     } catch (e) {
       console.warn('[dataStore] Failed to sync field stage/cycle to Firestore:', e);
     }
@@ -1327,6 +1385,30 @@ export const archiveFieldCropCycle = async (fieldId) => {
       console.warn('[dataStore] Error archiving logs in Firestore:', err);
     }
   }
+};
+
+export const deleteDraftLogs = async (draftIds = []) => {
+  if (!Array.isArray(draftIds) || draftIds.length === 0) return;
+  const idSet = new Set(draftIds);
+  const remaining = draftLogs.filter(d => !idSet.has(d.id));
+  draftLogs.length = 0;
+  remaining.forEach(d => draftLogs.push(d));
+  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  notify();
+};
+
+export const clearAllDraftsForField = async (fieldId) => {
+  if (!fieldId) return;
+  const remaining = draftLogs.filter(d => d.fieldId !== fieldId);
+  draftLogs.length = 0;
+  remaining.forEach(d => draftLogs.push(d));
+  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  notify();
+};
+
+export const saveDraftLogs = async () => {
+  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  notify();
 };
 
 export const isLogLocked = (log) => {
@@ -1438,24 +1520,31 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
 
 export const deletePastLogsForField = async (fieldId) => {
   if (!fieldId) return;
-  // Soft-archive past cycle logs instead of destructive deletion to preserve SRA compliance audit trails
-  const toArchive = operationLogs.filter(l => l.fieldId === fieldId && l.isPastCycle);
-  toArchive.forEach(l => {
-    l.isArchived = true;
-    l.archivedAt = new Date().toISOString();
-  });
+  const fId = fieldId.trim().toUpperCase();
+  const toDelete = operationLogs.filter(l => 
+    (l.fieldId || '').trim().toUpperCase() === fId && (l.isPastCycle || l.isArchived)
+  );
+  
+  // Prune past cycle records from in-memory operationLogs
+  const remaining = operationLogs.filter(l => 
+    !((l.fieldId || '').trim().toUpperCase() === fId && (l.isPastCycle || l.isArchived))
+  );
+  operationLogs.length = 0;
+  remaining.forEach(l => operationLogs.push(l));
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   notify();
 
   if (db) {
     try {
-      const archivePromises = toArchive.map(l => 
-        setDoc(doc(db, 'operation_logs', l.id), { isArchived: true, archivedAt: new Date().toISOString() }, { merge: true })
+      const deletePromises = toDelete.map(l => 
+        deleteDoc(doc(db, 'operation_logs', l.id)).catch(() =>
+          setDoc(doc(db, 'operation_logs', l.id), { isArchived: true, isDeleted: true }, { merge: true })
+        )
       );
-      await Promise.all(archivePromises);
+      await Promise.all(deletePromises);
     } catch (err) {
-      console.warn('[dataStore] Error archiving past logs in Firestore:', err);
+      console.warn('[dataStore] Error deleting past logs in Firestore:', err);
     }
   }
 };
@@ -1997,8 +2086,19 @@ export const listenToCloudSync = () => {
       const remoteFields = [];
       snapshot.forEach(docSnap => remoteFields.push({ id: docSnap.id, ...docSnap.data() }));
 
+      // Merge remote updates with current local fields and seeds, never blindly wiping fields!
+      const currentCombined = [...fields];
+      remoteFields.forEach(rf => {
+        const idx = currentCombined.findIndex(f => f.id === rf.id);
+        if (idx >= 0) {
+          currentCombined[idx] = { ...currentCombined[idx], ...rf };
+        } else {
+          currentCombined.push(rf);
+        }
+      });
+      const cleanFields = mergeFieldsWithSeeds(currentCombined);
       fields.length = 0;
-      remoteFields.forEach(rf => fields.push(rf));
+      cleanFields.forEach(f => fields.push(f));
       saveItem(STORAGE_KEYS.FIELDS, fields);
       notify();
     }, (err) => console.warn('[Mobile] Fields listener notice:', err));
@@ -2007,10 +2107,26 @@ export const listenToCloudSync = () => {
     const unsubLogs = onSnapshot(collection(db, 'operation_logs'), (snapshot) => {
       if (snapshot.empty) return;
       const remoteLogs = [];
-      snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (!data.isArchived && !data.isDeleted) {
+          remoteLogs.push({ id: docSnap.id, ...data });
+        }
+      });
+
+      // Merge remote logs with existing local logs, keeping local logs that aren't yet in cloud!
+      const remoteIds = new Set(remoteLogs.map(r => r.id));
+      const localOnly = operationLogs.filter(l => !remoteIds.has(l.id) && !l.isArchived && !l.isDeleted);
+      const merged = [...remoteLogs, ...localOnly];
+      merged.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+        const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+        if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+        return (b.id || '').localeCompare(a.id || '');
+      });
 
       operationLogs.length = 0;
-      remoteLogs.forEach(rl => operationLogs.push(rl));
+      merged.forEach(rl => operationLogs.push(rl));
       saveItem(STORAGE_KEYS.LOGS, operationLogs);
       notify();
     }, (err) => console.warn('[Mobile] Operation logs listener notice:', err));
@@ -2174,8 +2290,9 @@ export const initializeOfflineStorage = async () => {
       stored[STORAGE_KEYS.DRAFTS].forEach(d => draftLogs.push(d));
     }
     if (Array.isArray(stored[STORAGE_KEYS.FIELDS]) && stored[STORAGE_KEYS.FIELDS].length > 0) {
+      const cleanFields = mergeFieldsWithSeeds(stored[STORAGE_KEYS.FIELDS]);
       fields.length = 0;
-      stored[STORAGE_KEYS.FIELDS].forEach(f => fields.push(f));
+      cleanFields.forEach(f => fields.push(f));
     }
     if (Array.isArray(stored[STORAGE_KEYS.TICKETS]) && stored[STORAGE_KEYS.TICKETS].length > 0) {
       supportTickets.length = 0;
@@ -2198,7 +2315,14 @@ export const initializeOfflineStorage = async () => {
     // Hydrate cached audit reports
     if (Array.isArray(stored[STORAGE_KEYS.AUDIT_REPORTS]) && stored[STORAGE_KEYS.AUDIT_REPORTS].length > 0) {
       auditReports.length = 0;
-      stored[STORAGE_KEYS.AUDIT_REPORTS].forEach(a => auditReports.push(a));
+      stored[STORAGE_KEYS.AUDIT_REPORTS].forEach(a => {
+        // If May 2026 was compiled by manager without official SRA certification seal, maintain Pending SRA
+        if ((a.reportId === 'RPT-2026-05-NCY01' || a.id === 'AUD-2026-05' || a.month === 'May 2026') && !a.certifiedBy && a.status === 'Certified') {
+          a.status = 'Pending SRA';
+          a.verifiedBy = 'Pending SRA Inspector Review';
+        }
+        auditReports.push(a);
+      });
     }
 
     // Hydrate cached system history

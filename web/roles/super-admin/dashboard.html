@@ -1565,6 +1565,15 @@
                 <option value="User Management">User Authorizations</option>
                 <option value="SRA Price">SRA Prices &amp; Audits</option>
               </select>
+              <select id="hist-filter-scope" onchange="setHistoryArchiveScope(this.value)" class="px-3 py-2 text-xs border border-border rounded-xl bg-bg text-hug-text focus:border-primary focus:outline-none font-medium" title="Filter by Active or Archived Records">
+                <option value="active">Active Crop Cycle</option>
+                <option value="all">All Records (Active + Archived)</option>
+                <option value="archived">Archived Only</option>
+              </select>
+              <button onclick="archivePastCropCycles()" class="px-3.5 py-2 border border-amber-300 bg-amber-50/70 hover:bg-amber-100 text-amber-900 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs" title="Safely backup and archive historical crop cycle records">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+                Archive Past Records
+              </button>
               <button onclick="exportHistoryAuditLogCSV()" class="px-4 py-2 border border-border rounded-xl text-xs font-bold text-hug-text2 hover:text-primary hover:border-primary hover:bg-bg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs">
                 <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Export CSV Log
@@ -2194,7 +2203,7 @@
 <!-- TAKE OVER & FIELD OPERATIONS MODAL -->
 <div id="takeover-modal" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 hidden">
   <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-border flex flex-col">
-    <!-- Modal Header (Clean, Light Minimalist Header) -->
+    <!-- Modal Header -->
     <div class="flex items-center justify-between p-5 border-b border-border bg-white rounded-t-2xl">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl bg-primary-bg text-primary flex items-center justify-center flex-shrink-0 border border-primary/20">
@@ -2202,10 +2211,10 @@
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h2 id="takeover-field-title" class="text-base font-extrabold text-hug-text">Take Over: FLD-NCY-001</h2>
-            <span id="takeover-field-id-badge" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-bg text-primary border border-border">FLD-NCY-001</span>
+            <h2 id="takeover-field-title" class="text-base font-extrabold text-hug-text">Take Over Field</h2>
+            <span id="takeover-field-id-badge" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-bg text-primary border border-border">FLD-001</span>
           </div>
-          <p id="takeover-field-sub" class="text-xs text-hug-muted mt-0.5">Assigned to Juan dela Cruz · 1.5 Ha · Nacayao Block Farm</p>
+          <p id="takeover-field-sub" class="text-xs text-hug-muted mt-0.5">Assigned to Farmer · 1.5 Ha · Block Farm</p>
         </div>
       </div>
       <button onclick="closeTakeOverModal()" class="w-8 h-8 rounded-lg bg-bg hover:bg-border flex items-center justify-center text-hug-muted hover:text-hug-text transition-all cursor-pointer">
@@ -2224,193 +2233,200 @@
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-primary"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               Crop Cycle Stages
             </h3>
-            <span id="takeover-current-stage-pill" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary-bg text-primary border border-primary/20">Stage 4</span>
+            <span id="takeover-current-stage-pill" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary-bg text-primary border border-primary/20">Active Stage</span>
           </div>
           <p class="text-[11px] text-hug-muted">Select any stage below to populate standard benchmarks and log operation progress:</p>
-          <div id="takeover-timeline-container" class="flex flex-col gap-2 max-h-[440px] overflow-y-auto pr-1">
+          <div id="takeover-timeline-container" class="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
             <!-- Injected via JS -->
           </div>
         </div>
 
         <!-- Right Column: Operation Log Form (7 cols) -->
         <div class="lg:col-span-7 bg-white rounded-2xl p-5 border border-border shadow-xs flex flex-col gap-4">
-          <!-- Active Stage Card Header -->
-          <div class="bg-bg/70 rounded-xl p-3.5 border border-border flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2.5">
-              <div class="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
-                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <!-- Target Operation & Connected Stage Banner -->
+          <div class="bg-[#F0F8EC] rounded-xl p-4 border-1.5 border-primary flex items-start justify-between gap-3">
+            <div class="flex items-start gap-3">
+              <div class="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center flex-shrink-0 shadow-xs mt-0.5">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
               </div>
               <div>
-                <h4 class="text-xs font-bold text-hug-text" id="takeover-active-stage-title">Fertilization Stage 2</h4>
-                <p class="text-[11px] text-hug-muted mt-0.5" id="takeover-selected-stage-hint">Standard agricultural benchmark loaded</p>
+                <div class="flex items-center gap-2">
+                  <span id="takeover-op-id-badge" class="px-2 py-0.5 rounded text-[10px] font-black bg-primary text-white">SRA-02</span>
+                  <span class="text-[11px] font-extrabold text-primary uppercase tracking-wide">Target Operation</span>
+                </div>
+                <h4 class="text-sm font-extrabold text-hug-text mt-0.5" id="takeover-active-stage-title">Land Preparation</h4>
+                <div class="flex items-center gap-1.5 mt-1 text-xs font-bold text-primary">
+                  <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+                  <span>Connected to:</span>
+                  <span id="takeover-connected-stage-name" class="font-bold">Stage 1: Pre-Planting &amp; Land Preparation</span>
+                </div>
+                <p class="text-[11px] text-hug-muted mt-0.5" id="takeover-selected-stage-hint">Standard Benchmark: ₱12,000 / ha (Child Items)</p>
               </div>
             </div>
-            <span id="takeover-stage-badge" class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-primary-bg text-primary border border-primary/20">Selected Stage</span>
+            <span id="takeover-stage-badge" class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-primary-bg text-primary border border-primary/20 whitespace-nowrap">Active Stage</span>
           </div>
 
-          <!-- Section 1: Date & Agronomic Category -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-hug-text2 mb-1">Date Completed <span class="text-danger">*</span></label>
-              <input type="date" id="takeover-log-date" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-hug-text" />
+          <!-- SRA Operation Selector (14 Templates) -->
+          <div class="bg-bg/60 rounded-xl p-3.5 border border-border flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-[11px] font-bold text-hug-text uppercase tracking-wider flex items-center gap-1.5">
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-primary"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                SRA Operation (14 Templates)
+              </label>
+              <span class="text-[10px] font-medium text-hug-muted">Auto-aligns benchmark &amp; mode</span>
             </div>
-            <div>
-              <label class="block text-xs font-semibold text-hug-text2 mb-1">Agronomic Stage Category <span class="text-danger">*</span></label>
-              <select id="takeover-log-category" onchange="takeOverChangeCategory(this.value)" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-hug-text">
-                <option value="prep">Land Preparation</option>
-                <option value="plant">Planting</option>
-                <option value="fert">Fertilization</option>
-                <option value="weed">Weeding &amp; Cultivation</option>
-                <option value="harvest">Harvesting &amp; Milling</option>
-              </select>
+            <select id="takeover-op-select" onchange="takeOverChangeOperationSelect(this.value)" class="w-full text-xs font-semibold px-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-hug-text cursor-pointer">
+              <!-- Populated dynamically via JS -->
+            </select>
+          </div>
+
+          <!-- Input Mode Selector (Top of Input Area - Switches base on chosen operation) -->
+          <div class="bg-bg/50 p-3 rounded-xl border border-border flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-hug-text uppercase tracking-wider flex items-center gap-1.5">
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-primary"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Input Mode
+              </span>
+              <span id="takeover-mode-badge" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">Title with Child Items</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 p-1 bg-white rounded-xl border border-border">
+              <button id="takeover-mode-group-btn" type="button" onclick="takeOverSetMode('group')"
+                class="py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-primary text-white shadow-xs border border-primary">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Title with Child Items
+              </button>
+              <button id="takeover-mode-direct-btn" type="button" onclick="takeOverSetMode('direct')"
+                class="py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-white text-hug-text2 border border-border hover:border-primary/40">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Direct Input
+              </button>
             </div>
           </div>
 
-          <!-- Section 2: Activity Name -->
+          <!-- Hidden Stage Input (Sugarcane growth stage choices removed from UI as it is already beside) -->
+          <input type="hidden" id="takeover-log-stage" />
+
+          <!-- Date Completed -->
+          <div>
+            <label class="block text-xs font-semibold text-hug-text2 mb-1">Date Completed <span class="text-danger">*</span></label>
+            <input type="date" id="takeover-log-date" class="w-full text-xs font-semibold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-hug-text" />
+          </div>
+
+          <!-- Activity / Operation Name (Title) -->
           <div>
             <label class="block text-xs font-semibold text-hug-text2 mb-1">Activity / Operation Name <span class="text-danger">*</span></label>
-            <input type="text" id="takeover-log-activity" placeholder="e.g. Fertilization Stage 2 (Urea application)" class="w-full text-xs font-semibold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
+            <input type="text" id="takeover-log-activity" placeholder="e.g. Land Preparation (Disc Plowing &amp; Furrowing)" class="w-full text-xs font-semibold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
           </div>
 
-          <!-- Section 3: Cost, Hectares & Workers -->
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-hug-text2 mb-1">Operational Cost (₱) <span class="text-danger">*</span></label>
-              <div class="relative">
-                <span class="absolute left-3 top-2.5 text-xs font-bold text-hug-muted">₱</span>
-                <input type="number" id="takeover-log-cost" placeholder="7400" class="w-full text-xs font-bold pl-7 pr-3 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-hug-text transition-all" />
-              </div>
-            </div>
+          <!-- Hectares & Workers Count -->
+          <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-semibold text-hug-text2 mb-1">Hectares Covered <span class="text-danger">*</span></label>
-              <input type="number" step="0.1" id="takeover-log-ha" placeholder="1.5" class="w-full text-xs font-bold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
+              <input type="number" step="0.1" id="takeover-log-ha" oninput="updateTakeoverCostSummary()" placeholder="1.5" class="w-full text-xs font-bold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-hug-text2 mb-1">Workers Count <span class="text-danger">*</span></label>
-              <input type="number" id="takeover-log-people" placeholder="4" class="w-full text-xs font-bold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
+              <input type="number" id="takeover-log-people" placeholder="2" class="w-full text-xs font-bold px-3.5 py-2.5 border border-border rounded-xl bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
             </div>
           </div>
 
-          <!-- Section 4: Materials & Inputs Used (Aligned with Planner) -->
-          <div class="bg-bg/50 p-4 rounded-xl border border-border/80 flex flex-col gap-3">
+          <!-- DYNAMIC INPUT SECTION (CHANGES BASED ON WHAT IS BEING CHOSEN) -->
+          <!-- GROUP MODE: Subitems Panel (Title with Child Items) -->
+          <div id="takeover-subitems-panel" class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
-              <h5 class="text-[11px] font-bold text-primary uppercase tracking-wider">Materials &amp; Inputs Used (Aligned with Planner)</h5>
+              <span class="text-[10.5px] font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                Child Items &amp; Materials Breakdown
+              </span>
+              <span id="takeover-subitems-count" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary-bg text-primary border border-primary/20">0 items</span>
             </div>
-            
-            <div>
-              <label class="block text-[11px] font-semibold text-hug-text2 mb-1">Material / Input Name (Optional)</label>
-              <input type="text" id="takeover-log-input-name" placeholder="e.g. Urea (46-0-0) / Patdan / Herbicide / Disc Plow" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-lg bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
+            <div id="takeover-subitems-container" class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+              <!-- Injected via takeOverRenderSubItems() -->
             </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-              <div class="sm:col-span-5">
-                <label class="block text-[11px] font-semibold text-hug-text2 mb-1">Quantity</label>
-                <input type="number" step="0.1" id="takeover-log-input-qty" placeholder="4" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-lg bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all" />
-              </div>
-              <div class="sm:col-span-7">
-                <label class="block text-[11px] font-semibold text-hug-text2 mb-1">Unit</label>
-                <div class="flex flex-wrap gap-1" id="takeover-unit-chips">
-                  <button type="button" onclick="takeOverSetUnit('bags')" class="takeover-unit-chip text-[10px] font-bold px-2 py-1 rounded-md border border-primary bg-primary text-white transition-all cursor-pointer" data-unit="bags">bags</button>
-                  <button type="button" onclick="takeOverSetUnit('liters')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="liters">liters</button>
-                  <button type="button" onclick="takeOverSetUnit('pcs')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="pcs">pcs</button>
-                  <button type="button" onclick="takeOverSetUnit('ha')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="ha">ha</button>
-                  <button type="button" onclick="takeOverSetUnit('tons')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="tons">tons</button>
-                  <button type="button" onclick="takeOverSetUnit('truckload')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="truckload">truckload</button>
-                  <button type="button" onclick="takeOverSetUnit('days')" class="takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer" data-unit="days">days</button>
-                </div>
-                <input type="hidden" id="takeover-log-input-unit" value="bags" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Section 5: Photo / Receipt Attachment (Aligned with Mobile) -->
-          <div class="bg-bg/40 p-3.5 rounded-xl border border-border flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2.5">
-              <div class="w-7 h-7 rounded-lg bg-white border border-border text-primary flex items-center justify-center">
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              </div>
-              <div>
-                <p class="text-xs font-bold text-hug-text">Field Photo / Receipt Attachment</p>
-                <p id="takeover-photo-status" class="text-[10px] text-hug-muted">Optional receipt / proof for SRA district audit</p>
-              </div>
-            </div>
-            <button type="button" onclick="takeOverTogglePhoto()" id="takeover-photo-btn" class="px-3 py-1.5 bg-white border border-border text-hug-text2 text-xs font-semibold rounded-lg hover:border-primary hover:text-primary transition-all cursor-pointer shadow-xs">
-              + Attach Photo
+            <button type="button" onclick="takeOverAddSubItem()"
+              class="w-full py-2.5 text-xs font-bold text-primary border-1.5 border-dashed border-primary/40 rounded-xl hover:bg-primary-bg hover:border-primary transition-all cursor-pointer flex items-center justify-center gap-1.5 bg-white shadow-2xs">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              + Add Child Item / Material
             </button>
           </div>
 
-          <!-- Section 6: Optional Supervisor Note & Audit History for Completed Stage Updates -->
-          <div id="takeover-notes-container" class="flex flex-col gap-2">
-            <div>
-              <label class="block text-[11px] font-semibold text-hug-text2 mb-1">Supervisor Note / Change Reason (Optional)</label>
-              <input type="text" id="takeover-log-note" placeholder="e.g. Adjusted fertilizer bag count and cost to match field receipt" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-lg bg-white focus:border-primary outline-none transition-all" />
-            </div>
-
-            <div id="takeover-audit-trail-section" class="bg-bg p-3 rounded-xl border border-border text-xs hidden">
-              <span class="text-[10px] font-bold uppercase tracking-wider text-hug-muted block mb-1">Audit Trail History:</span>
-              <div id="takeover-audit-trail-list" class="flex flex-col gap-1 text-[11px] text-hug-muted max-h-24 overflow-y-auto">
-                <!-- Injected via JS -->
+          <!-- DIRECT MODE: Single direct cost entry -->
+          <div id="takeover-direct-panel" class="hidden">
+            <div class="bg-emerald-50/60 rounded-xl p-4 border border-emerald-200/80 flex flex-col gap-3">
+              <div class="flex items-center justify-between">
+                <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" class="text-emerald-600"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  Direct Cost Entry (Qty &times; Rate)
+                </p>
+                <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-full">Live Calc</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label class="block text-[10.5px] font-bold text-emerald-900 mb-1">Quantity</label>
+                  <input type="number" step="0.1" id="takeover-direct-qty" oninput="updateTakeoverCostSummary()" placeholder="1.5"
+                    class="w-full text-xs font-bold px-3 py-2 border border-emerald-300 rounded-lg bg-white focus:border-emerald-600 outline-none text-hug-text" />
+                </div>
+                <div>
+                  <label class="block text-[10.5px] font-bold text-emerald-900 mb-1">Unit</label>
+                  <select id="takeover-direct-unit" onchange="updateTakeoverCostSummary()"
+                    class="w-full text-xs font-bold px-2.5 py-2 border border-emerald-300 rounded-lg bg-white focus:border-emerald-600 outline-none text-hug-text cursor-pointer">
+                    <option value="ha">ha</option>
+                    <option value="ton">ton</option>
+                    <option value="bag">bag</option>
+                    <option value="pass">pass</option>
+                    <option value="lac">lac</option>
+                    <option value="days">days</option>
+                    <option value="pax">pax</option>
+                    <option value="pcs">pcs</option>
+                    <option value="liters">liters</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[10.5px] font-bold text-emerald-900 mb-1">Rate (₱)</label>
+                  <input type="number" id="takeover-direct-rate" oninput="updateTakeoverCostSummary()" placeholder="12000"
+                    class="w-full text-xs font-bold px-3 py-2 border border-emerald-300 rounded-lg bg-white focus:border-emerald-600 outline-none text-hug-text" />
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-emerald-200">
+                <span class="text-[11px] font-semibold text-emerald-800">Total Calculation:</span>
+                <span class="text-sm font-black text-emerald-900" id="takeover-direct-total">₱ 0</span>
               </div>
             </div>
           </div>
 
-          <!-- Submit Button -->
-          <div class="pt-2 border-t border-border flex justify-end">
-            <button id="takeover-submit-btn" onclick="takeOverSubmitLog()" class="w-full bg-primary text-white text-xs font-bold py-3 px-5 rounded-xl hover:bg-primary-light transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md">
-              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-              <span id="takeover-submit-btn-text">Record Operation &amp; Save Progress</span>
+          <!-- Hidden cost field (computed automatically) -->
+          <input type="hidden" id="takeover-log-cost" />
+
+          <!-- High-Visibility Cost Summary Card -->
+          <div class="bg-[#1E4D2B] rounded-xl p-4 text-white shadow-xs flex items-center justify-between gap-4">
+            <div>
+              <span class="text-[11px] font-bold text-[#D4EAD6] uppercase tracking-wider block">Total Operation Cost</span>
+              <span class="text-2xl font-black text-white block mt-0.5" id="takeover-summary-total">₱ 0</span>
+            </div>
+            <div class="text-right bg-white/15 px-3.5 py-1.5 rounded-xl border border-white/20">
+              <span class="text-[10px] font-bold text-[#D4EAD6] block">Per Hectare</span>
+              <span class="text-xs font-black text-white block mt-0.5" id="takeover-summary-per-ha">₱ 0 / ha</span>
+            </div>
+          </div>
+
+          <!-- Audit Trail for Completed Updates (if any) -->
+          <div id="takeover-audit-trail-section" class="bg-bg p-3 rounded-xl border border-border text-xs hidden">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-hug-muted block mb-1">Audit Trail History:</span>
+            <div id="takeover-audit-trail-list" class="flex flex-col gap-1 text-[11px] text-hug-muted max-h-24 overflow-y-auto">
+              <!-- Injected via JS -->
+            </div>
+          </div>
+
+          <!-- Single Authoritative Action Button (Clickable and Verified) -->
+          <div class="pt-2 border-t border-border">
+            <button id="takeover-submit-btn" onclick="takeOverSubmitLog()" type="button" class="w-full bg-primary hover:bg-primary-light active:scale-[0.99] text-white text-xs font-black py-3.5 px-5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span id="takeover-submit-btn-text">RECORD OPERATION &amp; SAVE PROGRESS</span>
             </button>
           </div>
         </div>
 
       </div>
-
-      <!-- Collapsible / Expandable Custom Stage Plan Settings -->
-      <details class="bg-white rounded-xl border border-border p-4 text-xs group">
-        <summary class="font-bold text-hug-text cursor-pointer flex items-center justify-between list-none">
-          <span class="flex items-center gap-2">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-primary"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            Customize Field Stage Sequence (Optional)
-          </span>
-          <span class="text-[10px] text-hug-muted font-normal">Click to expand / edit sequence</span>
-        </summary>
-
-        <div class="pt-4 border-t border-border mt-3 flex flex-col gap-3">
-          <div>
-            <label class="block text-[11px] font-bold text-hug-text2 mb-1.5 uppercase tracking-wide">Quick Add Stage Preset:</label>
-            <div class="flex flex-wrap gap-1.5">
-              <button onclick="takeOverAddPresetStage('Land Preparation', '#8F3A8F')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Land Prep</button>
-              <button onclick="takeOverAddPresetStage('Planting (Patdan)', '#4A7C2F')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Planting</button>
-              <button onclick="takeOverAddPresetStage('Weeding (Hilamon)', '#F5A623')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Weeding</button>
-              <button onclick="takeOverAddPresetStage('Fertilization 1', '#1A6B9A')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Fertilization 1</button>
-              <button onclick="takeOverAddPresetStage('Fertilization 2', '#4A7C2F')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Fertilization 2</button>
-              <button onclick="takeOverAddPresetStage('Off-barring & Hilling-up', '#5B4DA7')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Off-barring</button>
-              <button onclick="takeOverAddPresetStage('Harvesting & Milling', '#D9534F')" class="text-[10px] font-semibold px-2.5 py-1 bg-bg border border-border rounded-full hover:border-primary hover:text-primary transition-all cursor-pointer">+ Harvesting</button>
-            </div>
-          </div>
-
-          <div class="flex gap-2">
-            <input type="text" id="takeover-custom-stage-input" placeholder="Custom stage name (e.g. Drainage Canal Maintenance)" class="flex-1 text-xs font-semibold px-3 py-1.5 border border-border rounded-lg bg-bg focus:border-primary outline-none" />
-            <button onclick="takeOverAddCustomStage()" class="bg-primary text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-primary-light transition-all cursor-pointer">
-              + Add
-            </button>
-          </div>
-
-          <div id="takeover-editable-stages-list" class="flex flex-col gap-1.5 max-h-36 overflow-y-auto">
-            <!-- Injected via JS -->
-          </div>
-
-          <div class="flex justify-between items-center pt-2 border-t border-border">
-            <button onclick="takeOverResetToSRA()" class="text-[11px] font-bold text-hug-muted hover:text-danger cursor-pointer">
-              Reset to SRA 8-Stage Default
-            </button>
-            <button onclick="takeOverSaveStages()" class="bg-primary text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-primary-light transition-all cursor-pointer shadow-xs">
-              Save Stage Sequence
-            </button>
-          </div>
-        </div>
-      </details>
-
     </div>
   </div>
 </div>
@@ -3546,7 +3562,7 @@
 
 <!-- BLOCK FARM COOPERATIVE HISTORY MODAL (SRA / SUPERADMIN / MANAGER) -->
 <div id="modal-block-farm-history" onclick="if (event.target === this) closeBlockFarmHistoryModal()" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4 hidden backdrop-blur-xs">
-  <div class="bg-white rounded-2xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl border border-border flex flex-col gap-4 max-h-[88vh]">
+  <div class="bg-white rounded-2xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl border border-border flex flex-col gap-4 max-h-[92vh]">
     <!-- Fixed Header -->
     <div class="flex items-center justify-between border-b border-border pb-3 flex-shrink-0">
       <div>
@@ -3564,42 +3580,42 @@
 
     <!-- Collective Metrics Row -->
     <div class="grid grid-cols-3 gap-2.5 text-xs flex-shrink-0">
-      <div class="bg-bg p-3 rounded-xl border border-border">
+      <div class="bg-bg p-3 rounded-xl border border-border flex flex-col justify-between">
         <span class="text-[10px] text-hug-muted block font-bold uppercase tracking-wider">Enrolled Member Plots</span>
         <strong class="font-black text-hug-text block text-base mt-0.5" id="block-hist-plots-count">8 Plots</strong>
         <span class="text-[10px] text-primary font-semibold">Active Cooperative</span>
       </div>
-      <div class="bg-bg p-3 rounded-xl border border-border">
+      <div class="bg-bg p-3 rounded-xl border border-border flex flex-col justify-between">
         <span class="text-[10px] text-hug-muted block font-bold uppercase tracking-wider">Total Operational Spend</span>
         <strong class="font-black text-hug-text block text-base mt-0.5" id="block-hist-total-cost">₱0</strong>
         <span class="text-[10px] text-success font-semibold">Recorded SRA Ops</span>
       </div>
-      <div class="bg-bg p-3 rounded-xl border border-border">
+      <div class="bg-bg p-3 rounded-xl border border-border flex flex-col justify-between">
         <span class="text-[10px] text-hug-muted block font-bold uppercase tracking-wider">Sync Health</span>
         <strong class="font-black text-success block text-base mt-0.5" id="block-hist-sync-status">100% Synced</strong>
-        <span class="text-[10px] text-hug-muted font-mono">Live Ledger</span>
+        <span class="text-[10px] text-hug-muted font-mono leading-normal pb-0.5">Live Ledger</span>
       </div>
     </div>
 
     <!-- Operations Table with Search & Pagination -->
-    <div class="flex flex-col gap-2.5 flex-1 overflow-y-auto pr-1">
+    <div class="flex flex-col gap-2.5 flex-1 overflow-y-auto min-h-0 pr-1">
       <div class="flex items-center justify-between flex-wrap gap-2 flex-shrink-0">
         <div class="flex items-center gap-2">
           <input type="text" id="block-hist-search" placeholder="Search operation, plot ID, or member..." oninput="setBlockHistPage(1)" class="border border-border rounded-xl px-3 py-1.5 text-xs bg-bg focus:bg-white focus:outline-none focus:border-primary w-64 transition-all">
         </div>
-        <span class="text-xs text-hug-muted" id="block-hist-log-count">0 entries</span>
+        <span class="text-xs text-hug-muted font-medium" id="block-hist-log-count">0 entries</span>
       </div>
 
-      <div class="border border-border rounded-xl overflow-hidden bg-white">
-        <table class="w-full text-xs">
+      <div class="border border-border rounded-xl overflow-x-auto bg-white flex-shrink-0 min-w-full">
+        <table class="w-full text-xs min-w-[620px]">
           <thead class="bg-bg">
             <tr>
-              <th class="text-left px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Log ID</th>
-              <th class="text-left px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Plot ID</th>
-              <th class="text-left px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Operation / Task</th>
-              <th class="text-left px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Amount</th>
-              <th class="text-left px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Date</th>
-              <th class="text-right px-3 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Status</th>
+              <th class="text-left px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Log ID</th>
+              <th class="text-left px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Plot ID</th>
+              <th class="text-left px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Operation / Task</th>
+              <th class="text-left px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Amount</th>
+              <th class="text-left px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Date</th>
+              <th class="text-right px-3.5 py-2.5 text-hug-muted font-semibold text-[11px] border-b border-border">Status</th>
             </tr>
           </thead>
           <tbody id="block-hist-table-body">
@@ -3609,7 +3625,7 @@
       </div>
 
       <!-- Pagination Controls -->
-      <div id="block-hist-pagination" class="flex items-center justify-between pt-2 flex-shrink-0">
+      <div id="block-hist-pagination" class="flex items-center justify-between pt-1 flex-shrink-0">
         <!-- Injected via JS -->
       </div>
     </div>
@@ -3776,6 +3792,34 @@
       </button>
       <button type="button" onclick="submitFirstLoginVerify()" class="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-light transition-all cursor-pointer shadow-sm">
         Verify & Continue
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Log Revision History & Correction Details Modal -->
+<div id="modal-log-edit-details" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-lg w-full border border-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-white">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-farm-blue-bg text-farm-blue flex items-center justify-center">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-hug-text">Log Revision &amp; Correction Audit</h3>
+          <p id="edit-modal-subtitle" class="text-xs text-hug-muted font-mono">LOG-2026-NCY-001-001</p>
+        </div>
+      </div>
+      <button onclick="closeLogEditHistoryModal()" class="w-8 h-8 rounded-lg border border-border hover:bg-bg text-hug-muted hover:text-hug-text flex items-center justify-center cursor-pointer transition-all">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="edit-modal-body" class="p-6 overflow-y-auto flex flex-col gap-4 text-xs">
+      <!-- Injected via JS -->
+    </div>
+    <div class="px-6 py-3 border-t border-border bg-bg/50 flex justify-end">
+      <button onclick="closeLogEditHistoryModal()" class="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-light transition-all cursor-pointer">
+        Close
       </button>
     </div>
   </div>

@@ -23,8 +23,11 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [selectedFieldId, setSelectedFieldId] = useState('All');
   const [selectedStageKey, setSelectedStageKey] = useState(null);
   const [session, setSession] = useState(getCurrentSession());
+  const [logs, setLogs] = useState(operationLogs);
+  const [cycleFilter, setCycleFilter] = useState('active'); // 'active' | 'all'
   const [showLedgerModal, setShowLedgerModal] = useState(false);
   const [expandedLedgerLogId, setExpandedLedgerLogId] = useState(null);
+  const [viewedLedgerLogIds, setViewedLedgerLogIds] = useState(new Set());
   const [showPlotPickerModal, setShowPlotPickerModal] = useState(false);
   const [plotSearchQuery, setPlotSearchQuery] = useState('');
 
@@ -38,6 +41,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   useEffect(() => {
     const unsubscribe = subscribe(() => {
       setSession({ ...getCurrentSession() });
+      setLogs([...operationLogs]);
     });
     return unsubscribe;
   }, []);
@@ -111,17 +115,30 @@ export default function AnalyticsScreen({ navigation, route }) {
     return 'prep';
   };
 
-  // Cost & Activity calculations - STRICT ACTIVE LEDGER: Past cycles and drafts are NOT counted here
-  const { totalCost, costPerHa, activeLogsCount, categoryBreakdown, activeLogs = [] } = React.useMemo(() => {
-    const activeFieldIds = activeFields.map(f => f.id);
+  // Cost & Activity calculations - Supports active cycle and all cycles view
+  const { totalCost, costPerHa, activeLogsCount, categoryBreakdown, activeLogs = [], hasPastLogs = false, pastLogsCount = 0 } = React.useMemo(() => {
+    const activeFieldIds = activeFields.map(f => (f.id || '').trim().toUpperCase());
     
-    // Filter only active cycle submitted logs (matching the active ledger)
-    const activeLogs = operationLogs.filter(l => {
-      if (!activeFieldIds.includes(l.fieldId)) return false;
-      if (l.isPastCycle) return false;
-      if (l.isDraft) return false;
+    // Scoped logs for active fields
+    const fieldAllLogs = logs.filter(l => {
+      const fId = (l.fieldId || '').trim().toUpperCase();
+      if (!activeFieldIds.includes(fId)) return false;
+      if (l.isArchived || l.isDeleted || l.isDraft) return false;
+      return true;
+    });
+
+    const pastLogs = fieldAllLogs.filter(l => l.isPastCycle);
+
+    // Filter submitted logs according to cycleFilter ('active' or 'all') and sort newest first
+    const activeLogs = fieldAllLogs.filter(l => {
+      if (cycleFilter === 'active' && l.isPastCycle) return false;
       if (!isMember && l.isOffline) return false;
       return true;
+    }).sort((a, b) => {
+      const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+      const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+      if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+      return (b.id || '').localeCompare(a.id || '');
     });
 
     const cost = activeLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
@@ -172,8 +189,10 @@ export default function AnalyticsScreen({ navigation, route }) {
       activeLogsCount: totalActivities,
       categoryBreakdown: breakdown,
       activeLogs,
+      hasPastLogs: pastLogs.length > 0,
+      pastLogsCount: pastLogs.length
     };
-  }, [activeFields, totalHa, isMember]);
+  }, [activeFields, totalHa, isMember, logs, cycleFilter]);
 
 
   // Helper: map a field to exactly one SRA stage (prevent double counting)
@@ -241,9 +260,9 @@ export default function AnalyticsScreen({ navigation, route }) {
   // Member field logs for member view
   const memberLogs = React.useMemo(() => {
     if (!isMember) return [];
-    const myFieldIds = scopedFields.map(f => f.id);
-    return operationLogs.filter(l => myFieldIds.includes(l.fieldId));
-  }, [isMember, scopedFields]);
+    const myFieldIds = scopedFields.map(f => (f.id || '').trim().toUpperCase());
+    return logs.filter(l => myFieldIds.includes((l.fieldId || '').trim().toUpperCase()) && !l.isArchived && !l.isDeleted);
+  }, [isMember, scopedFields, logs]);
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -534,11 +553,11 @@ export default function AnalyticsScreen({ navigation, route }) {
             {/* Direct Operational Spend Summary Card */}
             <View style={s.spendCard}>
               <View style={s.spendCardHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 }}>
                   <View style={s.spendIconBox}>
                     <Ionicons name="cash" size={16} color={COLORS.primary} />
                   </View>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={s.spendCardTitle}>
                       {isMember ? 'My Direct Field Expenditure' : (selectedFieldId !== 'All' ? `${activeFields[0]?.member || 'Member'}'s Field Spend` : 'Direct Operations Expenditure')}
                     </Text>
@@ -549,6 +568,49 @@ export default function AnalyticsScreen({ navigation, route }) {
                   <Text style={s.activePlotsPillText}>{activeFields.length} {activeFields.length === 1 ? 'Plot' : 'Plots'}</Text>
                 </View>
               </View>
+
+              {/* Cycle View Toggle (When user has past cycle records) */}
+              {hasPastLogs && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 6 }}>
+                  <TouchableOpacity
+                    style={[
+                      { paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
+                      cycleFilter === 'active' && { backgroundColor: COLORS.primaryBg, borderColor: COLORS.primary }
+                    ]}
+                    onPress={() => setCycleFilter('active')}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: cycleFilter === 'active' ? COLORS.primary : COLORS.textMuted }}>
+                      Current Cycle
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      { paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
+                      cycleFilter === 'all' && { backgroundColor: COLORS.primaryBg, borderColor: COLORS.primary }
+                    ]}
+                    onPress={() => setCycleFilter('all')}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: cycleFilter === 'all' ? COLORS.primary : COLORS.textMuted }}>
+                      All Cycles ({pastLogsCount} past)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {activeLogsCount === 0 && hasPastLogs && cycleFilter === 'active' && (
+                <TouchableOpacity 
+                  onPress={() => setCycleFilter('all')}
+                  activeOpacity={0.8}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFBEB', padding: 8, borderRadius: RADIUS.xs, marginVertical: 6, borderWidth: 1, borderColor: '#FDE68A' }}
+                >
+                  <Ionicons name="information-circle" size={14} color="#B45309" />
+                  <Text style={{ fontSize: 11, color: '#B45309', flex: 1 }}>
+                    Active cycle has 0 recorded operations. Tap here to view {pastLogsCount} past cycle records.
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <View style={s.spendValueRow}>
                 <Text style={s.spendMainValue}>₱ {costPerHa.toLocaleString()}</Text>
@@ -956,26 +1018,56 @@ export default function AnalyticsScreen({ navigation, route }) {
               <View style={{ paddingVertical: 40, alignItems: 'center' }}>
                 <Ionicons name="documents-outline" size={40} color={COLORS.textMuted} />
                 <Text style={{ fontSize: 13, color: COLORS.textMuted, fontStyle: 'italic', marginTop: 8 }}>
-                  No active cycle submitted operations found.
+                  {hasPastLogs && cycleFilter === 'active' 
+                    ? `No current cycle operations found. (${pastLogsCount} past cycle records available)`
+                    : 'No operational logs recorded yet.'}
                 </Text>
+                {hasPastLogs && cycleFilter === 'active' && (
+                  <TouchableOpacity
+                    style={{ marginTop: 12, backgroundColor: COLORS.primaryBg, paddingVertical: 8, paddingHorizontal: 14, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.primary }}
+                    onPress={() => setCycleFilter('all')}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.primary }}>
+                      View Past Cycles ({pastLogsCount} records)
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <View style={{ gap: 8 }}>
                 {activeLogs.map(log => {
                   const isExpanded = expandedLedgerLogId === log.id;
+                  const isNew = Boolean(log.isNew && !viewedLedgerLogIds.has(log.id));
                   return (
-                    <View key={log.id} style={s.compactLogCard}>
+                    <View key={log.id} style={[
+                      s.compactLogCard,
+                      isNew && {
+                        backgroundColor: '#F6FAF3',
+                        borderColor: COLORS.primaryBorder,
+                        borderWidth: 1.5,
+                      }
+                    ]}>
                       <TouchableOpacity
                         style={s.compactLogHeader}
-                        onPress={() => setExpandedLedgerLogId(isExpanded ? null : log.id)}
+                        onPress={() => {
+                          setExpandedLedgerLogId(isExpanded ? null : log.id);
+                          setViewedLedgerLogIds(prev => new Set([...prev, log.id]));
+                        }}
                         activeOpacity={0.7}
                       >
-                        <View style={s.compactLogDot} />
+                        {isNew ? (
+                          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: COLORS.primary, marginRight: 2 }} />
+                        ) : null}
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             {log.sraOperationId && (
                               <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs }}>
                                 <Text style={{ fontSize: 10, fontWeight: '900', color: COLORS.primary }}>{log.sraOperationId}</Text>
+                              </View>
+                            )}
+                            {log.isPastCycle && (
+                              <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                                <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#64748B' }}>Past Cycle</Text>
                               </View>
                             )}
                             <Text style={s.compactLogTitle} numberOfLines={1}>

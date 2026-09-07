@@ -56,7 +56,9 @@ var INITIAL_DATABASE = {
       people: '2',
       date: '2026-05-02',
       approved: true,
-      status: 'Recorded',
+      status: 'Amended',
+      compiled: true,
+      compiledReportId: 'RPT-2026-05-NCY01',
       isOffline: false,
       loggedBy: 'Juan dela Cruz (Member)',
       loggedById: '04000001',
@@ -64,6 +66,26 @@ var INITIAL_DATABASE = {
         { id: 'SI-001-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1.5, unit: 'ha', unitCost: 5000, subTotal: 7500 },
         { id: 'SI-001-2', description: '2nd Pass Disc Harrowing', qty: 1.5, unit: 'ha', unitCost: 4000, subTotal: 6000 },
         { id: 'SI-001-3', description: 'Furrowing / Tudling', qty: 1.5, unit: 'ha', unitCost: 3000, subTotal: 4500 }
+      ],
+      isAmended: true,
+      editHistory: [
+        {
+          id: 'EDT-2026-0504-01',
+          editedBy: 'Jose Reyes (Farm Manager)',
+          editedRole: 'Farm Manager',
+          editedAt: 'May 04, 2026, 03:45 PM',
+          reason: 'Adjusted harrowing passes to match actual tractor rental meter and attached operator labor voucher',
+          previousValues: {
+            cost: 15000,
+            people: '1',
+            activity: 'Land Preparation'
+          },
+          newValues: {
+            cost: 18000,
+            people: '2',
+            activity: 'Land Preparation (Disc Plowing & Furrowing)'
+          }
+        }
       ]
     },
     {
@@ -83,6 +105,8 @@ var INITIAL_DATABASE = {
       date: '2026-05-08',
       approved: true,
       status: 'Recorded',
+      compiled: true,
+      compiledReportId: 'RPT-2026-05-NCY01',
       isOffline: false,
       loggedBy: 'Pedro Reyes (Member)',
       loggedById: '04000002',
@@ -107,6 +131,8 @@ var INITIAL_DATABASE = {
       date: '2026-05-12',
       approved: true,
       status: 'Recorded',
+      compiled: true,
+      compiledReportId: 'RPT-2026-05-NCY01',
       isOffline: false,
       loggedBy: 'Corazon Santos (Member)',
       loggedById: '04000003',
@@ -134,9 +160,12 @@ var INITIAL_DATABASE = {
       date: '2026-05-18',
       approved: true,
       status: 'Recorded',
+      compiled: true,
+      compiledReportId: 'RPT-2026-05-NCY01',
       isOffline: false,
-      loggedBy: 'Roberto Tan (Member)',
-      loggedById: '04000004',
+      loggedBy: 'Jose Reyes (Farm Manager)',
+      loggedById: '03000001',
+      actionSource: 'takeover',
       subItems: [
         { id: 'SI-004-1', description: '1st Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 },
         { id: 'SI-004-2', description: '2nd Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 }
@@ -159,6 +188,8 @@ var INITIAL_DATABASE = {
       date: '2026-05-22',
       approved: true,
       status: 'Recorded',
+      compiled: true,
+      compiledReportId: 'RPT-2026-05-NCY01',
       isOffline: false,
       loggedBy: 'Ana Gomez (Member)',
       loggedById: '04000005',
@@ -221,11 +252,47 @@ var INITIAL_DATABASE = {
       totalHectares: 15.25,
       totalLogs: 14,
       totalCost: 145225,
+      compiledBy: 'Jose Reyes (Farm Manager)',
+      compiledAt: '2026-05-30T10:00:00Z',
+      certifiedBy: null,
+      certifiedRole: null,
+      certifiedAt: null,
+      status: 'Pending SRA',
+      notes: 'Compiled by Farm Manager Jose Reyes. Transmitted to SRA Queue awaiting Inspectorate certification.'
+    },
+    {
+      id: 'RPT-2026-04-NCY01',
+      reportId: 'RPT-2026-04-NCY01',
+      qrHash: 'HUG-202604-B8E2',
+      qrPayload: 'HUG-202604-B8E2',
+      blockFarmId: 'BLK-NCY-01',
+      blockFarmName: 'Nacayao Block Farm',
+      period: 'April 2026',
+      totalHectares: 15.25,
+      totalLogs: 12,
+      totalCost: 128400,
       certifiedBy: 'Engr. Maria Santos (SRA Officer)',
       certifiedRole: 'SRA (Admin)',
-      certifiedAt: '2026-05-30T14:30:00Z',
+      certifiedAt: '2026-04-30T16:15:00Z',
       status: 'Certified',
-      notes: 'Fully audited against SRA S1-S14 Sugar Agronomic Benchmark standards.'
+      notes: 'Pre-planting soil tests & furrowing passes certified for Silay district plots.'
+    },
+    {
+      id: 'RPT-2026-03-NCY01',
+      reportId: 'RPT-2026-03-NCY01',
+      qrHash: 'HUG-202603-C1D4',
+      qrPayload: 'HUG-202603-C1D4',
+      blockFarmId: 'BLK-NCY-01',
+      blockFarmName: 'Nacayao Block Farm',
+      period: 'March 2026',
+      totalHectares: 15.25,
+      totalLogs: 10,
+      totalCost: 96500,
+      certifiedBy: 'Engr. Maria Santos (SRA Officer)',
+      certifiedRole: 'SRA (Admin)',
+      certifiedAt: '2026-03-31T15:00:00Z',
+      status: 'Certified',
+      notes: 'Initial land preparation, soil pH analysis, and tractor allocation signed.'
     }
   ],
   systemHistory: [
@@ -270,6 +337,34 @@ var INITIAL_DATABASE = {
       timestamp: 'May 21, 2026, 09:00 AM',
       createdAt: '2026-05-21T09:00:00Z',
       status: 'Recorded'
+    },
+    {
+      id: 'AUD-2026-0004',
+      category: 'operation',
+      categoryLabel: 'Field Operation',
+      eventType: 'Manager Take Over Entry',
+      entity: 'FLD-NCY-004 · Cultivation (Off-barring & On-barring)',
+      entityType: 'Field Operation',
+      actor: 'Jose Reyes (Farm Manager)',
+      actorId: '03000001',
+      details: 'Directly recorded Pahubas & Off-barring Pass (₱10,500) on behalf of member Roberto Tan due to device sync lag.',
+      timestamp: 'May 18, 2026, 04:15 PM',
+      createdAt: '2026-05-18T16:15:00Z',
+      status: 'Recorded'
+    },
+    {
+      id: 'AUD-2026-0005',
+      category: 'operation',
+      categoryLabel: 'Field Operation',
+      eventType: 'Manager Correction (Amended)',
+      entity: 'FLD-NCY-001 · Land Preparation (Disc Plowing & Furrowing)',
+      entityType: 'Field Operation',
+      actor: 'Jose Reyes (Farm Manager)',
+      actorId: '03000001',
+      details: 'Adjusted harrowing passes to match actual tractor rental meter and attached operator labor voucher. Cost updated from ₱15,000 to ₱18,000.',
+      timestamp: 'May 04, 2026, 03:45 PM',
+      createdAt: '2026-05-04T15:45:00Z',
+      status: 'Amended'
     }
   ],
   pendingUsers: [

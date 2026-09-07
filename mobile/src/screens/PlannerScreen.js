@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { getCurrentSession, fields, fieldsStore, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations } from '../data/dataStore';
+import { getCurrentSession, fields, fieldsStore, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { db } from '../firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
@@ -250,6 +250,35 @@ export default function PlannerScreen({ navigation }) {
     const fieldStageName = (selectedField?.stage || '').toLowerCase();
     return fieldStageName.includes(`stage ${currentStage.stageNum}`);
   }, [selectedField, currentStage]);
+
+  // Stage Completion Detection (checks if field has progressed past this stage)
+  const currentFieldStageInfo = useMemo(() => {
+    const fieldStageName = (selectedField?.stage || '').toLowerCase();
+    let num = selectedField?.stageNumber || 1;
+    const stageMatch = fieldStageName.match(/stage\s*(\d+)/i);
+    if (stageMatch) {
+      num = parseInt(stageMatch[1], 10);
+    } else if (fieldStageName.includes('prep') || fieldStageName.includes('tillage') || fieldStageName.includes('plow')) {
+      num = 1;
+    } else if (fieldStageName.includes('plant') || fieldStageName.includes('establishment') || fieldStageName.includes('patdan')) {
+      num = 2;
+    } else if (fieldStageName.includes('basal') || fieldStageName.includes('nutrition') || fieldStageName.includes('early care')) {
+      num = 3;
+    } else if (fieldStageName.includes('cultivation') || fieldStageName.includes('weed') || fieldStageName.includes('off-barring')) {
+      num = 4;
+    } else if (fieldStageName.includes('maintenance') || fieldStageName.includes('top-dress') || fieldStageName.includes('hilling')) {
+      num = 5;
+    } else if (fieldStageName.includes('harvest') || fieldStageName.includes('cutting') || fieldStageName.includes('hauling') || fieldStageName.includes('milling')) {
+      num = 6;
+    }
+    const isCycleComplete = fieldStageName.includes('complete') || fieldStageName.includes('mill');
+    return { currentStageNum: num, isCycleComplete };
+  }, [selectedField]);
+
+  const isStageCompletedInField = (stgNum) => {
+    if (currentFieldStageInfo.isCycleComplete) return true;
+    return stgNum < currentFieldStageInfo.currentStageNum;
+  };
 
   // Compute Cost for any stage given its ops and area
   const computeStageCost = (stgNum) => {
@@ -514,30 +543,57 @@ export default function PlannerScreen({ navigation }) {
   };
 
   // Send single operation to Field Ops
-  const sendSingleOperationToFieldOps = (op) => {
+  const sendSingleOperationToFieldOps = async (op) => {
     if (area <= 0) {
       Alert.alert('Required', 'Please enter a valid land area first.');
       return;
     }
 
-    const draftLog = createDraftLogForOp(op);
-    notifyDataUpdate();
+    const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
-    Alert.alert(
-      'Operation Saved to Drafts',
-      `"${op.name}" (₱ ${fmt(draftLog.cost)}) created as a Draft Log for ${draftLog.fieldId}.`,
-      [
-        { text: 'Keep Planning', style: 'cancel' },
-        { 
-          text: 'Go to Drafts', 
-          onPress: () => navigation && navigation.navigate('Field Ops', { screen: 'SchedMain', params: { openDrafts: true, initialTab: 'drafts' } }) 
-        }
-      ]
-    );
+    const executeSend = async (isSupplemental) => {
+      const draftLog = createDraftLogForOp(op, isSupplemental);
+      await saveDraftLogs();
+
+      const subtitle = isSupplemental
+        ? `"${op.name}" (₱ ${fmt(draftLog.cost)}) created as a SUPPLEMENTAL Draft Log for ${draftLog.fieldId}. Submitting this in Field Ops will not overwrite or rewind the field's current stage.`
+        : `"${op.name}" (₱ ${fmt(draftLog.cost)}) created as a Draft Log for ${draftLog.fieldId}.`;
+
+      Alert.alert(
+        isSupplemental ? 'Supplemental Draft Created' : 'Operation Saved to Drafts',
+        subtitle,
+        [
+          { text: 'Keep Planning', style: 'cancel' },
+          { 
+            text: 'Go to Drafts', 
+            onPress: () => navigation && navigation.navigate('Field Ops', { 
+              screen: 'SchedMain', 
+              params: { openDrafts: true, initialTab: 'drafts', highlightDraftIds: [draftLog.id], fieldId: draftLog.fieldId } 
+            }) 
+          }
+        ]
+      );
+    };
+
+    if (isStageDone) {
+      Alert.alert(
+        'Stage Already Completed in Field',
+        `Field "${selectedField?.name || selectedField?.id || 'Selected Field'}" has already completed Stage ${currentStage.stageNum} (${currentStage.label}).\n\nWould you like to send this as a Supplemental Entry? (Field stage progress will be safely preserved).`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Log as Supplemental', 
+            onPress: () => executeSend(true) 
+          }
+        ]
+      );
+    } else {
+      await executeSend(false);
+    }
   };
 
   // Helper to create and insert a draft log object
-  const createDraftLogForOp = (op) => {
+  const createDraftLogForOp = (op, isSupplemental = false) => {
     const fieldId = selectedField?.id || 'FLD-NCY-001';
     const draftId = generateDraftId(fieldId);
     let subItems = [];
@@ -572,6 +628,7 @@ export default function PlannerScreen({ navigation }) {
       isGroup: op.isGroup ?? false,
       inputType: op.isGroup ? 'group' : 'direct',
       cost: totalOpCost,
+      totalCost: totalOpCost,
       hectares: landArea,
       people: '2',
       subItems: op.isGroup ? subItems : [],
@@ -579,6 +636,10 @@ export default function PlannerScreen({ navigation }) {
       inputUnit: !op.isGroup ? (op.unit || 'ha') : '',
       inputName: !op.isGroup ? op.name : '',
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      createdAt: new Date().toISOString(),
+      isNew: true,
+      status: 'Draft',
+      isSupplemental: Boolean(isSupplemental),
     };
 
     DRAFT_LOGS.unshift(draftLog);
@@ -586,28 +647,58 @@ export default function PlannerScreen({ navigation }) {
   };
 
   // Send entire stage plan to Drafts
-  const sendStagePlanToFieldOps = () => {
+  const sendStagePlanToFieldOps = async () => {
     if (area <= 0 || currentOperations.length === 0) {
       Alert.alert('Required', 'Please ensure land area and at least one operation are configured.');
       return;
     }
 
-    currentOperations.forEach(op => {
-      createDraftLogForOp(op);
-    });
-    notifyDataUpdate();
+    const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
-    Alert.alert(
-      'Stage Plan Saved to Drafts!',
-      `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as Draft Logs to Field Operations.`,
-      [
-        { text: 'Keep Planning', style: 'cancel' },
-        { 
-          text: 'Go to Drafts', 
-          onPress: () => navigation && navigation.navigate('Field Ops', { screen: 'SchedMain', params: { openDrafts: true, initialTab: 'drafts' } }) 
-        }
-      ]
-    );
+    const executeSendAll = async (isSupplemental) => {
+      const targetFieldId = (selectedField?.id || 'FLD-NCY-001').trim().toUpperCase();
+      const createdIds = [];
+      currentOperations.forEach(op => {
+        const d = createDraftLogForOp(op, isSupplemental);
+        createdIds.push(d.id);
+      });
+      await saveDraftLogs();
+
+      const subtitle = isSupplemental
+        ? `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as SUPPLEMENTAL Drafts. Field stage progression will be preserved.`
+        : `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as Draft Logs to Field Operations.`;
+
+      Alert.alert(
+        isSupplemental ? 'Supplemental Stage Plan Saved!' : 'Stage Plan Saved to Drafts!',
+        subtitle,
+        [
+          { text: 'Keep Planning', style: 'cancel' },
+          { 
+            text: 'Go to Drafts', 
+            onPress: () => navigation && navigation.navigate('Field Ops', { 
+              screen: 'SchedMain', 
+              params: { openDrafts: true, initialTab: 'drafts', highlightDraftIds: createdIds, fieldId: targetFieldId } 
+            }) 
+          }
+        ]
+      );
+    };
+
+    if (isStageDone) {
+      Alert.alert(
+        'Stage Already Completed in Field',
+        `Field "${selectedField?.name || selectedField?.id || 'Selected Field'}" has already progressed past Stage ${currentStage.stageNum} (${currentStage.label}).\n\nDo you want to send all ${currentOperations.length} operations as Supplemental Entries? (Current field stage will not regress).`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Save as Supplemental', 
+            onPress: () => executeSendAll(true) 
+          }
+        ]
+      );
+    } else {
+      await executeSendAll(false);
+    }
   };
 
   return (
@@ -764,13 +855,15 @@ export default function PlannerScreen({ navigation }) {
                 const stgOps = stageOperationsMap[stg.stageNum] || [];
                 const stgCost = computeStageCost(stg.stageNum);
                 const isFieldActive = (selectedField?.stage || '').toLowerCase().includes(`stage ${stg.stageNum}`);
+                const isFieldCompleted = isStageCompletedInField(stg.stageNum);
 
                 return (
                   <TouchableOpacity
                     key={stg.key}
                     style={[
                       s.stageChoiceCard,
-                      isFieldActive && { borderColor: COLORS.primary }
+                      isFieldActive && { borderColor: COLORS.primary },
+                      isFieldCompleted && !isFieldActive && { borderColor: '#86EFAC', backgroundColor: '#FAFCF8' }
                     ]}
                     onPress={() => setActiveStageNum(stg.stageNum)}
                     activeOpacity={0.8}
@@ -788,6 +881,12 @@ export default function PlannerScreen({ navigation }) {
                             {isFieldActive && (
                               <View style={s.currentStagePill}>
                                 <Text style={s.currentStagePillText}>{t('current_badge', 'Current')}</Text>
+                              </View>
+                            )}
+                            {isFieldCompleted && !isFieldActive && (
+                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                                <Ionicons name="checkmark-circle" size={10} color="#16A34A" />
+                                <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#16A34A' }}>Completed</Text>
                               </View>
                             )}
                           </View>
@@ -854,18 +953,24 @@ export default function PlannerScreen({ navigation }) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg, marginBottom: 4 }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 6 }}>
               {DEFAULT_GROWTH_STAGES.map(stg => {
                 const isSelected = activeStageNum === stg.stageNum;
+                const isDone = isStageCompletedInField(stg.stageNum);
                 return (
                   <TouchableOpacity
                     key={stg.key}
                     style={[
                       s.quickStageChip,
-                      isSelected && { backgroundColor: stg.color, borderColor: stg.color }
+                      isSelected && { backgroundColor: stg.color, borderColor: stg.color },
+                      isDone && !isSelected && { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }
                     ]}
                     onPress={() => setActiveStageNum(stg.stageNum)}
                     activeOpacity={0.75}
                   >
-                    <Text style={[s.quickStageChipText, isSelected && { color: '#fff', fontWeight: '900' }]}>
-                      {t('stage_word', 'Stage')} {stg.stageNum}
+                    <Text style={[
+                      s.quickStageChipText,
+                      isSelected && { color: '#fff', fontWeight: '900' },
+                      isDone && !isSelected && { color: '#16A34A', fontWeight: '700' }
+                    ]}>
+                      {isDone ? '✓ ' : ''}{t('stage_word', 'Stage')} {stg.stageNum}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -873,21 +978,41 @@ export default function PlannerScreen({ navigation }) {
             </ScrollView>
 
             {/* Active Stage Banner Card */}
-            <View style={s.activeStageBanner}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={[
+              s.activeStageBanner,
+              isStageCompletedInField(currentStage.stageNum) && { borderColor: '#A7F3D0', backgroundColor: '#F0FDF4' }
+            ]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <View style={[s.stageNumBadge, { backgroundColor: currentStage.color, width: 28, height: 28, borderRadius: 14 }]}>
                     <Text style={{ color: '#fff', fontSize: 13, fontWeight: '900' }}>{currentStage.stageNum}</Text>
                   </View>
                   <Text style={s.activeStageTitle}>{t(`stage_${currentStage.stageNum}_short`, currentStage.shortLabel)}</Text>
                 </View>
-                <TouchableOpacity onPress={resetStageToDefault}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('btn_reset_defaults', 'Reset Defaults')}</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {isStageCompletedInField(currentStage.stageNum) && (
+                    <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>Completed in Field</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity onPress={resetStageToDefault}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('btn_reset_defaults', 'Reset Defaults')}</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <Text style={s.activeStageTimeline}>{formatPhaseMonth ? formatPhaseMonth(currentStage.month) : currentStage.month} · {t('sra_baseline_lbl', 'SRA Baseline')}: ₱{fmt(currentStage.benchmarkCost)} / ha</Text>
               <Text style={s.activeStageDesc}>{t(`stage_${currentStage.stageNum}_desc`, currentStage.description)}</Text>
+
+              {isStageCompletedInField(currentStage.stageNum) && (
+                <View style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#FEF3C7', borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FDE68A', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="information-circle" size={14} color="#92400E" />
+                  <Text style={{ fontSize: 11, color: '#92400E', fontWeight: '700', flex: 1 }}>
+                    Plot has progressed past this stage. Any operation sent to Field Ops will be recorded as a Supplemental Entry to protect active field progress.
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Operations in Stage Card */}

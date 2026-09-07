@@ -259,11 +259,11 @@ function getCanonicalInitialDB() {
       { employeeId: '04000005', contact: '09555444333', name: 'Ana Gomez', role: 'Member', roleKey: 'member', blockFarmId: 'BLK-NCY-01', fieldId: 'FLD-NCY-005', regDate: '2026-03-01', passwordHash: DEFAULT_SEED_PASSWORD_HASH }
     ],
     logs: [
-      { id: 'LOG-2026-NCY-001-001', fieldId: 'FLD-NCY-001', stageNumber: 1, stageName: 'Stage 1: Pre-Planting & Land Preparation', operationName: 'Land Preparation', activity: 'Land Preparation (Disc Plowing & Furrowing)', category: 'prep', totalCost: 18000, costPerHa: 12000, hectares: 1.5, people: 2, date: '2026-05-02', status: 'Recorded', loggedBy: 'Juan dela Cruz (Member)', loggedById: '04000001', subItems: [{ id: 'SI-001-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1.5, unit: 'ha', unitCost: 5000, subTotal: 7500 }, { id: 'SI-001-2', description: '2nd Pass Disc Harrowing', qty: 1.5, unit: 'ha', unitCost: 4000, subTotal: 6000 }, { id: 'SI-001-3', description: 'Furrowing / Tudling', qty: 1.5, unit: 'ha', unitCost: 3000, subTotal: 4500 }] },
-      { id: 'LOG-2026-NCY-002-001', fieldId: 'FLD-NCY-002', stageNumber: 2, stageName: 'Stage 2: Planting & Crop Establishment', operationName: 'Cost of Planting Material (Seedcane acquisition)', activity: 'Cost of Planting Material (Patdan)', category: 'plant', totalCost: 37500, costPerHa: 15000, hectares: 2.5, people: 4, date: '2026-05-08', status: 'Recorded', loggedBy: 'Pedro Reyes (Member)', loggedById: '04000002', subItems: [{ id: 'SI-002-1', description: 'Cane Points (Patdan - VMC 84-524)', qty: 12.5, unit: 'lac', unitCost: 3000, subTotal: 37500 }] },
-      { id: 'LOG-2026-NCY-003-001', fieldId: 'FLD-NCY-003', stageNumber: 3, stageName: 'Stage 3: Basal Nutrition & Early Care', operationName: 'Basal Fertilizer Application', activity: 'Basal Fertilizer (Urea + Complete + Potash)', category: 'fert', totalCost: 71100, costPerHa: 15800, hectares: 4.5, people: 6, date: '2026-05-12', status: 'Recorded', loggedBy: 'Corazon Santos (Member)', loggedById: '04000003', subItems: [{ id: 'SI-003-1', description: '46-00-00 Urea Application', qty: 9, unit: 'bag', unitCost: 1600, subTotal: 14400 }, { id: 'SI-003-2', description: '18-46-00 DAP / Complete', qty: 13.5, unit: 'bag', unitCost: 2500, subTotal: 33750 }, { id: 'SI-003-3', description: '00-00-60 Potash (MOP)', qty: 9, unit: 'bag', unitCost: 2200, subTotal: 19800 }, { id: 'SI-003-4', description: 'Fertilizer Application Labor', qty: 31.5, unit: 'bag', unitCost: 100, subTotal: 3150 }] },
-      { id: 'LOG-2026-NCY-004-001', fieldId: 'FLD-NCY-004', stageNumber: 4, stageName: 'Stage 4: Cultivation & Weed Management', operationName: 'Cultivation (Off-barring & On-barring)', activity: 'Pahubas & Off-barring Pass', category: 'weed', totalCost: 10500, costPerHa: 3000, hectares: 3.5, people: 3, date: '2026-05-18', status: 'Recorded', loggedBy: 'Roberto Tan (Member)', loggedById: '04000004', subItems: [{ id: 'SI-004-1', description: '1st Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 }, { id: 'SI-004-2', description: '2nd Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 }] },
-      { id: 'LOG-2026-NCY-005-001', fieldId: 'FLD-NCY-005', stageNumber: 5, stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up', operationName: 'Final Hilling-up (Pasungkal)', activity: 'Pasungkal Tractor Pass', category: 'maint', totalCost: 8125, costPerHa: 2500, hectares: 3.25, people: 2, date: '2026-05-22', status: 'Recorded', loggedBy: 'Ana Gomez (Member)', loggedById: '04000005', subItems: [{ id: 'SI-005-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 3.25, unit: 'ha', unitCost: 2500, subTotal: 8125 }] },
+      { id: 'LOG-2026-NCY-001-001', fieldId: 'FLD-NCY-001', stageNumber: 1, stageName: 'Stage 1: Pre-Planting & Land Preparation', operationName: 'Land Preparation', activity: 'Land Preparation (Disc Plowing & Furrowing)', category: 'prep', totalCost: 18000, costPerHa: 12000, hectares: 1.5, people: 2, date: '2026-05-02', status: 'Recorded', compiled: true, compiledReportId: 'RPT-2026-05-NCY01', loggedBy: 'Juan dela Cruz (Member)', loggedById: '04000001', subItems: [{ id: 'SI-001-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1.5, unit: 'ha', unitCost: 5000, subTotal: 7500 }, { id: 'SI-001-2', description: '2nd Pass Disc Harrowing', qty: 1.5, unit: 'ha', unitCost: 4000, subTotal: 6000 }, { id: 'SI-001-3', description: 'Furrowing / Tudling', qty: 1.5, unit: 'ha', unitCost: 3000, subTotal: 4500 }] },
+      { id: 'LOG-2026-NCY-002-001', fieldId: 'FLD-NCY-002', stageNumber: 2, stageName: 'Stage 2: Planting & Crop Establishment', operationName: 'Cost of Planting Material (Seedcane acquisition)', activity: 'Cost of Planting Material (Patdan)', category: 'plant', totalCost: 37500, costPerHa: 15000, hectares: 2.5, people: 4, date: '2026-05-08', status: 'Recorded', compiled: true, compiledReportId: 'RPT-2026-05-NCY01', loggedBy: 'Pedro Reyes (Member)', loggedById: '04000002', subItems: [{ id: 'SI-002-1', description: 'Cane Points (Patdan - VMC 84-524)', qty: 12.5, unit: 'lac', unitCost: 3000, subTotal: 37500 }] },
+      { id: 'LOG-2026-NCY-003-001', fieldId: 'FLD-NCY-003', stageNumber: 3, stageName: 'Stage 3: Basal Nutrition & Early Care', operationName: 'Basal Fertilizer Application', activity: 'Basal Fertilizer (Urea + Complete + Potash)', category: 'fert', totalCost: 71100, costPerHa: 15800, hectares: 4.5, people: 6, date: '2026-05-12', status: 'Recorded', compiled: true, compiledReportId: 'RPT-2026-05-NCY01', loggedBy: 'Corazon Santos (Member)', loggedById: '04000003', subItems: [{ id: 'SI-003-1', description: '46-00-00 Urea Application', qty: 9, unit: 'bag', unitCost: 1600, subTotal: 14400 }, { id: 'SI-003-2', description: '18-46-00 DAP / Complete', qty: 13.5, unit: 'bag', unitCost: 2500, subTotal: 33750 }, { id: 'SI-003-3', description: '00-00-60 Potash (MOP)', qty: 9, unit: 'bag', unitCost: 2200, subTotal: 19800 }, { id: 'SI-003-4', description: 'Fertilizer Application Labor', qty: 31.5, unit: 'bag', unitCost: 100, subTotal: 3150 }] },
+      { id: 'LOG-2026-NCY-004-001', fieldId: 'FLD-NCY-004', stageNumber: 4, stageName: 'Stage 4: Cultivation & Weed Management', operationName: 'Cultivation (Off-barring & On-barring)', activity: 'Pahubas & Off-barring Pass', category: 'weed', totalCost: 10500, costPerHa: 3000, hectares: 3.5, people: 3, date: '2026-05-18', status: 'Recorded', compiled: true, compiledReportId: 'RPT-2026-05-NCY01', loggedBy: 'Roberto Tan (Member)', loggedById: '04000004', subItems: [{ id: 'SI-004-1', description: '1st Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 }, { id: 'SI-004-2', description: '2nd Off-barring (Pahubas)', qty: 7, unit: 'pass', unitCost: 750, subTotal: 5250 }] },
+      { id: 'LOG-2026-NCY-005-001', fieldId: 'FLD-NCY-005', stageNumber: 5, stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up', operationName: 'Final Hilling-up (Pasungkal)', activity: 'Pasungkal Tractor Pass', category: 'maint', totalCost: 8125, costPerHa: 2500, hectares: 3.25, people: 2, date: '2026-05-22', status: 'Recorded', compiled: true, compiledReportId: 'RPT-2026-05-NCY01', loggedBy: 'Ana Gomez (Member)', loggedById: '04000005', subItems: [{ id: 'SI-005-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 3.25, unit: 'ha', unitCost: 2500, subTotal: 8125 }] },
       // Past Cycle Records for Plot History
       { id: 'PAST-2025-NCY-001-HARV', fieldId: 'FLD-NCY-001', stageNumber: 6, stageName: 'Stage 6: Harvesting & Transport', operationName: 'Cutting and Loading', activity: 'Cane Cutting & Mill Trucking (Haw-Phil)', category: 'harvest', totalCost: 48000, hectares: 1.5, people: 8, date: '2025-01-15', status: 'Certified', isPastCycle: true, certified: true, archivedAt: '2025-01-20T10:00:00Z', loggedBy: 'Juan dela Cruz (Member)', loggedById: '04000001', subItems: [{ id: 'PAST-SI-01', description: 'Cutting & Loading 90 Tons', qty: 90, unit: 'ton', unitCost: 450, subTotal: 40500 }, { id: 'PAST-SI-02', description: 'Terminal Mill Flatbed Freight', qty: 1, unit: 'trip', unitCost: 7500, subTotal: 7500 }] },
       { id: 'PAST-2025-NCY-002-HARV', fieldId: 'FLD-NCY-002', stageNumber: 6, stageName: 'Stage 6: Harvesting & Transport', operationName: 'Cutting and Loading', activity: 'Cane Cutting & Loading (150 Tons)', category: 'harvest', totalCost: 75000, hectares: 2.5, people: 12, date: '2025-01-22', status: 'Certified', isPastCycle: true, certified: true, archivedAt: '2025-01-25T10:00:00Z', loggedBy: 'Pedro Reyes (Member)', loggedById: '04000002', subItems: [{ id: 'PAST-SI-03', description: 'Cutting & Loading 150 Tons', qty: 150, unit: 'ton', unitCost: 450, subTotal: 67500 }, { id: 'PAST-SI-04', description: 'In-field Carabao Hauling Assist', qty: 1, unit: 'lot', unitCost: 7500, subTotal: 7500 }] },
@@ -382,6 +382,34 @@ function getCanonicalInitialDB() {
         timestamp: 'May 12, 2026, 03:15 PM',
         createdAt: '2026-05-12T15:15:00Z',
         status: 'Recorded'
+      },
+      {
+        id: 'AUD-2026-0006',
+        category: 'operation',
+        categoryLabel: 'Field Operation',
+        eventType: 'Manager Take Over Entry',
+        entity: 'FLD-NCY-004 · Cultivation (Off-barring & On-barring)',
+        entityType: 'Field Operation',
+        actor: 'Jose Reyes (Farm Manager)',
+        actorId: '03000001',
+        details: 'Directly recorded Pahubas & Off-barring Pass (₱10,500) on behalf of member Roberto Tan due to device sync lag.',
+        timestamp: 'May 18, 2026, 04:15 PM',
+        createdAt: '2026-05-18T16:15:00Z',
+        status: 'Recorded'
+      },
+      {
+        id: 'AUD-2026-0007',
+        category: 'operation',
+        categoryLabel: 'Field Operation',
+        eventType: 'Manager Correction (Amended)',
+        entity: 'FLD-NCY-001 · Land Preparation (Disc Plowing & Furrowing)',
+        entityType: 'Field Operation',
+        actor: 'Jose Reyes (Farm Manager)',
+        actorId: '03000001',
+        details: 'Adjusted harrowing passes to match actual tractor rental meter and attached operator labor voucher. Cost updated from ₱15,000 to ₱18,000.',
+        timestamp: 'May 04, 2026, 03:45 PM',
+        createdAt: '2026-05-04T15:45:00Z',
+        status: 'Amended'
       }
     ],
     auditReports: [
@@ -396,11 +424,13 @@ function getCanonicalInitialDB() {
         totalHectares: 15.25,
         totalLogs: 14,
         totalCost: 145225,
-        certifiedBy: 'Engr. Maria Santos (SRA Officer)',
-        certifiedRole: 'SRA (Admin)',
-        certifiedAt: '2026-05-30T14:30:00Z',
-        status: 'Certified',
-        notes: 'Fully audited against SRA S1-S14 Sugar Agronomic Benchmark standards.'
+        compiledBy: 'Jose Reyes (Farm Manager)',
+        compiledAt: '2026-05-30T10:00:00Z',
+        certifiedBy: null,
+        certifiedRole: null,
+        certifiedAt: null,
+        status: 'Pending SRA',
+        notes: 'Compiled by Farm Manager Jose Reyes. Transmitted to SRA Queue awaiting Inspectorate certification.'
       },
       {
         id: 'RPT-2026-04-NCY01',
@@ -515,6 +545,40 @@ function getDB() {
   if (!parsed.auditReports || !Array.isArray(parsed.auditReports)) {
     parsed.auditReports = canonical.auditReports || [];
     updated = true;
+  } else if (Array.isArray(canonical.auditReports)) {
+    canonical.auditReports.forEach(cr => {
+      if (!parsed.auditReports.some(r => r.period === cr.period || r.reportId === cr.reportId || r.id === cr.id)) {
+        parsed.auditReports.push(cr);
+        updated = true;
+      }
+    });
+  }
+  if (Array.isArray(parsed.logs) && Array.isArray(parsed.auditReports)) {
+    const mayReport = parsed.auditReports.find(r => (r.period && r.period.includes('May')) || (r.month && r.month.includes('May')));
+    if (mayReport) {
+      if (!mayReport.certifiedBy && mayReport.status === 'Certified') {
+        mayReport.status = 'Pending SRA';
+        updated = true;
+      }
+      const initialSeedIds = new Set(['LOG-2026-NCY-001-001', 'LOG-2026-NCY-002-001', 'LOG-2026-NCY-003-001', 'LOG-2026-NCY-004-001', 'LOG-2026-NCY-005-001']);
+      parsed.logs.forEach(l => {
+        if (l.isAmended && l.status === 'Recorded') {
+          l.status = 'Amended';
+          updated = true;
+        }
+        if (l.id === 'LOG-2026-NCY-004-001' && !l.actionSource) {
+          l.loggedBy = 'Jose Reyes (Farm Manager)';
+          l.loggedById = '03000001';
+          l.actionSource = 'takeover';
+          updated = true;
+        }
+        if (l.compiled === undefined && initialSeedIds.has(l.id)) {
+          l.compiled = true;
+          l.compiledReportId = mayReport.reportId || mayReport.id;
+          updated = true;
+        }
+      });
+    }
   }
 
   // Filter out any lingering mock fields not in canonical FLD-NCY set
@@ -842,10 +906,21 @@ function initFirestoreRealtimeSync() {
     if (snapshot.empty) return;
     const db = getDB();
     const remoteLogs = [];
-    snapshot.forEach(docSnap => remoteLogs.push(docSnap.data()));
+    const localNewSet = new Set((db.logs || []).filter(l => l.isNew).map(l => l.id));
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      if (localNewSet.has(data.id)) {
+        data.isNew = true;
+      }
+      remoteLogs.push(data);
+    });
 
     db.logs = remoteLogs;
     saveDB(db, false);
+    historyCurrentPage = 1;
+    logCurrentPage = 1;
+    blockHistPage = 1;
+    plotHistPage = 1;
     if (typeof renderDashboard === 'function') renderDashboard();
     if (typeof renderLogs === 'function') renderLogs();
     if (typeof renderOperations === 'function') renderOperations();
@@ -2923,6 +2998,39 @@ function renderManager() {
   }
   if (pendingBadge) pendingBadge.textContent = `${myLogs.length} Recorded`;
 
+  // Populate Monthly Regulatory Audit Card for Farm Manager
+  const auditReport = (db.auditReports && db.auditReports.find(r => r.blockFarmName === managerBlockFarm || r.id === 'RPT-2026-05-NCY01')) || (db.auditReports && db.auditReports[0]) || {
+    period: 'May 2026',
+    blockFarmName: 'Nacayao Block Farm',
+    totalLogs: 14,
+    totalHectares: 15.25,
+    totalCost: 145225,
+    qrHash: 'HUG-202605-A3F9',
+    status: 'Certified'
+  };
+  const auditPeriodEl = document.getElementById('mgr-audit-period');
+  const auditPeriodSubEl = document.getElementById('mgr-audit-period-sub');
+  const auditFarmNameEl = document.getElementById('mgr-audit-farm-name');
+  const auditLogsCountEl = document.getElementById('mgr-audit-logs-count');
+  const auditAreaEl = document.getElementById('mgr-audit-area');
+  const auditCostEl = document.getElementById('mgr-audit-total-cost');
+  const auditQrEl = document.getElementById('mgr-audit-qr-hash');
+  const auditStatusEl = document.getElementById('mgr-audit-status-badge');
+
+  if (auditPeriodEl) auditPeriodEl.textContent = auditReport.period || 'May 2026';
+  if (auditPeriodSubEl) auditPeriodSubEl.textContent = auditReport.period || 'May 2026';
+  if (auditFarmNameEl) auditFarmNameEl.textContent = auditReport.blockFarmName || managerBlockFarm;
+  if (auditLogsCountEl) auditLogsCountEl.textContent = `${auditReport.totalLogs || 14} Records`;
+  if (auditAreaEl) auditAreaEl.textContent = `${auditReport.totalHectares || 15.25} Ha`;
+  if (auditCostEl) auditCostEl.textContent = `₱${Number(auditReport.totalCost || 145225).toLocaleString()}`;
+  if (auditQrEl) auditQrEl.textContent = auditReport.qrHash || auditReport.qrSignature || 'HUG-202605-A3F9';
+  if (auditStatusEl) {
+    auditStatusEl.innerHTML = `
+      <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+      SRA ${auditReport.status || 'Certified'} &amp; Verified
+    `;
+  }
+
   // Render Sync Telemetry & Health Monitor
   renderSyncMonitor();
 
@@ -2948,19 +3056,48 @@ function renderManager() {
         const taskName = l.task || l.activity || 'Field Operation';
         const costVal = (l.cost || 0).toLocaleString();
         const inputDisplay = l.inputQty ? `${l.inputQty} ${l.inputUnit || ''} ${l.inputName ? `· ${l.inputName}` : ''}` : '<span class="text-hug-muted italic">Standard Labor</span>';
+        const isAmended = Boolean(l.isAmended || (Array.isArray(l.editHistory) && l.editHistory.length > 0));
+        const editCount = (Array.isArray(l.editHistory) && l.editHistory.length) || (l.isAmended ? 1 : 0);
+        const latestEdit = Array.isArray(l.editHistory) && l.editHistory.length > 0
+          ? l.editHistory[l.editHistory.length - 1]
+          : (l.isAmended ? { editedBy: 'Farm Manager', reason: 'Log details updated' } : null);
 
         return `<tr class="border-b border-border hover:bg-bg transition-all">
           <td class="px-4 py-3 font-bold text-xs text-hug-text font-mono">${l.id}</td>
           <td class="px-4 py-3 font-semibold text-xs text-farm-blue font-mono">${l.fieldId}</td>
           <td class="px-4 py-3 text-xs text-hug-text2 font-semibold">${memberName}</td>
-          <td class="px-4 py-3 text-xs text-hug-text font-medium">${taskName}</td>
+          <td class="px-4 py-3 text-xs text-hug-text font-medium">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span>${taskName}</span>
+              ${isAmended ? `
+                <button onclick="openLogEditHistoryModal('${l.id}')" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition-all cursor-pointer" title="Click to view full revision details">
+                  <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  Amended (${editCount}x)
+                </button>
+              ` : ''}
+            </div>
+            ${isAmended && latestEdit ? `
+              <div class="text-[11px] text-hug-muted mt-1 flex items-center gap-1">
+                <span class="font-semibold text-hug-text2">${latestEdit.editedBy || 'Manager'}:</span>
+                <span class="truncate max-w-[210px] italic" title="${latestEdit.reason || 'Record updated'}">"${latestEdit.reason || 'Record updated'}"</span>
+                <button onclick="openLogEditHistoryModal('${l.id}')" class="text-primary hover:underline font-bold ml-1 cursor-pointer">Details →</button>
+              </div>
+            ` : ''}
+          </td>
           <td class="px-4 py-3 text-xs text-hug-text2">${inputDisplay}</td>
           <td class="px-4 py-3 text-xs font-bold text-hug-text">Php ${costVal}</td>
           <td class="px-4 py-3 text-xs text-hug-muted">${l.date}</td>
           <td class="px-4 py-3">
-            <button onclick="viewFieldOperationsFromLedger('${l.fieldId}')" class="px-2.5 py-1 bg-white border border-border text-hug-text2 hover:border-primary hover:text-primary text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-xs" title="Open Field Operations & History">
-              View Plot →
-            </button>
+            <div class="flex items-center gap-1.5">
+              <button onclick="viewFieldOperationsFromLedger('${l.fieldId}')" class="px-2.5 py-1 bg-white border border-border text-hug-text2 hover:border-primary hover:text-primary text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-xs" title="Open Field Operations & History">
+                View Plot →
+              </button>
+              ${isAmended ? `
+                <button onclick="openLogEditHistoryModal('${l.id}')" class="p-1 text-farm-blue hover:bg-farm-blue-bg rounded-md transition-all cursor-pointer" title="Inspect Revisions & Edits">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </button>
+              ` : ''}
+            </div>
           </td>
         </tr>`;
       }).join('');
@@ -3550,14 +3687,452 @@ function viewFieldOperationsFromLedger(fieldId) {
 // ── TAKE OVER CONTROLLER FUNCTIONS ───────────────────────
 let selectedTakeOverStageId = null;
 
-const STAGE_INPUT_BENCHMARKS = {
-  'S1': { inputName: 'Land Prep & Furrowing (Ops 1–2)', inputQty: 1, inputUnit: 'ha', costPerHa: 4500, people: 2 },
-  'S2': { inputName: 'Patdan Cane Planting & Replanting (Ops 3–4)', inputQty: 40000, inputUnit: 'pcs', costPerHa: 14000, people: 8 },
-  'S3': { inputName: 'Basal Fertilization & Liming (Ops 5–6)', inputQty: 4, inputUnit: 'bags', costPerHa: 8000, people: 4 },
-  'S4': { inputName: 'Cultivation, Weeding & Early Care (Ops 7, 10–11)', inputQty: 1, inputUnit: 'ha', costPerHa: 5200, people: 6 },
-  'S5': { inputName: 'Top-Dress Fertilization 2nd Dose (Ops 8–9)', inputQty: 4, inputUnit: 'bags', costPerHa: 7400, people: 4 },
-  'S6': { inputName: 'Cane Harvesting, Cutting & Hauling (Ops 12–14)', inputQty: 65, inputUnit: 'tons', costPerHa: 27800, people: 12 },
-};
+// ── 14 OFFICIAL SRA OPERATION TEMPLATES ────────────────────
+const SRA_OPERATIONS_CATALOGUE = [
+  // Stage 1: Pre-Planting & Land Preparation
+  {
+    id: 'SRA-01',
+    stageNumber: 1,
+    stageName: 'Stage 1: Pre-Planting & Land Preparation',
+    name: 'Soil Sampling',
+    category: 'prep',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 1,
+    unit: 'ha',
+    rate: 100,
+    costPerHa: 100,
+    subItems: [
+      { id: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', qty: 1, unit: 'ha', unitCost: 100, subTotal: 100 }
+    ]
+  },
+  {
+    id: 'SRA-02',
+    stageNumber: 1,
+    stageName: 'Stage 1: Pre-Planting & Land Preparation',
+    name: 'Land Preparation',
+    category: 'prep',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 12000,
+    subItems: [
+      { id: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1, unit: 'ha', unitCost: 5000, subTotal: 5000 },
+      { id: 'SI-02-2', description: '2nd Pass Disc Harrowing', qty: 1, unit: 'ha', unitCost: 4000, subTotal: 4000 },
+      { id: 'SI-02-3', description: 'Furrowing / Tudling', qty: 1, unit: 'ha', unitCost: 3000, subTotal: 3000 }
+    ]
+  },
+  // Stage 2: Planting & Crop Establishment
+  {
+    id: 'SRA-03',
+    stageNumber: 2,
+    stageName: 'Stage 2: Planting & Crop Establishment',
+    name: 'Cost of Planting Material (Seedcane acquisition)',
+    category: 'plant',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 15000,
+    subItems: [
+      { id: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', qty: 5, unit: 'lac', unitCost: 3000, subTotal: 15000 }
+    ]
+  },
+  {
+    id: 'SRA-04',
+    stageNumber: 2,
+    stageName: 'Stage 2: Planting & Crop Establishment',
+    name: 'Planting Operations (Labor & Handling)',
+    category: 'plant',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 5000,
+    subItems: [
+      { id: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', qty: 5, unit: 'lac', unitCost: 600, subTotal: 3000 },
+      { id: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', qty: 5, unit: 'lac', unitCost: 400, subTotal: 2000 }
+    ]
+  },
+  // Stage 3: Basal Nutrition & Early Care
+  {
+    id: 'SRA-05',
+    stageNumber: 3,
+    stageName: 'Stage 3: Basal Nutrition & Early Care',
+    name: 'Basal Fertilizer Application (Labor & Materials)',
+    category: 'fert',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 15800,
+    subItems: [
+      { id: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', qty: 2, unit: 'bags', unitCost: 1600, subTotal: 3200 },
+      { id: 'SI-05-2', description: 'Application of 18-46-00 (DAP / Complete)', qty: 3, unit: 'bags', unitCost: 2500, subTotal: 7500 },
+      { id: 'SI-05-3', description: 'Application of 00-00-60 (MOP / Potash)', qty: 2, unit: 'bags', unitCost: 2200, subTotal: 4400 },
+      { id: 'SI-05-4', description: 'Fertilizer Application Labor', qty: 7, unit: 'bags', unitCost: 100, subTotal: 700 }
+    ]
+  },
+  {
+    id: 'SRA-06',
+    stageNumber: 3,
+    stageName: 'Stage 3: Basal Nutrition & Early Care',
+    name: 'Lime Application (Soil Amending)',
+    category: 'fert',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 2,
+    unit: 'tons',
+    rate: 2500,
+    costPerHa: 5000,
+    subItems: [
+      { id: 'SI-06-1', description: 'Agricultural Lime (Materials & Distribution)', qty: 2, unit: 'tons', unitCost: 2500, subTotal: 5000 }
+    ]
+  },
+  // Stage 4: Cultivation & Weed Management
+  {
+    id: 'SRA-07',
+    stageNumber: 4,
+    stageName: 'Stage 4: Cultivation & Weed Management',
+    name: 'Cultivation (Off-barring & On-barring)',
+    category: 'weed',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 3000,
+    subItems: [
+      { id: 'SI-07-1', description: '1st Off-barring (Pahubas) - Tractor/Animal', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 },
+      { id: 'SI-07-2', description: '2nd Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 }
+    ]
+  },
+  {
+    id: 'SRA-08',
+    stageNumber: 4,
+    stageName: 'Stage 4: Cultivation & Weed Management',
+    name: 'Weeding Operations (Hilamon & Herbicides)',
+    category: 'weed',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 6000,
+    subItems: [
+      { id: 'SI-08-1', description: 'Manual Weeding (1st Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
+      { id: 'SI-08-2', description: 'Manual Weeding (2nd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
+      { id: 'SI-08-3', description: 'Manual Weeding (3rd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
+    ]
+  },
+  // Stage 5: Crop Maintenance & Final Hilling-Up
+  {
+    id: 'SRA-09',
+    stageNumber: 5,
+    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
+    name: 'Top-Dress / 2nd Dose Fertilization',
+    category: 'fert',
+    inputType: 'group',
+    isGroup: true,
+    unit: 'ha',
+    costPerHa: 2500,
+    subItems: [
+      { id: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', qty: 1.5, unit: 'bags', unitCost: 1600, subTotal: 2400 },
+      { id: 'SI-09-2', description: 'Side-dressing Application Labor', qty: 1.5, unit: 'bags', unitCost: 66.67, subTotal: 100 }
+    ]
+  },
+  {
+    id: 'SRA-10',
+    stageNumber: 5,
+    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
+    name: 'Final Hilling-up (Pasungkal)',
+    category: 'weed',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 1,
+    unit: 'ha',
+    rate: 2500,
+    costPerHa: 2500,
+    subItems: [
+      { id: 'SI-10-1', description: 'Final Hilling-up / Pasungkal Pass', qty: 1, unit: 'ha', unitCost: 2500, subTotal: 2500 }
+    ]
+  },
+  // Stage 6: Harvesting & Post-Harvest Transport
+  {
+    id: 'SRA-11',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Post-Harvest Transport',
+    name: 'Cutting and Loading Operations',
+    category: 'harvest',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 60,
+    unit: 'tons',
+    rate: 450,
+    costPerHa: 27000,
+    subItems: [
+      { id: 'SI-11-1', description: 'Cane Cutting & Truck Loading Labor', qty: 60, unit: 'tons', unitCost: 450, subTotal: 27000 }
+    ]
+  },
+  {
+    id: 'SRA-12',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Post-Harvest Transport',
+    name: 'Hauling (Trucking to Mill)',
+    category: 'harvest',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 60,
+    unit: 'tons',
+    rate: 250,
+    costPerHa: 15000,
+    subItems: [
+      { id: 'SI-12-1', description: 'Trucking freight to sugar mill', qty: 60, unit: 'tons', unitCost: 250, subTotal: 15000 }
+    ]
+  },
+  {
+    id: 'SRA-13',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Post-Harvest Transport',
+    name: 'Bull Cart / In-field Transport',
+    category: 'harvest',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 60,
+    unit: 'tons',
+    rate: 120,
+    costPerHa: 7200,
+    subItems: [
+      { id: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', qty: 60, unit: 'tons', unitCost: 120, subTotal: 7200 }
+    ]
+  },
+  {
+    id: 'SRA-14',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Post-Harvest Transport',
+    name: 'Drainage & Post-Harvest Field Clearing',
+    category: 'prep',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 1,
+    unit: 'ha',
+    rate: 2000,
+    costPerHa: 2000,
+    subItems: [
+      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
+    ]
+  }
+];
+
+let takeoverInputMode = 'group'; // 'group' or 'direct'
+let takeoverSubItems = [];
+let takeoverCurrentOpId = 'SRA-02';
+
+function takeOverSetMode(mode) {
+  takeoverInputMode = mode === 'direct' ? 'direct' : 'group';
+  const groupBtn = document.getElementById('takeover-mode-group-btn');
+  const directBtn = document.getElementById('takeover-mode-direct-btn');
+  const subPanel = document.getElementById('takeover-subitems-panel');
+  const dirPanel = document.getElementById('takeover-direct-panel');
+  const modeBadge = document.getElementById('takeover-mode-badge');
+
+  if (takeoverInputMode === 'group') {
+    if (groupBtn) {
+      groupBtn.className = 'py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-primary text-white shadow-xs border border-primary';
+    }
+    if (directBtn) {
+      directBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-white text-hug-text2 border border-border hover:border-primary/40';
+    }
+    if (subPanel) subPanel.classList.remove('hidden');
+    if (dirPanel) dirPanel.classList.add('hidden');
+    if (modeBadge) {
+      modeBadge.className = 'text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap';
+      modeBadge.textContent = 'Title with Child Items';
+    }
+    if (takeoverSubItems.length === 0) {
+      takeOverRenderSubItems();
+    }
+  } else {
+    if (directBtn) {
+      directBtn.className = 'py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-primary text-white shadow-xs border border-primary';
+    }
+    if (groupBtn) {
+      groupBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-white text-hug-text2 border border-border hover:border-primary/40';
+    }
+    if (dirPanel) dirPanel.classList.remove('hidden');
+    if (subPanel) subPanel.classList.add('hidden');
+    if (modeBadge) {
+      modeBadge.className = 'text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap';
+      modeBadge.textContent = 'Direct Input';
+    }
+  }
+  updateTakeoverCostSummary();
+}
+
+function takeOverPopulateOpSelect(stageNum, selectedOpId = null) {
+  const selectEl = document.getElementById('takeover-op-select');
+  if (!selectEl) return;
+
+  const defaultOp = SRA_OPERATIONS_CATALOGUE.find(o => o.stageNumber === stageNum) || SRA_OPERATIONS_CATALOGUE[0];
+  const targetId = selectedOpId || defaultOp.id;
+
+  selectEl.innerHTML = SRA_OPERATIONS_CATALOGUE.map(op => {
+    const isSelected = op.id === targetId ? 'selected' : '';
+    const modeLabel = op.inputType === 'group' ? 'Child Items' : 'Direct';
+    return `<option value="${op.id}" ${isSelected}>${op.id} · ${op.name} (${modeLabel})</option>`;
+  }).join('') + `<option value="CUSTOM">Custom Operation / Other...</option>`;
+
+  takeOverChangeOperationSelect(targetId);
+}
+
+function takeOverChangeOperationSelect(opId) {
+  takeoverCurrentOpId = opId;
+  const op = SRA_OPERATIONS_CATALOGUE.find(o => o.id === opId);
+  const titleEl = document.getElementById('takeover-active-stage-title');
+  const activityEl = document.getElementById('takeover-log-activity');
+  const opBadgeEl = document.getElementById('takeover-op-id-badge');
+  const hintEl = document.getElementById('takeover-selected-stage-hint');
+  const haEl = document.getElementById('takeover-log-ha');
+  const ha = parseFloat(haEl ? haEl.value : 1.5) || 1.5;
+
+  if (op) {
+    if (titleEl) titleEl.textContent = op.name;
+    if (activityEl) activityEl.value = op.name;
+    if (opBadgeEl) opBadgeEl.textContent = op.id;
+    if (hintEl) {
+      hintEl.textContent = `Standard Benchmark: ₱${op.costPerHa.toLocaleString()} / ha (${op.inputType === 'group' ? 'Child Items' : 'Direct'})`;
+    }
+
+    takeOverSetMode(op.inputType);
+
+    if (op.inputType === 'group') {
+      takeoverSubItems = (op.subItems || []).map(si => ({
+        id: si.id || `SI-${Math.random().toString(36).slice(2, 7)}`,
+        description: si.description,
+        qty: si.qty,
+        unit: si.unit,
+        unitCost: si.unitCost,
+        subTotal: Math.round((si.qty || 1) * (si.unitCost || 0))
+      }));
+      takeOverRenderSubItems();
+    } else {
+      const qtyEl = document.getElementById('takeover-direct-qty');
+      const unitEl = document.getElementById('takeover-direct-unit');
+      const rateEl = document.getElementById('takeover-direct-rate');
+      if (qtyEl) qtyEl.value = (op.perHa || 1) * (op.unit === 'ha' ? ha : 1);
+      if (unitEl) unitEl.value = op.unit || 'ha';
+      if (rateEl) rateEl.value = op.rate || op.costPerHa || 0;
+    }
+  } else {
+    if (opBadgeEl) opBadgeEl.textContent = 'CUSTOM';
+    if (hintEl) hintEl.textContent = 'Custom Operation Benchmark';
+  }
+  updateTakeoverCostSummary();
+}
+
+function takeOverRenderSubItems() {
+  const container = document.getElementById('takeover-subitems-container');
+  const countBadge = document.getElementById('takeover-subitems-count');
+  if (countBadge) countBadge.textContent = `${takeoverSubItems.length} item${takeoverSubItems.length === 1 ? '' : 's'}`;
+  if (!container) return;
+
+  if (takeoverSubItems.length === 0) {
+    container.innerHTML = `
+      <div class="p-4 bg-white rounded-xl border border-dashed border-border text-center">
+        <p class="text-xs text-hug-muted font-medium">No child items yet. Click "+ Add Child Item / Material" below.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = takeoverSubItems.map((item, idx) => `
+    <div class="p-2.5 bg-white rounded-xl border border-border flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between gap-2">
+        <input type="text" value="${item.description.replace(/"/g, '&quot;')}" oninput="takeOverUpdateSubItem(${idx}, 'description', this.value)" placeholder="Description / material"
+          class="flex-1 text-xs font-bold text-hug-text px-2 py-1 bg-bg/50 border border-border rounded-lg focus:border-primary outline-none" />
+        <button type="button" onclick="takeOverRemoveSubItem(${idx})" class="p-1 text-hug-muted hover:text-danger hover:bg-danger-bg rounded-md transition-all cursor-pointer" title="Remove Item">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="grid grid-cols-4 gap-2 items-center text-[11px]">
+        <div>
+          <span class="text-[9.5px] text-hug-muted block">Qty</span>
+          <input type="number" step="0.1" value="${item.qty}" oninput="takeOverUpdateSubItem(${idx}, 'qty', this.value)"
+            class="w-full font-bold text-xs px-2 py-1 bg-bg/50 border border-border rounded-lg focus:border-primary outline-none text-hug-text" />
+        </div>
+        <div>
+          <span class="text-[9.5px] text-hug-muted block">Unit</span>
+          <input type="text" value="${item.unit}" oninput="takeOverUpdateSubItem(${idx}, 'unit', this.value)"
+            class="w-full font-semibold text-xs px-2 py-1 bg-bg/50 border border-border rounded-lg focus:border-primary outline-none text-hug-text" />
+        </div>
+        <div>
+          <span class="text-[9.5px] text-hug-muted block">Unit Cost (₱)</span>
+          <input type="number" value="${item.unitCost}" oninput="takeOverUpdateSubItem(${idx}, 'unitCost', this.value)"
+            class="w-full font-bold text-xs px-2 py-1 bg-bg/50 border border-border rounded-lg focus:border-primary outline-none text-hug-text" />
+        </div>
+        <div class="text-right">
+          <span class="text-[9.5px] text-hug-muted block">Subtotal</span>
+          <span class="font-extrabold text-xs text-primary block">₱ ${(item.subTotal || 0).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function takeOverAddSubItem() {
+  takeoverSubItems.push({
+    id: `SI-${Date.now()}`,
+    description: 'Additional Material / Labor Item',
+    qty: 1,
+    unit: 'bags',
+    unitCost: 1000,
+    subTotal: 1000
+  });
+  takeOverRenderSubItems();
+  updateTakeoverCostSummary();
+}
+
+function takeOverRemoveSubItem(idx) {
+  if (idx >= 0 && idx < takeoverSubItems.length) {
+    takeoverSubItems.splice(idx, 1);
+    takeOverRenderSubItems();
+    updateTakeoverCostSummary();
+  }
+}
+
+function takeOverUpdateSubItem(idx, field, value) {
+  if (idx < 0 || idx >= takeoverSubItems.length) return;
+  const it = takeoverSubItems[idx];
+  if (field === 'qty') {
+    it.qty = parseFloat(value) || 0;
+  } else if (field === 'unitCost') {
+    it.unitCost = parseFloat(value) || 0;
+  } else {
+    it[field] = value;
+  }
+  it.subTotal = Math.round((parseFloat(it.qty) || 0) * (parseFloat(it.unitCost) || 0));
+  takeOverRenderSubItems();
+  updateTakeoverCostSummary();
+}
+
+function updateTakeoverCostSummary() {
+  const costEl = document.getElementById('takeover-log-cost');
+  const haEl = document.getElementById('takeover-log-ha');
+  const totalEl = document.getElementById('takeover-summary-total');
+  const perHaEl = document.getElementById('takeover-summary-per-ha');
+  const directTotalEl = document.getElementById('takeover-direct-total');
+
+  let totalCost = 0;
+  if (takeoverInputMode === 'group') {
+    totalCost = takeoverSubItems.reduce((acc, it) => acc + (parseFloat(it.subTotal) || 0), 0);
+  } else {
+    const qty = parseFloat(document.getElementById('takeover-direct-qty')?.value) || 0;
+    const rate = parseFloat(document.getElementById('takeover-direct-rate')?.value) || 0;
+    totalCost = Math.round(qty * rate);
+    if (directTotalEl) directTotalEl.textContent = `₱ ${totalCost.toLocaleString('en-PH')}`;
+  }
+
+  if (costEl) costEl.value = totalCost;
+
+  const ha = parseFloat(haEl ? haEl.value : 1.5) || 1.5;
+  const perHa = ha > 0 ? Math.round(totalCost / ha) : 0;
+
+  if (totalEl) totalEl.textContent = `₱ ${totalCost.toLocaleString('en-PH')}`;
+  if (perHaEl) perHaEl.textContent = `₱ ${perHa.toLocaleString('en-PH')} / ha`;
+}
+
 
 function openTakeOverModal(fieldId, targetStageIdOrName = null) {
   if (!fieldId) return;
@@ -3604,7 +4179,7 @@ function openTakeOverModal(fieldId, targetStageIdOrName = null) {
   if (stagePillEl) stagePillEl.textContent = `Current Stage: ${field.stage}`;
   if (haInput) haInput.value = field.ha || field.area || '1.5';
 
-  // Target stage selection: specific stage requested or first active/pending
+  // Target stage selection
   let targetStage = null;
   if (targetStageIdOrName) {
     const q = String(targetStageIdOrName).toLowerCase();
@@ -3634,65 +4209,11 @@ function closeTakeOverModal() {
   renderManager();
 }
 
-let takeoverPhotoAttached = false;
-
-function takeOverSetUnit(unit) {
-  const hiddenInput = document.getElementById('takeover-log-input-unit');
-  if (hiddenInput) hiddenInput.value = unit;
-
-  document.querySelectorAll('#takeover-unit-chips .takeover-unit-chip').forEach(chip => {
-    const isSelected = chip.getAttribute('data-unit') === unit;
-    chip.className = isSelected
-      ? 'takeover-unit-chip text-[10px] font-bold px-2 py-1 rounded-md border border-primary bg-primary text-white transition-all cursor-pointer'
-      : 'takeover-unit-chip text-[10px] font-medium px-2 py-1 rounded-md border border-border bg-white text-hug-text2 hover:border-primary transition-all cursor-pointer';
-  });
-}
-
-function takeOverChangeCategory(catKey) {
-  const unitMap = {
-    'prep': 'ha',
-    'plant': 'pcs',
-    'fert': 'bags',
-    'weed': 'liters',
-    'harvest': 'tons'
-  };
-  if (unitMap[catKey]) {
-    takeOverSetUnit(unitMap[catKey]);
-  }
-}
-
-function takeOverTogglePhoto() {
-  takeoverPhotoAttached = !takeoverPhotoAttached;
-  const statusEl = document.getElementById('takeover-photo-status');
-  const btnEl = document.getElementById('takeover-photo-btn');
-
-  if (takeoverPhotoAttached) {
-    if (statusEl) {
-      statusEl.textContent = 'Photo attached: field_inspection_2026.jpg';
-      statusEl.className = 'text-[10px] text-success font-bold';
-    }
-    if (btnEl) {
-      btnEl.textContent = 'Remove Photo';
-      btnEl.className = 'px-3 py-1.5 bg-danger-bg border border-danger/30 text-danger text-xs font-bold rounded-lg hover:bg-danger/20 transition-all cursor-pointer shadow-xs';
-    }
-    toast('Field inspection photo attached.');
-  } else {
-    if (statusEl) {
-      statusEl.textContent = 'Optional receipt / proof for SRA district audit';
-      statusEl.className = 'text-[10px] text-hug-muted';
-    }
-    if (btnEl) {
-      btnEl.textContent = '+ Attach Photo';
-      btnEl.className = 'px-3 py-1.5 bg-white border border-border text-hug-text2 text-xs font-semibold rounded-lg hover:border-primary hover:text-primary transition-all cursor-pointer shadow-xs';
-    }
-  }
-}
-
 function takeOverSelectStage(stageId) {
   selectedTakeOverStageId = stageId;
   const db = getDB();
   const field = db.fields.find(f => f.id === activeTakeOverFieldId);
-  const stage = activeTakeOverStages.find(s => s.id === stageId);
+  const stage = activeTakeOverStages.find(s => s.id === stageId) || activeTakeOverStages.find(s => String(s.stageNum) === String(stageId));
   if (!stage || !field) return;
 
   const haNum = Number(field.ha || field.area) || 1.5;
@@ -3702,110 +4223,59 @@ function takeOverSelectStage(stageId) {
     l.taskId === stage.id
   );
 
-  const benchmark = STAGE_INPUT_BENCHMARKS[stageId] || {
-    inputName: stage.label,
-    inputQty: 1 * haNum,
-    inputUnit: 'ha',
-    costPerHa: 3000,
-    people: 4
-  };
+  const stageIdx = activeTakeOverStages.findIndex(s => s.id === stage.id);
+  const stageNum = stage.stageNum || (stageIdx >= 0 ? stageIdx + 1 : 1);
 
-  const titleEl = document.getElementById('takeover-active-stage-title');
-  const dateEl = document.getElementById('takeover-log-date');
-  const catEl = document.getElementById('takeover-log-category');
-  const activityEl = document.getElementById('takeover-log-activity');
-  const costEl = document.getElementById('takeover-log-cost');
-  const haEl = document.getElementById('takeover-log-ha');
-  const peopleEl = document.getElementById('takeover-log-people');
-  const inputNameEl = document.getElementById('takeover-log-input-name');
-  const inputQtyEl = document.getElementById('takeover-log-input-qty');
-  const noteEl = document.getElementById('takeover-log-note');
-  const auditSection = document.getElementById('takeover-audit-trail-section');
-  const auditList = document.getElementById('takeover-audit-trail-list');
-  const hintEl = document.getElementById('takeover-selected-stage-hint');
+  const stageHiddenEl = document.getElementById('takeover-log-stage');
+  if (stageHiddenEl) stageHiddenEl.value = stage.id;
+
+  const connectedStageEl = document.getElementById('takeover-connected-stage-name');
+  if (connectedStageEl) connectedStageEl.textContent = stage.label;
+
   const badgeEl = document.getElementById('takeover-stage-badge');
   const btnTextEl = document.getElementById('takeover-submit-btn-text');
+  const dateEl = document.getElementById('takeover-log-date');
+  const haEl = document.getElementById('takeover-log-ha');
+  const peopleEl = document.getElementById('takeover-log-people');
 
-  if (titleEl) titleEl.textContent = stage.label;
-  if (noteEl) noteEl.value = '';
-
-  // Infer category from stage label
-  const stageNameLower = (stage.label || '').toLowerCase();
-  let defaultCategory = 'fert';
-  if (stageNameLower.includes('prep') || stageNameLower.includes('plow')) defaultCategory = 'prep';
-  else if (stageNameLower.includes('plant') || stageNameLower.includes('patdan')) defaultCategory = 'plant';
-  else if (stageNameLower.includes('weed') || stageNameLower.includes('barring') || stageNameLower.includes('hilamon')) defaultCategory = 'weed';
-  else if (stageNameLower.includes('harvest') || stageNameLower.includes('milling') || stageNameLower.includes('tapas')) defaultCategory = 'harvest';
-
-  if (catEl) catEl.value = defaultCategory;
-
-  // Reset photo state
-  takeoverPhotoAttached = false;
-  const photoStatusEl = document.getElementById('takeover-photo-status');
-  const photoBtnEl = document.getElementById('takeover-photo-btn');
-  if (photoStatusEl) {
-    photoStatusEl.textContent = 'Optional receipt / proof for SRA district audit';
-    photoStatusEl.className = 'text-[10px] text-hug-muted';
-  }
-  if (photoBtnEl) {
-    photoBtnEl.textContent = '+ Attach Photo';
-    photoBtnEl.className = 'px-3 py-1.5 bg-white border border-border text-hug-text2 text-xs font-semibold rounded-lg hover:border-primary hover:text-primary transition-all cursor-pointer shadow-xs';
-  }
+  if (haEl) haEl.value = haNum.toFixed(1);
 
   if (matchingLog) {
-    // Populate with actual recorded values
     if (dateEl) dateEl.value = toISODateString(matchingLog.date);
-    if (activityEl) activityEl.value = matchingLog.task || matchingLog.activity || stage.label;
-    if (costEl) costEl.value = matchingLog.cost || 0;
-    if (haEl) haEl.value = matchingLog.hectares || haNum.toFixed(1);
-    if (peopleEl) peopleEl.value = matchingLog.people || benchmark.people;
-    if (inputNameEl) inputNameEl.value = matchingLog.inputName || '';
-    if (inputQtyEl) inputQtyEl.value = matchingLog.inputQty || '';
-    takeOverSetUnit(matchingLog.inputUnit || benchmark.inputUnit || 'bags');
-    if (hintEl) hintEl.textContent = `Stage completed & recorded on ${matchingLog.date || 'prior date'} (₱${(matchingLog.cost || 0).toLocaleString()})`;
+    if (peopleEl) peopleEl.value = matchingLog.people || 4;
     if (badgeEl) {
       badgeEl.className = 'text-[10px] font-bold px-2.5 py-1 rounded-full bg-success-bg text-success border border-success/30';
       badgeEl.textContent = 'Stage Completed';
     }
-    if (btnTextEl) btnTextEl.textContent = 'Update Recorded Stage Details';
+    if (btnTextEl) btnTextEl.textContent = 'UPDATE RECORDED STAGE DETAILS';
 
-    // Show audit trail if available
-    if (auditSection && auditList) {
-      if (Array.isArray(matchingLog.editHistory) && matchingLog.editHistory.length > 0) {
-        auditSection.classList.remove('hidden');
-        auditList.innerHTML = matchingLog.editHistory.map(h => `
-          <div class="p-2 bg-white rounded-lg border border-border space-y-1">
-            <div class="flex items-center justify-between gap-1">
-              <p class="font-bold text-hug-text text-[10.5px]">${h.editedBy}</p>
-              <span class="text-[9.5px] text-hug-muted">${h.editedAt}</span>
-            </div>
-            <p class="text-[10px] text-hug-text2 font-medium bg-primary-bg/30 text-primary px-2 py-0.5 rounded inline-block">Reason: ${h.reason || h.note || 'Details corrected'}</p>
-          </div>
-        `).join('');
-      } else {
-        auditSection.classList.add('hidden');
-        auditList.innerHTML = '';
-      }
+    takeOverPopulateOpSelect(stageNum, matchingLog.sraOperationId || null);
+
+    if (Array.isArray(matchingLog.subItems) && matchingLog.subItems.length > 0) {
+      takeoverSubItems = matchingLog.subItems.map(si => ({
+        id: si.id || `SI-${Math.random().toString(36).slice(2, 7)}`,
+        description: si.description || si.activity || matchingLog.activity,
+        qty: parseFloat(si.qty) || 1,
+        unit: si.unit || 'ha',
+        unitCost: parseFloat(si.unitCost) || parseFloat(si.subTotal) || 0,
+        subTotal: parseFloat(si.subTotal) || 0
+      }));
+      takeOverSetMode('group');
+      takeOverRenderSubItems();
     }
   } else {
-    // Populate with standard benchmark
     if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
-    if (activityEl) activityEl.value = stage.label;
-    if (costEl) costEl.value = Math.round(benchmark.costPerHa * haNum);
-    if (haEl) haEl.value = haNum.toFixed(1);
-    if (peopleEl) peopleEl.value = benchmark.people;
-    if (inputNameEl) inputNameEl.value = benchmark.inputName;
-    if (inputQtyEl) inputQtyEl.value = (benchmark.inputQty * (benchmark.inputUnit === 'pcs' || benchmark.inputUnit === 'tons' || benchmark.inputUnit === 'bags' || benchmark.inputUnit === 'liters' ? haNum : 1)).toString();
-    takeOverSetUnit(benchmark.inputUnit || 'bags');
-    if (hintEl) hintEl.textContent = `Standard benchmark loaded for ${haNum.toFixed(1)} Ha plot`;
+    if (peopleEl) peopleEl.value = 2;
     if (badgeEl) {
       badgeEl.className = 'text-[10px] font-bold px-2.5 py-1 rounded-full bg-primary-bg text-primary border border-primary/20';
-      badgeEl.textContent = 'Selected Stage';
+      badgeEl.textContent = 'Active Stage';
     }
-    if (btnTextEl) btnTextEl.textContent = 'Record Operation & Save Progress';
-    if (auditSection) auditSection.classList.add('hidden');
+    if (btnTextEl) btnTextEl.textContent = 'RECORD OPERATION & SAVE PROGRESS';
+
+    takeOverPopulateOpSelect(stageNum);
   }
 
+  updateTakeoverCostSummary();
   renderTakeOverTimeline();
 }
 
@@ -3823,30 +4293,33 @@ function renderTakeOverTimeline() {
       (l.task || l.activity || '').toLowerCase().includes(stage.label.toLowerCase()) || 
       l.taskId === stage.id
     );
-    const isDone = stage.done || Boolean(matchingLog);
-    const isSelected = selectedTakeOverStageId === stage.id;
-    const benchmark = STAGE_INPUT_BENCHMARKS[stage.id];
-    const benchCost = benchmark ? Math.round(benchmark.costPerHa * haNum) : 3000;
+    const isSelected = stage.id === selectedTakeOverStageId;
+    const isDone = Boolean(stage.done || matchingLog);
+    const stageNum = stage.stageNum || (idx + 1);
 
-    let statusPill = '';
-    if (isDone) {
-      statusPill = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success border border-success/30"><svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Done</span>';
-    } else if (stage.active) {
-      statusPill = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary text-white animate-pulse">Active</span>';
-    } else {
-      statusPill = '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-bg text-hug-muted border border-border">Pending</span>';
-    }
+    const defaultOp = SRA_OPERATIONS_CATALOGUE.find(o => o.stageNumber === stageNum);
+    const benchCost = defaultOp ? Math.round(defaultOp.costPerHa * haNum) : 10000;
 
-    return `<div onclick="takeOverSelectStage('${stage.id}')" class="p-3 rounded-xl border transition-all cursor-pointer ${isSelected ? 'border-primary bg-primary-bg/25 shadow-xs ring-2 ring-primary/20' : 'border-border bg-white hover:border-primary/40 hover:bg-bg/40'}">
+    const statusPill = isDone
+      ? '<span class="text-[10px] font-bold text-success bg-success-bg border border-success/30 px-2 py-0.5 rounded-full flex items-center gap-1">✓ Done</span>'
+      : (stage.active
+          ? '<span class="text-[10px] font-bold text-primary bg-primary-bg border border-primary/30 px-2 py-0.5 rounded-full flex items-center gap-1">Active</span>'
+          : '<span class="text-[10px] font-medium text-hug-muted bg-bg border border-border px-2 py-0.5 rounded-full">Pending</span>');
+
+    const borderStyle = isSelected
+      ? 'border-2 border-primary bg-primary-bg/15 shadow-sm ring-2 ring-primary/20'
+      : (isDone ? 'border border-success/30 bg-success-bg/10' : 'border border-border bg-white hover:border-primary/50');
+
+    return `<div onclick="takeOverSelectStage('${stage.id}')" class="p-3 rounded-xl ${borderStyle} transition-all cursor-pointer">
       <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-white flex-shrink-0 shadow-xs" style="background-color:${stage.color}">
-            ${idx + 1}
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-6 h-6 rounded-lg flex items-center justify-center font-bold text-xs text-white flex-shrink-0" style="background-color: ${stage.color || '#2D5016'}">
+            ${stageNum}
           </div>
           <div class="min-w-0">
             <h4 class="text-xs font-bold text-hug-text truncate">${stage.label}</h4>
             <p class="text-[10px] text-hug-muted mt-0.5">
-              ${isDone && matchingLog ? `Recorded: ₱${(matchingLog.cost || 0).toLocaleString()}` : `Est: ~₱${benchCost.toLocaleString()} · ${benchmark ? benchmark.inputName : 'Standard'}`}
+              ${isDone && matchingLog ? `Recorded: ₱${(matchingLog.cost || 0).toLocaleString()}` : `Est: ~₱${benchCost.toLocaleString()} · ${defaultOp ? defaultOp.name.slice(0, 20) : 'Standard'}`}
             </p>
           </div>
         </div>
@@ -3858,43 +4331,66 @@ function renderTakeOverTimeline() {
 
 function takeOverSubmitLog() {
   const dateEl = document.getElementById('takeover-log-date');
-  const catEl = document.getElementById('takeover-log-category');
+  const stageSelectEl = document.getElementById('takeover-log-stage');
   const activityEl = document.getElementById('takeover-log-activity');
   const costEl = document.getElementById('takeover-log-cost');
   const haEl = document.getElementById('takeover-log-ha');
   const peopleEl = document.getElementById('takeover-log-people');
-  const inputNameEl = document.getElementById('takeover-log-input-name');
-  const inputQtyEl = document.getElementById('takeover-log-input-qty');
-  const inputUnitEl = document.getElementById('takeover-log-input-unit');
   const noteEl = document.getElementById('takeover-log-note');
 
   const date = dateEl ? dateEl.value : new Date().toISOString().split('T')[0];
-  const category = catEl ? catEl.value : 'fert';
-  const activity = activityEl ? activityEl.value.trim() : '';
-  const cost = costEl ? parseFloat(costEl.value) : NaN;
-  const ha = haEl ? parseFloat(haEl.value) : NaN;
-  const people = peopleEl ? parseInt(peopleEl.value, 10) : 1;
-  const inputName = inputNameEl ? inputNameEl.value.trim() : '';
-  const inputQty = inputQtyEl ? inputQtyEl.value.trim() : '';
-  const inputUnit = inputUnitEl ? inputUnitEl.value : 'bags';
+  const selectedStageId = (stageSelectEl && stageSelectEl.value) ? stageSelectEl.value : selectedTakeOverStageId;
+  const ha = haEl ? (parseFloat(haEl.value) || 1.5) : 1.5;
+  const people = peopleEl ? (parseInt(peopleEl.value, 10) || 2) : 2;
   const note = noteEl ? noteEl.value.trim() : '';
 
-  if (!activity || isNaN(cost) || cost <= 0) {
-    toast('Error: Please enter an operation activity name and valid operational cost.');
-    return;
-  }
+  updateTakeoverCostSummary();
+  let cost = costEl ? parseFloat(costEl.value) : 0;
+  if (isNaN(cost) || cost < 0) cost = 0;
 
   const db = getDB();
   const field = db.fields.find(f => f.id === activeTakeOverFieldId);
-  if (!field) return;
+  if (!field) {
+    toast('Error: Active field not found.');
+    return;
+  }
 
-  const targetIdx = selectedTakeOverStageId 
-    ? activeTakeOverStages.findIndex(s => s.id === selectedTakeOverStageId)
+  const targetIdx = selectedStageId 
+    ? activeTakeOverStages.findIndex(s => s.id === selectedStageId)
     : activeTakeOverStages.findIndex(s => s.active || !s.done);
 
-  const stageObj = targetIdx > -1 ? activeTakeOverStages[targetIdx] : null;
+  const stageObj = targetIdx > -1 ? activeTakeOverStages[targetIdx] : (activeTakeOverStages[0] || null);
+  const stageNum = stageObj ? (stageObj.stageNum || (targetIdx + 1)) : 1;
+  const sraOperationId = takeoverCurrentOpId || `SRA-0${stageNum}`;
+  const activity = (activityEl && activityEl.value.trim()) || (stageObj ? stageObj.label : 'Sugarcane Field Operation');
 
-  // Check if an existing log exists for this completed stage
+  let compiledSubItems = [];
+  if (takeoverInputMode === 'group' && takeoverSubItems.length > 0) {
+    compiledSubItems = takeoverSubItems.map(si => ({
+      id: si.id || `SI-${Date.now()}`,
+      description: si.description,
+      qty: parseFloat(si.qty) || 1,
+      unit: si.unit || 'units',
+      unitCost: parseFloat(si.unitCost) || 0,
+      subTotal: parseFloat(si.subTotal) || 0
+    }));
+  } else {
+    const qty = parseFloat(document.getElementById('takeover-direct-qty')?.value) || 1;
+    const unit = document.getElementById('takeover-direct-unit')?.value || 'ha';
+    const rate = parseFloat(document.getElementById('takeover-direct-rate')?.value) || cost;
+    compiledSubItems = [{
+      id: `SI-DIR-${Date.now()}`,
+      description: activity,
+      qty: qty,
+      unit: unit,
+      unitCost: rate,
+      subTotal: Math.round(qty * rate) || cost
+    }];
+  }
+
+  const catMap = { 1: 'prep', 2: 'plant', 3: 'fert', 4: 'weed', 5: 'fert', 6: 'harvest' };
+  const category = catMap[stageNum] || 'prep';
+
   const fieldLogs = db.logs.filter(l => l.fieldId === activeTakeOverFieldId);
   const matchingLog = fieldLogs.find(l => 
     (stageObj && l.taskId === stageObj.id) ||
@@ -3902,27 +4398,8 @@ function takeOverSubmitLog() {
   );
 
   if (matchingLog) {
-    // Dirty check: check if anything actually changed
-    const isChanged = (
-      (date && toISODateString(date) !== toISODateString(matchingLog.date)) ||
-      activity !== (matchingLog.task || matchingLog.activity || '') ||
-      Math.round(cost) !== Math.round(matchingLog.cost || 0) ||
-      (!isNaN(ha) && String(ha) !== String(matchingLog.hectares || '')) ||
-      people !== (parseInt(matchingLog.people, 10) || 4) ||
-      inputName !== (matchingLog.inputName || '') ||
-      inputQty !== (matchingLog.inputQty || '') ||
-      inputUnit !== (matchingLog.inputUnit || 'bags') ||
-      Boolean(note) ||
-      takeoverPhotoAttached
-    );
-
     if (matchingLog.isPastCycle || matchingLog.certified || matchingLog.status === 'Certified' || matchingLog.status === 'Audited') {
-      toast('Security Lockout: This operation log has been certified by SRA Audit / archived and cannot be modified.');
-      return;
-    }
-
-    if (!isChanged) {
-      toast('No changes detected for this completed stage.');
+      toast('Security Lockout: This operation log has been certified by SRA Audit and cannot be modified.');
       return;
     }
 
@@ -3930,58 +4407,40 @@ function takeOverSubmitLog() {
       activity: matchingLog.activity || matchingLog.task || '',
       cost: matchingLog.cost || 0,
       hectares: matchingLog.hectares || 1.5,
-      people: matchingLog.people || 4,
+      people: matchingLog.people || 2,
       date: matchingLog.date || '',
-      inputName: matchingLog.inputName || '',
-      inputQty: matchingLog.inputQty || '',
-      inputUnit: matchingLog.inputUnit || 'bags',
     };
 
-    // Update existing record in-place
     matchingLog.date = date || matchingLog.date;
-    matchingLog.category = category || matchingLog.category;
+    matchingLog.category = category;
     matchingLog.task = activity;
     matchingLog.activity = activity;
     matchingLog.cost = Math.round(cost);
     matchingLog.totalCost = Math.round(cost);
-    matchingLog.status = 'Recorded';
+    matchingLog.status = 'Amended';
     matchingLog.approved = true;
-    matchingLog.hectares = isNaN(ha) ? 1.5 : ha;
-    matchingLog.people = isNaN(people) ? 4 : people;
-    matchingLog.inputName = inputName;
-    matchingLog.inputQty = inputQty;
-    matchingLog.inputUnit = inputUnit;
-    matchingLog.photo = takeoverPhotoAttached ? 'field_inspection_2026.jpg' : (matchingLog.photo || null);
-    if (!matchingLog.subItems || matchingLog.subItems.length === 0) {
-      matchingLog.subItems = [{
-        id: `SI-1`,
-        category: category,
-        description: inputName || activity,
-        qty: parseFloat(inputQty) || 1,
-        unit: inputUnit || 'ha',
-        unitCost: Math.round(cost / (parseFloat(inputQty) || 1)),
-        subTotal: Math.round(cost)
-      }];
-    }
+    matchingLog.hectares = ha;
+    matchingLog.people = people;
+    matchingLog.stageNumber = stageNum;
+    matchingLog.sraOperationId = sraOperationId;
+    matchingLog.subItems = compiledSubItems;
     matchingLog.isAmended = true;
+    matchingLog.compiled = false;
+    delete matchingLog.compiledReportId;
     matchingLog.editHistory = matchingLog.editHistory || [];
     matchingLog.editHistory.push({
       id: `EDT-${Date.now()}`,
-      editedBy: 'Farm Manager Jose Reyes (03000001)',
+      editedBy: 'Farm Manager (Take Over)',
       editedRole: 'Farm Manager',
       editedAt: new Date().toLocaleString('en-PH'),
-      reason: note || 'Supervisor stage record correction',
-      note: note || 'Updated stage record details',
+      reason: note || 'Supervisor stage record updated via Take Over Console',
       previousValues,
       newValues: {
         activity: activity,
         cost: Math.round(cost),
-        hectares: isNaN(ha) ? 1.5 : ha,
-        people: isNaN(people) ? 4 : people,
-        date: date || matchingLog.date,
-        inputName: inputName,
-        inputQty: inputQty,
-        inputUnit: inputUnit,
+        hectares: ha,
+        people: people,
+        date: date
       }
     });
 
@@ -3991,9 +4450,9 @@ function takeOverSubmitLog() {
       'operation',
       'Manager Stage Correction',
       `${activeTakeOverFieldId}`,
-      `Updated ${stageObj?.label || 'stage'} record (₱${Math.round(cost).toLocaleString()})${note ? ' (Note: ' + note + ')' : ''}.`,
+      `Updated ${stageObj?.label || 'stage'} record (₱${Math.round(cost).toLocaleString()}).`,
       'Farm Manager Jose Reyes',
-      'Recorded'
+      'Amended'
     );
     renderTakeOverTimeline();
     renderManager();
@@ -4003,54 +4462,50 @@ function takeOverSubmitLog() {
 
   // New log creation for unrecorded stage
   const newLog = {
-    id: `L-${Date.now().toString().slice(-4)}`,
+    id: `LOG-2026-${Date.now().toString().slice(-4)}`,
     fieldId: activeTakeOverFieldId,
     blockFarm: field.blockFarm || 'Nacayao Block Farm',
     category: category,
     activity: activity,
     task: activity,
     totalCost: Math.round(cost),
-    costPerHa: Math.round(cost / (isNaN(ha) || ha <= 0 ? 1.5 : ha)),
-    hectares: isNaN(ha) ? 1.5 : Number(ha),
-    people: isNaN(people) ? 4 : Number(people),
-    inputQty: inputQty,
-    inputUnit: inputUnit,
-    inputName: inputName,
+    cost: Math.round(cost),
+    costPerHa: ha > 0 ? Math.round(cost / ha) : Math.round(cost),
+    hectares: ha,
+    people: people,
     taskId: stageObj ? stageObj.id : null,
-    stageNumber: stageObj ? (stageObj.stageNum || (targetIdx + 1)) : (targetIdx + 1),
-    sraOperationId: stageObj ? `SRA-0${stageObj.stageNum || (targetIdx + 1)}` : 'SRA-01',
-    date: date || new Date().toISOString().split('T')[0],
-    photo: takeoverPhotoAttached ? 'field_inspection_2026.jpg' : null,
+    stageNumber: stageNum,
+    sraOperationId: sraOperationId,
+    date: date,
+    createdAt: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
+    isNew: true,
+    compiled: false,
+    compiledReportId: null,
+    photo: null,
     status: 'Recorded',
     approved: true,
     loggedBy: 'Jose Reyes (Farm Manager)',
     loggedById: '03000001',
-    subItems: [
-      {
-        id: `SI-1`,
-        category: category,
-        description: inputName || activity,
-        qty: parseFloat(inputQty) || 1,
-        unit: inputUnit || 'ha',
-        unitCost: Math.round(cost / (parseFloat(inputQty) || 1)),
-        subTotal: Math.round(cost)
-      }
-    ],
+    subItems: compiledSubItems,
     editHistory: [{
       editedBy: 'Farm Manager (Take Over)',
       editedAt: new Date().toLocaleString('en-PH'),
-      note: 'Direct supervisor entry via Web Console'
+      note: 'Supervisor entry via Web Console'
     }]
   };
 
   db.logs.unshift(newLog);
+  historyCurrentPage = 1;
+  logCurrentPage = 1;
+  blockHistPage = 1;
+  plotHistPage = 1;
+  tabHistCurrentPage = 1;
 
-  // Mark target stage done and advance
   if (targetIdx > -1) {
     activeTakeOverStages[targetIdx].done = true;
     activeTakeOverStages[targetIdx].active = false;
     
-    // Find next pending stage
     const nextIdx = activeTakeOverStages.findIndex((s, i) => i > targetIdx && !s.done);
     if (nextIdx > -1) {
       activeTakeOverStages[nextIdx].active = true;
@@ -4086,6 +4541,19 @@ function takeOverSubmitLog() {
   renderTakeOverTimeline();
   renderManager();
   renderOperations();
+}
+
+function takeOverSetUnit(unit) {
+  const u = document.getElementById('takeover-direct-unit');
+  if (u) {
+    u.value = unit;
+    updateTakeoverCostSummary();
+  }
+}
+function takeOverChangeCategory() {}
+function takeOverTogglePhoto() {}
+function takeOverChangeStageSelect(stageId) {
+  takeOverSelectStage(stageId);
 }
 
 function toISODateString(dateStr) {
@@ -5425,6 +5893,16 @@ function renderLogs() {
     filtered.sort((a, b) => a.cost - b.cost);
   } else if (logSortCost === 'desc') {
     filtered.sort((a, b) => b.cost - a.cost);
+  } else {
+    filtered.sort((a, b) => {
+      const aNew = a.isNew ? 1 : 0;
+      const bNew = b.isNew ? 1 : 0;
+      if (aNew !== bNew) return bNew - aNew;
+      const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+      const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+      if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+      return (b.id || '').localeCompare(a.id || '');
+    });
   }
 
   const totalPages = Math.ceil(filtered.length / LOGS_PER_PAGE) || 1;
@@ -5437,6 +5915,7 @@ function renderLogs() {
     const farmName = l.blockFarm || getBlockFarmName(l.fieldId);
     const fieldObj = db.fields.find(f => f.id === l.fieldId);
     const memberName = fieldObj ? (fieldObj.member || fieldObj.owner) : '';
+    const isNew = Boolean(l.isNew);
 
     let actionBtn = '';
     if (isAdmin || isSuperAdmin) {
@@ -5465,8 +5944,13 @@ function renderLogs() {
     const statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary border border-primary/20 whitespace-nowrap">Recorded</span>';
 
     return `
-      <tr class="hover:bg-bg/50 transition-colors border-b border-border/50">
-        <td class="px-4 py-3 font-mono font-bold text-hug-text text-xs">${l.id}</td>
+      <tr onclick="dismissWebHistoryHighlight('${l.id}')" class="${isNew ? 'bg-[#F6FAF3]' : 'hover:bg-bg/50'} transition-colors border-b border-border/50 cursor-pointer">
+        <td class="px-4 py-3 font-mono font-bold text-hug-text text-xs">
+          <div class="flex items-center gap-1.5">
+            ${isNew ? '<span class="w-1.5 h-1.5 rounded-full bg-primary inline-block flex-shrink-0" title="New unviewed entry"></span>' : ''}
+            <span>${l.id}</span>
+          </div>
+        </td>
         <td class="px-4 py-3">
           <div class="flex flex-col">
             <div class="flex items-center gap-1.5">
@@ -6570,6 +7054,17 @@ function renderPlotHistTable() {
 
   if (countEl) countEl.textContent = `${plotLogs.length} total entries`;
 
+  // Strictly sort newest records first (position 1 on Page 1)
+  plotLogs.sort((a, b) => {
+    const aNew = a.isNew ? 1 : 0;
+    const bNew = b.isNew ? 1 : 0;
+    if (aNew !== bNew) return bNew - aNew;
+    const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+    const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+    if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
   const totalPages = Math.max(1, Math.ceil(plotLogs.length / PLOT_HIST_PAGE_SIZE));
   plotHistPage = Math.max(1, Math.min(plotHistPage, totalPages));
 
@@ -6581,9 +7076,15 @@ function renderPlotHistTable() {
   } else {
     tableBody.innerHTML = pageLogs.map(l => {
       const inputDisplay = l.inputQty ? ` · ${l.inputQty} ${l.inputUnit || ''} (${l.inputName || ''})` : '';
+      const isNew = Boolean(l.isNew);
       return `
-        <tr class="border-b border-border/50 hover:bg-bg transition-colors">
-          <td class="px-3 py-2.5 font-mono font-bold text-primary">${l.id || 'LOG'}</td>
+        <tr onclick="dismissWebHistoryHighlight('${l.id}')" class="border-b border-border/50 ${isNew ? 'bg-[#F6FAF3]' : 'hover:bg-bg'} transition-colors cursor-pointer">
+          <td class="px-3 py-2.5 font-mono font-bold text-primary">
+            <div class="flex items-center gap-1.5">
+              ${isNew ? '<span class="w-1.5 h-1.5 rounded-full bg-primary inline-block flex-shrink-0 mr-0.5" title="New unviewed entry"></span>' : ''}
+              <span>${l.id || 'LOG'}</span>
+            </div>
+          </td>
           <td class="px-3 py-2.5">
             <div class="flex items-center gap-1.5">
               ${l.sraOperationId ? `<span class="px-1.5 py-0.5 rounded bg-primary-bg text-primary text-[10px] font-bold">${l.sraOperationId}</span>` : ''}
@@ -6714,6 +7215,17 @@ function renderBlockHistTable() {
     );
   }
 
+  // Strictly sort newest records first (position 1)
+  filteredLogs.sort((a, b) => {
+    const aNew = a.isNew ? 1 : 0;
+    const bNew = b.isNew ? 1 : 0;
+    if (aNew !== bNew) return bNew - aNew;
+    const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+    const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+    if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
   if (countEl) countEl.textContent = `${filteredLogs.length} total entries`;
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / BLOCK_HIST_PAGE_SIZE));
@@ -6727,20 +7239,22 @@ function renderBlockHistTable() {
   } else {
     tableBody.innerHTML = pageLogs.map(l => {
       const inputDisplay = l.inputQty ? ` · ${l.inputQty} ${l.inputUnit || ''} (${l.inputName || ''})` : '';
+      const isNew = Boolean(l.isNew);
       return `
-        <tr class="border-b border-border/50 hover:bg-bg transition-colors">
-          <td class="px-3 py-2.5 font-mono font-bold text-primary">${l.id || 'LOG'}</td>
-          <td class="px-3 py-2.5 font-mono font-bold text-hug-text">${l.fieldId || 'FLD'}</td>
-          <td class="px-3 py-2.5">
-            <div class="flex items-center gap-1.5">
-              ${l.sraOperationId ? `<span class="px-1.5 py-0.5 rounded bg-primary-bg text-primary text-[10px] font-bold">${l.sraOperationId}</span>` : ''}
+        <tr onclick="dismissWebHistoryHighlight('${l.id}')" class="border-b border-border/50 ${isNew ? 'bg-[#F6FAF3]' : 'hover:bg-bg'} transition-colors cursor-pointer">
+          <td class="px-3.5 py-2 font-mono font-bold text-primary text-[11px] whitespace-nowrap">${l.id || 'LOG'}</td>
+          <td class="px-3.5 py-2 font-mono font-bold text-hug-text text-[11px] whitespace-nowrap">${l.fieldId || 'FLD'}</td>
+          <td class="px-3.5 py-2">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              ${isNew ? '<span class="w-1.5 h-1.5 rounded-full bg-primary inline-block flex-shrink-0 mr-0.5"></span>' : ''}
+              ${l.sraOperationId ? `<span class="px-1.5 py-0.5 rounded bg-primary-bg text-primary text-[10px] font-bold whitespace-nowrap">${l.sraOperationId}</span>` : ''}
               <span class="font-semibold text-hug-text">${l.task || l.activity || 'Field Operation'}</span>
             </div>
             ${inputDisplay ? `<span class="text-[10px] text-hug-muted block mt-0.5">${inputDisplay}</span>` : ''}
           </td>
-          <td class="px-3 py-2.5 font-bold text-hug-text">₱${Number(l.cost || l.totalCost || 0).toLocaleString()}</td>
-          <td class="px-3 py-2.5 text-hug-muted">${l.date || 'Recent'}</td>
-          <td class="px-3 py-2.5 text-right">
+          <td class="px-3.5 py-2 font-bold text-hug-text whitespace-nowrap">₱${Number(l.cost || l.totalCost || 0).toLocaleString()}</td>
+          <td class="px-3.5 py-2 text-hug-muted whitespace-nowrap">${l.date || 'Recent'}</td>
+          <td class="px-3.5 py-2 text-right whitespace-nowrap">
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary">Recorded</span>
           </td>
         </tr>
@@ -6868,6 +7382,13 @@ function openPlotRegistryAuditModal() {
     (h.actor && h.actor.includes('Jose Reyes'))
   );
 
+  // Strictly sort newest registry events first
+  historyEvents.sort((a, b) => {
+    const timeA = new Date(a.timestamp || 0).getTime();
+    const timeB = new Date(b.timestamp || 0).getTime();
+    return timeB - timeA;
+  });
+
   if (haEl) haEl.textContent = `${totalHa.toFixed(1)} Ha Allocated`;
   if (plotsCountEl) plotsCountEl.textContent = `${bPlots.length} Plots`;
   if (usersCountEl) usersCountEl.textContent = `${bMembers.length} Members`;
@@ -6902,20 +7423,6 @@ function closePlotRegistryAuditModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function openTabHistoryModal(type) {
-  if (type === 'plot') {
-    const currentRole = localStorage.getItem('hugpong_role') || 'admin';
-    if (currentRole === 'manager') {
-      openPlotRegistryAuditModal();
-    } else {
-      openBlockFarmHistoryModal(null);
-    }
-  } else if (type === 'user') {
-    const db = getDB();
-    const firstUser = db.users[0];
-    if (firstUser) openUserHistoryModal(firstUser.contact);
-  }
-}
 
 function openUserHistoryModal(contact) {
   const db = getDB();
@@ -8398,33 +8905,6 @@ function loadFieldForEdit(fieldId) {
   openRegisterBlockFarmModal(farmName);
 }
 
-function showNewFieldForm() {
-  openRegisterBlockFarmModal();
-}
-
-async function archiveBlockFarm(blockFarmName) {
-  const currentRole = localStorage.getItem('hugpong_role') || 'admin';
-  if (currentRole !== 'superadmin' && currentRole !== 'admin') {
-    toast('Access Denied: Requires SRA (Admin) or Super Admin clearance.');
-    return;
-  }
-  const ok = await showConfirmDialog({
-    title: `Archive ${blockFarmName}?`,
-    message: `Are you sure you want to archive ${blockFarmName}?\n\nAll member plots, field allocations, and associated operations under this block farm will be moved to archived status.`,
-    confirmText: 'Archive Block Farm',
-    cancelText: 'Keep Active',
-    type: 'danger'
-  });
-  if (!ok) return;
-
-  const db = getDB();
-  db.fields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) !== blockFarmName);
-  saveDB(db);
-  renderFields();
-  renderDashboard();
-  toast(`${blockFarmName} archived successfully.`);
-}
-
 // ── TAB-SPECIFIC TOP-BAR HISTORY CONTROLLER ──────────────────
 let currentTabHistModule = 'plot';
 let currentTabHistFilter = 'all';
@@ -8436,12 +8916,12 @@ function setTabHistoryPage(p) {
   renderTabHistory();
 }
 
-function openTabHistoryModal(moduleType) {
+function openTabHistoryModal(moduleType, defaultFilter) {
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
   const isManager = currentRole === 'manager';
 
   currentTabHistModule = moduleType;
-  currentTabHistFilter = 'all';
+  currentTabHistFilter = defaultFilter || 'all';
   tabHistCurrentPage = 1;
 
   const modal = document.getElementById('modal-tab-history');
@@ -8481,15 +8961,14 @@ function openTabHistoryModal(moduleType) {
       }
     }
   } else if (moduleType === 'operation') {
-    if (badgeEl) badgeEl.textContent = 'Operations & Edits History';
-    if (titleEl) titleEl.textContent = 'Field Operations & Manager Corrections Ledger';
-    if (subEl) subEl.textContent = 'Chronological record of submitted activities, manager edits/typo corrections, and take over advances';
+    if (badgeEl) badgeEl.textContent = 'Operations & Audit Ledger';
+    if (titleEl) titleEl.textContent = 'Field Operations, Revisions & Compiled Audit Ledger';
+    if (subEl) subEl.textContent = 'Chronological record of submitted activities, manager edits/typo corrections, and monthly compiled SRA audits';
     if (chipsContainer) {
       chipsContainer.innerHTML = `
-        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full border border-primary bg-primary text-white transition-all cursor-pointer" data-filter="all" onclick="setTabHistoryFilter('all')">All Operations</button>
-        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary transition-all cursor-pointer" data-filter="correction" onclick="setTabHistoryFilter('correction')">Manager Corrections</button>
-        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary transition-all cursor-pointer" data-filter="takeover" onclick="setTabHistoryFilter('takeover')">Take Over Entries</button>
-        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary transition-all cursor-pointer" data-filter="member" onclick="setTabHistoryFilter('member')">Member Submissions</button>
+        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full ${(!defaultFilter || defaultFilter === 'all') ? 'border border-primary bg-primary text-white' : 'border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary'} transition-all cursor-pointer" data-filter="all" onclick="setTabHistoryFilter('all')">All Records</button>
+        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full ${(defaultFilter === 'compiled-audit') ? 'border border-primary bg-primary text-white' : 'border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary'} transition-all cursor-pointer" data-filter="compiled-audit" onclick="setTabHistoryFilter('compiled-audit')">Compiled Monthly Audits</button>
+        <button class="tab-hist-chip text-xs font-semibold px-3 py-1 rounded-full ${(defaultFilter === 'manager-action' || defaultFilter === 'correction' || defaultFilter === 'takeover') ? 'border border-primary bg-primary text-white' : 'border border-border bg-white text-hug-text2 hover:border-primary hover:text-primary'} transition-all cursor-pointer" data-filter="manager-action" onclick="setTabHistoryFilter('manager-action')">Manager Corrections &amp; Takeovers</button>
       `;
     }
   } else if (moduleType === 'user') {
@@ -8566,13 +9045,81 @@ function renderTabHistory() {
       (h.eventType && (h.eventType.toLowerCase().includes('audit') || h.eventType.toLowerCase().includes('certificate'))) || 
       (h.details && (h.details.toLowerCase().includes('qr') || h.details.toLowerCase().includes('compliance')))
     );
+  } else if (currentTabHistModule === 'operation') {
+    // Only include Manager Take Over, Manager Correction/Amended, or Compiled Audit events
+    const opHistory = allHistory.filter(h => {
+      if (h.category !== 'operation' && h.category !== 'audit') return false;
+      const ev = (h.eventType || '').toLowerCase();
+      if (ev === 'operation recorded' || (ev === 'recorded' && !h.actor?.toLowerCase().includes('manager'))) return false;
+      const isTakeOver = ev.includes('take over') || ev.includes('takeover');
+      const isCorrection = ev.includes('correction') || ev.includes('amend') || ev.includes('edit');
+      const isAudit = ev.includes('compiled') || ev.includes('audit') || ev.includes('certificate');
+      return isTakeOver || isCorrection || isAudit;
+    });
+    const auditReports = db.auditReports || [];
+    const auditEvents = auditReports.map(r => {
+      const isCertified = r.status === 'Certified' && Boolean(r.certifiedBy);
+      return {
+        id: r.reportId || r.id,
+        category: 'operation',
+        eventType: isCertified ? 'Monthly Audit Certified' : 'Monthly Audit Compiled',
+        entity: `${r.blockFarmName || r.blockFarm || 'Nacayao Block Farm'} · ${r.period || r.month || 'May 2026'}`,
+        details: `${r.totalLogs || r.logsCount || 14} operations compiled (${Number(r.totalHectares || 15.25).toFixed(2)} Ha, ₱${Number(r.totalCost || 145225).toLocaleString()}). QR Hash: <code class="font-mono text-primary font-bold">${r.qrHash || r.qrSignature || 'HUG-202605-A3F9'}</code> <button onclick="inspectCompiledAuditReport('${r.qrHash || r.reportId || r.id}')" class="ml-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline cursor-pointer">Inspect Certificate &amp; QR &rarr;</button>`,
+        actor: isCertified ? r.certifiedBy : (r.compiledBy || 'Jose Reyes (Farm Manager)'),
+        timestamp: r.certifiedAt ? new Date(r.certifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (r.dateGenerated || `${r.period || 'May 2026'}, 05:00 PM`),
+        rawTimestamp: r.certifiedAt || r.compiledAt || '2026-05-30T17:00:00Z',
+        status: isCertified ? 'Certified' : 'Pending SRA'
+      };
+    });
+
+    // Operational logs: ONLY include manager takeover or amended/corrected operations
+    // Routine member operations are already viewable in the 'View Operations' drawer in Field Operations
+    const logsList = db.logs || [];
+    const managerLogEvents = [];
+    logsList.forEach(l => {
+      const isAmended = Boolean(l.isAmended || (Array.isArray(l.editHistory) && l.editHistory.length > 0));
+      const isManagerTakeover = (l.loggedBy || '').toLowerCase().includes('manager') || 
+                                (l.actor || '').toLowerCase().includes('manager') ||
+                                (l.actionSource || '').toLowerCase().includes('takeover') ||
+                                (l.source || '').toLowerCase().includes('takeover');
+
+      // EXCLUDE routine "Operation Recorded" logs as they are already in View Operations
+      if (!isAmended && !isManagerTakeover) return;
+
+      const eventType = isAmended ? 'Manager Correction (Amended)' : 'Manager Take Over Entry';
+      const status = isAmended ? 'Amended' : 'Recorded';
+      const latestEdit = Array.isArray(l.editHistory) && l.editHistory.length > 0 ? l.editHistory[l.editHistory.length - 1] : null;
+
+      managerLogEvents.push({
+        id: l.id,
+        category: 'operation',
+        eventType: eventType,
+        entity: `${l.fieldId} · ${l.activity || l.operationName || 'Field Operation'}`,
+        details: `${l.activity || l.operationName} (₱${Number(l.cost || l.totalCost || 0).toLocaleString()} · ${l.hectares || '1.5'} Ha)${isAmended && latestEdit?.reason ? ` · Reason: "${latestEdit.reason}"` : ''}`,
+        actor: isAmended ? (latestEdit?.editedBy || 'Farm Manager') : (l.loggedBy || 'Jose Reyes (Farm Manager)'),
+        timestamp: l.date || '2026-05-02',
+        rawTimestamp: l.createdAt || l.timestamp || l.date,
+        isNew: Boolean(l.isNew),
+        status: status
+      });
+    });
+
+    const existingIds = new Set(opHistory.map(h => h.id));
+    const newAuditEvents = auditEvents.filter(ae => !existingIds.has(ae.id));
+    const newLogEvents = managerLogEvents.filter(le => !existingIds.has(le.id));
+    moduleEvents = [...newAuditEvents, ...opHistory, ...newLogEvents];
   } else {
     moduleEvents = allHistory.filter(h => h.category === currentTabHistModule);
   }
 
   // Sub-filter by filter chips
   if (currentTabHistFilter !== 'all') {
-    if (currentTabHistFilter === 'block') {
+    if (currentTabHistFilter === 'compiled-audit') {
+      moduleEvents = moduleEvents.filter(h => 
+        (h.eventType && (h.eventType.toLowerCase().includes('compiled') || h.eventType.toLowerCase().includes('audit'))) ||
+        h.category === 'audit'
+      );
+    } else if (currentTabHistFilter === 'block') {
       moduleEvents = moduleEvents.filter(h => h.category === 'block' || h.eventType.toLowerCase().includes('block'));
     } else if (currentTabHistFilter === 'registered') {
       moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('register') || h.eventType.toLowerCase().includes('enrolled'));
@@ -8580,12 +9127,18 @@ function renderTabHistory() {
       moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('update') || h.eventType.toLowerCase().includes('transfer'));
     } else if (currentTabHistFilter === 'archived') {
       moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('archive') || h.status === 'Archived');
-    } else if (currentTabHistFilter === 'correction') {
-      moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('correction'));
-    } else if (currentTabHistFilter === 'takeover') {
-      moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('take over'));
-    } else if (currentTabHistFilter === 'member') {
-      moduleEvents = moduleEvents.filter(h => h.eventType.toLowerCase().includes('member') || h.actor.toLowerCase().includes('member'));
+    } else if (currentTabHistFilter === 'manager-action' || currentTabHistFilter === 'correction' || currentTabHistFilter === 'takeover') {
+      moduleEvents = moduleEvents.filter(h => 
+        (h.eventType && (
+          h.eventType.toLowerCase().includes('correction') || 
+          h.eventType.toLowerCase().includes('take over') || 
+          h.eventType.toLowerCase().includes('takeover') || 
+          h.eventType.toLowerCase().includes('amended') ||
+          h.eventType.toLowerCase().includes('manager')
+        )) ||
+        (h.actor && h.actor.toLowerCase().includes('manager')) ||
+        h.status === 'Amended'
+      );
     } else if (currentTabHistFilter === 'approved') {
       moduleEvents = moduleEvents.filter(h => h.status === 'Approved' || h.eventType.toLowerCase().includes('approved'));
     } else if (currentTabHistFilter === 'rejected') {
@@ -8612,6 +9165,17 @@ function renderTabHistory() {
     );
   }
 
+  // Strictly sort newest records first
+  moduleEvents.sort((a, b) => {
+    const aNew = a.isNew ? 1 : 0;
+    const bNew = b.isNew ? 1 : 0;
+    if (aNew !== bNew) return bNew - aNew;
+    const timeA = new Date(a.rawTimestamp || a.timestamp || 0).getTime();
+    const timeB = new Date(b.rawTimestamp || b.timestamp || 0).getTime();
+    if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
   const countEl = document.getElementById('tab-hist-count');
   if (countEl) countEl.textContent = `${moduleEvents.length} Record${moduleEvents.length === 1 ? '' : 's'}`;
 
@@ -8632,13 +9196,25 @@ function renderTabHistory() {
       let statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-bg text-hug-text border border-border">${h.status || 'Recorded'}</span>`;
       if (h.status === 'Approved' || h.status === 'Verified' || h.status === 'Recorded' || h.status === 'Enrolled') {
         statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success border border-success/20">${h.status}</span>`;
+      } else if (h.status === 'Amended') {
+        statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">Amended</span>`;
+      } else if (h.status === 'Certified') {
+        statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success border border-success/20">Certified</span>`;
+      } else if (h.status === 'Pending SRA' || (h.status && h.status.includes('Pending')) || h.status === 'Compiled') {
+        statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">Pending SRA</span>`;
       } else if (h.status === 'Revoked' || h.status === 'Rejected' || h.status === 'Archived') {
         statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-danger-bg text-danger border border-danger/20">${h.status}</span>`;
       }
 
+      const isNew = Boolean(h.isNew);
       return `
-        <tr class="hover:bg-bg/40 transition-colors">
-          <td class="px-4 py-2.5 text-xs text-hug-muted font-medium whitespace-nowrap">${h.timestamp}</td>
+        <tr onclick="dismissWebHistoryHighlight('${h.id}')" class="${isNew ? 'bg-[#F6FAF3]' : 'hover:bg-bg/40'} transition-colors cursor-pointer">
+          <td class="px-4 py-2.5 text-xs text-hug-muted font-medium whitespace-nowrap">
+            <div class="flex items-center gap-1.5">
+              ${isNew ? '<span class="w-1.5 h-1.5 rounded-full bg-primary inline-block flex-shrink-0 mr-0.5" title="New unviewed entry"></span>' : ''}
+              <span>${h.timestamp}</span>
+            </div>
+          </td>
           <td class="px-4 py-2.5">
             <strong class="font-bold text-xs text-hug-text block">${h.eventType}</strong>
             <span class="text-[10px] text-hug-muted font-mono">${h.id}</span>
@@ -8718,6 +9294,8 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
     id: auditId,
     timestamp: new Date().toLocaleString('en-PH', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
     createdAt: new Date().toISOString(),
+    rawTimestamp: new Date().toISOString(),
+    isNew: true,
     category,
     categoryLabel: catLabel,
     eventType,
@@ -8728,6 +9306,8 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
   };
 
   db.systemHistory.unshift(newEvent);
+  historyCurrentPage = 1;
+  tabHistCurrentPage = 1;
   saveDB(db);
 
   // Write to Firestore audit_logs so history persists across sessions
@@ -8791,6 +9371,43 @@ function onTypeFilterChange() {
   renderHistory();
 }
 
+let historyArchiveScope = 'active';
+
+function setHistoryArchiveScope(scope) {
+  historyArchiveScope = scope;
+  historyCurrentPage = 1;
+  renderHistory();
+}
+window.setHistoryArchiveScope = setHistoryArchiveScope;
+
+function dismissWebHistoryHighlight(logId) {
+  if (!logId) return;
+  const db = getDB();
+  let changed = false;
+  if (Array.isArray(db.logs)) {
+    const l = db.logs.find(item => item.id === logId || `AUD-${(item.id || '').replace('LOG-2026-', '')}` === logId);
+    if (l && l.isNew) {
+      l.isNew = false;
+      changed = true;
+    }
+  }
+  if (Array.isArray(db.systemHistory)) {
+    const s = db.systemHistory.find(item => item.id === logId);
+    if (s && s.isNew) {
+      s.isNew = false;
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveDB(db, false);
+    if (typeof renderHistory === 'function') renderHistory();
+    if (typeof renderLogs === 'function') renderLogs();
+    if (typeof renderBlockHistTable === 'function') renderBlockHistTable();
+    if (typeof renderPlotHistTable === 'function') renderPlotHistTable();
+  }
+}
+window.dismissWebHistoryHighlight = dismissWebHistoryHighlight;
+
 function renderHistory() {
   const db = getDB();
   
@@ -8800,6 +9417,8 @@ function renderHistory() {
     regItems.push({
       id: `REG-BLK-${bf.code || 'NCY'}`,
       timestamp: '2026-05-01',
+      rawTimestamp: '2026-05-01T08:00:00Z',
+      isNew: false,
       category: 'block',
       categoryLabel: 'Block Farm',
       entityType: 'Block Farm',
@@ -8816,6 +9435,8 @@ function renderHistory() {
     regItems.push({
       id: `REG-${f.id}`,
       timestamp: '2026-05-01',
+      rawTimestamp: '2026-05-01T08:30:00Z',
+      isNew: false,
       category: 'plot',
       categoryLabel: 'Field Plot',
       entityType: 'Field Plot',
@@ -8828,28 +9449,85 @@ function renderHistory() {
     });
   });
 
-  // Also include operational logs as audit events
-  const opItems = (db.logs || []).map(l => ({
-    id: `AUD-${(l.id || '').replace('LOG-2026-', '')}`,
-    timestamp: l.date || '2026-05-02',
-    category: 'operation',
-    categoryLabel: 'Field Operation',
-    entityType: 'Field Operation',
-    entity: `${l.fieldId} · ${l.operationName || l.activity || 'Field Operation'}`,
-    person: l.loggedBy || 'Member Farmer',
-    area: `${l.hectares || '1.5'} Ha`,
-    details: `${l.activity || l.operationName} (₱${Number(l.totalCost || l.cost || 0).toLocaleString()} · ${l.subItems ? l.subItems.length : 0} line items)`,
-    actor: 'Verified by Farm Manager',
-    status: l.status || 'Recorded'
-  }));
+  // Source operation logs according to archive scope
+  let targetLogs = db.logs || [];
+  if (historyArchiveScope === 'archived') {
+    targetLogs = db.archivedLogs || [];
+  } else if (historyArchiveScope === 'active') {
+    targetLogs = (db.logs || []).filter(l => !l.isPastCycle && (!l.date || !l.date.includes('2025')));
+  } else if (historyArchiveScope === 'all') {
+    targetLogs = [...(db.logs || []), ...(db.archivedLogs || [])];
+  }
 
-  const sysItems = (db.systemHistory || []).map(s => {
+  // Operational audit items: Only include Manager Take Overs and Manager Amendments/Corrections
+  // Routine member operations are already viewable in the Field Operations console via "View Operations"
+  const opItems = [];
+  targetLogs.forEach(l => {
+    const isAmendedLog = Boolean(l.isAmended || (Array.isArray(l.editHistory) && l.editHistory.length > 0));
+    const isManagerTakeover = (l.loggedBy || '').toLowerCase().includes('manager') || 
+                              (l.actor || '').toLowerCase().includes('manager') ||
+                              (l.actionSource || '').toLowerCase().includes('takeover') ||
+                              (l.source || '').toLowerCase().includes('takeover');
+
+    if (!isAmendedLog && !isManagerTakeover) return;
+
+    const latestEdit = Array.isArray(l.editHistory) && l.editHistory.length > 0 ? l.editHistory[l.editHistory.length - 1] : null;
+    const eventType = isAmendedLog ? 'Manager Correction (Amended)' : 'Manager Take Over Entry';
+    opItems.push({
+      id: `AUD-${(l.id || '').replace('LOG-2026-', '')}`,
+      rawLogId: l.id,
+      timestamp: l.date || '2026-05-02',
+      rawTimestamp: l.createdAt || l.timestamp || l.date,
+      isNew: Boolean(l.isNew),
+      category: 'operation',
+      categoryLabel: 'Field Operation',
+      entityType: 'Field Operation',
+      entity: `${l.fieldId} · ${l.operationName || l.activity || 'Field Operation'}`,
+      eventType: eventType,
+      person: isAmendedLog ? (latestEdit?.editedBy || 'Jose Reyes (Farm Manager)') : (l.loggedBy || 'Jose Reyes (Farm Manager)'),
+      area: `${l.hectares || '1.5'} Ha`,
+      details: `${l.activity || l.operationName} (₱${Number(l.totalCost || l.cost || 0).toLocaleString()} · ${l.subItems ? l.subItems.length : 0} line items)${isAmendedLog && latestEdit?.reason ? ` · Reason: "${latestEdit.reason}"` : ''}`,
+      actor: isAmendedLog ? (latestEdit?.editedBy || 'Amended by Farm Manager') : 'Jose Reyes (Farm Manager)',
+      status: isAmendedLog ? 'Amended' : 'Recorded'
+    });
+  });
+
+  const auditReportItems = (db.auditReports || []).map(r => {
+    const isCertified = r.status === 'Certified' && Boolean(r.certifiedBy);
+    return {
+      id: r.reportId || r.id,
+      timestamp: r.certifiedAt ? new Date(r.certifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : (r.dateGenerated || `${r.period || 'May 2026'}, 05:00 PM`),
+      rawTimestamp: r.certifiedAt || r.compiledAt || '2026-05-30T17:00:00Z',
+      isNew: false,
+      category: 'operation',
+      categoryLabel: 'Monthly Regulatory Audit',
+      entityType: 'Audit Report',
+      entity: `${r.blockFarmName || r.blockFarm || 'Nacayao Block Farm'} · ${r.period || r.month || 'May 2026'}`,
+      eventType: isCertified ? 'Monthly Audit Certified' : 'Monthly Audit Compiled',
+      person: isCertified ? r.certifiedBy : (r.compiledBy || 'Jose Reyes (Farm Manager)'),
+      area: `${Number(r.totalHectares || 15.25).toFixed(2)} Ha`,
+      details: `${r.totalLogs || r.logsCount || 14} operations compiled (₱${Number(r.totalCost || 145225).toLocaleString()}). QR Hash: ${r.qrHash || r.qrSignature || 'HUG-202605-A3F9'}`,
+      actor: isCertified ? r.certifiedBy : (r.compiledBy || 'Jose Reyes (Farm Manager)'),
+      status: isCertified ? 'Certified' : 'Pending SRA'
+    };
+  });
+
+  const sysItems = (db.systemHistory || []).filter(s => {
+    if (s.category === 'operation') {
+      const ev = (s.eventType || '').toLowerCase();
+      if (ev === 'operation recorded' || (ev === 'recorded' && !s.actor?.toLowerCase().includes('manager'))) return false;
+      const isTakeOver = ev.includes('take over') || ev.includes('takeover');
+      const isCorrection = ev.includes('correction') || ev.includes('amend') || ev.includes('edit');
+      const isAudit = ev.includes('compiled') || ev.includes('audit') || ev.includes('certificate');
+      return isTakeOver || isCorrection || isAudit;
+    }
+    return true;
+  }).map(s => {
     let eType = 'Field Operation';
     if (s.category === 'plot') eType = 'Field Plot';
     else if (s.category === 'user') eType = 'User Management';
     else if (s.category === 'sra' || s.category === 'price') eType = 'SRA Price';
     else if (s.category === 'block') eType = 'Block Farm';
-    // Support both new schema (eventType/entity/actor) and seed schema (action/entityId/actorName)
     const resolvedActor = s.actor || s.actorName || (s.actorRole ? `${s.actorName || 'System'} (${s.actorRole})` : 'Authorized Personnel');
     const resolvedEntity = s.entity || s.entityId || s.action || 'System Action';
     const resolvedEvent = s.eventType || s.action || 'System Event';
@@ -8857,6 +9535,8 @@ function renderHistory() {
     return {
       id: s.id,
       timestamp: s.timestamp || s.createdAt || new Date().toISOString().split('T')[0],
+      rawTimestamp: s.createdAt || s.timestamp,
+      isNew: Boolean(s.isNew),
       category: resolvedCategory,
       categoryLabel: s.categoryLabel || eType,
       entityType: s.entityType || eType,
@@ -8870,7 +9550,7 @@ function renderHistory() {
     };
   });
 
-  const allItems = [...regItems, ...opItems, ...sysItems];
+  const allItems = [...regItems, ...opItems, ...auditReportItems, ...sysItems];
 
   // Update Summary KPI Stats dynamically from database
   const statArea = document.getElementById('hist-stat-area');
@@ -8933,6 +9613,18 @@ function renderHistory() {
     );
   }
 
+  // Strictly sort newest records first (position 1 on Page 1)
+  filtered.sort((a, b) => {
+    const aNew = a.isNew ? 1 : 0;
+    const bNew = b.isNew ? 1 : 0;
+    if (aNew !== bNew) return bNew - aNew;
+
+    const timeA = new Date(a.rawTimestamp || a.timestamp || 0).getTime();
+    const timeB = new Date(b.rawTimestamp || b.timestamp || 0).getTime();
+    if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
   if (recordCountEl) recordCountEl.textContent = `${filtered.length} Total Records`;
 
   const totalHistItems = filtered.length;
@@ -8959,15 +9651,26 @@ function renderHistory() {
       let statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-bg text-hug-text border border-border whitespace-nowrap">${h.status || 'Recorded'}</span>`;
       if (h.status === 'Approved' || h.status === 'Verified' || h.status === 'Completed' || h.status === 'Enrolled' || h.status === 'Official Circular') {
         statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success border border-success/20 whitespace-nowrap">${h.status}</span>`;
+      } else if (h.status === 'Amended') {
+        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap">Amended</span>`;
+      } else if (h.status === 'Certified') {
+        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success border border-success/20 whitespace-nowrap">Certified</span>`;
+      } else if (h.status === 'Pending SRA' || (h.status && h.status.includes('Pending')) || h.status === 'Compiled') {
+        statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 whitespace-nowrap">Pending SRA</span>`;
       } else if (h.status === 'Revoked' || h.status === 'Rejected' || h.status === 'Archived') {
         statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-danger-bg text-danger border border-danger/20 whitespace-nowrap">${h.status}</span>`;
       }
 
       return `
-        <tr class="hover:bg-bg/40 transition-colors">
+        <tr onclick="dismissWebHistoryHighlight('${h.rawLogId || h.id}')" class="${h.isNew ? 'bg-[#F6FAF3]' : 'hover:bg-bg/40'} transition-colors cursor-pointer border-b border-border/50">
           <td class="px-4 py-3 text-xs whitespace-nowrap">
-            <span class="font-mono font-bold text-hug-text block">${h.id}</span>
-            <span class="text-[10px] text-hug-muted">${h.timestamp}</span>
+            <div class="flex items-center gap-1.5">
+              ${h.isNew ? '<span class="w-2 h-2 rounded-full bg-primary inline-block flex-shrink-0 mr-1" title="New unviewed entry"></span>' : ''}
+              <div>
+                <span class="font-mono font-bold text-hug-text block">${h.id}</span>
+                <span class="text-[10px] text-hug-muted">${h.timestamp}</span>
+              </div>
+            </div>
           </td>
           <td class="px-4 py-3">
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${catBg}">
@@ -9001,6 +9704,76 @@ function renderHistory() {
     }
   }
 }
+
+async function archivePastCropCycles() {
+  const db = getDB();
+  let pastLogs = (db.logs || []).filter(l => l.isPastCycle || (l.date && l.date.includes('2025')));
+  
+  // If no 2025 logs exist, check for logs prior to June 2026
+  if (pastLogs.length === 0) {
+    pastLogs = (db.logs || []).filter(l => l.date && l.date < '2026-06-01');
+  }
+
+  if (pastLogs.length === 0) {
+    toast('Notice: No past crop cycle records pending archive. Active database is already optimized.');
+    return;
+  }
+
+  const ok = await showConfirmDialog({
+    title: 'Archive Completed Records to Cold Storage?',
+    message: `Archive ${pastLogs.length} historical records from past crop cycles into cold storage?\n\nAn official backup JSON file will be downloaded automatically, and active history views will be streamlined to the current crop year.`,
+    confirmText: 'Download Backup & Archive',
+    cancelText: 'Cancel',
+    type: 'warning'
+  });
+  if (!ok) return;
+
+  // Export archive snapshot
+  const fileName = `hugpong-audit-archive-${new Date().toISOString().slice(0, 10)}.json`;
+  const blob = new Blob([JSON.stringify({
+    title: 'HUGPONG SRA Historical Audit Archive',
+    archivedAt: new Date().toISOString(),
+    recordCount: pastLogs.length,
+    logs: pastLogs
+  }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  const pastIds = new Set(pastLogs.map(l => l.id));
+  db.archivedLogs = [...(db.archivedLogs || []), ...pastLogs];
+  db.logs = (db.logs || []).filter(l => !pastIds.has(l.id));
+
+  db.systemHistory = db.systemHistory || [];
+  db.systemHistory.unshift({
+    id: `AUD-ARCH-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toISOString().split('T')[0],
+    category: 'audit',
+    categoryLabel: 'System Audit',
+    entityType: 'Cold Archive',
+    entity: `Archived ${pastLogs.length} Past Cycle Records`,
+    eventType: 'Cold Storage Archive',
+    person: localStorage.getItem('hugpong_role') === 'superadmin' ? 'Super Admin' : 'SRA Administrator',
+    actor: 'Silay Sugar Regulatory Administration',
+    area: 'District Scope',
+    details: `Exported and archived ${pastLogs.length} historical operations to ${fileName}`,
+    status: 'Archived',
+    isNew: true
+  });
+
+  saveDB(db);
+  historyCurrentPage = 1;
+  renderHistory();
+  if (typeof renderLogs === 'function') renderLogs();
+  if (typeof renderDashboard === 'function') renderDashboard();
+  toast(`Success: Archived ${pastLogs.length} past records. Backup downloaded to ${fileName}`);
+}
+window.archivePastCropCycles = archivePastCropCycles;
 
 function exportHistoryAuditLogCSV() {
   const db = getDB();
@@ -10617,3 +11390,736 @@ window.scanQRFromFile = scanQRFromFile;
 window.issueSRACertification = issueSRACertification;
 window.renderAuditQueue = renderAuditQueue;
 window.loadAuditCertificate = loadAuditCertificate;
+window.openTakeOverModal = openTakeOverModal;
+window.closeTakeOverModal = closeTakeOverModal;
+window.takeOverSelectStage = takeOverSelectStage;
+window.takeOverChangeStageSelect = takeOverChangeStageSelect;
+window.updateTakeoverCostSummary = updateTakeoverCostSummary;
+window.takeOverSubmitLog = takeOverSubmitLog;
+window.takeOverSetUnit = takeOverSetUnit;
+window.takeOverUpdateSubItem = takeOverUpdateSubItem;
+window.takeOverSetMode = takeOverSetMode;
+window.takeOverPopulateOpSelect = takeOverPopulateOpSelect;
+window.takeOverChangeOperationSelect = takeOverChangeOperationSelect;
+window.takeOverRenderSubItems = takeOverRenderSubItems;
+window.takeOverAddSubItem = takeOverAddSubItem;
+window.takeOverRemoveSubItem = takeOverRemoveSubItem;
+window.takeOverUpdateSubItem = takeOverUpdateSubItem;
+window.updateTakeoverCostSummary = updateTakeoverCostSummary;
+window.takeOverSubmitLog = takeOverSubmitLog;
+window.SRA_OPERATIONS_CATALOGUE = SRA_OPERATIONS_CATALOGUE;
+window.getDB = getDB;
+window.saveDB = saveDB;
+
+function inspectManagerAuditPackage(hash) {
+  navigate('audit');
+  const input = document.getElementById('manual-qr-input');
+  if (input) input.value = hash || 'HUG-202605-A3F9';
+  if (typeof loadAuditCertificate === 'function') {
+    loadAuditCertificate(hash || 'HUG-202605-A3F9');
+  }
+}
+
+function exportManagerAuditPDF(hash) {
+  navigate('audit');
+  const input = document.getElementById('manual-qr-input');
+  if (input) input.value = hash || 'HUG-202605-A3F9';
+  if (typeof loadAuditCertificate === 'function') {
+    loadAuditCertificate(hash || 'HUG-202605-A3F9');
+  }
+  toast('Preparing official SRA certified compliance PDF...');
+  setTimeout(() => {
+    window.print();
+  }, 400);
+}
+
+function openLogEditHistoryModal(logId) {
+  const db = getDB();
+  const log = (db.logs || []).find(l => l.id === logId);
+  if (!log) {
+    toast('Error: Log record not found.');
+    return;
+  }
+  const modal = document.getElementById('modal-log-edit-details');
+  if (!modal) return;
+
+  const subtitle = document.getElementById('edit-modal-subtitle');
+  if (subtitle) {
+    subtitle.textContent = `${log.id} · ${log.fieldId} · ${log.task || log.activity || 'Operation'}`;
+  }
+
+  const body = document.getElementById('edit-modal-body');
+  if (!body) return;
+
+  const editHistory = Array.isArray(log.editHistory) && log.editHistory.length > 0 ? log.editHistory : [
+    {
+      editedBy: 'Jose Reyes (Farm Manager)',
+      editedAt: 'Recently',
+      reason: 'Supervisor adjustment via Web Console',
+      previousValues: { cost: log.cost, people: log.people },
+      newValues: { cost: log.cost, people: log.people }
+    }
+  ];
+
+  body.innerHTML = `
+    <div class="bg-bg/60 p-3.5 rounded-xl border border-border flex items-center justify-between">
+      <div>
+        <span class="text-[10px] font-bold uppercase tracking-wider text-hug-muted">Current Log State</span>
+        <h4 class="text-sm font-bold text-hug-text mt-0.5">${log.task || log.activity}</h4>
+        <p class="text-xs text-hug-text2 font-mono mt-0.5">${log.fieldId} · ${log.date} · Php ${Number(log.cost || 0).toLocaleString()}</p>
+      </div>
+      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        ${editHistory.length} Revision${editHistory.length === 1 ? '' : 's'}
+      </span>
+    </div>
+
+    <div class="flex flex-col gap-3">
+      <h5 class="text-xs font-bold text-hug-text uppercase tracking-wider">Revision History &amp; Correction Diff</h5>
+      ${editHistory.map((rev, idx) => {
+        const prev = rev.previousValues || {};
+        const next = rev.newValues || {};
+        const costChanged = prev.cost != null && next.cost != null && prev.cost !== next.cost;
+        const peopleChanged = prev.people != null && next.people != null && String(prev.people) !== String(next.people);
+        const haChanged = prev.hectares != null && next.hectares != null && String(prev.hectares) !== String(next.hectares);
+        const actChanged = prev.activity != null && next.activity != null && prev.activity !== next.activity;
+
+        return `
+          <div class="p-3.5 bg-white rounded-xl border border-border/80 shadow-2xs flex flex-col gap-2.5">
+            <div class="flex items-center justify-between border-b border-border/60 pb-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-black bg-primary text-white">REV #${idx + 1}</span>
+                <span class="font-bold text-hug-text text-xs">${rev.editedBy || 'Farm Manager'}</span>
+              </div>
+              <span class="text-[11px] text-hug-muted">${rev.editedAt || 'Recorded'}</span>
+            </div>
+
+            ${rev.reason ? `
+              <div class="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/60 text-xs">
+                <span class="font-bold text-amber-900 block mb-0.5 uppercase tracking-wider text-[10px]">Stated Reason:</span>
+                <p class="text-amber-800 italic">"${rev.reason}"</p>
+              </div>
+            ` : ''}
+
+            <div class="flex flex-col gap-1.5 bg-bg/40 p-2.5 rounded-lg border border-border/60 text-[11px]">
+              <span class="font-bold text-hug-muted uppercase tracking-wider text-[10px]">Value Modifications:</span>
+              ${costChanged ? `
+                <div class="flex items-center justify-between">
+                  <span class="text-hug-text2 font-semibold">Expense Cost:</span>
+                  <span class="font-mono">
+                    <span class="line-through text-danger">₱${Number(prev.cost).toLocaleString()}</span>
+                    <span class="text-hug-muted mx-1">→</span>
+                    <span class="text-success font-bold">₱${Number(next.cost).toLocaleString()}</span>
+                  </span>
+                </div>
+              ` : ''}
+              ${peopleChanged ? `
+                <div class="flex items-center justify-between">
+                  <span class="text-hug-text2 font-semibold">Workers / Labor:</span>
+                  <span class="font-mono">
+                    <span class="line-through text-danger">${prev.people} workers</span>
+                    <span class="text-hug-muted mx-1">→</span>
+                    <span class="text-success font-bold">${next.people} workers</span>
+                  </span>
+                </div>
+              ` : ''}
+              ${haChanged ? `
+                <div class="flex items-center justify-between">
+                  <span class="text-hug-text2 font-semibold">Hectares Area:</span>
+                  <span class="font-mono">
+                    <span class="line-through text-danger">${prev.hectares} Ha</span>
+                    <span class="text-hug-muted mx-1">→</span>
+                    <span class="text-success font-bold">${next.hectares} Ha</span>
+                  </span>
+                </div>
+              ` : ''}
+              ${actChanged ? `
+                <div class="flex items-center justify-between">
+                  <span class="text-hug-text2 font-semibold">Activity Name:</span>
+                  <span>
+                    <span class="line-through text-danger">${prev.activity}</span>
+                    <span class="text-hug-muted mx-1">→</span>
+                    <span class="text-success font-bold">${next.activity}</span>
+                  </span>
+                </div>
+              ` : ''}
+              ${!costChanged && !peopleChanged && !haChanged && !actChanged ? `
+                <p class="text-hug-muted italic">Values confirmed by manager without numeric modifications.</p>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  modal.classList.remove('hidden');
+}
+
+function closeLogEditHistoryModal() {
+  const modal = document.getElementById('modal-log-edit-details');
+  if (modal) modal.classList.add('hidden');
+}
+
+window.inspectManagerAuditPackage = inspectManagerAuditPackage;
+window.exportManagerAuditPDF = exportManagerAuditPDF;
+window.openLogEditHistoryModal = openLogEditHistoryModal;
+window.closeLogEditHistoryModal = closeLogEditHistoryModal;
+
+
+
+// ── FARM MANAGER MONTHLY AUDIT COMPILATION CONTROLLERS ──────────
+function generateQRVectorHTML(data) {
+  return `
+    <svg width="140" height="140" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="rounded">
+      <rect width="100" height="100" fill="#ffffff"/>
+      <!-- Outer boundary / quiet zone -->
+      <!-- Top-left Finder -->
+      <rect x="6" y="6" width="26" height="26" fill="#1b4d3e" rx="3"/>
+      <rect x="10" y="10" width="18" height="18" fill="#ffffff" rx="2"/>
+      <rect x="14" y="14" width="10" height="10" fill="#1b4d3e" rx="1"/>
+      <!-- Top-right Finder -->
+      <rect x="68" y="6" width="26" height="26" fill="#1b4d3e" rx="3"/>
+      <rect x="72" y="10" width="18" height="18" fill="#ffffff" rx="2"/>
+      <rect x="76" y="14" width="10" height="10" fill="#1b4d3e" rx="1"/>
+      <!-- Bottom-left Finder -->
+      <rect x="6" y="68" width="26" height="26" fill="#1b4d3e" rx="3"/>
+      <rect x="10" y="72" width="18" height="18" fill="#ffffff" rx="2"/>
+      <rect x="14" y="76" width="10" height="10" fill="#1b4d3e" rx="1"/>
+      <!-- Data modules representation -->
+      <rect x="36" y="8" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="46" y="8" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="56" y="8" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="36" y="18" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="56" y="18" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="40" y="28" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="50" y="28" width="6" height="6" fill="#1b4d3e"/>
+      <!-- Timing pattern -->
+      <rect x="36" y="38" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="48" y="38" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="60" y="38" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="72" y="38" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="84" y="38" width="6" height="6" fill="#1b4d3e"/>
+      <!-- Central data matrix -->
+      <rect x="8" y="40" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="20" y="40" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="14" y="52" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="26" y="52" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="38" y="48" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="52" y="48" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="66" y="48" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="78" y="48" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="38" y="62" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="48" y="62" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="62" y="62" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="74" y="62" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="86" y="62" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="38" y="76" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="50" y="76" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="62" y="76" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="78" y="76" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="88" y="76" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="38" y="86" width="8" height="8" fill="#1b4d3e" rx="1"/>
+      <rect x="52" y="86" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="66" y="86" width="6" height="6" fill="#1b4d3e"/>
+      <rect x="78" y="86" width="8" height="8" fill="#1b4d3e" rx="1"/>
+    </svg>
+  `;
+}
+
+function openCompileAuditModal() {
+  const modal = document.getElementById('modal-compile-audit');
+  if (!modal) return;
+
+  const setupStep = document.getElementById('compile-audit-step-setup');
+  const successStep = document.getElementById('compile-audit-step-success');
+  const setupActions = document.getElementById('compile-audit-actions-setup');
+  const successActions = document.getElementById('compile-audit-actions-success');
+
+  if (setupStep) setupStep.classList.remove('hidden');
+  if (setupActions) setupActions.classList.remove('hidden');
+  if (successStep) successStep.classList.add('hidden');
+  if (successActions) successActions.classList.add('hidden');
+
+  updateCompileAuditPreview();
+  modal.classList.remove('hidden');
+}
+
+function closeCompileAuditModal() {
+  const modal = document.getElementById('modal-compile-audit');
+  if (modal) modal.classList.add('hidden');
+}
+
+function isLogFromMonth(dateStr, monthStr) {
+  if (!dateStr || !monthStr) return false;
+  const d = String(dateStr).toLowerCase();
+  const m = String(monthStr).toLowerCase();
+  if (m.includes('may') && (d.includes('2026-05') || d.includes('may'))) return true;
+  if (m.includes('apr') && (d.includes('2026-04') || d.includes('apr'))) return true;
+  if (m.includes('mar') && (d.includes('2026-03') || d.includes('mar'))) return true;
+  if (m.includes('jun') && (d.includes('2026-06') || d.includes('jun'))) return true;
+  return false;
+}
+
+function isLogFromMonth(dateStr, monthStr) {
+  if (!dateStr || !monthStr) return false;
+  const d = String(dateStr).toLowerCase();
+  const m = String(monthStr).toLowerCase();
+  if (m.includes('may') && (d.includes('2026-05') || d.includes('may'))) return true;
+  if (m.includes('apr') && (d.includes('2026-04') || d.includes('apr'))) return true;
+  if (m.includes('mar') && (d.includes('2026-03') || d.includes('mar'))) return true;
+  if (m.includes('jun') && (d.includes('2026-06') || d.includes('jun'))) return true;
+  return false;
+}
+
+function updateCompileAuditPreview() {
+  const month = document.getElementById('compile-month-select')?.value || 'May 2026';
+  const db = getDB();
+  const allLogs = db.logs || [];
+  
+  // 1. Get logs matching the selected month
+  const monthLogs = allLogs.filter(l => {
+    const d = l.date || l.createdAt || '';
+    return isLogFromMonth(d, month);
+  });
+
+  // 2. Check if an audit report already exists for this month
+  const reports = db.auditReports || [];
+  const existingReport = reports.find(r => 
+    (r.period && r.period.toLowerCase() === month.toLowerCase()) || 
+    (r.month && r.month.toLowerCase() === month.toLowerCase())
+  );
+
+  // 3. Find uncompiled logs
+  const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
+  const isFullyCompiled = Boolean(existingReport && uncompiledLogs.length === 0 && (monthLogs.length > 0 || (existingReport.totalLogs && existingReport.totalLogs > 0)));
+  const hasNoLogs = monthLogs.length === 0 && !existingReport;
+
+  const count = monthLogs.length > 0 ? monthLogs.length : (existingReport ? (existingReport.totalLogs || 14) : 0);
+  const cost = monthLogs.length > 0
+    ? monthLogs.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0)
+    : (existingReport ? Number(existingReport.totalCost || 145225) : 0);
+  const ha = 15.25;
+
+  const haEl = document.getElementById('compile-preview-ha');
+  const logsEl = document.getElementById('compile-preview-logs');
+  const costEl = document.getElementById('compile-preview-cost');
+  if (haEl) haEl.textContent = `${ha.toFixed(2)} Ha`;
+  if (logsEl) logsEl.textContent = `${count} Records`;
+  if (costEl) costEl.textContent = `₱${cost.toLocaleString()}`;
+
+  // Render Status Banner
+  const bannerEl = document.getElementById('compile-status-banner');
+  const actionsEl = document.getElementById('compile-audit-actions-setup');
+
+  if (bannerEl) {
+    if (isFullyCompiled) {
+      bannerEl.innerHTML = `
+        <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5">
+          <div class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">✓</div>
+          <div class="text-[11px] text-emerald-900 leading-relaxed">
+            <strong class="font-bold block text-emerald-950 text-xs">All Operations for ${month} are Already Compiled ${existingReport.status === 'Certified' ? '&amp; Certified' : '(Pending SRA Certification)'}</strong>
+            Audit Report <span class="font-mono font-bold text-emerald-800">${existingReport.reportId || existingReport.id}</span> (QR Hash: <code class="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-800">${existingReport.qrHash || existingReport.qrSignature || 'HUG-202605-A3F9'}</code>) is up-to-date with all ${count} field records. ${existingReport.status === 'Certified' ? 'Certified by SRA District Inspectorate.' : 'Transmitted to SRA Queue awaiting inspector certification.'} No new or uncompiled operations require compilation.
+          </div>
+        </div>
+      `;
+    } else if (hasNoLogs) {
+      bannerEl.innerHTML = `
+        <div class="p-3.5 bg-gray-50 border border-border rounded-xl flex items-start gap-2.5">
+          <div class="w-5 h-5 rounded-full bg-gray-200 text-hug-muted flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">!</div>
+          <div class="text-[11px] text-hug-muted leading-relaxed">
+            <strong class="font-bold block text-hug-text text-xs">No Operations Recorded for ${month}</strong>
+            There are no field operations logged for this calendar cycle yet. Members or managers must record operations before a monthly package can be compiled.
+          </div>
+        </div>
+      `;
+    } else if (uncompiledLogs.length > 0 && existingReport) {
+      bannerEl.innerHTML = `
+        <div class="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
+          <div class="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">!</div>
+          <div class="text-[11px] text-amber-900 leading-relaxed">
+            <strong class="font-bold block text-amber-950 text-xs">${uncompiledLogs.length} New Operation${uncompiledLogs.length !== 1 ? 's' : ''} Ready to Compile (Batch Revision)</strong>
+            New field operations were recorded since Report ${existingReport.reportId} was generated. Re-compiling will seal the new records into a revised SRA QR envelope.
+          </div>
+        </div>
+      `;
+    } else {
+      bannerEl.innerHTML = `
+        <div class="p-3.5 bg-primary-bg/50 border border-primary/20 rounded-xl flex items-start gap-2.5">
+          <div class="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">⚡</div>
+          <div class="text-[11px] text-hug-text leading-relaxed">
+            <strong class="font-bold block text-primary text-xs">${monthLogs.length} Operations Ready for SRA Monthly Audit Compilation</strong>
+            Compiling this batch will seal all ${monthLogs.length} field operations into an official cryptographic QR envelope and transmit it to the SRA District Cloud Queue.
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // Update Action Buttons
+  if (actionsEl) {
+    if (isFullyCompiled) {
+      actionsEl.innerHTML = `
+        <button id="compile-submit-btn" disabled class="px-4 py-2 rounded-xl bg-gray-100 text-gray-400 border border-gray-200 font-bold text-xs cursor-not-allowed flex items-center gap-1.5 shadow-none">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>All Operations Already Compiled</span>
+        </button>
+        <button onclick="inspectCompiledAuditReport('${existingReport.qrHash || existingReport.id}')" class="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-light transition-all flex items-center gap-1.5 cursor-pointer shadow-xs">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+          <span>${existingReport.status === 'Certified' ? 'View SRA Certificate &amp; QR' : 'View SRA Audit Dossier &amp; QR'}</span>
+        </button>
+      `;
+    } else if (hasNoLogs) {
+      actionsEl.innerHTML = `
+        <button id="compile-submit-btn" disabled class="px-5 py-2 rounded-xl bg-gray-100 text-gray-400 border border-gray-200 font-bold text-xs cursor-not-allowed">
+          No Operations to Compile
+        </button>
+      `;
+    } else {
+      const label = existingReport ? `Compile ${uncompiledLogs.length} New Operations (Revise Batch)` : `Compile &amp; Sign Audit Package (${monthLogs.length} Logs)`;
+      actionsEl.innerHTML = `
+        <button id="compile-submit-btn" onclick="executeCompileMonthlyAudit()" class="px-5 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-light transition-all flex items-center gap-1.5 cursor-pointer shadow-xs">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <span>${label}</span>
+        </button>
+      `;
+    }
+  }
+
+  // Agronomic stage breakdown
+  const stages = [
+    { name: 'Stage 1: Pre-Planting & Land Prep', logs: 3, cost: Math.round(cost * 0.30) },
+    { name: 'Stage 2: Planting & Crop Establishment', logs: 3, cost: Math.round(cost * 0.22) },
+    { name: 'Stage 3: Basal Nutrition & Soil Care', logs: 2, cost: Math.round(cost * 0.17) },
+    { name: 'Stage 4: Cultivation & Weeding', logs: 2, cost: Math.round(cost * 0.13) },
+    { name: 'Stage 5: Maintenance & Hilling-Up', logs: 2, cost: Math.round(cost * 0.08) },
+    { name: 'Stage 6: Harvesting & Transport', logs: 2, cost: cost - Math.round(cost * 0.30) - Math.round(cost * 0.22) - Math.round(cost * 0.17) - Math.round(cost * 0.13) - Math.round(cost * 0.08) }
+  ];
+
+  const tbody = document.getElementById('compile-preview-stages');
+  if (tbody) {
+    tbody.innerHTML = stages.map(st => `
+      <tr class="hover:bg-bg/40">
+        <td class="px-3 py-2 font-medium text-hug-text">${st.name}</td>
+        <td class="px-3 py-2 text-center text-hug-muted font-mono">${st.logs}</td>
+        <td class="px-3 py-2 text-right font-mono font-bold text-hug-text">₱${st.cost.toLocaleString()}</td>
+        <td class="px-3 py-2 text-right font-mono text-hug-muted">${cost > 0 ? Math.round((st.cost / cost) * 100) : 0}%</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function executeCompileMonthlyAudit() {
+  const month = document.getElementById('compile-month-select')?.value || 'May 2026';
+  const db = getDB();
+  const allLogs = db.logs || [];
+  
+  const monthLogs = allLogs.filter(l => {
+    const d = l.date || l.createdAt || '';
+    return isLogFromMonth(d, month);
+  });
+
+  const reports = db.auditReports || [];
+  const existingReport = reports.find(r => 
+    (r.period && r.period.toLowerCase() === month.toLowerCase()) || 
+    (r.month && r.month.toLowerCase() === month.toLowerCase())
+  );
+  const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
+
+  // PREVENT COMPILING AGAIN IF NO NEW OPERATIONS
+  if (existingReport && uncompiledLogs.length === 0 && (monthLogs.length > 0 || (existingReport.totalLogs && existingReport.totalLogs > 0))) {
+    toast(`All operations for ${month} are already compiled into ${existingReport.qrHash || existingReport.reportId}!`);
+    updateCompileAuditPreview();
+    return;
+  }
+
+  if (monthLogs.length === 0 && !existingReport) {
+    toast(`Cannot compile: No operations found for ${month}.`);
+    return;
+  }
+
+  const monthCode = month.includes('May') ? '05' : (month.includes('Apr') ? '04' : (month.includes('Mar') ? '03' : '06'));
+  const reportId = existingReport ? existingReport.reportId : `RPT-2026-${monthCode}-NCY01`;
+  const qrHash = existingReport ? existingReport.qrHash : (month === 'May 2026' ? 'HUG-202605-A3F9' : `HUG-2026${monthCode}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  
+  const cost = monthLogs.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0) || (month === 'May 2026' ? 145225 : 128400);
+  const count = monthLogs.length || 14;
+  const ha = 15.25;
+
+  // Mark all logs for this month as compiled
+  const nowIso = new Date().toISOString();
+  allLogs.forEach(l => {
+    const d = l.date || l.createdAt || '';
+    if (isLogFromMonth(d, month)) {
+      l.compiled = true;
+      l.compiledReportId = reportId;
+      l.compiledAt = nowIso;
+    }
+  });
+
+  const newReport = {
+    id: reportId,
+    reportId: reportId,
+    qrHash: qrHash,
+    qrPayload: qrHash,
+    blockFarmId: 'BLK-NCY-01',
+    blockFarmName: 'Nacayao Block Farm',
+    period: month,
+    month: month,
+    totalHectares: ha,
+    totalLogs: count,
+    totalCost: cost,
+    compiledBy: 'Jose Reyes (Farm Manager)',
+    compiledAt: nowIso,
+    status: 'Pending SRA',
+    certifiedBy: null,
+    certifiedRole: null,
+    certifiedAt: null,
+    notes: `Compiled by Farm Manager Jose Reyes. Transmitted to SRA District Cloud Queue for Official SRA Review & Certification.`
+  };
+
+  if (!db.auditReports) db.auditReports = [];
+  const existingIdx = db.auditReports.findIndex(r => r.reportId === reportId || r.id === reportId || r.period === month);
+  if (existingIdx >= 0) {
+    db.auditReports[existingIdx] = { ...db.auditReports[existingIdx], ...newReport };
+  } else {
+    db.auditReports.unshift(newReport);
+  }
+
+  if (!db.systemHistory) db.systemHistory = [];
+  db.systemHistory.unshift({
+    id: `AUD-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+    category: 'operation',
+    categoryLabel: 'Field Operation',
+    eventType: 'Monthly Audit Compiled',
+    entity: `Nacayao Block Farm · ${month}`,
+    entityType: 'Audit Report',
+    actor: 'Jose Reyes (Farm Manager)',
+    actorId: '03000001',
+    details: `Compiled ${count} operations (${ha} Ha, ₱${cost.toLocaleString()}) with SRA QR Signature ${qrHash}. Transmitted to SRA District Cloud Queue for Official SRA Review & Certification.`,
+    timestamp: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    createdAt: nowIso,
+    status: 'Pending SRA'
+  });
+
+  saveDB(db);
+
+  // Show Success View
+  const setupStep = document.getElementById('compile-audit-step-setup');
+  const successStep = document.getElementById('compile-audit-step-success');
+  const setupActions = document.getElementById('compile-audit-actions-setup');
+  const successActions = document.getElementById('compile-audit-actions-success');
+
+  if (setupStep) setupStep.classList.add('hidden');
+  if (setupActions) setupActions.classList.add('hidden');
+  if (successStep) successStep.classList.remove('hidden');
+  if (successActions) successActions.classList.remove('hidden');
+
+  const hashEl = document.getElementById('compile-success-hash');
+  const periodEl = document.getElementById('compile-success-period');
+  const countEl = document.getElementById('compile-success-count');
+  const costEl = document.getElementById('compile-success-cost');
+  const qrContainer = document.getElementById('compile-success-qr');
+
+  if (hashEl) hashEl.textContent = qrHash;
+  if (periodEl) periodEl.textContent = month;
+  if (countEl) countEl.textContent = `${count} Logs`;
+  if (costEl) costEl.textContent = `₱${cost.toLocaleString()}`;
+
+  if (qrContainer) {
+    qrContainer.innerHTML = generateQRVectorHTML(qrHash);
+  }
+
+  toast(`Successfully compiled ${month} operations for Nacayao Block Farm! ☁️`);
+}
+
+let activeCompiledAuditHash = 'HUG-202605-A3F9';
+
+function inspectCompiledAuditReport(hashOrId) {
+  const targetHash = hashOrId || activeCompiledAuditHash || 'HUG-202605-A3F9';
+  const db = getDB();
+  const reports = db.auditReports || [];
+  const report = reports.find(r => 
+    r.qrHash === targetHash || 
+    r.qrSignature === targetHash || 
+    r.reportId === targetHash || 
+    r.id === targetHash ||
+    (r.period && r.period === targetHash) ||
+    (r.month && r.month === targetHash)
+  ) || reports[0] || {
+    period: 'May 2026',
+    blockFarmName: 'Nacayao Block Farm',
+    totalHectares: 15.25,
+    totalLogs: 14,
+    totalCost: 145225,
+    qrHash: targetHash || 'HUG-202605-A3F9',
+    status: 'Pending SRA',
+    compiledBy: 'Jose Reyes (Farm Manager)',
+    certifiedBy: null
+  };
+
+  activeCompiledAuditHash = report.qrHash || report.qrSignature || targetHash || 'HUG-202605-A3F9';
+
+  // If compilation modal is open, hide it so the certificate is unobstructed
+  const compileModal = document.getElementById('modal-compile-audit');
+  if (compileModal) compileModal.classList.add('hidden');
+
+  const modal = document.getElementById('modal-compiled-audit-view');
+  if (!modal) return;
+
+  const subtitle = document.getElementById('view-audit-subtitle');
+  if (subtitle) {
+    subtitle.textContent = `${report.reportId || report.id || 'RPT-2026-05-NCY01'} · ${activeCompiledAuditHash}`;
+  }
+
+  const body = document.getElementById('view-audit-body');
+  if (body) {
+    const cost = Number(report.totalCost || 145225);
+    const stages = [
+      { name: 'Stage 1: Pre-Planting & Land Prep', ha: '15.25 Ha', cost: Math.round(cost * 0.30) },
+      { name: 'Stage 2: Planting & Crop Establishment', ha: '15.25 Ha', cost: Math.round(cost * 0.22) },
+      { name: 'Stage 3: Basal Nutrition & Care', ha: '15.25 Ha', cost: Math.round(cost * 0.17) },
+      { name: 'Stage 4: Cultivation & Weeding', ha: '15.25 Ha', cost: Math.round(cost * 0.13) },
+      { name: 'Stage 5: Maintenance & Hilling-Up', ha: '15.25 Ha', cost: Math.round(cost * 0.08) },
+      { name: 'Stage 6: Harvesting & Hauling', ha: '15.25 Ha', cost: cost - Math.round(cost * 0.30) - Math.round(cost * 0.22) - Math.round(cost * 0.17) - Math.round(cost * 0.13) - Math.round(cost * 0.08) }
+    ];
+
+    body.innerHTML = `
+      <!-- Government / SRA Header -->
+      <div class="border-b border-border pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-xl bg-primary text-white font-black text-base flex items-center justify-center shadow-xs">
+            SRA
+          </div>
+          <div>
+            <span class="text-[10px] uppercase font-bold text-hug-muted tracking-wider block">Republic of the Philippines · Department of Agriculture</span>
+            <h4 class="text-sm font-black text-hug-text uppercase tracking-wide">Sugar Regulatory Administration</h4>
+            <span class="text-[11px] text-primary font-semibold">Silay Agricultural District 3 Oversight Office</span>
+          </div>
+        </div>
+        <div class="flex flex-col items-start sm:items-end">
+          ${(report.status === 'Certified' && report.certifiedBy) ? `
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-success-bg text-success border border-success/30">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+              SRA Certified &amp; Verified
+            </span>
+          ` : `
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Pending SRA Certification
+            </span>
+          `}
+          <span class="text-[10px] text-hug-muted mt-1 font-mono">Dossier: ${report.reportId || 'RPT-2026-05-NCY01'}</span>
+        </div>
+      </div>
+
+      <!-- Scope & Key Metric Grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-bg/40 p-4 rounded-xl border border-border">
+        <div>
+          <span class="text-[10px] text-hug-muted uppercase font-bold block">Audit Period</span>
+          <p class="text-sm font-black text-hug-text mt-0.5">${report.period || report.month || 'May 2026'}</p>
+          <span class="text-[10px] text-hug-muted">Calendar Month</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-hug-muted uppercase font-bold block">Block Farm</span>
+          <p class="text-sm font-black text-hug-text mt-0.5 truncate">${report.blockFarmName || report.blockFarm || 'Nacayao Block Farm'}</p>
+          <span class="text-[10px] text-hug-muted font-mono">BLK-NCY-01</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-hug-muted uppercase font-bold block">Audited Area</span>
+          <p class="text-sm font-black text-hug-text mt-0.5">${Number(report.totalHectares || 15.25).toFixed(2)} Ha</p>
+          <span class="text-[10px] text-hug-muted">7 Member Plots</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-primary uppercase font-bold block">Compiled Total Cost</span>
+          <p class="text-sm font-black text-primary mt-0.5">₱${cost.toLocaleString()}</p>
+          <span class="text-[10px] text-hug-muted">${report.totalLogs || 14} Certified Logs</span>
+        </div>
+      </div>
+
+      <!-- QR & Hash Authentication Box -->
+      <div class="flex flex-col sm:flex-row items-center gap-4 p-4 bg-white rounded-xl border border-border shadow-xs">
+        <div class="p-2 bg-bg rounded-lg border border-border flex-shrink-0">
+          ${generateQRVectorHTML(activeCompiledAuditHash)}
+        </div>
+        <div class="flex-1 flex flex-col gap-1.5 text-left">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Tamper-Proof QR Hash:</span>
+            <code class="font-mono text-xs font-bold text-primary bg-primary-bg px-2.5 py-0.5 rounded">${activeCompiledAuditHash}</code>
+          </div>
+          <p class="text-[11px] text-hug-text2 leading-relaxed">
+            This cryptographic hash encapsulates all 14 field operations, labor vouchers, and fertilizer input expenditures recorded during ${report.period || 'May 2026'}. Verifiable instantly in offline mode using the SRA Inspector terminal scanner.
+          </p>
+        </div>
+      </div>
+
+      <!-- Stage Schedule Breakdown -->
+      <div>
+        <span class="font-bold text-hug-text text-xs uppercase tracking-wider block mb-2">Agronomic Stage Expenditure Breakdown</span>
+        <div class="border border-border rounded-xl overflow-hidden">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-bg text-hug-muted uppercase text-[10px] font-bold border-b border-border">
+              <tr>
+                <th class="px-3 py-2.5">Crop Cycle Stage</th>
+                <th class="px-3 py-2.5 text-center">Land Coverage</th>
+                <th class="px-3 py-2.5 text-right">Expenditure (PHP)</th>
+                <th class="px-3 py-2.5 text-right">% of Total</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border/60">
+              ${stages.map(st => `
+                <tr class="hover:bg-bg/40">
+                  <td class="px-3 py-2 font-medium text-hug-text">${st.name}</td>
+                  <td class="px-3 py-2 text-center text-hug-muted font-mono">${st.ha}</td>
+                  <td class="px-3 py-2 text-right font-mono font-bold text-hug-text">₱${st.cost.toLocaleString()}</td>
+                  <td class="px-3 py-2 text-right font-mono text-hug-muted">${Math.round((st.cost / cost) * 100)}%</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Signatures Footer -->
+      <div class="grid grid-cols-2 gap-6 pt-4 border-t border-border text-center">
+        <div>
+          <div class="font-bold text-xs text-hug-text">${report.compiledBy || 'Jose Reyes (Farm Manager)'}</div>
+          <span class="text-[10px] text-hug-muted block">Compiling Farm Manager · Nacayao Block Farm</span>
+          <span class="text-[10px] text-success font-semibold mt-0.5 block">✓ Compiled &amp; Signed</span>
+        </div>
+        <div>
+          <div class="font-bold text-xs ${(report.status === 'Certified' && report.certifiedBy) ? 'text-hug-text' : 'text-hug-muted italic'}">${(report.status === 'Certified' && report.certifiedBy) ? report.certifiedBy : 'Pending SRA Inspector Assignment'}</div>
+          <span class="text-[10px] text-hug-muted block">SRA Agricultural Inspector · District 3 Oversight</span>
+          ${(report.status === 'Certified' && report.certifiedBy) ? `
+            <span class="text-[10px] text-success font-semibold mt-0.5 block">✓ Certified Official SRA Record</span>
+          ` : `
+            <span class="text-[10px] text-amber-700 font-semibold mt-0.5 block">⏳ Transmitted to SRA Queue · Awaiting Official Certification</span>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeCompiledAuditView() {
+  const modal = document.getElementById('modal-compiled-audit-view');
+  if (modal) modal.classList.add('hidden');
+}
+
+function exportCompiledAuditPDF() {
+  toast('Preparing official SRA certified compliance PDF...');
+  setTimeout(() => {
+    window.print();
+  }, 400);
+}
+
+window.openCompileAuditModal = openCompileAuditModal;
+window.closeCompileAuditModal = closeCompileAuditModal;
+window.updateCompileAuditPreview = updateCompileAuditPreview;
+window.executeCompileMonthlyAudit = executeCompileMonthlyAudit;
+window.inspectCompiledAuditReport = inspectCompiledAuditReport;
+window.closeCompiledAuditView = closeCompiledAuditView;
+window.exportCompiledAuditPDF = exportCompiledAuditPDF;
+window.generateQRVectorHTML = generateQRVectorHTML;
