@@ -12,6 +12,73 @@ export { hashPassword, verifyPassword, DEFAULT_SEED_PASSWORD_HASH, DEFAULT_MASTE
 // Single Canonical Source of Truth: Cloud Firestore / Server DB
 // ══════════════════════════════════════════════════════════════
 
+// ── CANONICAL DATE & DEDUPLICATION UTILITIES ────────────────
+export function formatDisplayDate(dateStr) {
+  if (!dateStr) return 'September 8, 2026';
+  const str = String(dateStr).trim();
+  if (/^[A-Za-z]+ \d{1,2}, \d{4}$/.test(str)) {
+    return str;
+  }
+  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const monthIdx = parseInt(m[2], 10) - 1;
+    const d = parseInt(m[3], 10);
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${months[monthIdx]} ${d}, ${y}`;
+    }
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+  return str;
+}
+
+export function toISODateString(dateStr) {
+  if (!dateStr) return new Date().toISOString().split('T')[0];
+  const str = String(dateStr).trim();
+  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const y = m[1];
+    const month = m[2].padStart(2, '0');
+    const day = m[3].padStart(2, '0');
+    return `${y}-${month}-${day}`;
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return new Date().toISOString().split('T')[0];
+}
+
+export function cleanupDuplicateLogs(logs) {
+  if (!Array.isArray(logs)) return [];
+  const byId = new Map();
+  for (const l of logs) {
+    if (!l) continue;
+    const logId = l.id || `LOG-${l.fieldId}-${l.stageNumber || 1}-${l.activity || 'op'}-${l.date || Date.now()}`;
+    if (!byId.has(logId)) {
+      byId.set(logId, l);
+    } else {
+      const existing = byId.get(logId);
+      const timeExisting = new Date(existing.updatedAt || existing.createdAt || existing.date || 0).getTime();
+      const timeCurrent = new Date(l.updatedAt || l.createdAt || l.date || 0).getTime();
+      if (timeCurrent >= timeExisting || l.isAmended || l.isTakeover) {
+        byId.set(logId, l);
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+
 export const priceHistory = [
   { id: 'PRC-2026-W04-MAY', week: 'Week 4 May', month: 'May', price: 2950, molasses: 4400, date: 'May 21, 2026', isoDate: '2026-05-21', change: 70, molassesChange: 100, source: 'SRA Official Circular #105 (HPCo Silay Millsite)', circular: 'SRA Circular #105', timestamp: 1779344400000, createdAt: '2026-05-21T09:00:00Z' },
   { id: 'PRC-2026-W03-MAY', week: 'Week 3 May', month: 'May', price: 2880, molasses: 4300, date: 'May 14, 2026', isoDate: '2026-05-14', change: 80, molassesChange: 50, source: 'SRA Official Circular #104 (HPCo Silay Millsite)', circular: 'SRA Circular #104', timestamp: 1778739600000, createdAt: '2026-05-14T09:00:00Z' },
@@ -48,9 +115,28 @@ export const mergeFieldsWithSeeds = (incomingFields = []) => {
   const merged = SEED_FIELDS.map(seed => {
     const found = incomingFields.find(f => f.id === seed.id);
     if (!found) return { ...seed };
+    const currentStageNum = (found.stageNumber != null && !isNaN(Number(found.stageNumber)) && Number(found.stageNumber) >= 1)
+      ? Number(found.stageNumber)
+      : (seed.stageNumber || 1);
+    const stageStr = (found.stage || seed.stage || '').toLowerCase();
+    // CANNOT be completed if stageNumber < 6 (e.g. stageNumber 1 after starting new cycle)
+    const isCompleted = currentStageNum >= 6 && (
+      found.isCompleted === true || 
+      stageStr.includes('complete') || 
+      stageStr.includes('milling') ||
+      (Array.isArray(found.customStages) && found.customStages.length > 0 && found.customStages.every(s => s.done))
+    );
+
     return {
       ...seed,
       ...found,
+      stage: isCompleted && !stageStr.includes('complete') ? 'Harvesting & Milling (Completed)' : (found.stage || seed.stage),
+      stageNumber: isCompleted ? 6 : currentStageNum,
+      isCompleted: isCompleted,
+      customStages: Array.isArray(found.customStages) ? found.customStages : (seed.customStages || []),
+      cycleType: found.cycleType || seed.cycleType || 'Plant Cane (New Plant)',
+      cropYear: found.cropYear || seed.cropYear || 'CY 2025–2026',
+      cycleNumber: Number(found.cycleNumber) || 1,
       ha: Number(found.ha) || seed.ha,
       member: found.member || found.memberName || seed.member,
       memberName: found.memberName || found.member || seed.memberName,
@@ -719,24 +805,30 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   const nowIso = new Date().toISOString();
   
   const seed = SEED_FIELDS.find(s => s.id === fieldData.id) || {};
+  const currentF = existingIdx >= 0 ? fields[existingIdx] : {};
   const formattedField = {
     id: fieldData.id,
-    blockFarmId: fieldData.blockFarmId || seed.blockFarmId || 'BLK-NCY-01',
-    blockFarm: fieldData.blockFarm || seed.blockFarm || 'Nacayao Block Farm',
-    memberId: fieldData.memberId || fieldData.userId || seed.memberId || '',
-    memberName: fieldData.memberName || fieldData.member || seed.memberName || 'Unassigned',
-    member: fieldData.member || fieldData.memberName || seed.member || 'Unassigned',
-    memberContact: fieldData.memberContact || seed.memberContact || '',
-    ha: Number(fieldData.ha) || seed.ha || 1.5,
-    stage: fieldData.stage || seed.stage || 'Pre-Planting & Land Preparation',
-    stageNumber: fieldData.stageNumber || seed.stageNumber || 1,
-    month: fieldData.month !== undefined ? fieldData.month : (seed.month !== undefined ? seed.month : 0),
-    batchMonth: fieldData.batchMonth || seed.batchMonth || 1,
+    blockFarmId: fieldData.blockFarmId || currentF.blockFarmId || seed.blockFarmId || 'BLK-NCY-01',
+    blockFarm: fieldData.blockFarm || currentF.blockFarm || seed.blockFarm || 'Nacayao Block Farm',
+    memberId: fieldData.memberId || fieldData.userId || currentF.memberId || seed.memberId || '',
+    memberName: fieldData.memberName || fieldData.member || currentF.memberName || seed.memberName || 'Unassigned',
+    member: fieldData.member || fieldData.memberName || currentF.member || seed.member || 'Unassigned',
+    memberContact: fieldData.memberContact || currentF.memberContact || seed.memberContact || '',
+    ha: Number(fieldData.ha) || currentF.ha || seed.ha || 1.5,
+    stage: fieldData.stage || currentF.stage || seed.stage || 'Pre-Planting & Land Preparation',
+    stageNumber: fieldData.stageNumber || currentF.stageNumber || seed.stageNumber || 1,
+    isCompleted: fieldData.isCompleted !== undefined ? fieldData.isCompleted : (currentF.isCompleted !== undefined ? currentF.isCompleted : false),
+    customStages: fieldData.customStages || currentF.customStages || seed.customStages || [],
+    customOperations: fieldData.customOperations || currentF.customOperations || {},
+    cycleType: fieldData.cycleType || currentF.cycleType || seed.cycleType || 'Plant Cane (New Plant)',
+    cropYear: fieldData.cropYear || currentF.cropYear || seed.cropYear || 'CY 2025–2026',
+    month: fieldData.month !== undefined ? fieldData.month : (currentF.month !== undefined ? currentF.month : (seed.month !== undefined ? seed.month : 0)),
+    batchMonth: fieldData.batchMonth || currentF.batchMonth || seed.batchMonth || 1,
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
-    lastSync: fieldData.lastSync || seed.lastSync || 'Just now',
-    variety: fieldData.variety || seed.variety || 'VMC 84-524',
-    soilType: fieldData.soilType || seed.soilType || 'Clay Loam',
-    createdAt: fieldData.createdAt || nowIso,
+    lastSync: fieldData.lastSync || currentF.lastSync || seed.lastSync || 'Just now',
+    variety: fieldData.variety || currentF.variety || seed.variety || 'VMC 84-524',
+    soilType: fieldData.soilType || currentF.soilType || seed.soilType || 'Clay Loam',
+    createdAt: fieldData.createdAt || currentF.createdAt || nowIso,
     updatedAt: nowIso
   };
 
@@ -1357,19 +1449,48 @@ export const updateFieldStageAndCycle = async (fieldId, updates) => {
   }
 };
 
-export const archiveFieldCropCycle = async (fieldId) => {
+export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   if (!fieldId) return;
-  const targetLogs = operationLogs.filter(l => l.fieldId === fieldId);
+  const cleanId = String(fieldId).trim().toUpperCase();
   const nowIso = new Date().toISOString();
+  
+  const targetLogs = operationLogs.filter(l => {
+    const logFId = String(l.fieldId || '').trim().toUpperCase();
+    return logFId === cleanId && !l.isPastCycle && !l.isArchived;
+  });
+  
   targetLogs.forEach(l => {
     l.isPastCycle = true;
     l.archivedAt = l.archivedAt || nowIso;
   });
   
   // Remove drafts belonging to the archived cycle
-  const remainingDrafts = draftLogs.filter(d => d.fieldId !== fieldId);
+  const remainingDrafts = draftLogs.filter(d => String(d.fieldId || '').trim().toUpperCase() !== cleanId);
   draftLogs.length = 0;
   remainingDrafts.forEach(d => draftLogs.push(d));
+
+  // Canonical reset of the field plot in dataStore to Stage 1 of the new crop cycle
+  const targetField = fields.find(f => String(f.id || '').trim().toUpperCase() === cleanId);
+  if (targetField) {
+    const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
+    const finalCropYear = options.cropYear || targetField.cropYear || 'CY 2026–2027';
+    const stage1Name = options.stage || 'Pre-Planting & Land Preparation';
+    const freshCustomStages = Array.isArray(options.customStages) && options.customStages.length > 0
+      ? options.customStages
+      : [];
+
+    targetField.stage = stage1Name;
+    targetField.stageNumber = 1;
+    targetField.isCompleted = false;
+    targetField.customStages = freshCustomStages;
+    targetField.cycleType = finalCycleType;
+    targetField.cropYear = finalCropYear;
+    targetField.cycleNumber = (Number(targetField.cycleNumber) || 1) + 1;
+    targetField.lastUpdated = nowIso;
+    targetField.lastSync = 'Just now';
+    targetField.synced = true;
+    await saveItem(STORAGE_KEYS.FIELDS, fields);
+  }
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
@@ -1380,11 +1501,97 @@ export const archiveFieldCropCycle = async (fieldId) => {
       const updatePromises = targetLogs.map(l => 
         setDoc(doc(db, 'operation_logs', l.id), { isPastCycle: true, archivedAt: l.archivedAt }, { merge: true })
       );
+      if (targetField) {
+        updatePromises.push(
+          setDoc(doc(db, 'fields', targetField.id), {
+            stage: targetField.stage,
+            stageNumber: 1,
+            isCompleted: false,
+            customStages: targetField.customStages,
+            cycleType: targetField.cycleType,
+            cropYear: targetField.cropYear,
+            cycleNumber: targetField.cycleNumber,
+            lastUpdated: nowIso,
+            lastSync: targetField.lastSync,
+            synced: true,
+            updatedAt: nowIso
+          }, { merge: true })
+        );
+      }
       await Promise.all(updatePromises);
     } catch (err) {
       console.warn('[dataStore] Error archiving logs in Firestore:', err);
     }
   }
+
+  // Record audit history event shared with Web & Cloud
+  const session = getCurrentSession();
+  const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Jose Reyes (Farm Manager)';
+  await logSystemEvent(
+    'operation',
+    'Crop Cycle Renewal (Mobile)',
+    fieldId,
+    `Archived crop cycle and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}".`,
+    actorName,
+    'Completed'
+  );
+};
+
+export const logSystemEvent = async (category, eventType, entity, details, actor, status = 'Recorded') => {
+  const session = getCurrentSession();
+  const defaultActor = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Jose Reyes (Farm Manager)';
+  
+  let catLabel = 'System';
+  if (category === 'operation') catLabel = 'Field Operation';
+  else if (category === 'plot') catLabel = 'Plot Registry';
+  else if (category === 'block') catLabel = 'Block Farm';
+  else if (category === 'user') catLabel = 'User Management';
+  else if (category === 'sra' || category === 'price' || category === 'audit') catLabel = 'SRA Price / Audit';
+
+  const auditId = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date();
+  const newEvent = {
+    id: auditId,
+    timestamp: now.toLocaleString('en-PH', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    createdAt: now.toISOString(),
+    rawTimestamp: now.toISOString(),
+    isNew: true,
+    category: category || 'operation',
+    categoryLabel: catLabel,
+    eventType: eventType || 'System Event',
+    entity: entity || 'System',
+    details: details || '',
+    actor: actor || defaultActor,
+    status: status || 'Recorded'
+  };
+
+  const existingIdx = systemHistory.findIndex(a => a.id === auditId);
+  if (existingIdx >= 0) {
+    systemHistory[existingIdx] = newEvent;
+  } else {
+    systemHistory.unshift(newEvent);
+  }
+
+  await saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
+  notify();
+
+  // Enqueue for background / offline outbox sync
+  try {
+    enqueueOutboxItem('audit_log', newEvent);
+  } catch (e) {
+    console.warn('[dataStore] Enqueue audit log notice:', e);
+  }
+
+  // Direct sync to Cloud Firestore if online
+  if (db) {
+    try {
+      await setDoc(doc(db, 'audit_logs', auditId), newEvent, { merge: true });
+    } catch (e) {
+      console.warn('[dataStore] Firestore audit log notice:', e);
+    }
+  }
+
+  return newEvent;
 };
 
 export const deleteDraftLogs = async (draftIds = []) => {
@@ -1480,6 +1687,42 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     subItems: Array.isArray(updates.subItems) ? JSON.parse(JSON.stringify(updates.subItems)) : previousValues.subItems,
   };
 
+  // Check if any actual change exists between previous and new values
+  const prevSI = previousValues.subItems || [];
+  const newSI = newValues.subItems || [];
+  let subItemsChanged = prevSI.length !== newSI.length;
+  if (!subItemsChanged) {
+    for (let i = 0; i < prevSI.length; i++) {
+      if (
+        (prevSI[i].description || '').trim() !== (newSI[i].description || '').trim() ||
+        Number(prevSI[i].qty || 0) !== Number(newSI[i].qty || 0) ||
+        Number(prevSI[i].unitCost || 0) !== Number(newSI[i].unitCost || 0) ||
+        (prevSI[i].unit || '') !== (newSI[i].unit || '')
+      ) {
+        subItemsChanged = true;
+        break;
+      }
+    }
+  }
+
+  const hasActivityChanged = (previousValues.activity || '').trim() !== (newValues.activity || '').trim();
+  const hasCostChanged = Math.round(Number(previousValues.cost || 0)) !== Math.round(Number(newValues.cost || 0));
+  const hasHaChanged = Math.abs(parseFloat(previousValues.hectares || 0) - parseFloat(newValues.hectares || 0)) > 0.001;
+  const hasPeopleChanged = String(previousValues.people || '').trim() !== String(newValues.people || '').trim();
+  const hasDateChanged = formatDisplayDate(previousValues.date) !== formatDisplayDate(newValues.date);
+  const hasInputQtyChanged = String(previousValues.inputQty || '').trim() !== String(newValues.inputQty || '').trim();
+  const hasInputUnitChanged = String(previousValues.inputUnit || '').trim() !== String(newValues.inputUnit || '').trim();
+
+  const hasChanges = hasActivityChanged || hasCostChanged || hasHaChanged || hasPeopleChanged || hasDateChanged || hasInputQtyChanged || hasInputUnitChanged || subItemsChanged;
+
+  if (!hasChanges) {
+    return {
+      success: false,
+      noChanges: true,
+      error: 'No changes detected. The operation details are identical to the current record. Nothing was submitted.'
+    };
+  }
+
   const editRecord = {
     id: `EDT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
     editedBy: `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.employeeId || CURRENT_SESSION.role || 'Member'})`,
@@ -1493,8 +1736,16 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
 
   const existingHistory = Array.isArray(targetLog.editHistory) ? targetLog.editHistory : [];
   
+  const displayDate = formatDisplayDate(updates.date || updates.period || targetLog.date || targetLog.period);
+  const costNum = Number(updates.totalCost != null ? updates.totalCost : (updates.cost != null ? updates.cost : (targetLog.totalCost != null ? targetLog.totalCost : targetLog.cost || 0)));
+
   // Apply updates to target log
   Object.assign(targetLog, updates, {
+    date: displayDate,
+    period: displayDate,
+    isoDate: toISODateString(displayDate),
+    cost: costNum,
+    totalCost: costNum,
     isAmended: true,
     editHistory: [...existingHistory, editRecord],
     lastModifiedAt: new Date().toISOString(),
@@ -1513,6 +1764,17 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   } else {
     await enqueueOutboxItem('operation_log', targetLog);
   }
+
+  // Record audit history event shared with Web & Cloud
+  const actorName = `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.role || 'Member'})`;
+  await logSystemEvent(
+    'operation',
+    'Operation Log Correction',
+    targetLog.fieldId || 'Field Plot',
+    `Amended operation record ${targetLog.id} (${targetLog.activity || targetLog.task || 'Operation'}, ₱${costNum.toLocaleString()}). Reason: ${reasonTrimmed}`,
+    actorName,
+    'Amended'
+  );
 
   notify();
   return { success: true, log: targetLog, editRecord };
@@ -1881,6 +2143,40 @@ export const SRA_OPERATIONS_CATALOGUE = [
     subItems: [
       { id: 'SI-12-1', description: 'Flatbed Hauling to Haw-Phil Milling Terminal', qty: 60, unit: 'ton', unitCost: 250, subTotal: 15000 }
     ]
+  },
+  {
+    id: 'SRA-13',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Transport',
+    section: 'I. Direct Operations',
+    name: 'Bull Cart / In-field Transport',
+    category: 'harvest',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 60,
+    unit: 'ton',
+    rate: 120,
+    costPerHa: 7200,
+    subItems: [
+      { id: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', qty: 60, unit: 'ton', unitCost: 120, subTotal: 7200 }
+    ]
+  },
+  {
+    id: 'SRA-14',
+    stageNumber: 6,
+    stageName: 'Stage 6: Harvesting & Transport',
+    section: 'I. Direct Operations',
+    name: 'Drainage & Post-Harvest Field Clearing',
+    category: 'prep',
+    inputType: 'direct',
+    isGroup: false,
+    perHa: 1,
+    unit: 'ha',
+    rate: 2000,
+    costPerHa: 2000,
+    subItems: [
+      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
+    ]
   }
 ];
 
@@ -2110,7 +2406,22 @@ export const listenToCloudSync = () => {
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (!data.isArchived && !data.isDeleted) {
-          remoteLogs.push({ id: docSnap.id, ...data });
+          let effCost = Number(data.totalCost != null ? data.totalCost : (data.cost || 0));
+          const opName = (data.sraOperationId || data.task || data.activity || '').toLowerCase();
+          if (effCost === 0 && (opName.includes('cutting') || opName.includes('loading') || opName.includes('sra-11') || opName.includes('harvest'))) {
+            const ha = Number(data.hectares) || 1.5;
+            effCost = Math.round(ha * 60 * 450);
+          }
+          const displayDate = formatDisplayDate(data.date || data.period);
+          remoteLogs.push({ 
+            id: docSnap.id, 
+            ...data,
+            cost: effCost,
+            totalCost: effCost,
+            date: displayDate,
+            period: displayDate,
+            isoDate: toISODateString(displayDate)
+          });
         }
       });
 
@@ -2125,8 +2436,9 @@ export const listenToCloudSync = () => {
         return (b.id || '').localeCompare(a.id || '');
       });
 
+      const dedupedLogs = cleanupDuplicateLogs(merged);
       operationLogs.length = 0;
-      merged.forEach(rl => operationLogs.push(rl));
+      dedupedLogs.forEach(rl => operationLogs.push(rl));
       saveItem(STORAGE_KEYS.LOGS, operationLogs);
       notify();
     }, (err) => console.warn('[Mobile] Operation logs listener notice:', err));
@@ -2283,7 +2595,24 @@ export const initializeOfflineStorage = async () => {
     }
     if (Array.isArray(stored[STORAGE_KEYS.LOGS]) && stored[STORAGE_KEYS.LOGS].length > 0) {
       operationLogs.length = 0;
-      stored[STORAGE_KEYS.LOGS].forEach(l => operationLogs.push(l));
+      const normalized = cleanupDuplicateLogs(stored[STORAGE_KEYS.LOGS]).map(l => {
+        let effCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
+        const opName = (l.sraOperationId || l.task || l.activity || '').toLowerCase();
+        if (effCost === 0 && (opName.includes('cutting') || opName.includes('loading') || opName.includes('sra-11') || opName.includes('harvest'))) {
+          const ha = Number(l.hectares) || 1.5;
+          effCost = Math.round(ha * 60 * 450);
+        }
+        const displayDate = formatDisplayDate(l.date || l.period);
+        return {
+          ...l,
+          cost: effCost,
+          totalCost: effCost,
+          date: displayDate,
+          period: displayDate,
+          isoDate: toISODateString(displayDate)
+        };
+      });
+      normalized.forEach(l => operationLogs.push(l));
     }
     if (Array.isArray(stored[STORAGE_KEYS.DRAFTS])) {
       draftLogs.length = 0;

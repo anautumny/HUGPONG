@@ -20,10 +20,10 @@ function ManagerHomeView({
   const [showAllLogs, setShowAllLogs] = useState(false);
   const DISPLAY_LIMIT = 3;
 
-  const targetFarm = session?.farm || 'Nacayao Block Farm';
+  const targetFarm = session?.farm || session?.blockFarm || 'Nacayao Block Farm';
 
   const { managedFields, totalHectares, totalOperationsCount, allFormattedLogs } = React.useMemo(() => {
-    const mf = fields.filter(f => f.blockFarm === targetFarm);
+    const mf = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || f.blockFarm.includes('Nacayao') || f.blockFarmId === session?.blockFarmId);
     const th = mf.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
     const mIds = mf.map(f => f.id);
     const fieldMap = Object.fromEntries(mf.map(f => [f.id, f]));
@@ -38,7 +38,7 @@ function ManagerHomeView({
       if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
 
       // Ensure block farm association
-      const belongsToFarm = (l.blockFarm && l.blockFarm === targetFarm) || 
+      const belongsToFarm = (l.blockFarm && (l.blockFarm === targetFarm || l.blockFarm.includes('Nacayao'))) || 
                             (l.fieldId && mIds.includes(l.fieldId)) || 
                             (!l.blockFarm && mIds.length === 0);
       return belongsToFarm;

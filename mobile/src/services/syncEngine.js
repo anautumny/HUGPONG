@@ -460,6 +460,10 @@ export async function flushOutboxToFirestore() {
           console.warn('[syncEngine] Stage update notice:', stageErr);
         }
         return true;
+      } else if (type === 'audit_log' || type === 'system_event') {
+        const docRef = doc(db, 'audit_logs', payload.id);
+        await setDoc(docRef, { ...payload, synced: true, syncedAt: new Date().toISOString() }, { merge: true });
+        return true;
       }
       return true;
     });

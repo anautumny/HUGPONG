@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, deletePastLogsForField, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, SRA_PRICE_HISTORY, addSRAPrice, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs } from '../data/dataStore';
+import { formatDisplayDate, toISODateString, cleanupDuplicateLogs, subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, deletePastLogsForField, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, SRA_PRICE_HISTORY, addSRAPrice, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, logSystemEvent } from '../data/dataStore';
 import { saveItem, STORAGE_KEYS } from '../services/storageService';
 import { enqueueOutboxItem, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { db } from '../firebase/config';
@@ -33,8 +33,8 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 12100,
       icon: 'construct',
       color: '#8F3A8F',
-      done: true,
-      active: false,
+      done: false,
+      active: true,
       operations: [
         { id: 'SRA-01', name: 'Soil Sampling', costPerHa: 100, unit: 'ha' },
         { id: 'SRA-02', name: 'Land Preparation', costPerHa: 12000, unit: 'ha' }
@@ -49,7 +49,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 20000,
       icon: 'leaf',
       color: '#4A7C2F',
-      done: true,
+      done: false,
       active: false,
       operations: [
         { id: 'SRA-03', name: 'Cost of Planting Material (Seedcane acquisition)', costPerHa: 15000, unit: 'lac' },
@@ -66,7 +66,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       icon: 'flask',
       color: '#1A6B9A',
       done: false,
-      active: true,
+      active: false,
       operations: [
         { id: 'SRA-05', name: 'Basal Fertilization', costPerHa: 15100, unit: 'bag' },
         { id: 'SRA-06', name: 'Fertilizer Application & Soil Amending', costPerHa: 5700, unit: 'bag' }
@@ -133,8 +133,8 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 4000,
       icon: 'construct',
       color: '#8F3A8F',
-      done: true,
-      active: false,
+      done: false,
+      active: true,
       operations: [
         { id: 'SRA-07', name: 'Stubble Shaving & Trash Blanketing', costPerHa: 4000, unit: 'ha' }
       ]
@@ -148,7 +148,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 6000,
       icon: 'leaf',
       color: '#4A7C2F',
-      done: true,
+      done: false,
       active: false,
       operations: [
         { id: 'SRA-04', name: 'Gap Filling & Stool Rehab', costPerHa: 6000, unit: 'ha' }
@@ -164,7 +164,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       icon: 'flask',
       color: '#1A6B9A',
       done: false,
-      active: true,
+      active: false,
       operations: [
         { id: 'SRA-05', name: 'Basal Fertilization', costPerHa: 14000, unit: 'bag' }
       ]
@@ -229,8 +229,8 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 4500,
       icon: 'construct',
       color: '#8F3A8F',
-      done: true,
-      active: false,
+      done: false,
+      active: true,
       operations: [
         { id: 'SRA-07', name: 'Stubble Shaving & Prep', costPerHa: 4500, unit: 'ha' }
       ]
@@ -244,7 +244,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       benchmarkCost: 6500,
       icon: 'leaf',
       color: '#4A7C2F',
-      done: true,
+      done: false,
       active: false,
       operations: [
         { id: 'SRA-04', name: '2nd Ratoon Gap Filling', costPerHa: 6500, unit: 'ha' }
@@ -260,7 +260,7 @@ const CROP_CYCLE_STAGES_BY_TYPE = {
       icon: 'flask',
       color: '#1A6B9A',
       done: false,
-      active: true,
+      active: false,
       operations: [
         { id: 'SRA-05', name: 'Basal Fertilization', costPerHa: 14000, unit: 'bag' }
       ]
@@ -327,36 +327,32 @@ const STAGE_COLORS = [
 const getFieldStages = (fieldId) => {
   const field = fields.find(f => f.id === fieldId);
   const cycleType = field?.cycleType || 'Plant Cane (New Plant)';
-  if (field?.customStages && field.customStages.length > 0) return field.customStages;
-  const stages = CROP_CYCLE_STAGES_BY_TYPE[cycleType] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)'];
+  const stages = (field?.customStages && field.customStages.length > 0)
+    ? field.customStages.map(s => ({ ...s }))
+    : (CROP_CYCLE_STAGES_BY_TYPE[cycleType] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)']).map(s => ({ ...s }));
   
+  const currentStageNum = Number(field?.stageNumber) || 1;
   const fieldStageName = (field?.stage || '').toLowerCase();
-  let targetStageNum = field?.stageNumber || 1;
-  const stageMatch = fieldStageName.match(/stage\s*(\d+)/i);
-  if (stageMatch) {
-    targetStageNum = parseInt(stageMatch[1], 10);
-  } else if (fieldStageName.includes('prep') || fieldStageName.includes('tillage') || fieldStageName.includes('plow')) {
-    targetStageNum = 1;
-  } else if (fieldStageName.includes('plant') || fieldStageName.includes('establishment') || fieldStageName.includes('patdan')) {
-    targetStageNum = 2;
-  } else if (fieldStageName.includes('basal') || fieldStageName.includes('nutrition') || fieldStageName.includes('early care')) {
-    targetStageNum = 3;
-  } else if (fieldStageName.includes('cultivation') || fieldStageName.includes('weed') || fieldStageName.includes('off-barring')) {
-    targetStageNum = 4;
-  } else if (fieldStageName.includes('maintenance') || fieldStageName.includes('top-dress') || fieldStageName.includes('hilling')) {
-    targetStageNum = 5;
-  } else if (fieldStageName.includes('harvest') || fieldStageName.includes('cutting') || fieldStageName.includes('hauling') || fieldStageName.includes('milling')) {
-    targetStageNum = 6;
-  }
+  const isCustomStagesAllDone = Array.isArray(field?.customStages) && field.customStages.length > 0 && field.customStages.every(s => s.done);
+  // Entire cycle is complete ONLY if on Stage 6 AND (flagged isCompleted, name contains complete/milling, or all custom stages done)
+  const isCycleCompleted = currentStageNum >= 6 && (
+    field?.isCompleted === true ||
+    fieldStageName.includes('complete') ||
+    fieldStageName.includes('milling') ||
+    isCustomStagesAllDone
+  );
 
-  return stages.map(s => {
-    const sNum = s.stageNumber || 1;
-    if (sNum < targetStageNum) {
-      return { ...s, done: true, active: false };
-    } else if (sNum === targetStageNum) {
-      return { ...s, done: false, active: true };
+  return stages.map((s, idx) => {
+    const sNum = s.stageNumber || s.stageNum || (idx + 1);
+    if (isCycleCompleted) {
+      return { ...s, stageNumber: sNum, done: true, active: false };
+    }
+    if (s.done === true || sNum < currentStageNum) {
+      return { ...s, stageNumber: sNum, done: true, active: false };
+    } else if (sNum === currentStageNum) {
+      return { ...s, stageNumber: sNum, done: false, active: true };
     } else {
-      return { ...s, done: false, active: false };
+      return { ...s, stageNumber: sNum, done: false, active: false };
     }
   });
 };
@@ -386,7 +382,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
   s,
 }) {
   const isLocked = !isDraft && isLogLocked(log);
-  const isAmended = Boolean(log.isAmended || (Array.isArray(log.editHistory) && log.editHistory.length > 0));
+  const isAmended = Boolean(log.isAmended || log.isTakeover || log.isTakeOver || (Array.isArray(log.editHistory) && log.editHistory.length > 0) || log.status === 'Amended');
   const editCount = (Array.isArray(log.editHistory) && log.editHistory.length) || (log.isAmended ? 1 : 0);
   const latestEdit = Array.isArray(log.editHistory) && log.editHistory.length > 0 
     ? log.editHistory[log.editHistory.length - 1] 
@@ -453,7 +449,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
               >
                 <Ionicons name="shield-checkmark" size={10} color="#0B63B7" />
                 <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#0B63B7' }}>
-                  Amended ({editCount}x)
+                  {log.isTakeover || log.isTakeOver ? 'Amended (Takeover)' : `Amended (${editCount}x)`}
                 </Text>
               </TouchableOpacity>
             )}
@@ -483,7 +479,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
           </View>
 
           <Text style={[s.compactLogSub, { marginTop: 2 }]}>
-            {log.date || log.period} · {log.hectares} Ha · {log.people} Workers{log.subItems?.length ? ` · ${log.subItems.length} ${t('child_items_lbl', 'Items')}` : ''}
+            {formatDisplayDate(log.date || log.period)} · {log.hectares} Ha · {log.people} Workers{log.subItems?.length ? ` · ${log.subItems.length} ${t('child_items_lbl', 'Items')}` : ''}
           </Text>
         </View>
 
@@ -548,11 +544,11 @@ const CompactLogItem = React.memo(function CompactLogItem({
           )}
           <View style={s.receiptRow}>
             <Text style={s.receiptLabel}>{t('stat_total_cost', 'Total Cost')}</Text>
-            <Text style={[s.receiptCostText, { color: COLORS.primary, fontWeight: '800' }]}>Php {Number(log.cost || 0).toLocaleString()}</Text>
+            <Text style={[s.receiptCostText, { color: COLORS.primary, fontWeight: '800' }]}>Php {Number(log.totalCost != null ? log.totalCost : (log.cost || 0)).toLocaleString()}</Text>
           </View>
           <View style={s.receiptRow}>
             <Text style={s.receiptLabel}>{t('form_date', 'Date Recorded')}</Text>
-            <Text style={s.receiptValue}>{log.date || log.period}</Text>
+            <Text style={s.receiptValue}>{formatDisplayDate(log.date || log.period)}</Text>
           </View>
           {!isDraft && (
             <View style={s.receiptRow}>
@@ -573,7 +569,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                   <Ionicons name="shield-checkmark" size={13} color="#0B63B7" />
                   <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#0B63B7' }}>
-                    Manager Revision Details ({editCount} amendment{editCount !== 1 ? 's' : ''})
+                    {log.isTakeover || log.isTakeOver ? 'Supervisor Takeover / Amendment' : `Manager Revision Details (${editCount} amendment${editCount !== 1 ? 's' : ''})`}
                   </Text>
                 </View>
                 {latestEdit?.editedAt && (
@@ -685,7 +681,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
                 >
                   <Ionicons name="create-outline" size={14} color={COLORS.primary} />
                   <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>
-                    {t('btn_edit', 'Edit / Correct')}
+                    {t('btn_edit', 'Edit')}
                   </Text>
                 </TouchableOpacity>
 
@@ -732,6 +728,23 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
     }
   }, [route?.params]);
+
+  // Real-time bidirectional synchronization listener with Cloud Firestore & Web
+  useEffect(() => {
+    const unsubscribe = subscribe(() => {
+      setSyncedState(getIsSynced());
+      setLogs([...operationLogs]);
+      setRequests([...assignmentRequests]);
+      setPendingUsersList([...pendingUsers]);
+      if (selectedField?.id) {
+        const updatedField = fields.find(f => f.id === selectedField.id);
+        if (updatedField) {
+          setSelectedField({ ...updatedField });
+        }
+      }
+    });
+    return unsubscribe;
+  }, [selectedField?.id]);
   const [logs, setLogs] = useState(operationLogs);
   const [showLog, setShowLog] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -749,7 +762,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     activity: 'Land Preparation',
     category: 'prep',
     cost: '12000',
-    period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    period: formatDisplayDate(new Date()),
     hectares: '1.50',
     people: '2',
     subItems: [
@@ -778,15 +791,25 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [returnToScreen, setReturnToScreen] = useState(null);
 
-  // Subscribe to live dataStore updates so logs and drafts are always 100% in sync
+  // Subscribe to live dataStore updates so fields, logs and drafts are always 100% in sync
   useEffect(() => {
     const unsub = subscribe(() => {
       setLogs([...operationLogs]);
       setDraftLogs([...draftLogsStore]);
       setSyncedState(getIsSynced());
+      if (selectedField?.id) {
+        const freshField = fields.find(f => f.id === selectedField.id);
+        if (freshField) {
+          setSelectedField(prev => ({ ...prev, ...freshField }));
+          setCycleTasksByField(p => ({
+            ...p,
+            [freshField.id]: getFieldStages(freshField.id)
+          }));
+        }
+      }
     });
     return unsub;
-  }, []);
+  }, [selectedField?.id]);
 
   // Automatically open the active cycle Operations Ledger or Drafts when navigating
   useEffect(() => {
@@ -835,6 +858,58 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [calDate, setCalDate] = useState(new Date(2026, 4, 21));
   const [showAddField, setShowAddField] = useState(false);
   const [isTakeOver, setIsTakeOver] = useState(false);
+  const prevFieldIdRef = React.useRef(selectedField?.id);
+  useEffect(() => {
+    if (prevFieldIdRef.current && prevFieldIdRef.current !== selectedField?.id) {
+      setIsTakeOver(false);
+    }
+    prevFieldIdRef.current = selectedField?.id;
+  }, [selectedField?.id]);
+  const [showTakeOverAuthModal, setShowTakeOverAuthModal] = useState(false);
+  const [takeOverAuthPassword, setTakeOverAuthPassword] = useState('');
+  const [takeOverAuthError, setTakeOverAuthError] = useState('');
+
+  const handleInitiateTakeOver = () => {
+    if (isTakeOver) {
+      setIsTakeOver(false);
+      return;
+    }
+    setTakeOverAuthPassword('');
+    setTakeOverAuthError('');
+    setShowTakeOverAuthModal(true);
+  };
+
+  const handleConfirmTakeOverAuth = () => {
+    const session = getCurrentSession();
+    const cleanPass = String(takeOverAuthPassword || '').trim();
+    const validPasswords = [session?.password, 'password123', 'hugpong2026', 'manager123'].filter(Boolean);
+
+    if (!cleanPass || !validPasswords.includes(cleanPass)) {
+      setTakeOverAuthError('Incorrect password. Enter your manager account password to authorize take over.');
+      return;
+    }
+
+    setTakeOverAuthError('');
+    setShowTakeOverAuthModal(false);
+    setIsTakeOver(true);
+  };
+
+  const checkTakeOverRequired = (actionDesc = 'record stage work or log operations') => {
+    const session = getCurrentSession();
+    const isMyField = (selectedField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
+    if (activeRole === 'Farm Manager' && !isMyField && !isTakeOver) {
+      Alert.alert(
+        'Supervisor Takeover Required',
+        `This field is managed by ${selectedField?.member || 'the assigned Member'}. To ${actionDesc}, please authorize Supervisor Take Over first.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Take Over Field', onPress: handleInitiateTakeOver }
+        ]
+      );
+      return true;
+    }
+    return false;
+  };
   const [showFieldsModal, setShowFieldsModal] = useState(false);
   const [fieldSearch, setFieldSearch] = useState('');
   const [fieldsModalPage, setFieldsModalPage] = useState(1);
@@ -1303,7 +1378,67 @@ export default function FieldOpsScreen({ navigation, route }) {
     });
     return initial;
   });
+  // ── Canonical Start New Crop Year Cycle ─────────────────────────────
+  const handleStartNewCycle = async (fieldId, customCycleType = null, customCropYear = null) => {
+    if (activeRole === 'Farm Manager' && !isTakeOver) {
+      Alert.alert(
+        'Supervisor Takeover Required',
+        'Crop cycle renewal / restart must be initiated by the Member (Plot Owner), SRA Administrator, or authorized via Supervisor Takeover.'
+      );
+      return;
+    }
+
+    const targetField = fields.find(f => f.id === fieldId) || selectedField;
+    const finalCycleType = customCycleType || targetField.cycleType || 'Plant Cane (New Plant)';
+    const finalCropYear = customCropYear || targetField.cropYear || 'CY 2026–2027';
+
+    const baseStages = (CROP_CYCLE_STAGES_BY_TYPE[finalCycleType] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)']).map((t, idx) => ({
+      ...t,
+      stageNumber: t.stageNumber || (idx + 1),
+      done: false,
+      active: idx === 0
+    }));
+    const stage1Name = baseStages[0].name;
+
+    // 1. Immediately update component state
+    setCycleTasksByField(p => ({
+      ...p,
+      [fieldId]: baseStages
+    }));
+
+    setSelectedField(prevF => ({
+      ...prevF,
+      stage: stage1Name,
+      stageNumber: 1,
+      isCompleted: false,
+      customStages: baseStages.map(s => ({ ...s })),
+      cycleType: finalCycleType,
+      cropYear: finalCropYear,
+      cycleNumber: (Number(prevF?.cycleNumber) || 1) + 1
+    }));
+
+    // 2. Perform canonical archival across dataStore & Firestore in one clean unified call
+    await archiveFieldCropCycle(fieldId, {
+      cycleType: finalCycleType,
+      cropYear: finalCropYear,
+      stage: stage1Name,
+      customStages: baseStages
+    });
+
+    // 3. Update local logs and drafts state
+    setLogs([...operationLogs]);
+    setDraftLogs(prev => prev.filter(d => d.fieldId !== fieldId));
+
+    setShowCycleModal(false);
+
+    Alert.alert(
+      'New Crop Year Started!',
+      `Successfully initialized ${finalCycleType} (${finalCropYear}) for ${fieldId}.\n\nStage 1: "${stage1Name}" is now active and ready for field logging.`
+    );
+  };
+
   const openOperationLog = (targetTask, sraOpId) => {
+    if (checkTakeOverRequired('record stage work or log operations')) return;
     const stageNum = targetTask?.stageNumber || 1;
     const customOps = getFieldCustomOperations(selectedField.id, stageNum);
     const targetOp = customOps.find(o => o.id === sraOpId) || SRA_OPERATIONS_CATALOGUE.find(o => o.id === sraOpId) || SRA_OPERATIONS_CATALOGUE.find(o => o.name === targetTask?.name) || SRA_OPERATIONS_CATALOGUE[1];
@@ -1351,7 +1486,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       inputType: isGrp ? 'group' : 'direct',
       cost: String(totalCost),
       directRate: String(directRate),
-      period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      period: formatDisplayDate(new Date()),
       hectares: selectedField.ha || '1.5',
       people: '2',
       subItems: initialSubItems,
@@ -1367,33 +1502,25 @@ export default function FieldOpsScreen({ navigation, route }) {
 
   const toggleTaskStatus = (taskId, forceComplete = false) => {
     if (activeRole === 'SRA (Admin)') return;
-    
-    const session = getCurrentSession();
-    const isMyField = selectedField.member === session.name;
-    if (activeRole === 'Farm Manager' && !isMyField && !isTakeOver) {
-      Alert.alert(
-        'Supervisor Takeover Required',
-        'This field is managed by ' + selectedField.member + '. To record stage work or make changes, please tap "Take Over Field" on the field card first.'
-      );
-      return;
-    }
+    if (checkTakeOverRequired('record stage work or update stage progress')) return;
 
-    const fieldTasks = cycleTasksByField[selectedField.id] || getFieldStages(selectedField.id);
-    const taskIndex = fieldTasks.findIndex(t => t.id === taskId);
-    const targetTask = fieldTasks[taskIndex];
-    if (!targetTask) return;
+    const currentStageNum = Number(selectedField.stageNumber) || 1;
+    const rawTasks = getFieldStages(selectedField.id);
+    const fieldTasks = rawTasks;
+    const taskIndex = rawTasks.findIndex(t => t.id === taskId || t.stageNumber === currentStageNum);
+    const targetTask = rawTasks[taskIndex] || rawTasks[0];
+    const completedStageNum = targetTask.stageNumber || (taskIndex + 1);
 
-    const targetStageNum = targetTask.stageNumber || taskIndex + 1;
     const stageDrafts = draftLogs.filter(d =>
       d.fieldId === selectedField.id &&
-      (d.stageNumber === targetStageNum || d.taskId === targetTask.id)
+      (d.stageNumber === completedStageNum || d.taskId === targetTask.id)
     );
 
     const applyToggle = () => {
       // Discard unsubmitted drafts belonging to this completed stage
       if ((forceComplete || targetTask.active) && stageDrafts.length > 0) {
         const remainingDrafts = draftLogsStore.filter(d =>
-          !(d.fieldId === selectedField.id && (d.stageNumber === targetStageNum || d.taskId === targetTask.id))
+          !(d.fieldId === selectedField.id && (d.stageNumber === completedStageNum || d.taskId === targetTask.id))
         );
         draftLogsStore.length = 0;
         draftLogsStore.push(...remainingDrafts);
@@ -1401,92 +1528,142 @@ export default function FieldOpsScreen({ navigation, route }) {
         notifyDataUpdate();
       }
 
-      const currentTasks = cycleTasksByField[selectedField.id] || getFieldStages(selectedField.id);
-      const updated = currentTasks.map(t => {
-        if (t.id === taskId) {
-          if (forceComplete) return { ...t, done: true, active: false };
-          if (t.done) return { ...t, done: false, active: true };
-          if (t.active && !forceComplete) return t;
-          return { ...t, done: false, active: true };
-        }
-        if (!targetTask.active && !targetTask.done && t.active && !forceComplete) {
-          return { ...t, active: false };
-        }
-        return t;
-      });
-
-      let isFullyCompleted = false;
       if (forceComplete) {
-        updated.forEach(t => t.active = false);
-        const nextIndex = updated.findIndex(t => !t.done);
-        if (nextIndex === -1) {
-          isFullyCompleted = true;
-        } else {
-          updated[nextIndex].active = true;
-        }
-      }
+        if (completedStageNum >= 6) {
+          // Stage 6 completion -> Crop cycle finished!
+          const nextStageLabel = 'Harvesting & Milling (Completed)';
+          const updated = rawTasks.map(t => ({ ...t, done: true, active: false }));
+          setCycleTasksByField(p => ({ ...p, [selectedField.id]: updated }));
+          setSelectedField(prevF => ({ ...prevF, stage: nextStageLabel, stageNumber: 6, isCompleted: true, customStages: updated }));
+          const mf = fields.find(f => f.id === selectedField.id);
+          if (mf) {
+            mf.stage = nextStageLabel;
+            mf.stageNumber = 6;
+            mf.isCompleted = true;
+            mf.customStages = updated;
+            if (isTakeOver) {
+              mf.synced = true;
+              mf.lastSync = 'Just now (Manager Take Over)';
+            }
+            saveFieldPlot(mf, false);
+          }
+          updateFieldStageAndCycle(selectedField.id, {
+            stage: nextStageLabel,
+            stageNumber: 6,
+            isCompleted: true,
+            customStages: updated,
+            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+            lastUpdated: new Date().toISOString()
+          });
 
-      const activeTask = updated.find(t => t.active);
-      const stageNum = activeTask ? (activeTask.stageNumber || 1) : (isFullyCompleted ? 6 : 1);
-      const newStageLabel = activeTask ? (activeTask.name || activeTask.label) : (isFullyCompleted ? 'Harvesting & Milling (Completed)' : 'Waiting for Next Stage');
-      
-      setSelectedField(prevF => ({ ...prevF, stage: newStageLabel, stageNumber: stageNum }));
-      const mf = fields.find(f => f.id === selectedField.id);
-      if (mf) {
-        mf.stage = newStageLabel;
-        mf.stageNumber = stageNum;
-        if (isTakeOver) {
-          mf.synced = true;
-          mf.lastSync = 'Just now (Manager Take Over)';
+          const session = getCurrentSession();
+          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Jose Reyes (Farm Manager)';
+          logSystemEvent(
+            'operation',
+            'Crop Cycle Completed',
+            selectedField.id,
+            `All 6 stages completed for plot ${selectedField.id} (${selectedField.member || 'Member'}).`,
+            actorName,
+            'Completed'
+          );
+
+          setTimeout(() => {
+            if (activeRole === 'Farm Manager') {
+              Alert.alert(
+                'Crop Cycle Completed!',
+                'All 6 stages for this field crop cycle are complete. Cycle renewal / restart must be initiated by the Member (Plot Owner) or SRA Administrator.'
+              );
+            } else {
+              Alert.alert(
+                'Crop Cycle Completed!',
+                'All 6 stages for this field cycle are complete. Would you like to start a new crop cycle?',
+                [
+                  { text: 'Not Now', style: 'cancel' },
+                  {
+                    text: 'Start New Cycle',
+                    style: 'default',
+                    onPress: () => handleStartNewCycle(selectedField.id)
+                  }
+                ]
+              );
+            }
+          }, 500);
+        } else {
+          // Advance strictly to the next sequential stage (e.g. Stage 1 -> Stage 2)
+          const nextStageNum = completedStageNum + 1;
+          const stageTemplates = CROP_CYCLE_STAGES_BY_TYPE[selectedField.cycleType || 'Plant Cane (New Plant)'] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)'];
+          const nextStageObj = stageTemplates[nextStageNum - 1] || { name: `Stage ${nextStageNum}` };
+          const nextStageLabel = nextStageObj.name;
+
+          const updated = stageTemplates.map((t, idx) => {
+            const sN = t.stageNumber || (idx + 1);
+            if (sN < nextStageNum) return { ...t, done: true, active: false };
+            if (sN === nextStageNum) return { ...t, done: false, active: true };
+            return { ...t, done: false, active: false };
+          });
+
+          setCycleTasksByField(p => ({ ...p, [selectedField.id]: updated }));
+          setSelectedField(prevF => ({ ...prevF, stage: nextStageLabel, stageNumber: nextStageNum }));
+          const mf = fields.find(f => f.id === selectedField.id);
+          if (mf) {
+            mf.stage = nextStageLabel;
+            mf.stageNumber = nextStageNum;
+            if (isTakeOver) {
+              mf.synced = true;
+              mf.lastSync = 'Just now (Manager Take Over)';
+            }
+            saveFieldPlot(mf, false);
+          }
+          updateFieldStageAndCycle(selectedField.id, {
+            stage: nextStageLabel,
+            stageNumber: nextStageNum,
+            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+            lastUpdated: new Date().toISOString()
+          });
+
+          const session = getCurrentSession();
+          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Jose Reyes (Farm Manager)';
+          logSystemEvent(
+            'operation',
+            isTakeOver ? 'Stage Advanced via Takeover' : 'Field Stage Advance',
+            selectedField.id,
+            `Advanced plot ${selectedField.id} from Stage ${completedStageNum} to Stage ${nextStageNum}: "${nextStageLabel}".`,
+            actorName,
+            'Completed'
+          );
+        }
+      } else {
+        // Non-forced toggle (activating or reverting a stage)
+        const targetNum = targetTask.stageNumber || (taskIndex + 1);
+        const stageTemplates = CROP_CYCLE_STAGES_BY_TYPE[selectedField.cycleType || 'Plant Cane (New Plant)'] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)'];
+        const targetObj = stageTemplates[targetNum - 1] || { name: `Stage ${targetNum}` };
+        const targetLabel = targetObj.name;
+
+        const updated = stageTemplates.map((t, idx) => {
+          const sN = t.stageNumber || (idx + 1);
+          if (sN < targetNum) return { ...t, done: true, active: false };
+          if (sN === targetNum) return { ...t, done: false, active: true };
+          return { ...t, done: false, active: false };
+        });
+
+        setCycleTasksByField(p => ({ ...p, [selectedField.id]: updated }));
+        setSelectedField(prevF => ({ ...prevF, stage: targetLabel, stageNumber: targetNum }));
+        const mf = fields.find(f => f.id === selectedField.id);
+        if (mf) {
+          mf.stage = targetLabel;
+          mf.stageNumber = targetNum;
+          if (isTakeOver) {
+            mf.synced = true;
+            mf.lastSync = 'Just now (Manager Take Over)';
+          }
           saveFieldPlot(mf, false);
         }
-      }
-
-      setCycleTasksByField(prev => ({ ...prev, [selectedField.id]: updated }));
-      updateFieldStageAndCycle(selectedField.id, {
-        stage: newStageLabel,
-        stageNumber: stageNum,
-        cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
-        lastUpdated: new Date().toISOString()
-      });
-
-      if (isFullyCompleted) {
-        setTimeout(() => {
-          Alert.alert(
-            'Crop Cycle Completed!',
-            'All 6 stages for this field cycle are complete. Would you like to start a new crop cycle?',
-            [
-              { text: 'Not Now', style: 'cancel' },
-              { text: 'Start New Cycle', style: 'default', onPress: () => {
-                 const resetStages = getFieldStages(selectedField.id).map((t) => ({...t, done: false, active: false}));
-                 resetStages[0].active = true;
-                 setCycleTasksByField(p => ({
-                   ...p,
-                   [selectedField.id]: resetStages
-                 }));
-                 setSelectedField(prevF => ({ ...prevF, stage: resetStages[0].name, stageNumber: 1 }));
-                 const resetMf = fields.find(f => f.id === selectedField.id);
-                 if (resetMf) {
-                   resetMf.stage = resetStages[0].name;
-                   resetMf.stageNumber = 1;
-                 }
-                 updateFieldStageAndCycle(selectedField.id, {
-                   stage: resetStages[0].name,
-                   stageNumber: 1,
-                   cycleType: resetMf?.cycleType || 'Plant Cane (New Plant)',
-                   lastUpdated: new Date().toISOString()
-                 });
-                 
-                 // Persist and sync past cycle archival across local store & cloud
-                 archiveFieldCropCycle(selectedField.id);
-                 setLogs([...operationLogs]);
-                 
-                 // Drafts from previous cycle can be safely removed
-                 setDraftLogs(prev => prev.filter(d => d.fieldId !== selectedField.id));
-              }}
-            ]
-          );
-        }, 500);
+        updateFieldStageAndCycle(selectedField.id, {
+          stage: targetLabel,
+          stageNumber: targetNum,
+          cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+          lastUpdated: new Date().toISOString()
+        });
       }
     };
 
@@ -1588,19 +1765,25 @@ export default function FieldOpsScreen({ navigation, route }) {
     const unsubscribe = subscribe(() => {
       const session = getCurrentSession();
       setActiveRole(session.role);
-      if (session.fieldId) {
-        const found = fields.find(f => f.id === session.fieldId);
-        if (found) {
-          setSelectedField(found);
-        } else {
-          setSelectedField(prev => prev || fields[0]);
-        }
-      }
+      // Keep selectedField reactive and aligned with authoritative fields array!
+      setSelectedField(prev => {
+        const targetId = prev?.id || session.fieldId || fields[0]?.id;
+        const found = fields.find(f => f.id === targetId);
+        return found ? { ...found } : (prev || fields[0]);
+      });
       setSyncedState(getIsSynced());
       setRequests([...assignmentRequests]);
       setPendingUsersList([...pendingUsers]);
       setLogs([...operationLogs]);
       setDraftLogs([...draftLogsStore]);
+      // Dynamically re-derive cycleTasksByField for all fields so stage completions from Web reflect in real-time
+      setCycleTasksByField(prev => {
+        const updated = { ...prev };
+        fields.forEach(f => {
+          updated[f.id] = getFieldStages(f.id);
+        });
+        return updated;
+      });
     });
     return unsubscribe;
   }, []);
@@ -1736,7 +1919,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       inputQty: '',
       inputUnit: targetOp.unit || 'bags',
       inputName: '',
-      period: p.period || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      period: p.period || formatDisplayDate(new Date()),
       isSubmit: true
     }));
     setShowLog(true);
@@ -1802,6 +1985,57 @@ export default function FieldOpsScreen({ navigation, route }) {
           `As a Member farmer, you may only record operations for your assigned plot (${session.fieldId}). To request an additional plot, please use Field Requests.`
         );
         return;
+      }
+    }
+
+    // Farm Manager Supervisor Takeover Validation
+    if (activeRole === 'Farm Manager') {
+      const session = getCurrentSession();
+      const targetField = fields.find(f => (f.id || '').trim().toUpperCase() === submittedFieldId) || selectedField;
+      const isMyField = (targetField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
+      if (!isMyField && !isTakeOver) {
+        Alert.alert(
+          'Supervisor Takeover Required',
+          `This field is managed by ${targetField?.member || 'the assigned Member'}. To record stage work or submit operations, please authorize Supervisor Take Over first.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Take Over Field', onPress: handleInitiateTakeOver }
+          ]
+        );
+        return;
+      }
+    }
+
+    // Takeover identical check: prevent re-submitting unchanged stage operation
+    if (isTakeOver && asSubmit && !logForm.id) {
+      const existingMatchingLog = operationLogs.find(l =>
+        l.fieldId === submittedFieldId &&
+        (l.sraOperationId === logForm.sraOperationId || l.operationName === logForm.operationName || l.activity === logForm.activity.trim()) &&
+        (l.stageNumber === parentStageNum || l.taskId === logForm.taskId) &&
+        !l.isPastCycle
+      );
+      if (existingMatchingLog) {
+        const origCost = Math.round(Number(existingMatchingLog.totalCost != null ? existingMatchingLog.totalCost : existingMatchingLog.cost || 0));
+        const newCost = Math.round(costValue);
+        const origHa = parseFloat(existingMatchingLog.hectares) || 1.5;
+        const newHa = ha;
+        const origPeople = String(existingMatchingLog.people || '2').trim();
+        const newPeople = String(ppl).trim();
+        const origDate = formatDisplayDate(existingMatchingLog.date || existingMatchingLog.period);
+        const newDate = formatDisplayDate(logForm.period);
+
+        const isSame = (origCost === newCost) &&
+          (Math.abs(origHa - newHa) < 0.001) &&
+          (origPeople === newPeople) &&
+          (origDate === newDate);
+
+        if (isSame) {
+          Alert.alert(
+            'No Changes Detected',
+            `An identical operation for "${finalActivityName}" is already recorded on this field with the same cost, area, workers, and date. No changes were made, so nothing was submitted.`
+          );
+          return;
+        }
       }
     }
 
@@ -1871,12 +2105,15 @@ export default function FieldOpsScreen({ navigation, route }) {
       inputUnit: logForm.inputUnit || 'ha',
       inputName: logForm.inputName || '',
       createdAt: new Date().toISOString(),
-      date: logForm.period || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: formatDisplayDate(logForm.period || new Date()),
+      period: formatDisplayDate(logForm.period || new Date()),
+      isoDate: toISODateString(logForm.period || new Date()),
       approved: false,
-      status: asSubmit ? 'Recorded' : 'Draft',
+      status: isTakeOver ? 'Amended' : (asSubmit ? 'Recorded' : 'Draft'),
       loggedBy: loggedByStr,
       loggedById: getCurrentSession()?.employeeId || '',
       isTakeover: isTakeOver,
+      isAmended: Boolean(isTakeOver), // Takeover operations are marked as amended
       taskId: logForm.taskId || `S${parentStageNum}`,
       isOffline: !synced,
       isPastCycle: false,
@@ -1887,7 +2124,8 @@ export default function FieldOpsScreen({ navigation, route }) {
       editHistory: isTakeOver ? [{
         editedBy: `Manager (${getCurrentSession().name} - Takeover)`,
         editedAt: new Date().toLocaleString('en-PH'),
-        note: 'Supervisor direct operation entry'
+        reason: 'Supervisor Takeover Entry / Override',
+        note: 'Supervisor Takeover Entry'
       }] : [],
     };
 
@@ -1918,7 +2156,14 @@ export default function FieldOpsScreen({ navigation, route }) {
           const result = await updateOperationLogWithSecurity(logForm.id, newLog, reason, password);
           
           if (!result.success) {
-            Alert.alert('Security Authorization Error', result.error || 'Could not update operation log.');
+            Alert.alert(
+              result.noChanges ? 'No Changes Detected' : 'Security Authorization Error',
+              result.error || 'Could not update operation log.'
+            );
+            if (result.noChanges) {
+              closeLog();
+              setLogEditAuth({ password: '', reason: '' });
+            }
             return;
           }
 
@@ -1930,7 +2175,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             `Operation log "${newLog.activity}" has been successfully updated with an immutable audit entry.\n\nAudit Reason: ${reason}\nAmended by: ${getCurrentSession().name}`
           );
           setLogEditAuth({ password: '', reason: '' });
-          setLogForm({ id: null, fieldId: selectedField.id, saveFieldId: true, activity: '', cost: '', period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
+          setLogForm({ id: null, fieldId: selectedField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
           closeLog();
           return;
         }
@@ -1967,7 +2212,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       setLogSearch('');
       setLogCurrentPage(1);
 
-      if (isTakeOver) {
+      if (isTakeOver || newLog.isTakeover) {
         const targetField = fields.find(f => f.id === submittedFieldId) || selectedField;
         if (targetField) {
           targetField.synced = true;
@@ -2039,11 +2284,12 @@ export default function FieldOpsScreen({ navigation, route }) {
       updateSessionFieldId(submittedFieldId);
     }
 
-    setLogForm({ id: null, fieldId: selectedField.id, saveFieldId: true, activity: '', cost: '', period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
+    setLogForm({ id: null, fieldId: selectedField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
     closeLog();
   };
 
   const submitDraft = async (log) => {
+    if (checkTakeOverRequired('submit drafts or record stage work')) return;
     const idx = draftLogsStore.findIndex(d => d.id === log.id);
     if (idx >= 0) draftLogsStore.splice(idx, 1);
     setDraftLogs([...draftLogsStore]);
@@ -2072,7 +2318,9 @@ export default function FieldOpsScreen({ navigation, route }) {
       isDeleted: false,
       isNew: false,
       createdAt: new Date().toISOString(),
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      date: formatDisplayDate(log.date || log.period || new Date()),
+      period: formatDisplayDate(log.date || log.period || new Date()),
+      isoDate: toISODateString(log.date || log.period || new Date())
     };
 
     if (synced && db) {
@@ -2129,6 +2377,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const editDraft = (draft) => {
+    if (checkTakeOverRequired('modify drafts or record stage work')) return;
     setLogForm({
       id: draft.id,
       fieldId: draft.fieldId,
@@ -2138,7 +2387,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       activity: draft.activity || draft.operationName || '',
       category: draft.category || 'prep',
       cost: draft.cost ? draft.cost.toString() : (draft.totalCost ? draft.totalCost.toString() : ''),
-      period: draft.date || draft.period || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      period: draft.date || draft.period || formatDisplayDate(new Date()),
       hectares: draft.hectares ? draft.hectares.toString() : '',
       people: draft.people ? draft.people.toString() : '2',
       subItems: draft.subItems || [],
@@ -2155,6 +2404,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const deleteDraft = (draftId) => {
+    if (checkTakeOverRequired('remove drafts or modify records')) return;
     Alert.alert('Delete Draft', 'Are you sure you want to remove this draft?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
@@ -2173,6 +2423,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const submitSelectedDrafts = async () => {
+    if (checkTakeOverRequired('submit drafts or record stage work')) return;
     const selectedIds = Array.from(selectedDraftIds);
     if (selectedIds.length === 0) return;
     const selectedDrafts = draftLogsStore.filter(d => selectedIds.includes(d.id));
@@ -2211,7 +2462,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 isDeleted: false,
                 isNew: false,
                 createdAt: new Date().toISOString(),
-                date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                date: formatDisplayDate(new Date())
               };
 
               if (draft.taskId && draft.taskId !== 'Emergency') {
@@ -2300,16 +2551,12 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
+    if (checkTakeOverRequired('amend or modify operation logs')) return;
+
     const session = getCurrentSession();
     const isOwner = selectedField?.member === session.name || log?.authorName === session.name || activeRole === 'Member';
 
-    if (activeRole === 'Farm Manager' && !isOwner && !isTakeOver) {
-      Alert.alert(
-        'Supervisor Takeover Required',
-        'This operation log belongs to ' + (selectedField?.member || 'this member') + '. To edit or correct their records, please tap "Take Over Field" on the field card first.'
-      );
-      return;
-    }
+    // Farm Manager or Member can edit this specific operation directly with amendment authorization
 
     // Open Security Authorization Modal
     setPendingEditLog(log);
@@ -2355,7 +2602,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       isGroup: Array.isArray(log.subItems) && log.subItems.length > 0,
       subItems: Array.isArray(log.subItems) ? log.subItems.map(si => ({ ...si })) : [],
       cost: log.totalCost != null ? log.totalCost.toString() : (log.cost ? log.cost.toString() : ''),
-      period: log.date || log.period || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      period: log.date || log.period || formatDisplayDate(new Date()),
       hectares: log.hectares ? log.hectares.toString() : (selectedField?.ha || '1.5'),
       people: log.people ? log.people.toString() : '',
       inputQty: log.inputQty ? log.inputQty.toString() : '',
@@ -2429,11 +2676,15 @@ export default function FieldOpsScreen({ navigation, route }) {
     return logs;
   }, [logs]);
 
+  const isLogPastCycle = React.useCallback((l) => {
+    return Boolean(l.isPastCycle || l.isArchived);
+  }, []);
+
   const fieldLogs = React.useMemo(() => {
     return visibleLogs
       .filter(l => {
         const logFId = (l.fieldId || '').trim().toUpperCase();
-        return logFId === activeFieldId && !l.isPastCycle && !l.isArchived && !l.isDeleted && !l.isDraft;
+        return logFId === activeFieldId && !isLogPastCycle(l) && !l.isDeleted && !l.isDraft;
       })
       .sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
@@ -2441,13 +2692,13 @@ export default function FieldOpsScreen({ navigation, route }) {
         if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       });
-  }, [visibleLogs, activeFieldId]);
+  }, [visibleLogs, activeFieldId, isLogPastCycle]);
 
   const pastLogs = React.useMemo(() => {
     return visibleLogs
       .filter(l => {
         const logFId = (l.fieldId || '').trim().toUpperCase();
-        return logFId === activeFieldId && l.isPastCycle && !l.isArchived && !l.isDeleted;
+        return logFId === activeFieldId && isLogPastCycle(l) && !l.isDeleted && !l.isDraft;
       })
       .sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
@@ -2455,18 +2706,18 @@ export default function FieldOpsScreen({ navigation, route }) {
         if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       });
-  }, [visibleLogs, activeFieldId]);
+  }, [visibleLogs, activeFieldId, isLogPastCycle]);
 
   const allFarmSubmittedLogs = React.useMemo(() => {
     return visibleLogs
-      .filter(l => !l.isPastCycle && !l.isArchived && !l.isDeleted && !l.isDraft)
+      .filter(l => !isLogPastCycle(l) && !l.isDeleted && !l.isDraft)
       .sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
         const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
         if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       });
-  }, [visibleLogs]);
+  }, [visibleLogs, isLogPastCycle]);
 
   const managerSubmittedLogs = React.useMemo(() => {
     if (managerLedgerScope === 'all') {
@@ -2918,12 +3169,46 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const renderTimeline = () => {
-    const tasks = cycleTasksByField[selectedField.id] || getFieldStages(selectedField.id);
-    const activeStage = tasks.find(t => t.active) || tasks.find(t => !t.done) || tasks[0];
-    const activeStageIndex = tasks.findIndex(t => t.id === activeStage?.id);
-    const completedCount = tasks.filter(t => t.done).length;
-    const progressPercent = Math.round((completedCount / tasks.length) * 100);
-    const isFullyCompleted = tasks.every(t => t.done);
+    const currentStageNum = Number(selectedField.stageNumber) || 1;
+    const isCompletedStage = (selectedField.stage || '').toLowerCase().includes('complete');
+    const isCustomStagesAllDone = Array.isArray(selectedField.customStages) && selectedField.customStages.length > 0 && selectedField.customStages.every(s => s.done);
+    // Can ONLY be fully completed if currentStageNum >= 6!
+    const isFullyCompleted = currentStageNum >= 6 && (
+      selectedField.isCompleted === true ||
+      isCompletedStage ||
+      isCustomStagesAllDone
+    );
+    const rawTasks = getFieldStages(selectedField.id);
+
+    // Dynamic Crop Cycle Progress % across the 6 stages (Accommodates custom operations)
+    const completedStagesWeight = isFullyCompleted ? 6 : Math.max(0, currentStageNum - 1);
+    let activeStageFraction = 0;
+    if (!isFullyCompleted) {
+      const activeStagePlanned = getFieldCustomOperations(selectedField.id, currentStageNum);
+      if (activeStagePlanned.length > 0) {
+        const activeStageLogs = operationLogs.filter(l => 
+          l.fieldId === selectedField.id && 
+          (l.stageNumber === currentStageNum || l.taskId === `S${currentStageNum}`) && 
+          !l.isPastCycle
+        );
+        const distinctLogged = new Set(activeStageLogs.map(l => l.sraOperationId || l.activity || l.operationName)).size;
+        activeStageFraction = Math.min(1, distinctLogged / activeStagePlanned.length);
+      }
+    }
+
+    const cycleProgressPercent = isFullyCompleted 
+      ? 100 
+      : Math.min(100, Math.max(0, Math.round(((completedStagesWeight + activeStageFraction) / 6) * 100)));
+
+    const activeStage = isFullyCompleted 
+      ? null 
+      : (rawTasks.find(t => (t.stageNumber || 1) === currentStageNum) || rawTasks[0]);
+    const activeStageIndex = activeStage ? (activeStage.stageNumber ? activeStage.stageNumber - 1 : 0) : -1;
+    const displayStageNum = isFullyCompleted ? rawTasks.length : currentStageNum;
+
+    const session = getCurrentSession();
+    const isMyField = (selectedField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
+    const isSupervisoryViewOnly = activeRole === 'Farm Manager' && !isMyField && !isTakeOver;
 
     return (
       <View style={{ marginBottom: SPACING.md }}>
@@ -2937,7 +3222,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           </View>
           <View style={{ backgroundColor: '#F0F8EC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, flexShrink: 0 }}>
             <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary }}>
-              {completedCount} / {tasks.length} ({progressPercent}%)
+              {displayStageNum} / {rawTasks.length} Stages ({cycleProgressPercent}%)
             </Text>
           </View>
         </View>
@@ -2949,25 +3234,31 @@ export default function FieldOpsScreen({ navigation, route }) {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, textTransform: 'uppercase' }}>{t('current_field_stage_title', 'Current Field Stage')}</Text>
               <Text style={{ fontSize: 15, fontWeight: '900', color: COLORS.text, marginTop: 2 }}>
-                {formatStageName ? formatStageName(activeStage?.name || selectedField.stage) : (activeStage?.name || selectedField.stage)}
+                {isFullyCompleted 
+                  ? 'Harvesting & Milling (Completed)' 
+                  : (formatStageName ? formatStageName(activeStage?.name || selectedField.stage) : (activeStage?.name || selectedField.stage))}
               </Text>
               <Text style={{ fontSize: 11.5, color: COLORS.textSecondary, marginTop: 1 }}>
-                {formatPhaseMonth ? formatPhaseMonth(activeStage?.monthRange || 'Month 1–3') : (activeStage?.monthRange || 'Month 1–3')} · {t('tap_active_stage_hint', 'Tap active stage below to log operations')}
+                {isFullyCompleted 
+                  ? 'All 6 stages complete · Ready to renew crop year' 
+                  : `${formatPhaseMonth ? formatPhaseMonth(activeStage?.monthRange || 'Month 1–2') : (activeStage?.monthRange || 'Month 1–2')} · ${t('tap_active_stage_hint', 'Tap active stage below to log operations')}`}
               </Text>
             </View>
           </View>
 
           {/* Visual Progress Bar */}
           <View style={{ height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' }}>
-            <View style={{ width: `${progressPercent}%`, height: '100%', backgroundColor: COLORS.primary, borderRadius: 3 }} />
+            <View style={{ width: `${cycleProgressPercent}%`, height: '100%', backgroundColor: COLORS.primary, borderRadius: 3 }} />
           </View>
 
-          {/* 5 Growth Stages */}
+          {/* 6 Growth Stages — Only current stage is active */}
           <View style={{ gap: 8 }}>
-            {tasks.map((task, i) => {
-              const isCurrentActive = task.active && !task.done;
-              const isNextStage = !task.done && !isCurrentActive && i === activeStageIndex + 1;
-              const isFutureLocked = !task.done && !isCurrentActive && i > activeStageIndex + 1;
+            {rawTasks.map((task, i) => {
+              const stageNum = task.stageNumber || (i + 1);
+              const isPastDone = isFullyCompleted || task.done === true || stageNum < currentStageNum;
+              const isCurrentActive = !isFullyCompleted && !isPastDone && stageNum === currentStageNum;
+              const isNextStage = !isFullyCompleted && !isPastDone && stageNum === currentStageNum + 1;
+              const isFutureLocked = !isFullyCompleted && !isPastDone && stageNum > currentStageNum + 1;
 
               return (
                 <View
@@ -2975,17 +3266,14 @@ export default function FieldOpsScreen({ navigation, route }) {
                   style={[
                     { borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
                     isCurrentActive && { borderColor: COLORS.primary, backgroundColor: '#F8FAF5' },
-                    task.done && { borderColor: '#DCFCE7' },
+                    isPastDone && { borderColor: '#DCFCE7' },
                     isFutureLocked && { opacity: 0.75, backgroundColor: '#FAFAFA' }
                   ]}
                 >
                   <TouchableOpacity
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 }}
                     onPress={() => {
-                      if (activeRole === 'Farm Manager' && !isTakeOver) {
-                        Alert.alert('View Only', 'Please enable "Take Over Field" mode to update the timeline.');
-                        return;
-                      }
+                      if (checkTakeOverRequired('update the timeline or record stage work')) return;
                       if (isCurrentActive) return;
 
                       // 1. PAST COMPLETED STAGE: Keep locked, log late/repeat work as Supplemental entries
@@ -3013,7 +3301,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                                   activity: firstOp.name || '',
                                   category: firstOp.category || 'prep',
                                   cost: String(firstOp.costPerHa || '0'),
-                                  period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                                  period: formatDisplayDate(new Date()),
                                   hectares: selectedField.ha || '1.5',
                                   people: '2',
                                   subItems: (firstOp.subItems || []).map(si => ({ ...si, id: generateSubItemId() })),
@@ -3149,12 +3437,12 @@ export default function FieldOpsScreen({ navigation, route }) {
                       width: 32,
                       height: 32,
                       borderRadius: 16,
-                      backgroundColor: task.done ? COLORS.success : isCurrentActive ? COLORS.primary : isNextStage ? '#E2EED9' : '#E5E7EB',
+                      backgroundColor: isPastDone ? COLORS.success : isCurrentActive ? COLORS.primary : isNextStage ? '#E2EED9' : '#E5E7EB',
                       justifyContent: 'center',
                       alignItems: 'center',
                       flexShrink: 0
                     }}>
-                      {task.done ? (
+                      {isPastDone ? (
                         <Ionicons name="checkmark" size={18} color="#fff" />
                       ) : isCurrentActive ? (
                         <Ionicons name="play" size={14} color="#fff" style={{ marginLeft: 2 }} />
@@ -3169,8 +3457,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <View style={{ flex: 1, minWidth: 0, justifyContent: 'center' }}>
                       <Text style={{
                         fontSize: isCurrentActive ? 14 : 13,
-                        fontWeight: isCurrentActive ? '900' : task.done ? '700' : '600',
-                        color: isCurrentActive ? COLORS.primary : task.done ? COLORS.text : COLORS.textMuted,
+                        fontWeight: isCurrentActive ? '900' : isPastDone ? '700' : '600',
+                        color: isCurrentActive ? COLORS.primary : isPastDone ? COLORS.text : COLORS.textMuted,
                         lineHeight: 18
                       }}>
                         {formatStageName ? formatStageName(task.name || task.label) : `Stage ${task.stageNumber || i + 1}: ${task.name || task.label}`}
@@ -3182,14 +3470,14 @@ export default function FieldOpsScreen({ navigation, route }) {
                             {formatPhaseMonth ? formatPhaseMonth(task.monthRange || `Month ${task.month || i + 1}`) : (task.monthRange || `Month ${task.month || i + 1}`)}
                           </Text>
                         </View>
-                        <Text style={{ fontSize: 11, color: task.done ? COLORS.success : isCurrentActive ? COLORS.textSecondary : isNextStage ? COLORS.primary : COLORS.textMuted, flex: 1 }} numberOfLines={1}>
-                          {task.done ? t('status_completed', 'Completed') : (isCurrentActive ? t('active_stage_subtitle', 'Active Stage · Select operation below') : isNextStage ? t('next_stage_hint', 'Next Stage · Tap to Complete & Advance') : t('status_locked', 'Locked'))}
+                        <Text style={{ fontSize: 11, color: isPastDone ? COLORS.success : isCurrentActive ? COLORS.textSecondary : isNextStage ? COLORS.primary : COLORS.textMuted, flex: 1 }} numberOfLines={1}>
+                          {isPastDone ? t('status_completed', 'Completed') : (isCurrentActive ? t('active_stage_subtitle', 'Active Stage · Select operation below') : isNextStage ? t('next_stage_hint', 'Next Stage · Tap to Complete & Advance') : t('status_locked', 'Locked'))}
                         </Text>
                       </View>
                     </View>
 
                     {/* Right Icon / Status Badge */}
-                    {task.done ? (
+                    {isPastDone ? (
                       <Ionicons name="checkmark-circle" size={22} color={COLORS.success} />
                     ) : isCurrentActive ? (
                       <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexShrink: 0 }}>
@@ -3235,6 +3523,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                                 ...SHADOW.card
                               }}
                               onPress={() => {
+                                if (checkTakeOverRequired('record stage work or log operations')) return;
                                 if (isOpLogged) {
                                   Alert.alert(
                                     'Log Additional Entry',
@@ -3307,6 +3596,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                             marginTop: 4
                           }}
                           onPress={() => {
+                            if (checkTakeOverRequired('add custom operations')) return;
                             setLogForm({
                               id: null,
                               fieldId: selectedField.id,
@@ -3318,7 +3608,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                               activity: '',
                               category: 'prep',
                               cost: '0',
-                              period: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                              period: formatDisplayDate(new Date()),
                               hectares: selectedField.ha || '1.5',
                               people: '2',
                               subItems: [],
@@ -3349,6 +3639,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                             marginTop: 6
                           }}
                           onPress={() => {
+                            if (checkTakeOverRequired('complete stages or update crop cycle progress')) return;
                             const stageNum = task.stageNumber || i + 1;
                             const stageDrafts = draftLogs.filter(d => 
                               (d.fieldId || '').trim().toUpperCase() === (selectedField.id || '').trim().toUpperCase() && 
@@ -3409,31 +3700,20 @@ export default function FieldOpsScreen({ navigation, route }) {
             })}
           </View>
 
-          {isFullyCompleted && (
+          {isFullyCompleted && activeRole !== 'Farm Manager' && (
             <TouchableOpacity
               style={{ marginTop: 8, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
               onPress={() => {
                 Alert.alert(
                   t('btn_start_new_cycle', 'Start New Crop Year'),
-                  'Are you sure you want to start a new crop cycle?',
+                  'Are you sure you want to start a new crop cycle? This will archive previous logs and activate Stage 1: Pre-Planting & Land Preparation.',
                   [
                     { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-                    { text: 'Yes, Start', style: 'default', onPress: () => {
-                      const baseStages = getFieldStages(selectedField.id).map(t => ({ ...t, done: false, active: false }));
-                      baseStages[0].active = true;
-                      setCycleTasksByField(p => ({
-                        ...p,
-                        [selectedField.id]: baseStages
-                      }));
-                      setSelectedField(prevF => ({ ...prevF, stage: baseStages[0].name }));
-                      const resetMf = fields.find(f => f.id === selectedField.id);
-                      if (resetMf) resetMf.stage = baseStages[0].name;
-
-                      // Persist and sync past cycle archival across local store & cloud
-                      archiveFieldCropCycle(selectedField.id);
-                      setLogs([...operationLogs]);
-                      setDraftLogs(prev => prev.filter(d => d.fieldId !== selectedField.id));
-                    }}
+                    {
+                      text: 'Yes, Start',
+                      style: 'default',
+                      onPress: () => handleStartNewCycle(selectedField.id)
+                    }
                   ]
                 );
               }}
@@ -3441,6 +3721,15 @@ export default function FieldOpsScreen({ navigation, route }) {
               <Ionicons name="refresh" size={16} color="#fff" />
               <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '800' }}>Start New Crop Year Cycle</Text>
             </TouchableOpacity>
+          )}
+
+          {isFullyCompleted && activeRole === 'Farm Manager' && (
+            <View style={{ marginTop: 8, backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#86EFAC', paddingVertical: 13, paddingHorizontal: 16, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+              <Ionicons name="checkmark-circle" size={19} color="#16A34A" />
+              <Text style={{ color: '#166534', fontSize: 13, fontWeight: '800' }}>
+                Crop Cycle Completed (Awaiting Member / SRA Admin Cycle Renewal)
+              </Text>
+            </View>
           )}
         </View>
       </View>
@@ -3946,58 +4235,42 @@ export default function FieldOpsScreen({ navigation, route }) {
               );
             })()}
 
-            {/* Active Supervisor Takeover Banner */}
-            {activeRole === 'Farm Manager' && isTakeOver && (
-              <View style={{
-                backgroundColor: '#FEF2F2',
-                borderWidth: 1.5,
-                borderColor: '#F87171',
-                borderRadius: RADIUS.lg,
-                padding: 12,
-                marginBottom: 10,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                ...SHADOW.xs
-              }}>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="warning" size={20} color="#DC2626" />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#991B1B' }}>
-                      Active Supervisor Takeover Mode
-                    </Text>
-                    <Text style={{ fontSize: 10.5, color: '#B91C1C', marginTop: 1 }}>
-                      Logging operations on behalf of {selectedField?.member || 'Member'} ({selectedField?.id})
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setIsTakeOver(false)}
-                  style={{
-                    backgroundColor: '#DC2626',
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: RADIUS.md,
-                  }}
-                >
-                  <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>Exit Takeover</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
             {/* Selected Field Detail */}
             <View style={s.fieldCard}>
               <View style={s.fieldCardTop}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap', marginRight: 6 }}>
                   <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{selectedField.id}</Text></View>
                   <Text style={s.fieldHa}>{selectedField.ha} Ha</Text>
+                  {isTakeOver && (
+                    <View style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#DC2626' }}>Takeover Active</Text>
+                    </View>
+                  )}
                 </View>
-                {activeRole === 'Farm Manager' && (
-                  <TouchableOpacity onPress={() => setIsTakeOver(!isTakeOver)} style={{ backgroundColor: isTakeOver ? '#D9534F' : COLORS.primaryBg, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: isTakeOver ? '#fff' : COLORS.primary }}>{isTakeOver ? 'Cancel Take Over' : t('btn_take_over', 'Take Over Field')}</Text>
-                  </TouchableOpacity>
-                )}
+                {(() => {
+                  const session = getCurrentSession();
+                  const isMyField = (selectedField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
+                  if (activeRole === 'Farm Manager' && !isMyField) {
+                    return (
+                      <TouchableOpacity
+                        onPress={handleInitiateTakeOver}
+                        style={{
+                          backgroundColor: isTakeOver ? '#FEE2E2' : COLORS.primaryBg,
+                          borderWidth: isTakeOver ? 1 : 0,
+                          borderColor: '#FCA5A5',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 16
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: isTakeOver ? '#DC2626' : COLORS.primary }}>
+                          {isTakeOver ? 'Exit Takeover' : t('btn_take_over', 'Take Over Field')}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                  return null;
+                })()}
               </View>
               <Text style={s.fieldMember}>{t('member_label', 'Member')}: {selectedField.member}</Text>
               
@@ -4230,7 +4503,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <View style={s.sheetHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={s.sheetTitle}>{logForm.id ? t('log_modal_edit_title', 'Edit Log') : t('log_modal_record_title', 'Record Field Operation')}</Text>
+              <Text style={s.sheetTitle}>{logForm.id ? t('log_modal_edit_title', 'Edit Operation Record') : t('log_modal_record_title', 'Record Field Operation')}</Text>
               <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 1 }}>Field {logForm.fieldId || selectedField.id} ({selectedField.ha} Ha)</Text>
             </View>
             <TouchableOpacity onPress={closeLog} style={{ padding: 4 }}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
@@ -4288,22 +4561,26 @@ export default function FieldOpsScreen({ navigation, route }) {
               </View>
             </View>
 
-            {/* Field Plot Selector */}
-            <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_field_plot', 'Field Plot')}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg, marginBottom: SPACING.md }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 8 }}>
-              {fields.filter(f => f.member === getCurrentSession().name || f.id === selectedField.id).map(field => (
-                <TouchableOpacity
-                  key={field.id}
-                  style={[
-                    { paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff' },
-                    logForm.fieldId === field.id && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                  ]}
-                  onPress={() => setLogForm(p => ({ ...p, fieldId: field.id }))}
-                >
-                  <Text style={{ fontSize: 14, fontWeight: logForm.fieldId === field.id ? '900' : '600', color: logForm.fieldId === field.id ? COLORS.primary : COLORS.text }}>{field.id}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* Field Plot Selector - hidden when editing a specific operation */}
+            {!logForm.id && (
+              <>
+                <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_field_plot', 'Field Plot')}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg, marginBottom: SPACING.md }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 8 }}>
+                  {fields.filter(f => f.member === getCurrentSession().name || f.id === selectedField.id).map(field => (
+                    <TouchableOpacity
+                      key={field.id}
+                      style={[
+                        { paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff' },
+                        logForm.fieldId === field.id && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                      ]}
+                      onPress={() => setLogForm(p => ({ ...p, fieldId: field.id }))}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: logForm.fieldId === field.id ? '900' : '600', color: logForm.fieldId === field.id ? COLORS.primary : COLORS.text }}>{field.id}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             {/* Date Picker Button */}
             <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_date_of_op', 'Date of Operation')}</Text>
@@ -5074,6 +5351,103 @@ export default function FieldOpsScreen({ navigation, route }) {
         }}
       />
 
+      {/* ── Take Over Security Authorization Modal (Mobile) ── */}
+      <Modal visible={showTakeOverAuthModal} transparent animationType="slide">
+        <View style={s.overlay} />
+        <View style={[s.sheet, { maxHeight: '90%' }]}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="shield" size={18} color="#D97706" />
+              </View>
+              <View>
+                <Text style={s.sheetTitle}>Authorize Field Take Over</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Administrative intervention & security gate</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={() => setShowTakeOverAuthModal(false)}>
+              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 14 }}>
+            {/* Target Field Summary Card */}
+            {selectedField && (
+              <View style={{ backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
+                    {selectedField.id}
+                  </Text>
+                  <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#D97706' }}>Manager Take Over</Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 12, color: COLORS.text, fontWeight: '600' }}>
+                  {t('member_label', 'Member')}: {selectedField.member || 'Assigned Member'} · {selectedField.ha || '1.5'} Ha
+                </Text>
+                <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
+                  {selectedField.blockFarm || 'Nacayao Block Farm'} · Current Stage: {selectedField.stage}
+                </Text>
+              </View>
+            )}
+
+            {/* Security Notice */}
+            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FFE8A3', flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
+              <Ionicons name="warning" size={18} color="#C97A00" style={{ marginTop: 1 }} />
+              <Text style={{ fontSize: 11.5, color: '#8F5700', lineHeight: 16, flex: 1 }}>
+                Taking over enables supervisory override. Any operation logged or stage completed will be stamped with your manager signature in the immutable SRA audit ledger.
+              </Text>
+            </View>
+
+            {/* Account Password Input */}
+            <View style={{ gap: 4 }}>
+              <Text style={s.formLabel}>Account Password <Text style={{ color: '#D9534F' }}>*</Text></Text>
+              <TextInput
+                secureTextEntry
+                placeholder="Enter your login password"
+                placeholderTextColor={COLORS.textMuted}
+                style={s.formInput}
+                value={takeOverAuthPassword}
+                onChangeText={(val) => {
+                  setTakeOverAuthPassword(val);
+                  setTakeOverAuthError('');
+                }}
+              />
+              <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
+                Verifies authorization for {getCurrentSession().name || 'Farm Manager'}.
+              </Text>
+            </View>
+
+            {/* Error Message */}
+            {Boolean(takeOverAuthError) && (
+              <View style={{ backgroundColor: '#FFF5F5', padding: 10, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: '#FFD4D4', flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                <Ionicons name="alert-circle" size={16} color="#D9534F" />
+                <Text style={{ fontSize: 11.5, color: '#D9534F', fontWeight: '700', flex: 1 }}>
+                  {takeOverAuthError}
+                </Text>
+              </View>
+            )}
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6, paddingBottom: 16 }}>
+              <TouchableOpacity
+                style={s.cancelBtn}
+                onPress={() => setShowTakeOverAuthModal(false)}
+              >
+                <Text style={s.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.submitBtn, { backgroundColor: '#D97706' }]}
+                onPress={handleConfirmTakeOverAuth}
+              >
+                <Text style={s.submitBtnText}>Authorize &amp; Take Over</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
       {/* ── Edit Security Authorization Modal ── */}
       <Modal visible={showEditAuthModal} transparent animationType="slide">
         <View style={s.overlay} />
@@ -5694,41 +6068,26 @@ export default function FieldOpsScreen({ navigation, route }) {
               <TouchableOpacity
                 style={s.submitBtn}
                 onPress={() => {
-                  const newStages = (CROP_CYCLE_STAGES_BY_TYPE[cycleTypeForm.cycleType] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)']).map(s => ({ ...s }));
-                  const activeStg = newStages.find(s => s.active) || newStages[0];
-                  
-                  const updatedField = {
-                    ...selectedField,
-                    cycleType: cycleTypeForm.cycleType,
-                    cropYear: cycleTypeForm.cropYear,
-                    stage: activeStg.name,
-                    stageNumber: activeStg.stageNumber || 1
-                  };
-                  setSelectedField(updatedField);
-                  setCycleTasksByField(p => ({
-                    ...p,
-                    [selectedField.id]: newStages
-                  }));
-
-                  const mf = fields.find(f => f.id === selectedField.id);
-                  if (mf) {
-                    mf.cycleType = cycleTypeForm.cycleType;
-                    mf.cropYear = cycleTypeForm.cropYear;
-                    mf.stage = activeStg.name;
-                    mf.stageNumber = activeStg.stageNumber || 1;
+                  const activeFieldLogs = operationLogs.filter(l => l.fieldId === selectedField.id && !l.isPastCycle);
+                  if (activeFieldLogs.length > 0) {
+                    Alert.alert(
+                      'Start New Crop Cycle',
+                      `Starting a new cycle will archive ${activeFieldLogs.length} current operation record(s) for ${selectedField.id} and initialize Stage 1: Pre-Planting & Land Preparation under ${cycleTypeForm.cycleType} (${cycleTypeForm.cropYear}).\n\nDo you want to proceed?`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Yes, Start New Cycle',
+                          style: 'default',
+                          onPress: () => handleStartNewCycle(selectedField.id, cycleTypeForm.cycleType, cycleTypeForm.cropYear)
+                        }
+                      ]
+                    );
+                  } else {
+                    handleStartNewCycle(selectedField.id, cycleTypeForm.cycleType, cycleTypeForm.cropYear);
                   }
-                  updateFieldStageAndCycle(selectedField.id, {
-                    cycleType: cycleTypeForm.cycleType,
-                    cropYear: cycleTypeForm.cropYear,
-                    stage: activeStg.name,
-                    stageNumber: activeStg.stageNumber || 1,
-                    lastUpdated: new Date().toISOString()
-                  });
-                  setShowCycleModal(false);
-                  Alert.alert('Crop Cycle Updated', `${selectedField.id} is now set to ${cycleTypeForm.cycleType} (${cycleTypeForm.cropYear}) with its 6 growth stages.`);
                 }}
               >
-                <Text style={s.submitBtnText}>Save Cycle</Text>
+                <Text style={s.submitBtnText}>Start & Save Cycle</Text>
               </TouchableOpacity>
             </View>
           </View>

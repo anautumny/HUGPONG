@@ -24,6 +24,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [selectedStageKey, setSelectedStageKey] = useState(null);
   const [session, setSession] = useState(getCurrentSession());
   const [logs, setLogs] = useState(operationLogs);
+  const [allFields, setAllFields] = useState([...fields]);
   const [cycleFilter, setCycleFilter] = useState('active'); // 'active' | 'all'
   const [showLedgerModal, setShowLedgerModal] = useState(false);
   const [expandedLedgerLogId, setExpandedLedgerLogId] = useState(null);
@@ -42,6 +43,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     const unsubscribe = subscribe(() => {
       setSession({ ...getCurrentSession() });
       setLogs([...operationLogs]);
+      setAllFields([...fields]);
     });
     return unsubscribe;
   }, []);
@@ -53,18 +55,18 @@ export default function AnalyticsScreen({ navigation, route }) {
   // 1. Scoped Fields by Role
   const scopedFields = React.useMemo(() => {
     if (isMember) {
-      const myFields = fields.filter(f => f.member === session.name || f.memberId === session.employeeId);
-      return myFields.length > 0 ? myFields : fields.slice(0, 1);
+      const myFields = allFields.filter(f => f.member === session.name || f.memberId === session.employeeId);
+      return myFields.length > 0 ? myFields : allFields.slice(0, 1);
     }
     if (isSRA) {
-      if (selectedBlockFarm === 'All') return fields;
-      return fields.filter(f => resolveFieldBlockFarm(f) === selectedBlockFarm || f.blockFarmId === selectedBlockFarm);
+      if (selectedBlockFarm === 'All') return allFields;
+      return allFields.filter(f => resolveFieldBlockFarm(f) === selectedBlockFarm || f.blockFarmId === selectedBlockFarm);
     }
     // Farm Manager: scoped to assigned farm
     const mgrFarm = session.blockFarm || session.farm || 'Nacayao Block Farm';
-    const mgrFields = fields.filter(f => resolveFieldBlockFarm(f) === mgrFarm || f.blockFarmId === session.blockFarmId);
-    return mgrFields.length > 0 ? mgrFields : fields;
-  }, [isMember, isSRA, selectedBlockFarm, session.name, session.farm, session.employeeId, session.blockFarmId]);
+    const mgrFields = allFields.filter(f => resolveFieldBlockFarm(f) === mgrFarm || f.blockFarmId === session.blockFarmId || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+    return mgrFields.length > 0 ? mgrFields : allFields;
+  }, [isMember, isSRA, selectedBlockFarm, session.name, session.farm, session.employeeId, session.blockFarmId, allFields]);
 
   // Block farms list for SRA filter (from canonical block_farms collection)
   const blockFarmsList = React.useMemo(() => {
@@ -195,9 +197,13 @@ export default function AnalyticsScreen({ navigation, route }) {
   }, [activeFields, totalHa, isMember, logs, cycleFilter]);
 
 
-  // Helper: map a field to exactly one SRA stage (prevent double counting)
+  // Helper: map a field to exactly one SRA stage (aligns 100% with web matchFieldToPhaseKey)
   const matchFieldToStageKey = (f) => {
-    const stageStr = (f.stage || '').toLowerCase();
+    const stageNum = Number(f?.stageNumber);
+    if (stageNum >= 1 && stageNum <= 6) {
+      return `stage-${stageNum}`;
+    }
+    const stageStr = (f?.stage || '').toLowerCase();
     for (let i = 1; i <= 6; i++) {
       if (stageStr.includes(`stage ${i}`) || stageStr.includes(`stage${i}`)) {
         return `stage-${i}`;
@@ -208,7 +214,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         return st.key;
       }
     }
-    return 'stage-2';
+    return 'stage-1';
   };
 
   // Crop stage distribution (strictly 1 stage per field)
@@ -263,6 +269,23 @@ export default function AnalyticsScreen({ navigation, route }) {
     const myFieldIds = scopedFields.map(f => (f.id || '').trim().toUpperCase());
     return logs.filter(l => myFieldIds.includes((l.fieldId || '').trim().toUpperCase()) && !l.isArchived && !l.isDeleted);
   }, [isMember, scopedFields, logs]);
+
+  // Member cycle progress based on 6 stages with active operations
+  const memberCycleProgress = React.useMemo(() => {
+    if (!memberCurrentStage) return { stageNum: 1, totalStages: 6, pct: 0 };
+    const stageNum = memberCurrentStage.stageNum || 1;
+    const completedWeight = Math.max(0, stageNum - 1);
+    const currentStageLogs = (logs || []).filter(l => 
+      (l.fieldId || '').trim().toUpperCase() === (memberCurrentStage.fieldId || '').trim().toUpperCase() &&
+      (l.stageNumber === stageNum || (l.stageName || '').toLowerCase().includes(`stage ${stageNum}`)) &&
+      !l.isPastCycle
+    );
+    const distinctLogged = new Set(currentStageLogs.map(l => l.sraOperationId || l.activity || l.operationName)).size;
+    const activePlannedCount = (stageNum === 5 || stageNum === 6) ? 3 : 2;
+    const activeFraction = Math.min(1, distinctLogged / activePlannedCount);
+    const pct = Math.min(100, Math.round(((completedWeight + activeFraction) / 6) * 100));
+    return { stageNum, totalStages: 6, pct };
+  }, [memberCurrentStage, logs]);
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -753,7 +776,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                     <View>
                       <Text style={{ fontSize: 10, color: COLORS.textMuted }}>Cycle Progress</Text>
                       <Text style={{ fontSize: 13, fontWeight: '900', color: memberCurrentStage.color }}>
-                        {Math.round((memberCurrentStage.stageNum / 6) * 100)}%
+                        {memberCycleProgress.stageNum} / {memberCycleProgress.totalStages} Stages ({memberCycleProgress.pct}%)
                       </Text>
                     </View>
                   </View>
