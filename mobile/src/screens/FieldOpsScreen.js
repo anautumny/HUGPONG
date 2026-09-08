@@ -2006,13 +2006,15 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
     }
 
-    // Takeover identical check: prevent re-submitting unchanged stage operation
+    // Takeover identical check: prevent re-submitting unchanged stage operation in active cycle
     if (isTakeOver && asSubmit && !logForm.id) {
       const existingMatchingLog = operationLogs.find(l =>
+        !l.isPastCycle &&
+        !l.isArchived &&
+        !l.isDeleted &&
         l.fieldId === submittedFieldId &&
-        (l.sraOperationId === logForm.sraOperationId || l.operationName === logForm.operationName || l.activity === logForm.activity.trim()) &&
-        (l.stageNumber === parentStageNum || l.taskId === logForm.taskId) &&
-        !l.isPastCycle
+        (l.sraOperationId === logForm.sraOperationId || l.operationName === logForm.operationName || l.activity === (logForm.activity || '').trim()) &&
+        (l.stageNumber === parentStageNum || l.taskId === logForm.taskId)
       );
       if (existingMatchingLog) {
         const origCost = Math.round(Number(existingMatchingLog.totalCost != null ? existingMatchingLog.totalCost : existingMatchingLog.cost || 0));
@@ -2039,13 +2041,16 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
     }
 
-    // Duplicate detection (soft warning)
+    // Duplicate detection (soft warning within active crop cycle)
     const isDupConfirmed = forceDuplicateConfirm || logForm._duplicateConfirmed;
     if (asSubmit && !logForm.id) {
       const isDuplicate = operationLogs.some(l =>
+        !l.isPastCycle &&
+        !l.isArchived &&
+        !l.isDeleted &&
         l.fieldId === submittedFieldId &&
-        (l.operationName === logForm.operationName || l.activity === logForm.activity.trim()) &&
-        l.date === (logForm.period || '')
+        (l.operationName === logForm.operationName || l.activity === (logForm.activity || '').trim()) &&
+        (l.date === (logForm.period || '') || formatDisplayDate(l.date) === formatDisplayDate(logForm.period))
       );
       if (isDuplicate && !isDupConfirmed) {
         Alert.alert(
@@ -2109,7 +2114,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       period: formatDisplayDate(logForm.period || new Date()),
       isoDate: toISODateString(logForm.period || new Date()),
       approved: false,
-      status: isTakeOver ? 'Amended' : (asSubmit ? 'Recorded' : 'Draft'),
+      status: logForm.isSupplemental ? 'Supplemental' : (isTakeOver ? 'Amended' : (asSubmit ? 'Recorded' : 'Draft')),
       loggedBy: loggedByStr,
       loggedById: getCurrentSession()?.employeeId || '',
       isTakeover: isTakeOver,
@@ -2356,6 +2361,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         // If stage was already marked done previously, flag this entry as supplemental
         if (isAlreadyDone || log.isSupplemental) {
           submittedLog.isSupplemental = true;
+          submittedLog.status = 'Supplemental';
           await saveItem(STORAGE_KEYS.LOGS, operationLogs);
         }
         // Do NOT auto-complete the stage! Keep stage active so the farmer can log again or add more passes.

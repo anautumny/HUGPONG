@@ -3670,6 +3670,21 @@ function getOperationAuditBadge(fl, db) {
     };
   }
 
+  // 2. Check Supplemental status
+  const isSupplemental = Boolean(fl.isSupplemental || fl.status === 'Supplemental' || (fl.activity && fl.activity.toLowerCase().includes('(supplemental)')) || (fl.task && fl.task.toLowerCase().includes('(supplemental)')));
+  if (isSupplemental) {
+    return {
+      type: 'supplemental',
+      status: 'Supplemental',
+      badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-amber-900 bg-amber-100 border border-amber-300 flex items-center gap-1 shadow-2xs whitespace-nowrap" title="Supplemental stage operation recorded">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+        Supplemental
+      </span>`,
+      isLocked: false,
+      lockTitle: ''
+    };
+  }
+
   const isAmendedLog = Boolean(fl.isAmended || fl.isTakeover || (Array.isArray(fl.editHistory) && fl.editHistory.length > 0) || fl.status === 'Amended');
   if (isAmendedLog) {
     const editCount = (Array.isArray(fl.editHistory) && fl.editHistory.length) || (fl.isAmended ? 1 : 0);
