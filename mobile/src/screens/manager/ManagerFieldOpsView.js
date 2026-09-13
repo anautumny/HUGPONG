@@ -21,10 +21,10 @@ function ManagerFieldOpsView({
 
   const managedFields = React.useMemo(() => {
     if (session?.blockFarmId) {
-      return fields.filter(f => f.blockFarmId === session.blockFarmId || f.blockFarm === session.farm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+      return fields.filter(f => f.blockFarmId === session.blockFarmId || f.blockFarm === (session?.farm || session?.blockFarm || 'District Central') );
     }
-    const targetFarm = session?.farm || 'Nacayao Block Farm';
-    return fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+    const targetFarm = session?.farm || session?.blockFarm || 'District Central';
+    return fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm);
   }, [fields, session?.farm, session?.blockFarmId]);
 
   return (
@@ -45,7 +45,7 @@ function ManagerFieldOpsView({
       {/* Supervised Field Registry */}
       <View style={s.sectionHeader}>
         <Text style={s.sectionTitle}>{t('supervised_plots_label', 'Supervised Plots')} ({managedFields.length})</Text>
-        <Text style={s.farmTag}>{session.farm || 'Nacayao Block Farm'}</Text>
+        <Text style={s.farmTag}>{(session?.farm || session?.blockFarm || 'District Central')}</Text>
       </View>
 
       {managedFields.map(f => (

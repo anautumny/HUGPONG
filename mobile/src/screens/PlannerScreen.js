@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Modal, Alert,
+  Modal, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -118,7 +118,7 @@ export default function PlannerScreen({ navigation }) {
   const { t, formatOperationName, formatStageName, formatPhaseMonth } = useTranslation();
   const [session, setSession] = useState(getCurrentSession());
   const [allFields, setAllFields] = useState([...fieldsStore]);
-  const isMember = session.role === 'Member';
+  const isMember = session?.role === 'Member';
 
   useEffect(() => {
     const unsub = subscribe(() => {
@@ -162,7 +162,7 @@ export default function PlannerScreen({ navigation }) {
     }
   }, [displayedFields, selectedField]);
 
-  const [landArea, setLandArea] = useState(() => selectedField?.ha ? String(selectedField.ha) : '1.50');
+  const [landArea, setLandArea] = useState(() => selectedField?.ha ? String(selectedField?.ha) : '1.50');
   
   // Clean Master-Detail UX State: null = Stages Hub, 1..6 = Stage Detail View
   const [activeStageNum, setActiveStageNum] = useState(null);
@@ -170,10 +170,10 @@ export default function PlannerScreen({ navigation }) {
   // Sync landArea and stageOperationsMap when selectedField changes
   useEffect(() => {
     if (selectedField?.id) {
-      setLandArea(String(selectedField.ha || '1.50'));
+      setLandArea(String(selectedField?.ha || '1.50'));
       const map = {};
       for (let i = 1; i <= 6; i++) {
-        map[i] = getFieldCustomOperations(selectedField.id, i);
+        map[i] = getFieldCustomOperations(selectedField?.id, i);
       }
       setStageOperationsMap(map);
     }
@@ -183,7 +183,7 @@ export default function PlannerScreen({ navigation }) {
   const [stageOperationsMap, setStageOperationsMap] = useState(() => {
     const map = {};
     for (let i = 1; i <= 6; i++) {
-      map[i] = getFieldCustomOperations(selectedField?.id || 'FLD-NCY-001', i);
+      map[i] = getFieldCustomOperations(selectedField?.id || (selectedField?.id || fields[0]?.id || ''), i);
     }
     return map;
   });
@@ -196,6 +196,7 @@ export default function PlannerScreen({ navigation }) {
   const [newOpUnit, setNewOpUnit] = useState('ha');
   const [newOpRate, setNewOpRate] = useState('1000');
   const [selectedCatalogOp, setSelectedCatalogOp] = useState(null);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   // Modal: Add Child Item to a specific operation
   const [showAddChildModal, setShowAddChildModal] = useState(false);
@@ -225,10 +226,10 @@ export default function PlannerScreen({ navigation }) {
     if (selectedField) {
       const map = {};
       for (let i = 1; i <= 6; i++) {
-        map[i] = getFieldCustomOperations(selectedField.id, i);
+        map[i] = getFieldCustomOperations(selectedField?.id, i);
       }
       setStageOperationsMap(map);
-      setLandArea(selectedField.ha ? String(selectedField.ha) : '1.50');
+      setLandArea(selectedField?.ha ? String(selectedField?.ha) : '1.50');
     }
   }, [selectedField?.id]);
 
@@ -506,14 +507,14 @@ export default function PlannerScreen({ navigation }) {
       ...prev,
       [activeStageNum]: defaults
     }));
-    Alert.alert('Reset', `Stage ${activeStageNum} operations restored to standard SRA benchmarks.`);
+    Alert.alert('Reset', `Stage ${activeStageNum} operations restored to standard template.`);
   };
 
   // Reset ALL 6 stages to SRA defaults
   const resetAllStagesToDefault = () => {
     Alert.alert(
       'Reset All Stages',
-      'Restore all 6 stages to the standard SRA baseline templates?',
+      'Restore all 6 stages to standard templates?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -525,8 +526,8 @@ export default function PlannerScreen({ navigation }) {
               map[i] = getDefaultStageOperations(i);
             }
             setStageOperationsMap(map);
-            saveFieldFullPlan(selectedField?.id || 'FLD-NCY-001', map);
-            Alert.alert('Restored', 'All 6 stages restored to official SRA benchmarks.');
+            saveFieldFullPlan(selectedField?.id || (selectedField?.id || fields[0]?.id || ''), map);
+            Alert.alert('Restored', 'All 6 stages restored to standard templates.');
           }
         }
       ]
@@ -534,12 +535,24 @@ export default function PlannerScreen({ navigation }) {
   };
 
   // Save full custom plan for this field
-  const handleSaveFieldPlan = () => {
-    saveFieldFullPlan(selectedField?.id || 'FLD-NCY-001', stageOperationsMap);
-    Alert.alert(
-      'Farm Plan Saved',
-      `Custom plan for ${selectedField?.id || 'FLD-NCY-001'} saved! Field Operations will now use these customized operations.`
-    );
+  const handleSaveFieldPlan = async () => {
+    const targetFieldId = selectedField?.id || fields[0]?.id || '';
+    if (!targetFieldId) {
+      Alert.alert('No Field Selected', 'Please select a field plot before saving a customized plan.');
+      return;
+    }
+    setIsSavingPlan(true);
+    try {
+      await saveFieldFullPlan(targetFieldId, stageOperationsMap);
+      setIsSavingPlan(false);
+      Alert.alert(
+        'Farm Plan Saved',
+        `Custom plan for ${targetFieldId} recorded to database! Field Operations will now use these customized operations.`
+      );
+    } catch (e) {
+      setIsSavingPlan(false);
+      Alert.alert('Error', 'Failed to save custom plan to database.');
+    }
   };
 
   // Send single operation to Field Ops
@@ -594,7 +607,7 @@ export default function PlannerScreen({ navigation }) {
 
   // Helper to create and insert a draft log object
   const createDraftLogForOp = (op, isSupplemental = false) => {
-    const fieldId = selectedField?.id || 'FLD-NCY-001';
+    const fieldId = selectedField?.id || (selectedField?.id || fields[0]?.id || '');
     const draftId = generateDraftId(fieldId);
     let subItems = [];
     let totalOpCost = 0;
@@ -656,7 +669,7 @@ export default function PlannerScreen({ navigation }) {
     const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
     const executeSendAll = async (isSupplemental) => {
-      const targetFieldId = (selectedField?.id || 'FLD-NCY-001').trim().toUpperCase();
+      const targetFieldId = (selectedField?.id || (selectedField?.id || fields[0]?.id || '')).trim().toUpperCase();
       const createdIds = [];
       currentOperations.forEach(op => {
         const d = createDraftLogForOp(op, isSupplemental);
@@ -800,8 +813,8 @@ export default function PlannerScreen({ navigation }) {
               <View style={s.fieldCardHeader}>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={s.fieldIdText}>{selectedField?.id || 'FLD-NCY-001'}</Text>
-                    <Text style={s.fieldFarmText}>· {selectedField?.blockFarm || 'Nacayao Block Farm'}</Text>
+                    <Text style={s.fieldIdText}>{selectedField?.id || (selectedField?.id || fields[0]?.id || '')}</Text>
+                    <Text style={s.fieldFarmText}>· {selectedField?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
                   </View>
                   <Text style={s.fieldMemberText}>{t('assigned_lbl', 'Assigned')}: {selectedField?.member || session.name}</Text>
                 </View>
@@ -837,10 +850,6 @@ export default function PlannerScreen({ navigation }) {
                 <Text style={s.hubSummaryLabel}>{t('full_season_budget', 'FULL SEASON ESTIMATED BUDGET')}</Text>
                 <Text style={s.hubSummaryValue}>Php {fmt(Math.round(fullSeasonTotal))}</Text>
                 <Text style={s.hubSummarySub}>{t('whole_cycle_plan_for', 'Whole cycle customized plan for')} {landArea} Ha (6 {t('stages_word', 'Stages')})</Text>
-              </View>
-              <View style={s.hubSraBadge}>
-                <Ionicons name="shield-checkmark" size={14} color={COLORS.primary} />
-                <Text style={s.hubSraBadgeText}>{t('sra_direct_ceiling', 'SRA Direct: ₱66.9k/ha')}</Text>
               </View>
             </View>
 
@@ -898,7 +907,6 @@ export default function PlannerScreen({ navigation }) {
 
                       <View style={{ alignItems: 'flex-end', marginLeft: 8, flexShrink: 0 }}>
                         <Text style={s.stageChoicePrice}>₱ {fmt(Math.round(stgCost))}</Text>
-                        <Text style={s.stageChoiceHaRate}>₱ {fmt(stg.benchmarkCost)}/ha</Text>
                       </View>
                     </View>
 
@@ -930,7 +938,7 @@ export default function PlannerScreen({ navigation }) {
                 activeOpacity={0.85}
               >
                 <Ionicons name="refresh-outline" size={16} color={COLORS.textMuted} />
-                <Text style={s.resetAllBtnText}>{t('btn_reset_all_stages', 'Reset All 6 Stages to SRA Baseline')}</Text>
+                <Text style={s.resetAllBtnText}>{t('btn_reset_all_stages', 'Reset All 6 Stages to Standard Template')}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -1002,7 +1010,7 @@ export default function PlannerScreen({ navigation }) {
                 </View>
               </View>
 
-              <Text style={s.activeStageTimeline}>{formatPhaseMonth ? formatPhaseMonth(currentStage.month) : currentStage.month} · {t('sra_baseline_lbl', 'SRA Baseline')}: ₱{fmt(currentStage.benchmarkCost)} / ha</Text>
+              <Text style={s.activeStageTimeline}>{formatPhaseMonth ? formatPhaseMonth(currentStage.month) : currentStage.month}</Text>
               <Text style={s.activeStageDesc}>{t(`stage_${currentStage.stageNum}_desc`, currentStage.description)}</Text>
 
               {isStageCompletedInField(currentStage.stageNum) && (
@@ -1259,12 +1267,22 @@ export default function PlannerScreen({ navigation }) {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ backgroundColor: '#F0F8EC', borderWidth: 1.5, borderColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                style={[{ backgroundColor: '#F0F8EC', borderWidth: 1.5, borderColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }, isSavingPlan && { opacity: 0.65 }]}
                 onPress={handleSaveFieldPlan}
+                disabled={isSavingPlan}
                 activeOpacity={0.85}
               >
-                <Ionicons name="save-outline" size={18} color={COLORS.primary} />
-                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>{t('save_custom_plan_btn', 'SAVE CUSTOM PLAN FOR THIS FIELD')}</Text>
+                {isSavingPlan ? (
+                  <>
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>RECORDING CUSTOM PLAN TO DATABASE...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="save-outline" size={18} color={COLORS.primary} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>{t('save_custom_plan_btn', 'SAVE CUSTOM PLAN FOR THIS FIELD')}</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </>

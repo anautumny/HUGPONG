@@ -20,10 +20,10 @@ function ManagerHomeView({
   const [showAllLogs, setShowAllLogs] = useState(false);
   const DISPLAY_LIMIT = 3;
 
-  const targetFarm = session?.farm || session?.blockFarm || 'Nacayao Block Farm';
+  const targetFarm = session?.farm || session?.blockFarm || 'District Central';
 
   const { managedFields, totalHectares, totalOperationsCount, allFormattedLogs } = React.useMemo(() => {
-    const mf = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || f.blockFarm.includes('Nacayao') || f.blockFarmId === session?.blockFarmId);
+    const mf = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || f.blockFarmId === session?.blockFarmId);
     const th = mf.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
     const mIds = mf.map(f => f.id);
     const fieldMap = Object.fromEntries(mf.map(f => [f.id, f]));
@@ -34,11 +34,11 @@ function ManagerHomeView({
       // Exclude past cycle archives, drafts, and certified past history
       if (l.isPastCycle === true || l.isPastCycle === 'true') return false;
       if (l.isArchived === true || l.isDeleted === true) return false;
-      if (l.isDraft === true || l.status === 'Draft' || l.status === 'Certified') return false;
+      if (l.isDraft === true || l.status === 'Draft' || l.status === 'Archived') return false;
       if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
 
       // Ensure block farm association
-      const belongsToFarm = (l.blockFarm && (l.blockFarm === targetFarm || l.blockFarm.includes('Nacayao'))) || 
+      const belongsToFarm = (l.blockFarm && (l.blockFarm === targetFarm || l.blockFarmId === session?.blockFarmId)) || 
                             (l.fieldId && mIds.includes(l.fieldId)) || 
                             (!l.blockFarm && mIds.length === 0);
       return belongsToFarm;
@@ -90,7 +90,7 @@ function ManagerHomeView({
       <View style={s.summaryCard}>
         <View style={s.summaryHeader}>
           <View style={{ flex: 1, marginRight: 10 }}>
-            <Text style={s.farmName} numberOfLines={1}>{session?.farm || 'Nacayao Block Farm'}</Text>
+            <Text style={s.farmName} numberOfLines={1}>{session?.farm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
             <View style={s.managerPill}>
               <Ionicons name="shield-checkmark" size={11} color={COLORS.primary} />
               <Text style={s.managerTag}>

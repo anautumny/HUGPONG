@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
-import { authenticateUser, isValidUserIdentifier } from '../../data/dataStore';
+import { authenticateUser, isValidUserIdentifier, resetUserPasswordByIdentifier } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
+import { isOnline, addNetworkListener } from '../../services/networkService';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
@@ -16,11 +17,31 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [authError, setAuthError] = useState('');
+  const [deviceOnline, setDeviceOnline] = useState(isOnline());
 
   // Security: Brute-Force Rate Limiting & Account Lockout
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const timerRef = useRef(null);
+
+  // First-Time Password Change Assistant State
+  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false);
+  const [authenticatedUser, setAuthenticatedUser] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [firstLoginError, setFirstLoginError] = useState('');
+  const [firstLoginSaving, setFirstLoginSaving] = useState(false);
+
+  useEffect(() => {
+    const unsubNet = addNetworkListener((status) => {
+      setDeviceOnline(status);
+    });
+    return () => {
+      if (typeof unsubNet === 'function') unsubNet();
+    };
+  }, []);
 
   useEffect(() => {
     if (lockoutSeconds > 0) {
@@ -84,9 +105,79 @@ export default function LoginScreen({ navigation }) {
       // Successful authentication
       setFailedAttempts(0);
       setAuthError('');
+
+      // Check if user requires password change on first login or temporary default password
+      const isDefault = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
+      if (res.requiresPasswordChange || isDefault) {
+        setAuthenticatedUser(res.user);
+        setNewPassword('');
+        setConfirmPassword('');
+        setFirstLoginError('');
+        setShowFirstLoginModal(true);
+        return;
+      }
+
       navigation.replace('MainTabs');
     }, 450);
   };
+
+  const handleSaveFirstLoginPassword = async () => {
+    const isLen = newPassword.length >= 8;
+    const isCase = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
+    const isNum = /[0-9]/.test(newPassword);
+    const isNotDefault = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase());
+
+    if (!isLen) {
+      setFirstLoginError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (!isCase) {
+      setFirstLoginError('Password must contain both UPPERCASE (A-Z) and lowercase (a-z) letters.');
+      return;
+    }
+    if (!isNum) {
+      setFirstLoginError('Password must contain at least one number (0-9).');
+      return;
+    }
+    if (!isNotDefault) {
+      setFirstLoginError('Cannot use temporary default password ("hugpong" / "hugpong2026").');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setFirstLoginError('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    setFirstLoginSaving(true);
+    setFirstLoginError('');
+    try {
+      const identifier = authenticatedUser?.employeeId || authenticatedUser?.contact || contactNumber;
+      const res = await resetUserPasswordByIdentifier(identifier, newPassword);
+      setFirstLoginSaving(false);
+
+      if (!res.success) {
+        setFirstLoginError(res.error || 'Failed to set password. Please try again.');
+        return;
+      }
+
+      setShowFirstLoginModal(false);
+      Alert.alert(
+        'Password Configured',
+        'Your new secure password has been set successfully. Welcome to HUGPONG!'
+      );
+      navigation.replace('MainTabs');
+    } catch (err) {
+      setFirstLoginSaving(false);
+      setFirstLoginError('An unexpected error occurred. Please try again.');
+    }
+  };
+
+  // Requirement status calculations
+  const reqLen = newPassword.length >= 8;
+  const reqCase = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
+  const reqNum = /[0-9]/.test(newPassword);
+  const reqDiff = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase()) && newPassword.trim().length > 0;
+  const isReqValid = reqLen && reqCase && reqNum && reqDiff && newPassword === confirmPassword && confirmPassword.length > 0;
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -102,6 +193,19 @@ export default function LoginScreen({ navigation }) {
 
           {/* Login Card */}
           <View style={s.card}>
+
+            {/* Offline First-Time Login Notice */}
+            {!deviceOnline ? (
+              <View style={s.offlineBanner}>
+                <Ionicons name="cloud-offline-outline" size={20} color="#B45309" />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={s.offlineBannerTitle}>You are currently offline</Text>
+                  <Text style={s.offlineBannerText}>
+                    An active internet connection is required to sign in or register for the first time. Once signed in, you stay logged in offline.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
 
             {/* Lockout or Auth Error Banner */}
             {authError ? (
@@ -199,57 +303,6 @@ export default function LoginScreen({ navigation }) {
               )}
             </TouchableOpacity>
 
-            {/* Instant Role Access (No Emojis) */}
-            <View style={s.quickAccessWrap}>
-              <View style={s.quickAccessHeader}>
-                <Text style={s.quickAccessTitle}>Instant Role Access</Text>
-                <Text style={s.quickAccessSub}>1-Click Fast Switch</Text>
-              </View>
-              <View style={s.quickGrid}>
-                <TouchableOpacity
-                  style={s.quickRoleBtn}
-                  onPress={() => {
-                    setContactNumber('09171234567');
-                    setPassword('password123');
-                    authenticateUser('09171234567', 'password123');
-                    navigation.replace('MainTabs');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickRoleTitle}>Farmer Member</Text>
-                  <Text style={s.quickRoleName}>Juan dela Cruz</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={s.quickRoleBtn}
-                  onPress={() => {
-                    setContactNumber('09189876543');
-                    setPassword('password123');
-                    authenticateUser('09189876543', 'password123');
-                    navigation.replace('MainTabs');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickRoleTitle}>Farm Manager</Text>
-                  <Text style={s.quickRoleName}>Jose Reyes</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[s.quickRoleBtn, { width: '100%' }]}
-                  onPress={() => {
-                    setContactNumber('09194448888');
-                    setPassword('password123');
-                    authenticateUser('09194448888', 'password123');
-                    navigation.replace('MainTabs');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickRoleTitle}>SRA Admin</Text>
-                  <Text style={s.quickRoleName}>Engr. Maria Santos (Silay Authority)</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
             <View style={s.securityNotice}>
               <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.primary} />
               <Text style={s.securityNoticeText}>Encrypted &amp; SRA Certified Agricultural Gateway</Text>
@@ -263,8 +316,163 @@ export default function LoginScreen({ navigation }) {
               <Text style={s.registerLink}>{t('auth_register_now', 'Create Account')}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Legal Compliance Footer Notice */}
+          <View style={s.legalNoticeRow}>
+            <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
+            <Text style={s.legalNoticeText}>
+              Protected under Republic Act No. 10173 (Data Privacy Act of 2012)
+            </Text>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* ── FIRST-TIME LOGIN PASSWORD CHANGE ASSISTANT MODAL ── */}
+      <Modal
+        visible={showFirstLoginModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowFirstLoginModal(false);
+        }}
+      >
+        <View style={s.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+            <View style={s.modalCard}>
+              {/* Header */}
+              <View style={s.modalHeaderRow}>
+                <View style={s.modalIconWrap}>
+                  <Ionicons name="shield-half" size={22} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.modalTitle}>Set Your New Secure Password</Text>
+                  <Text style={s.modalSub}>
+                    Welcome to HUGPONG! Since this is your first time logging in, please create a new secure password to protect your account and farm records.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Account Context Badge */}
+              <View style={s.modalAccountBox}>
+                <View style={s.modalAccountRow}>
+                  <Text style={s.modalAccountLbl}>Account Holder</Text>
+                  <Text style={s.modalAccountVal}>{authenticatedUser?.name || 'Authorized Personnel'}</Text>
+                </View>
+                <View style={[s.modalAccountRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 4 }]}>
+                  <Text style={s.modalAccountLbl}>User ID / Role</Text>
+                  <Text style={[s.modalAccountVal, { color: COLORS.primary, fontWeight: '800' }]}>
+                    {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Member'})
+                  </Text>
+                </View>
+              </View>
+
+              {/* Error Message */}
+              {firstLoginError ? (
+                <View style={s.firstLoginErrorBox}>
+                  <Ionicons name="alert-circle" size={16} color="#DC2626" />
+                  <Text style={s.firstLoginErrorText}>{firstLoginError}</Text>
+                </View>
+              ) : null}
+
+              {/* New Password Input */}
+              <View style={s.fieldGroup}>
+                <Text style={s.label}>New Password *</Text>
+                <View style={s.inputWrap}>
+                  <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} style={s.inputIcon} />
+                  <TextInput
+                    style={[s.input, { flex: 1 }]}
+                    value={newPassword}
+                    onChangeText={v => {
+                      setNewPassword(v);
+                      setFirstLoginError('');
+                    }}
+                    placeholder="Minimum 8 characters"
+                    placeholderTextColor={COLORS.textMuted}
+                    secureTextEntry={!showNewPw}
+                    autoComplete="password"
+                  />
+                  <TouchableOpacity onPress={() => setShowNewPw(p => !p)} style={{ padding: 4 }}>
+                    <Ionicons name={showNewPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Confirm Password Input */}
+              <View style={s.fieldGroup}>
+                <Text style={s.label}>Confirm New Password *</Text>
+                <View style={s.inputWrap}>
+                  <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} style={s.inputIcon} />
+                  <TextInput
+                    style={[s.input, { flex: 1 }]}
+                    value={confirmPassword}
+                    onChangeText={v => {
+                      setConfirmPassword(v);
+                      setFirstLoginError('');
+                    }}
+                    placeholder="Re-enter new password"
+                    placeholderTextColor={COLORS.textMuted}
+                    secureTextEntry={!showConfirmPw}
+                    autoComplete="password"
+                  />
+                  <TouchableOpacity onPress={() => setShowConfirmPw(p => !p)} style={{ padding: 4 }}>
+                    <Ionicons name={showConfirmPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Interactive Security Checklist */}
+              <View style={s.checklistCard}>
+                <Text style={s.checklistTitle}>Security Requirements:</Text>
+                <View style={s.checklistItem}>
+                  <Ionicons name={reqLen ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqLen ? "#16A34A" : COLORS.textMuted} />
+                  <Text style={[s.checklistText, reqLen && s.checklistTextPassed]}>At least 8 characters long</Text>
+                </View>
+                <View style={s.checklistItem}>
+                  <Ionicons name={reqCase ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqCase ? "#16A34A" : COLORS.textMuted} />
+                  <Text style={[s.checklistText, reqCase && s.checklistTextPassed]}>Contains UPPERCASE &amp; lowercase letters (A-Z, a-z)</Text>
+                </View>
+                <View style={s.checklistItem}>
+                  <Ionicons name={reqNum ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqNum ? "#16A34A" : COLORS.textMuted} />
+                  <Text style={[s.checklistText, reqNum && s.checklistTextPassed]}>Contains at least one number (0-9)</Text>
+                </View>
+                <View style={s.checklistItem}>
+                  <Ionicons name={reqDiff ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqDiff ? "#16A34A" : COLORS.textMuted} />
+                  <Text style={[s.checklistText, reqDiff && s.checklistTextPassed]}>Cannot be temporary default password</Text>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={s.modalBtnRow}>
+                <TouchableOpacity
+                  style={s.modalCancelBtn}
+                  onPress={() => {
+                    setShowFirstLoginModal(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.modalCancelText}>Sign Out</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.modalSaveBtn, (!isReqValid || firstLoginSaving) && { opacity: 0.7 }]}
+                  onPress={handleSaveFirstLoginPassword}
+                  disabled={firstLoginSaving}
+                  activeOpacity={0.8}
+                >
+                  {firstLoginSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={s.modalSaveText}>Save Password &amp; Open</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#fff" />
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -278,6 +486,27 @@ const s = StyleSheet.create({
   sub: { fontSize: 13, color: COLORS.textMuted },
   card: { backgroundColor: '#fff', borderRadius: RADIUS['2xl'] || 24, padding: SPACING.xl, gap: SPACING.md, ...SHADOW.card },
   
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: 12,
+    borderRadius: RADIUS.md,
+  },
+  offlineBannerTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  offlineBannerText: {
+    fontSize: 11,
+    color: '#B45309',
+    lineHeight: 15,
+  },
+
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -351,58 +580,163 @@ const s = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Instant Role Access Styles (No Emojis)
-  quickAccessWrap: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    gap: 8,
+  registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  registerText: { fontSize: 13, color: COLORS.textMuted },
+  registerLink: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
+  legalNoticeRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 12, paddingHorizontal: 16 },
+  legalNoticeText: { fontSize: 10.5, color: COLORS.textMuted, textAlign: 'center', lineHeight: 14 },
+
+  // First Login Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
   },
-  quickAccessHeader: {
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: RADIUS['2xl'] || 24,
+    padding: 20,
+    gap: 14,
+    width: '100%',
+    maxWidth: 420,
+    ...SHADOW.lg,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  modalIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.text,
+  },
+  modalSub: {
+    fontSize: 11.5,
+    color: COLORS.textMuted,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  modalAccountBox: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 10,
+    gap: 6,
+  },
+  modalAccountRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  quickAccessTitle: {
+  modalAccountLbl: {
     fontSize: 10.5,
-    fontWeight: '800',
-    color: COLORS.textSecondary,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  quickAccessSub: {
-    fontSize: 9.5,
+    fontWeight: '700',
     color: COLORS.textMuted,
-    fontWeight: '600',
   },
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  quickRoleBtn: {
-    width: '48.5%',
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    paddingVertical: 9,
-    paddingHorizontal: 10,
-    gap: 2,
-  },
-  quickRoleTitle: {
-    fontSize: 11.5,
-    fontWeight: '800',
+  modalAccountVal: {
+    fontSize: 12,
+    fontWeight: '700',
     color: COLORS.text,
   },
-  quickRoleName: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    fontWeight: '600',
+  firstLoginErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    padding: 8,
+    borderRadius: RADIUS.sm,
   },
-
-  registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },
-  registerText: { fontSize: 13, color: COLORS.textMuted },
-  registerLink: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
+  firstLoginErrorText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+    flex: 1,
+  },
+  checklistCard: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    padding: 10,
+    gap: 4,
+  },
+  checklistTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#166534',
+    marginBottom: 2,
+  },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  checklistText: {
+    fontSize: 10.5,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  checklistTextPassed: {
+    color: '#166534',
+    fontWeight: '700',
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  modalCancelBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  modalSaveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: RADIUS.md,
+    ...SHADOW.xs,
+  },
+  modalSaveText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#fff',
+  },
 });

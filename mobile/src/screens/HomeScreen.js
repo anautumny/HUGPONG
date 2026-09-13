@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Alert,
+  Modal, Dimensions, TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel } from '../data/dataStore';
+import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { getOutboxCount } from '../services/syncEngine';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
+import OfflineBanner from '../components/OfflineBanner';
+import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
 
 // Role-Specific Modular Views
 import MemberHomeView from './member/MemberHomeView';
@@ -29,24 +31,31 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   const allDrafts = customDrafts || draftLogs || [];
 
   const userRole = session?.role || 'Member';
-  const managerBlockFarm = (session?.blockFarm || 'Nacayao Block Farm').toLowerCase();
+  const managerBlockFarm = (session?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')).toLowerCase();
   
   // Resolve fields belonging to this manager's block farm
   const managerFieldIds = fields.filter(f => {
-    const fFarm = (f.blockFarm || 'Nacayao Block Farm').toLowerCase();
+    const fFarm = (f.blockFarm || (session?.farm || session?.blockFarm || 'District Central')).toLowerCase();
     return fFarm.includes(managerBlockFarm) || managerBlockFarm.includes(fFarm);
   }).map(f => f.id);
 
-  // 1. Offline Logs Alert (Pending Cloud Sync - Scoped by Role)
-  let scopedLogs = allLogs;
+  // 1. Offline Logs Alert (Pending Cloud Sync - Scoped by Role, strictly excluding past cycle/archived)
+  let scopedLogs = allLogs.filter(l => {
+    if (!l) return false;
+    if (l.isPastCycle === true || l.isPastCycle === 'true') return false;
+    if (l.isArchived === true || l.isDeleted === true || l.isDraft === true) return false;
+    if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
+    return true;
+  });
+
   if (userRole === 'Member') {
-    const userFieldId = session?.fieldId || 'FLD-NCY-001';
-    scopedLogs = allLogs.filter(l => l.fieldId === userFieldId || l.authorName === session?.name || (l.loggedBy && l.loggedBy.includes(session?.name)));
+    const userFieldId = session?.fieldId || (fields[0]?.id || '');
+    scopedLogs = scopedLogs.filter(l => l.fieldId === userFieldId || l.authorName === session?.name || (l.loggedBy && l.loggedBy.includes(session?.name)));
   } else if (userRole === 'Farm Manager') {
-    scopedLogs = allLogs.filter(l => managerFieldIds.includes(l.fieldId) || (l.loggedBy && l.loggedBy.includes(session?.name)));
+    scopedLogs = scopedLogs.filter(l => managerFieldIds.includes(l.fieldId) || (l.loggedBy && l.loggedBy.includes(session?.name)));
   }
 
-  const offlineLogsCount = scopedLogs.filter(l => l.isOffline || l.synced === false).length + (userRole !== 'SRA (Admin)' ? outboxCount : 0);
+  const offlineLogsCount = scopedLogs.filter(l => l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued').length + (userRole !== 'SRA (Admin)' ? outboxCount : 0);
   if (offlineLogsCount > 0 && !dismissedIds.has('notif-offline-sync')) {
     notifs.push({
       id: 'notif-offline-sync',
@@ -77,7 +86,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'trending-up',
         color: '#267326',
         title: 'New SRA Price Circular Broadcast',
-        msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.price || 2950).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molasses || 4400).toLocaleString()}/MT (${latest.week || 'Current Circular'}).`,
+        msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.price || 0).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molasses || 0).toLocaleString()}/MT (${latest.week || 'Current Circular'}).`,
         time: latest.date || 'Live Circular',
         unread: !readIds.has(priceNotifId),
       });
@@ -97,7 +106,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'document-text-outline',
         color: '#0284C7',
         title: 'Unsubmitted Field Drafts',
-        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member' ? (session?.fieldId || 'your plot') : (session?.blockFarm || 'Nacayao Block Farm')}. Tap to review, edit, and record operations.`,
+        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member' ? (session?.fieldId || 'your plot') : (session?.blockFarm || (session?.farm || session?.blockFarm || 'District Central'))}. Tap to review, edit, and record operations.`,
         time: `${scopedDrafts.length} draft${scopedDrafts.length !== 1 ? 's' : ''}`,
         badgeText: 'Review Drafts',
         unread: !readIds.has('notif-unsubmitted-drafts'),
@@ -120,7 +129,7 @@ export default function HomeScreen({ navigation }) {
   const [dismissedNotifIds, setDismissedNotifIds] = useState(new Set());
   const [notifs, setNotifs] = useState(() => generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs));
   
-  // Consolidated Dynamic SRA Price State
+  const [isOnline, setIsOnline] = useState(getNetworkStatus());
   const [priceData, setPriceData] = useState({
     livePrice: currentPrice.value,
     liveMol: currentMarketObservation.value,
@@ -133,15 +142,45 @@ export default function HomeScreen({ navigation }) {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [inputWeek, setInputWeek] = useState(() => calculateSRAWeekLabel(new Date()));
   const [inputEffectiveDate, setInputEffectiveDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [inputBag, setInputBag] = useState('2950');
-  const [inputMol, setInputMol] = useState('4400');
+  const [inputBag, setInputBag] = useState(() => currentPrice.value ? String(currentPrice.value) : '');
+  const [inputMol, setInputMol] = useState(() => currentMarketObservation.value ? String(currentMarketObservation.value) : '');
   const [inputCircular, setInputCircular] = useState('SRA Circular #105 (Official SRA Millsite Notice)');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
 
+  const handleCheckNetConnection = async () => {
+    if (isCheckingNet) return;
+    setIsCheckingNet(true);
+    try {
+      const online = await checkConnectivity(3500);
+      if (online) {
+        try {
+          await performMobileSync();
+        } catch (_) {}
+        Alert.alert(
+          t('connection_restored', 'Connection Restored'),
+          t('connection_restored_msg', 'Connected to the internet! The dashboard, live price circulars, and weather telemetry are now active.')
+        );
+      } else {
+        Alert.alert(
+          t('offline_status', 'Still Offline'),
+          t('offline_recheck_msg', 'Could not establish an internet connection. Field operations and the Growth Stage Planner remain available offline.')
+        );
+      }
+    } catch (e) {
+      Alert.alert(
+        t('connection_notice', 'Connection Check'),
+        t('connection_check_err', 'Unable to reach the network. Offline tools remain ready.')
+      );
+    } finally {
+      setIsCheckingNet(false);
+    }
+  };
+
   const pendingSyncCount = React.useMemo(() => {
-    return operationLogs.filter(l => l.isOffline || l.synced === false).length + getOutboxCount();
-  }, [operationLogs, synced]);
+    return getPendingSyncCount(session);
+  }, [operationLogs, synced, session]);
 
   const unreadCount = React.useMemo(() => notifs.filter(n => n.unread && !readNotifIds.has(n.id)).length, [notifs, readNotifIds]);
 
@@ -160,7 +199,13 @@ export default function HomeScreen({ navigation }) {
         liveWeek: currentPrice.week || 'No circular',
       });
     });
-    return unsubscribe;
+    const unsubNet = subscribeToNetwork((online) => {
+      setIsOnline(online);
+    });
+    return () => {
+      unsubscribe();
+      unsubNet();
+    };
   }, [readNotifIds, dismissedNotifIds]);
 
   const handleDismissNotif = React.useCallback((id) => {
@@ -230,7 +275,11 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleOpenPriceModal = () => {
-    if (session.role === 'SRA (Admin)') {
+    if (session?.role === 'SRA (Admin)') {
+      if (!synced) {
+        Alert.alert('Offline Mode', 'You are currently offline. Please connect to the internet to broadcast official SRA weekly benchmark circulars.');
+        return;
+      }
       const today = new Date().toISOString().split('T')[0];
       const autoWeek = calculateSRAWeekLabel(today);
       setInputBag(livePrice.toString());
@@ -241,6 +290,8 @@ export default function HomeScreen({ navigation }) {
       setShowPriceModal(true);
     }
   };
+
+  const isFieldRole = session?.role === 'Member' || session?.role === 'Farm Manager';
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -253,19 +304,100 @@ export default function HomeScreen({ navigation }) {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* ── 1. Top HPCo · Silay Price Card ── */}
-        <TouchableOpacity
-          style={[s.card, s.priceCard]}
-          activeOpacity={session.role === 'SRA (Admin)' ? 0.7 : 1}
-          onPress={handleOpenPriceModal}
-        >
+        {!isOnline ? (
+          <View style={s.offlineGateContainer}>
+            <View style={s.offlineGateCard}>
+              <View style={s.offlineIconCircle}>
+                <Ionicons name="cloud-offline-outline" size={44} color="#B45309" />
+              </View>
+              <Text style={s.offlineGateTitle}>Dashboard Unavailable Offline</Text>
+              <Text style={s.offlineGateSubtitle}>
+                Live market analytics, price circular broadcasts, weather radar, and cluster telemetry require an active internet connection.
+              </Text>
+
+              <View style={s.offlineAvailableBox}>
+                <Text style={s.offlineAvailableTitle}>AVAILABLE OFFLINE SERVICES</Text>
+
+                <TouchableOpacity
+                  style={s.offlineActionBtn}
+                  onPress={() => navigation.navigate('Field Ops')}
+                  activeOpacity={0.8}
+                >
+                  <View style={s.offlineActionIconWrap}>
+                    <Ionicons name="book" size={20} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={s.offlineActionBtnText}>Field Operations</Text>
+                      <View style={s.activeOfflineBadge}>
+                        <Text style={s.activeOfflineText}>ACTIVE OFFLINE</Text>
+                      </View>
+                    </View>
+                    <Text style={s.offlineActionBtnSub}>Record field activities, stage work & manage plots locally</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
+                </TouchableOpacity>
+
+                {session?.role !== 'SRA (Admin)' && (
+                  <TouchableOpacity
+                    style={[s.offlineActionBtn, { marginTop: 10 }]}
+                    onPress={() => navigation.navigate('Planner')}
+                    activeOpacity={0.8}
+                  >
+                    <View style={s.offlineActionIconWrap}>
+                      <Ionicons name="construct" size={20} color={COLORS.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={s.offlineActionBtnText}>Growth Stage Planner</Text>
+                        <View style={s.activeOfflineBadge}>
+                          <Text style={s.activeOfflineText}>ACTIVE OFFLINE</Text>
+                        </View>
+                      </View>
+                      <Text style={s.offlineActionBtnSub}>Calculate split doses, crop timeline & estimated budget</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={[s.offlineRetryBtn, isCheckingNet && { opacity: 0.75 }]}
+                onPress={handleCheckNetConnection}
+                disabled={isCheckingNet}
+                activeOpacity={0.8}
+              >
+                {isCheckingNet ? (
+                  <>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={s.offlineRetryBtnText}>Checking Connection...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={16} color="#FFFFFF" />
+                    <Text style={s.offlineRetryBtnText}>Check Internet Connection</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <>
+            {/* ── 1. Top HPCo · Silay Price Card ── */}
+            <TouchableOpacity
+              style={[s.card, s.priceCard]}
+              activeOpacity={session?.role === 'SRA (Admin)' ? 0.7 : 1}
+              onPress={handleOpenPriceModal}
+            >
           <View style={s.priceCardHeader}>
             <View style={s.priceSourceRow}>
-              <View style={[s.sourceDot, !synced && { backgroundColor: COLORS.accent }]} />
-              <Text style={s.priceSource}>HPCo · Silay</Text>
+              <View style={[s.sourceDot, (!isOnline && isFieldRole) && { backgroundColor: COLORS.accent }]} />
+              <Text style={s.priceSource}>{currentPrice.mill ? `${currentPrice.mill} · ${currentPrice.location}` : 'HPCo · Silay'}</Text>
             </View>
-            <Text style={[s.priceUpdated, !synced && { color: COLORS.accent, fontWeight: '600' }]}>
-              {synced ? `Official: ${liveWeek} · ${liveDate}` : 'Offline: Cached'}
+            <Text style={[s.priceUpdated, (!isOnline && isFieldRole) && { color: COLORS.accent, fontWeight: '600' }]}>
+              {liveWeek !== 'No records' && liveDate !== 'No records' 
+                ? (isOnline ? `Official: ${liveWeek} · ${liveDate}` : (isFieldRole ? 'Offline: Cached' : `Official: ${liveWeek} · ${liveDate}`))
+                : 'No official broadcast records'}
             </Text>
           </View>
 
@@ -277,8 +409,12 @@ export default function HomeScreen({ navigation }) {
                 ₱{livePrice.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
               <View style={s.priceChangeRow}>
-                <Ionicons name="caret-up" size={11} color={COLORS.success} />
-                <Text style={s.priceChangeTxt}>+{Number(liveChange).toFixed(2)}</Text>
+                {liveChange !== 0 && (
+                  <Ionicons name={liveChange > 0 ? "caret-up" : "caret-down"} size={11} color={liveChange > 0 ? COLORS.success : COLORS.danger} />
+                )}
+                <Text style={[s.priceChangeTxt, liveChange < 0 && { color: COLORS.danger }, liveChange === 0 && { color: COLORS.textMuted }]}>
+                  {liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : '0.00')}
+                </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_lkg', 'per Lkg')}</Text>
             </View>
@@ -292,14 +428,18 @@ export default function HomeScreen({ navigation }) {
                 ₱{liveMol.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
               <View style={s.priceChangeRow}>
-                <Ionicons name="caret-up" size={11} color={COLORS.success} />
-                <Text style={s.priceChangeTxt}>+{Number(currentMarketObservation.change || 100).toFixed(2)}</Text>
+                {currentMarketObservation.change !== 0 && (
+                  <Ionicons name={currentMarketObservation.change > 0 ? "caret-up" : "caret-down"} size={11} color={currentMarketObservation.change > 0 ? COLORS.success : COLORS.danger} />
+                )}
+                <Text style={[s.priceChangeTxt, currentMarketObservation.change < 0 && { color: COLORS.danger }, currentMarketObservation.change === 0 && { color: COLORS.textMuted }]}>
+                  {currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : '0.00')}
+                </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_mt', 'per MT')}</Text>
             </View>
           </View>
 
-          {session.role === 'SRA (Admin)' && (
+          {session?.role === 'SRA (Admin)' && (
             <View style={s.sraEditHint}>
               <Ionicons name="create-outline" size={13} color={COLORS.primary} />
               <Text style={s.sraEditText}>{t('tap_to_broadcast', 'Tap to broadcast new official SRA weekly price')}</Text>
@@ -322,7 +462,7 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
           <Text style={s.syncStamp}>
-            {synced ? `Last synced: May 21, 2026 · 6:30 PM ✓ Cached` : t('sync_cached_stamp', 'Last synced: Cached')}
+            {synced ? `Official SRA Broadcast · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Last synced: Cached') : `Official SRA Broadcast · ${liveDate}`)}
           </Text>
 
           {/* Bar Chart with Dynamic Headroom Scaling & Overflow Protection */}
@@ -415,17 +555,30 @@ export default function HomeScreen({ navigation }) {
           <View style={s.statsRow}>
             <View style={s.statBox}>
               <Text style={s.statLabel}>{t('stat_monthly_avg', 'Monthly Avg')}</Text>
-              <Text style={s.statValue}>₱{Number(priceAnalytics.monthlyAvg || 2845).toLocaleString()}</Text>
+              <Text style={s.statValue}>
+                {priceAnalytics.monthlyAvg > 0 ? `₱${Number(priceAnalytics.monthlyAvg).toLocaleString()}` : '—'}
+              </Text>
             </View>
             <View style={s.statDivider} />
             <View style={s.statBox}>
               <Text style={s.statLabel}>{t('stat_crop_year_peak', 'Crop Year Peak')}</Text>
-              <Text style={s.statValue}>₱{Number(priceAnalytics.cropYearPeak || 2950).toLocaleString()}</Text>
+              <Text style={s.statValue}>
+                {priceAnalytics.cropYearPeak > 0 ? `₱${Number(priceAnalytics.cropYearPeak).toLocaleString()}` : '—'}
+              </Text>
             </View>
             <View style={s.statDivider} />
             <View style={s.statBox}>
               <Text style={s.statLabel}>{t('stat_trend', 'Trend')}</Text>
-              <Text style={[s.statValue, { color: COLORS.success }]}>↑ 3.2%</Text>
+              {(() => {
+                const sorted = getSortedPrices();
+                if (sorted.length < 2) return <Text style={s.statValue}>—</Text>;
+                const latest = Number(sorted[0].price) || 0;
+                const prev = Number(sorted[sorted.length - 1].price) || 0;
+                const pct = prev > 0 ? (((latest - prev) / prev) * 100).toFixed(1) : null;
+                if (!pct) return <Text style={s.statValue}>—</Text>;
+                const up = parseFloat(pct) >= 0;
+                return <Text style={[s.statValue, { color: up ? COLORS.success : COLORS.danger }]}>{up ? '↑' : '↓'} {Math.abs(pct)}%</Text>;
+              })()}
             </View>
           </View>
 
@@ -436,63 +589,65 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        {/* ── 2. Sleek Compact Sync Dashboard ── */}
-        <View style={s.syncCard}>
-          <View style={s.syncHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name={synced && pendingSyncCount === 0 ? "cloud-done" : "cloud-offline"} size={16} color={synced && pendingSyncCount === 0 ? COLORS.success : '#D97706'} />
+        {/* ── 2. Sleek Compact Sync Dashboard (Field Operations Only) ── */}
+        {isFieldRole && (
+          <View style={s.syncCard}>
+            <View style={s.syncHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name={isOnline && synced && pendingSyncCount === 0 ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline")} size={16} color={isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706'} />
+                </View>
+                <Text style={s.syncTitle}>Cloud &amp; Device Sync</Text>
               </View>
-              <Text style={s.syncTitle}>Cloud &amp; Device Sync</Text>
+              <View style={[s.syncBadge, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7' }]}>
+                <View style={[s.syncDot, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706' }]} />
+                <Text style={[s.syncBadgeText, { color: isOnline && synced && pendingSyncCount === 0 ? '#15803D' : '#B45309' }]}>
+                  {isOnline && synced && pendingSyncCount === 0 ? 'Fully Synced' : `${pendingSyncCount} Pending`}
+                </Text>
+              </View>
             </View>
-            <View style={[s.syncBadge, { backgroundColor: synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7' }]}>
-              <View style={[s.syncDot, { backgroundColor: synced && pendingSyncCount === 0 ? COLORS.success : '#D97706' }]} />
-              <Text style={[s.syncBadgeText, { color: synced && pendingSyncCount === 0 ? '#15803D' : '#B45309' }]}>
-                {synced && pendingSyncCount === 0 ? 'Fully Synced' : `${pendingSyncCount} Pending`}
-              </Text>
-            </View>
-          </View>
 
-          <View style={s.syncMetricsRow}>
-            <View style={s.syncMetricCol}>
-              <Text style={s.syncMetricLabel}>Pending</Text>
-              <Text style={[s.syncMetricVal, pendingSyncCount > 0 && { color: '#D97706' }]}>{pendingSyncCount}</Text>
+            <View style={s.syncMetricsRow}>
+              <View style={s.syncMetricCol}>
+                <Text style={s.syncMetricLabel}>Pending</Text>
+                <Text style={[s.syncMetricVal, pendingSyncCount > 0 && { color: '#D97706' }]}>{pendingSyncCount}</Text>
+              </View>
+              <View style={s.syncMetricDivider} />
+              <View style={s.syncMetricCol}>
+                <Text style={s.syncMetricLabel}>Last Synced</Text>
+                <Text style={s.syncMetricVal}>{syncTimeStr}</Text>
+              </View>
+              <View style={s.syncMetricDivider} />
+              <View style={s.syncMetricCol}>
+                <Text style={s.syncMetricLabel}>Status</Text>
+                <Text style={[s.syncMetricVal, { color: isOnline ? COLORS.success : '#D97706' }]}>
+                  {isOnline ? 'Online' : 'Offline'}
+                </Text>
+              </View>
             </View>
-            <View style={s.syncMetricDivider} />
-            <View style={s.syncMetricCol}>
-              <Text style={s.syncMetricLabel}>Last Synced</Text>
-              <Text style={s.syncMetricVal}>{syncTimeStr}</Text>
-            </View>
-            <View style={s.syncMetricDivider} />
-            <View style={s.syncMetricCol}>
-              <Text style={s.syncMetricLabel}>Status</Text>
-              <Text style={[s.syncMetricVal, { color: synced ? COLORS.success : '#D97706' }]}>
-                {synced ? 'Online' : 'Offline'}
-              </Text>
-            </View>
-          </View>
 
-          <TouchableOpacity 
-            style={[s.syncBtnCompact, isSyncing && { opacity: 0.6 }]} 
-            onPress={handleHomeSync}
-            disabled={isSyncing}
-            activeOpacity={0.8}
-          >
-            <Ionicons name={isSyncing ? "refresh" : "cloud-upload-outline"} size={15} color="#fff" />
-            <Text style={s.syncBtnTextCompact}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity 
+              style={[s.syncBtnCompact, isSyncing && { opacity: 0.6 }]} 
+              onPress={handleHomeSync}
+              disabled={isSyncing}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={isSyncing ? "refresh" : "cloud-upload-outline"} size={15} color="#fff" />
+              <Text style={s.syncBtnTextCompact}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* ── 3. Role-Specific Modular Views ── */}
-        {session.role === 'Member' && (
+        {session?.role === 'Member' && (
           <MemberHomeView
             session={session}
-            myFields={fields.filter(f => f.member === session.name || f.id === session.fieldId)}
+            myFields={fields.filter(f => f.member === session?.name || f.id === session?.fieldId)}
             navigation={navigation}
             onManualSync={handleManualSync}
           />
         )}
-        {session.role === 'Farm Manager' && (
+        {session?.role === 'Farm Manager' && (
           <ManagerHomeView
             session={session}
             fields={fields}
@@ -500,12 +655,14 @@ export default function HomeScreen({ navigation }) {
             onManualSync={handleManualSync}
           />
         )}
-        {session.role === 'SRA (Admin)' && (
+        {session?.role === 'SRA (Admin)' && (
           <SRAHomeView
             session={session}
             fields={fields}
             navigation={navigation}
           />
+        )}
+          </>
         )}
 
       </ScrollView>
@@ -586,7 +743,7 @@ export default function HomeScreen({ navigation }) {
                       value={inputBag}
                       onChangeText={setInputBag}
                       keyboardType="numeric"
-                      placeholder="2950"
+                      placeholder={currentPrice.value ? String(currentPrice.value) : '0'}
                     />
                   </View>
                   {(() => {
@@ -614,7 +771,7 @@ export default function HomeScreen({ navigation }) {
                       value={inputMol}
                       onChangeText={setInputMol}
                       keyboardType="numeric"
-                      placeholder="4400"
+                      placeholder={currentMarketObservation.value ? String(currentMarketObservation.value) : '0'}
                     />
                   </View>
                   {(() => {
@@ -1000,6 +1157,119 @@ const s = StyleSheet.create({
   syncBtnTextCompact: {
     color: '#fff',
     fontSize: 12.5,
+    fontWeight: '800'
+  },
+
+  // Offline Dashboard Gate
+  offlineGateContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24
+  },
+  offlineGateCard: {
+    backgroundColor: '#fff',
+    borderRadius: RADIUS.xl,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FEF0D0',
+    ...SHADOW.card
+  },
+  offlineIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FFFBEB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#FDE68A'
+  },
+  offlineGateTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 8
+  },
+  offlineGateSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 20
+  },
+  offlineAvailableBox: {
+    width: '100%',
+    backgroundColor: '#F8FAF5',
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20
+  },
+  offlineAvailableTitle: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: COLORS.primary,
+    letterSpacing: 0.8,
+    marginBottom: 12
+  },
+  offlineActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: RADIUS.md,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 12,
+    ...SHADOW.xs
+  },
+  offlineActionIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  activeOfflineBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4
+  },
+  activeOfflineText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#15803D'
+  },
+  offlineActionBtnText: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: COLORS.text
+  },
+  offlineActionBtnSub: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2
+  },
+  offlineRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: RADIUS.md,
+    width: '100%'
+  },
+  offlineRetryBtnText: {
+    color: '#fff',
+    fontSize: 13,
     fontWeight: '800'
   }
 });

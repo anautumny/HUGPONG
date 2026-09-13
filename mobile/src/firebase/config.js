@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, setLogLevel } from 'firebase/firestore';
 import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -20,8 +20,21 @@ export const mobileFirebaseConfig = {
 // Initialize or reuse Firebase App
 const app = getApps().length === 0 ? initializeApp(mobileFirebaseConfig) : getApp();
 
-// Initialize Firestore Database
-const db = getFirestore(app);
+// Suppress routine WebChannel stream retry notices in React Native console
+try {
+  setLogLevel('error');
+} catch (e) {}
+
+// Initialize Firestore Database with long-polling transport for React Native
+let db;
+try {
+  db = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: false
+  });
+} catch (e) {
+  db = getFirestore(app);
+}
 
 // Initialize Firebase Auth with AsyncStorage persistence (guarantees session persists across app close)
 let auth;

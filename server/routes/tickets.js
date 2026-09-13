@@ -36,7 +36,7 @@ router.post('/', async (req, res) => {
     id: ticketId,
     title,
     author: author || (req.session && req.session.user ? req.session.user.name : 'Mobile User'),
-    blockFarm: blockFarm || 'Nacayao Block Farm A',
+    blockFarm: blockFarm || (req.session && req.session.user ? req.session.user.blockFarm || '' : ''),
     category: category || 'General Support',
     priority: priority || 'Normal',
     status: 'Open',

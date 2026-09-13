@@ -19,7 +19,7 @@ import QRCode from 'qrcode';
  * @param {string} errorCorrectionLevel - 'L' | 'M' | 'Q' | 'H' (default 'M')
  */
 export default function OfflineQRCode({
-  value = 'HUG-202605-A3F9',
+  value = 'HUGPONG-OFFLINE',
   size = 200,
   color = '#1B381A',
   backgroundColor = '#FFFFFF',

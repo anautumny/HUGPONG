@@ -2,61 +2,163 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
-import { subscribe, getIsSynced, getCurrentSession, setSynced } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, performMobileSync, getPendingSyncCount } from '../data/dataStore';
+import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
 import { useTranslation } from '../services/i18n';
 
 const LOGO = require('../../assets/HUGPONG LOGO.png');
 
 /**
  * AppHeader — shared header brand row used across all main tab screens.
- * Features a dynamic sync indicator button on the right that turns green/yellow.
+ * Features a dynamic sync indicator button on the right that turns green when online and fully synced,
+ * and yellow when offline or when pending unsynced records exist.
  */
 function AppHeader({ right }) {
   const { t } = useTranslation();
+  const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
-  const [pendingCount, setPendingCount] = useState(getCurrentSession().pendingLogs);
+  const [isOnline, setIsOnline] = useState(getNetworkStatus());
+  const [pendingCount, setPendingCount] = useState(getPendingSyncCount(getCurrentSession()));
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatusText, setSyncStatusText] = useState('');
   const spinValue = useRef(new Animated.Value(0)).current;
+  const loopAnimRef = useRef(null);
 
   useEffect(() => {
-    const unsubscribe = subscribe(() => {
+    const unsubscribeSession = subscribe(() => {
+      const cur = getCurrentSession();
+      setSessionState(cur);
       setSyncedState(getIsSynced());
-      setPendingCount(getCurrentSession().pendingLogs);
+      setPendingCount(getPendingSyncCount(cur));
     });
-    return unsubscribe;
+    const unsubscribeNetwork = subscribeToNetwork((online) => {
+      setIsOnline(online);
+    });
+    return () => {
+      unsubscribeSession();
+      unsubscribeNetwork();
+      if (loopAnimRef.current) loopAnimRef.current.stop();
+    };
   }, []);
 
-  const handleSync = () => {
+  const startSpinAnimation = () => {
+    spinValue.setValue(0);
+    loopAnimRef.current = Animated.loop(
+      Animated.timing(spinValue, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loopAnimRef.current.start();
+  };
+
+  const stopSpinAnimation = () => {
+    if (loopAnimRef.current) {
+      loopAnimRef.current.stop();
+      loopAnimRef.current = null;
+    }
+    spinValue.setValue(0);
+  };
+
+  const handleCheckConnection = async () => {
     if (isSyncing) return;
-    if (synced && pendingCount === 0) {
+    setIsSyncing(true);
+    setSyncStatusText(t('checking_network', 'Checking...'));
+    startSpinAnimation();
+
+    try {
+      const online = await checkConnectivity(3500);
+      if (online) {
+        setSyncStatusText(t('syncing_progress', 'Syncing...'));
+        await performMobileSync();
+        setSynced(true);
+        setSyncedState(true);
+        setPendingCount(0);
+        Alert.alert(
+          t('sync_status_synced', 'Online & Synced'),
+          t('sync_toast_complete', 'Internet connection re-established! All local sugarcane operation logs have been successfully synchronized with HUGPONG cloud.')
+        );
+      } else {
+        Alert.alert(
+          t('offline_status', 'Still Offline'),
+          t('offline_recheck_msg', 'Could not establish an internet connection. Your sugarcane logs remain safe and intact in local device storage.')
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        t('connection_notice', 'Connection Check'),
+        t('connection_check_err', 'Unable to reach the network. Field operations continue to work offline seamlessly.')
+      );
+    } finally {
+      stopSpinAnimation();
+      setIsSyncing(false);
+      setSyncStatusText('');
+    }
+  };
+
+  const handleSync = async () => {
+    if (isSyncing) return;
+    const safeCount = Math.max(0, Number(pendingCount || 0));
+
+    if (!isOnline) {
+      Alert.alert(
+        'Offline Mode Active',
+        safeCount > 0
+          ? `${safeCount} sugarcane operation(s) are stored securely in local device storage. They will automatically sync to Cloud Firestore when internet connectivity is re-established.`
+          : 'You are currently offline. Field operations and the Growth Stage Planner are fully available locally on your device.',
+        [
+          { text: 'Check Connection', onPress: () => handleCheckConnection() },
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
+      return;
+    }
+
+    if (synced && safeCount === 0) {
       Alert.alert(
         t('synced', 'Synced'),
-        t('sync_toast_synced', 'Your sugarcane records are fully synchronized with the HUGPONG cloud. Safe to work offline.')
+        t('sync_toast_synced', 'Your sugarcane records are fully synchronized with the HUGPONG cloud. Safe to work offline.'),
+        [
+          { text: 'Check Connection', onPress: () => handleCheckConnection() },
+          { text: 'OK', style: 'cancel' }
+        ]
       );
       return;
     }
 
     setIsSyncing(true);
-    spinValue.setValue(0);
-    Animated.timing(spinValue, {
-      toValue: 1,
-      duration: 1500,
-      easing: Easing.linear,
-      useNativeDriver: true,
-    }).start(() => {
-      setIsSyncing(false);
+    setSyncStatusText(t('syncing_progress', 'Syncing...'));
+    startSpinAnimation();
+
+    try {
+      await performMobileSync();
       setSynced(true);
+      setSyncedState(true);
+      setPendingCount(0);
       Alert.alert(
         t('sync_status_synced', 'Sync Successful'),
         t('sync_toast_complete', 'All local sugarcane operation logs have been successfully uploaded and compiled.')
       );
-    });
+    } catch (err) {
+      Alert.alert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');
+    } finally {
+      stopSpinAnimation();
+      setIsSyncing(false);
+      setSyncStatusText('');
+    }
   };
 
   const spin = spinValue.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+
+  const isFieldRole = session?.role === 'Member' || session?.role === 'Farm Manager';
+  const liveCount = getPendingSyncCount(session);
+  const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
+  const isFullySynced = isOnline && safeCount === 0;
 
   return (
     <View style={s.header}>
@@ -65,26 +167,35 @@ function AppHeader({ right }) {
         <Text style={s.logoText}>HUGPONG</Text>
       </View>
       <View style={s.rightActions}>
-        <TouchableOpacity
-          style={[
-            s.syncPill,
-            synced ? s.syncPillGreen : s.syncPillYellow,
-            isSyncing && s.syncPillSyncing
-          ]}
-          onPress={handleSync}
-          activeOpacity={0.75}
-        >
-          <Animated.View style={isSyncing ? { transform: [{ rotate: spin }] } : {}}>
-            <Ionicons
-              name={isSyncing ? "sync-outline" : (synced ? "cloud-done" : "cloud-upload")}
-              size={16}
-              color={isSyncing ? '#1A6B9A' : (synced ? '#267326' : '#C97A00')}
-            />
-          </Animated.View>
-          <Text style={[s.syncText, synced ? s.syncTextGreen : s.syncTextYellow]}>
-            {isSyncing ? t('syncing_progress', 'Syncing...') : (synced ? t('synced', 'Synced') : `${t('btn_sync_now', 'Sync')} (${pendingCount})`)}
-          </Text>
-        </TouchableOpacity>
+        {isFieldRole && (
+          <TouchableOpacity
+            style={[
+              s.syncPill,
+              isFullySynced ? s.syncPillGreen : s.syncPillYellow,
+              isSyncing && s.syncPillSyncing
+            ]}
+            onPress={handleSync}
+            disabled={isSyncing}
+            activeOpacity={0.75}
+          >
+            <Animated.View style={isSyncing ? { transform: [{ rotate: spin }] } : {}}>
+              <Ionicons
+                name={isSyncing ? "sync-outline" : (isFullySynced ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline"))}
+                size={16}
+                color={isSyncing ? '#1A6B9A' : (isFullySynced ? '#267326' : '#C97A00')}
+              />
+            </Animated.View>
+            <Text style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}>
+              {isSyncing
+                ? (syncStatusText || t('syncing_progress', 'Syncing...'))
+                : (isFullySynced
+                  ? t('synced', 'Synced')
+                  : (!isOnline
+                    ? (safeCount > 0 ? `Offline (${safeCount})` : 'Offline')
+                    : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {right ? <View style={s.right}>{right}</View> : <View style={s.rightPlaceholder} />}
       </View>
@@ -163,5 +274,8 @@ const s = StyleSheet.create({
   },
   syncTextYellow: {
     color: '#C97A00',
+  },
+  syncTextSyncing: {
+    color: '#1A6B9A',
   },
 });

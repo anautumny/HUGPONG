@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <title>HUGPONG Workspace Redirect</title>
   <script>
-    const role = localStorage.getItem('hugpong_role');
-    if (role === 'superadmin') {
+    const role = (localStorage.getItem('hugpong_role') || '').toLowerCase();
+    if (role.includes('super')) {
       window.location.replace('roles/super-admin/dashboard.html');
-    } else if (role === 'manager') {
+    } else if (role.includes('manager')) {
       window.location.replace('roles/farm-manager/dashboard.html');
-    } else if (role === 'admin') {
+    } else if (role.includes('admin') || role.includes('sra')) {
       window.location.replace('roles/sra-admin/dashboard.html');
     } else {
       window.location.replace('login.html');

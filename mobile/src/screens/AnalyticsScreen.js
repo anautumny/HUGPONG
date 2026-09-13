@@ -48,9 +48,9 @@ export default function AnalyticsScreen({ navigation, route }) {
     return unsubscribe;
   }, []);
 
-  const isMember = session.role === 'Member';
-  const isSRA = session.role === 'SRA (Admin)';
-  const isManager = session.role === 'Farm Manager';
+  const isMember = session?.role === 'Member';
+  const isSRA = session?.role === 'SRA (Admin)';
+  const isManager = session?.role === 'Farm Manager';
 
   // 1. Scoped Fields by Role
   const scopedFields = React.useMemo(() => {
@@ -63,8 +63,8 @@ export default function AnalyticsScreen({ navigation, route }) {
       return allFields.filter(f => resolveFieldBlockFarm(f) === selectedBlockFarm || f.blockFarmId === selectedBlockFarm);
     }
     // Farm Manager: scoped to assigned farm
-    const mgrFarm = session.blockFarm || session.farm || 'Nacayao Block Farm';
-    const mgrFields = allFields.filter(f => resolveFieldBlockFarm(f) === mgrFarm || f.blockFarmId === session.blockFarmId || (f.blockFarm && f.blockFarm.includes('Nacayao')));
+    const mgrFarm = session.blockFarm || session.farm || '';
+    const mgrFields = allFields.filter(f => resolveFieldBlockFarm(f) === mgrFarm || f.blockFarmId === session.blockFarmId );
     return mgrFields.length > 0 ? mgrFields : allFields;
   }, [isMember, isSRA, selectedBlockFarm, session.name, session.farm, session.employeeId, session.blockFarmId, allFields]);
 
@@ -72,14 +72,14 @@ export default function AnalyticsScreen({ navigation, route }) {
   const blockFarmsList = React.useMemo(() => {
     const canonical = blockFarms.length > 0
       ? blockFarms
-      : [{ id: 'BLK-NCY-01', code: 'BLK-NCY', name: 'Nacayao Block Farm', declaredHa: 15.25 }];
+      : [];
 
     return canonical.map(bf => {
       const bfFields = fields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || f.blockFarmId === bf.code);
-      const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0) || Number(bf.declaredHa) || 15.25;
+      const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
       return {
         id: bf.id,
-        name: bf.name || 'Nacayao Block Farm',
+        name: bf.name || 'Block Farm',
         fields: bfFields,
         totalHa
       };
@@ -94,7 +94,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     return scopedFields;
   }, [scopedFields, selectedFieldId]);
 
-  const totalHa = activeFields.reduce((s, f) => s + (Number(f.ha) || 1.5), 0);
+  const totalHa = activeFields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
 
   // Helper: accurately map an operation log to its agronomic category
   const getLogCategory = (l) => {
@@ -125,15 +125,16 @@ export default function AnalyticsScreen({ navigation, route }) {
     const fieldAllLogs = logs.filter(l => {
       const fId = (l.fieldId || '').trim().toUpperCase();
       if (!activeFieldIds.includes(fId)) return false;
-      if (l.isArchived || l.isDeleted || l.isDraft) return false;
+      if (l.isDeleted || l.isDraft) return false;
       return true;
     });
 
-    const pastLogs = fieldAllLogs.filter(l => l.isPastCycle);
+    const pastLogs = fieldAllLogs.filter(l => Boolean(l.isPastCycle || l.isArchived || l.status === 'Archived'));
 
     // Filter submitted logs according to cycleFilter ('active' or 'all') and sort newest first
     const activeLogs = fieldAllLogs.filter(l => {
-      if (cycleFilter === 'active' && l.isPastCycle) return false;
+      const isPast = Boolean(l.isPastCycle || l.isArchived || l.status === 'Archived');
+      if (cycleFilter === 'active' && isPast) return false;
       if (!isMember && l.isOffline) return false;
       return true;
     }).sort((a, b) => {
@@ -240,11 +241,11 @@ export default function AnalyticsScreen({ navigation, route }) {
       const stageObj = SRA_GROWTH_STAGES.find(s => s.key === stageKey) || SRA_GROWTH_STAGES[1];
       return {
         ...stageObj,
-        fieldId: myField?.id || 'FLD-NCY-001',
+        fieldId: myField?.id || (fields[0]?.id || ''),
         member: myField?.member || session.name,
         ha: Number(myField?.ha || 1.5),
         variety: myField?.variety || 'Phil 2006-2282',
-        blockFarm: myField?.blockFarm || 'Nacayao Block Farm'
+        blockFarm: myField?.blockFarm || (session.farm || session.blockFarm || 'Block Farm')
       };
     }
     if (selectedFieldId !== 'All' && activeFields.length === 1) {
@@ -257,7 +258,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         member: field.member || 'Member Farmer',
         ha: Number(field.ha || 1.5),
         variety: field.variety || 'Phil 2006-2282',
-        blockFarm: field.blockFarm || 'Nacayao Block Farm'
+        blockFarm: field.blockFarm || (session.farm || session.blockFarm || 'Block Farm')
       };
     }
     return null;
@@ -300,7 +301,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             {isSRA
               ? (selectedBlockFarm === 'All' ? 'District Block Farms Supervision' : `${selectedBlockFarm} Supervision`)
               : isManager
-              ? `${session.blockFarm || session.farm || 'Nacayao Block Farm'} Operations`
+              ? `${session.blockFarm || session.farm || 'Block Farm'} Operations`
               : `${scopedFields[0]?.id || 'Field Plot'} · ${session.name || 'Member Farmer'}`}
           </Text>
         </View>
@@ -359,7 +360,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.sraPillText, selectedBlockFarm === 'All' && s.sraPillTextActive]}>
-                  All Districts (110.5 Ha)
+                  {`All Districts (${blockFarmsList.reduce((sum, b) => sum + (Number(b.totalHa) || 0), 0).toFixed(1)} Ha)`}
                 </Text>
               </TouchableOpacity>
               {blockFarmsList.map(bf => (
@@ -370,7 +371,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                   activeOpacity={0.7}
                 >
                   <Text style={[s.sraPillText, selectedBlockFarm === bf.name && s.sraPillTextActive]}>
-                    {bf.name} ({bf.totalHa.toFixed(1)} Ha)
+                    {bf.name} ({Number(bf.totalHa || 0).toFixed(1)} Ha)
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -385,7 +386,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Ionicons name="person-circle-outline" size={14} color={COLORS.primary} />
                 <Text style={s.sraFilterLabel}>
-                  {isManager ? 'Nacayao Member Plot Filter:' : 'Member Plot Filter:'}
+                  {isManager ? `${session.farm || session.blockFarm || 'Block Farm'} Plot Filter:` : 'Member Plot Filter:'}
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -421,7 +422,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.sraPillText, selectedFieldId === 'All' && s.sraPillTextActive]}>
-                  {isManager ? 'All Nacayao Plots' : 'All Enrolled Plots'} ({scopedFields.reduce((sum, f) => sum + (Number(f.ha) || 1.5), 0).toFixed(1)} Ha)
+                  {isManager ? `All ${session.farm || session.blockFarm || 'Block Farm'} Plots` : 'All Enrolled Plots'} ({scopedFields.reduce((sum, f) => sum + (Number(f.ha) || 1.5), 0).toFixed(1)} Ha)
                 </Text>
               </TouchableOpacity>
 
@@ -484,7 +485,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                       <Text style={s.twinLabel}>Selected Member</Text>
                     </View>
                     <Text style={s.twinValue} numberOfLines={1}>{activeFields[0].member || 'Member Farmer'}</Text>
-                    <Text style={s.twinSub}>{activeFields[0].id} · {activeFields[0].blockFarm || 'Nacayao Block Farm'}</Text>
+                    <Text style={s.twinSub}>{activeFields[0].id} · {activeFields[0].blockFarm || (session.farm || session.blockFarm || 'Block Farm')}</Text>
                   </View>
 
                   <View style={s.twinCard}>
@@ -507,8 +508,8 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                       <Text style={s.twinLabel}>Managed Area</Text>
                     </View>
-                    <Text style={s.twinValue}>{selectedBlockFarm === 'All' ? '110.5 Ha' : `${totalHa.toFixed(1)} Ha`}</Text>
-                    <Text style={s.twinSub}>{selectedBlockFarm === 'All' ? '4 block farms · 100% mapped' : selectedBlockFarm}</Text>
+                    <Text style={s.twinValue}>{selectedBlockFarm === 'All' ? `${blockFarmsList.reduce((sum, b) => sum + (Number(b.totalHa) || 0), 0).toFixed(1)} Ha` : `${totalHa.toFixed(1)} Ha`}</Text>
+                    <Text style={s.twinSub}>{selectedBlockFarm === 'All' ? `${blockFarmsList.length} block farm${blockFarmsList.length !== 1 ? 's' : ''} · 100% mapped` : selectedBlockFarm}</Text>
                   </View>
 
                   <View style={s.twinCard}>
@@ -518,8 +519,8 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                       <Text style={s.twinLabel}>Monitored Plots</Text>
                     </View>
-                    <Text style={s.twinValue}>{selectedBlockFarm === 'All' ? '16 Plots' : `${activeFields.length} Plots`}</Text>
-                    <Text style={s.twinSub}>{selectedBlockFarm === 'All' ? '16 member farmers · Active' : `${activeFields.length} active plots`}</Text>
+                    <Text style={s.twinValue}>{selectedBlockFarm === 'All' ? `${allFields.length} Plots` : `${activeFields.length} Plots`}</Text>
+                    <Text style={s.twinSub}>{selectedBlockFarm === 'All' ? `${allFields.length} member farmer${allFields.length !== 1 ? 's' : ''} · Active` : `${activeFields.length} active plots`}</Text>
                   </View>
                 </>
               ) : isManager ? (
@@ -532,7 +533,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                       <Text style={s.twinLabel}>My Field Plots</Text>
                     </View>
                     <Text style={s.twinValue}>{activeFields.length} Plots</Text>
-                    <Text style={s.twinSub}>{session.blockFarm || session.farm || 'Nacayao Block Farm'}</Text>
+                    <Text style={s.twinSub}>{session.blockFarm || session.farm || 'Block Farm'}</Text>
                   </View>
 
                   <View style={s.twinCard}>
@@ -1058,11 +1059,11 @@ export default function AnalyticsScreen({ navigation, route }) {
               </View>
             ) : (
               <View style={{ gap: 8 }}>
-                {activeLogs.map(log => {
+                {activeLogs.map((log, logIdx) => {
                   const isExpanded = expandedLedgerLogId === log.id;
                   const isNew = Boolean(log.isNew && !viewedLedgerLogIds.has(log.id));
                   return (
-                    <View key={log.id} style={[
+                    <View key={log.id ? `${log.id}-${logIdx}` : `ledger-${logIdx}`} style={[
                       s.compactLogCard,
                       isNew && {
                         backgroundColor: '#F6FAF3',
@@ -1202,7 +1203,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             <View>
               <Text style={s.historyModalTitle}>Select Enrolled Plot</Text>
               <Text style={s.historyModalSub}>
-                {scopedFields.length} total plots registered in {isManager ? 'Nacayao' : 'supervised district'}
+                {scopedFields.length} total plots registered in {isManager ? (session.farm || session.blockFarm || 'Block Farm') : 'supervised district'}
               </Text>
             </View>
             <TouchableOpacity
@@ -1218,7 +1219,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, gap: 8 }}>
               <Ionicons name="search" size={16} color={COLORS.textMuted} />
               <TextInput
-                placeholder="Search by Plot ID (e.g. FLD-NCY-001) or Member name..."
+                placeholder="Search by Plot ID or Member name..."
                 placeholderTextColor={COLORS.textMuted}
                 value={plotSearchQuery}
                 onChangeText={setPlotSearchQuery}
@@ -1255,7 +1256,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             >
               <View style={{ gap: 2 }}>
                 <Text style={{ fontSize: 14, fontWeight: '800', color: selectedFieldId === 'All' ? COLORS.primary : COLORS.text }}>
-                  {isManager ? 'All Nacayao Plots' : 'All Enrolled District Plots'}
+                  {isManager ? `All ${session.farm || session.blockFarm || 'Block Farm'} Plots` : 'All Enrolled District Plots'}
                 </Text>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
                   Combined summary of {scopedFields.length} plots ({scopedFields.reduce((sum, f) => sum + (Number(f.ha) || 1.5), 0).toFixed(1)} Ha)

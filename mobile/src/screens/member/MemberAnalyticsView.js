@@ -27,7 +27,7 @@ export default function MemberAnalyticsView({
       {/* Member Yield & Investment Card */}
       <View style={s.summaryCard}>
         <Text style={s.cardLabel}>{t('plot_perf_title', 'Plot Production Overview')}</Text>
-        <Text style={s.cardTitle}>{myFields[0]?.id || 'FLD-NCY-001'} · {totalHa.toFixed(2)} {t('lbl_hectares', 'Hectares')}</Text>
+        <Text style={s.cardTitle}>{myFields[0]?.id || (fields[0]?.id || '')} · {totalHa.toFixed(2)} {t('lbl_hectares', 'Hectares')}</Text>
 
         <View style={s.statsGrid}>
           <View style={s.statCell}>

@@ -23,6 +23,9 @@ import SyncMonitorScreen from '../screens/SyncMonitorScreen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../services/i18n';
 
+import AdminOfflineBarrier from '../components/AdminOfflineBarrier';
+import { subscribeToNetwork, getNetworkStatus } from '../services/networkService';
+
 const Root = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -77,15 +80,23 @@ function ProfileNavigator() {
 }
 
 function MainTabs() {
-  const [role, setRole] = React.useState(getCurrentSession().role);
+  const [role, setRole] = React.useState(getCurrentSession()?.role || 'Member');
+  const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom > 0 ? Math.min(insets.bottom, 16) : 0;
 
   React.useEffect(() => {
-    return subscribe(() => {
-      setRole(getCurrentSession().role);
+    const unsubSession = subscribe(() => {
+      setRole(getCurrentSession()?.role || 'Member');
     });
+    const unsubNet = subscribeToNetwork((online) => {
+      setIsOnline(online);
+    });
+    return () => {
+      unsubSession();
+      unsubNet();
+    };
   }, []);
 
   const screenOptions = React.useCallback(({ route }) => ({
@@ -127,6 +138,16 @@ function MainTabs() {
       );
     },
   }), [bottomInset]);
+
+  // Strict Offline Barrier for SRA Admin & Super Admin to protect audit integrity
+  if (!isOnline && (role === 'SRA (Admin)' || role === 'Super Admin')) {
+    return (
+      <AdminOfflineBarrier
+        session={getCurrentSession()}
+        onRetry={(online) => setIsOnline(online)}
+      />
+    );
+  }
 
   return (
     <Tab.Navigator screenOptions={screenOptions}>

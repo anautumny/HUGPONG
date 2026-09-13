@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions, Image } from 'react-native';
 import { COLORS } from '../../theme';
 import { getItem } from '../../services/storageService';
+import { restoreSessionFromToken } from '../../data/dataStore';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
@@ -26,18 +27,26 @@ export default function SplashScreen({ navigation }) {
         const langChosen = await getItem('@hugpong_lang_chosen');
         if (!langChosen) {
           navigation.replace('LanguageSelect');
+          return;
+        }
+
+        const onboarded = await getItem('@hugpong_onboarded');
+        if (!onboarded) {
+          navigation.replace('Onboarding');
+          return;
+        }
+
+        // Check persistent auth session token (Stay Logged In)
+        const authRes = await restoreSessionFromToken();
+        if (authRes.success) {
+          navigation.replace('MainTabs');
         } else {
-          const onboarded = await getItem('@hugpong_onboarded');
-          if (!onboarded) {
-            navigation.replace('Onboarding');
-          } else {
-            navigation.replace('Login');
-          }
+          navigation.replace('Login');
         }
       } catch (e) {
         navigation.replace('Login');
       }
-    }, 2000);
+    }, 1800);
     return () => clearTimeout(timer);
   }, []);
 

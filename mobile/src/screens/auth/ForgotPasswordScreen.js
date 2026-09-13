@@ -161,7 +161,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                     style={s.input}
                     value={identifier}
                     onChangeText={setIdentifier}
-                    placeholder="04000001 or 0917 123 4567"
+                    placeholder="04000001 or 09171234567"
                     placeholderTextColor={COLORS.textMuted}
                     autoCapitalize="none"
                   />

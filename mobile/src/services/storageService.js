@@ -1,11 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const STORAGE_KEYS = {
+  AUTH_TOKEN: '@hugpong_auth_token',
   SESSION: '@hugpong_session',
   USERS: '@hugpong_users',
   LOGS: '@hugpong_logs',
   DRAFTS: '@hugpong_drafts',
   FIELDS: '@hugpong_fields',
+  ARCHIVED_FIELDS: '@hugpong_archived_fields',
   OUTBOX: '@hugpong_outbox',
   PRICES: '@hugpong_prices',
   TICKETS: '@hugpong_tickets',
@@ -16,6 +18,7 @@ export const STORAGE_KEYS = {
   LAST_SYNC: '@hugpong_last_sync',
   AUDIT_REPORTS: '@hugpong_audit_reports',
   SYSTEM_HISTORY: '@hugpong_system_history',
+  DELETED_LOG_IDS: '@hugpong_deleted_log_ids',
 };
 
 // In-memory shadow cache for synchronous reads after initial hydration

@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
 
 // ── POST /api/users/approve (Super Admin & Managers) ────────
 router.post('/approve', requireAuth, requireRole(['super admin', 'farm manager', 'admin']), async (req, res) => {
-  const { contact, name, role, blockFarm, fieldId } = req.body;
+  const { contact, name, role, blockFarm, blockFarmId, fieldId } = req.body;
 
   if (!contact) {
     return res.status(400).json({ success: false, error: 'User contact is required.' });
@@ -38,7 +38,7 @@ router.post('/approve', requireAuth, requireRole(['super admin', 'farm manager',
   const isSRAAdmin = sessionUser && (String(sessionUser.role || '').toLowerCase().includes('sra') || (String(sessionUser.role || '').toLowerCase().includes('admin') && !isManager));
 
   let assignedRole = role || 'Member';
-  let assignedBlockFarm = blockFarm || 'Nacayao Block Farm';
+  let assignedBlockFarm = blockFarm ? String(blockFarm).trim() : '';
 
   // Privilege escalation guard: Farm Managers can ONLY approve Members for their assigned block farm
   if (isManager && !isSuperAdmin && !isSRAAdmin) {
@@ -65,10 +65,11 @@ router.post('/approve', requireAuth, requireRole(['super admin', 'farm manager',
   const userPayload = {
     employeeId,
     contact: cleanContact,
-    name: name || 'Approved Member',
+    name: name ? String(name).trim() : 'Approved Member',
     role: assignedRole,
     roleKey,
     blockFarm: assignedBlockFarm,
+    blockFarmId: blockFarmId || '',
     fieldId: fieldId || '',
     status: 'Active',
     approvedBy: sessionUser ? sessionUser.name : 'Administrator',
@@ -78,8 +79,30 @@ router.post('/approve', requireAuth, requireRole(['super admin', 'farm manager',
   try {
     if (db) {
       await db.collection('users').doc(employeeId || cleanContact).set(userPayload, { merge: true });
+
+      // 2-Way Symmetrical Synchronization: If Farm Manager assigned to a Block Farm, update block_farms
+      if (roleKey === 'farm_manager' && assignedBlockFarm) {
+        let bfTargetDoc = null;
+        if (blockFarmId) {
+          bfTargetDoc = db.collection('block_farms').doc(blockFarmId);
+        } else {
+          // Search by name
+          const bfSnap = await db.collection('block_farms').where('name', '==', assignedBlockFarm).limit(1).get();
+          if (!bfSnap.empty) {
+            bfTargetDoc = bfSnap.docs[0].ref;
+          }
+        }
+
+        if (bfTargetDoc) {
+          await bfTargetDoc.set({
+            farmManagerId: employeeId,
+            farmManagerName: userPayload.name,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      }
     }
-    console.log(`[HUGPONG Users] User Approved: ${userPayload.name} (${userPayload.role})`);
+    console.log(`[HUGPONG Users] User Approved: ${userPayload.name} (${userPayload.role}) -> Block Farm: ${assignedBlockFarm || 'Unassigned'}`);
     return res.json({ success: true, data: userPayload });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

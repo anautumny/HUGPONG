@@ -116,8 +116,8 @@ export default function SecurityScreen({ navigation }) {
     );
   };
 
-  const userEmployeeId = session?.employeeId || session?.userId || '04000001';
-  const userMobile = session?.mobile || session?.contact || '0917 123 4567';
+  const userEmployeeId = session?.employeeId || session?.userId || session?.contact || '—';
+  const userMobile = session?.mobile || session?.contact || '—';
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -140,7 +140,7 @@ export default function SecurityScreen({ navigation }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.userName}>{session?.name || 'HUGPONG User'}</Text>
-              <Text style={s.userRole}>{session?.role || 'Member'} · {session?.farm || 'Nacayao Block Farm'}</Text>
+              <Text style={s.userRole}>{session?.role || 'Member'} · {session?.farm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
             </View>
           </View>
 

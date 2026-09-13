@@ -1,3 +1,4 @@
+import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — SRA Administrator Home View Component
 // Role: SRA (Admin) · Silay Sugar Regulatory Administration
@@ -8,27 +9,27 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
-import { blockFarms } from '../../data/dataStore';
+import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/dataStore';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
 
   const blockFarmsList = React.useMemo(() => {
-    const list = blockFarms.length > 0 ? blockFarms : [
-      { id: 'BLK-NCY-01', name: 'Nacayao Block Farm', declaredHa: 15.25, farmManagerName: 'Jose Reyes' }
-    ];
+    const list = blockFarms;
     return list.map(bf => {
       const bfFields = fields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
-      const activeFieldsList = bfFields.length > 0 ? bfFields : fields;
-      const totalHa = activeFieldsList.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0) || Number(bf.declaredHa) || 15.25;
+      const activeFieldsList = bfFields;
+      const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
+      const resolvedMgr = resolveBlockFarmManager(bf);
       return {
         id: bf.id,
-        name: bf.name || 'Nacayao Block Farm',
-        manager: bf.farmManagerName || 'Jose Reyes',
-        plots: activeFieldsList.length || 5,
+        name: bf.name || (session?.farm || session?.blockFarm || 'District Central'),
+        manager: resolvedMgr,
+        plots: bfFields.length,
         ha: totalHa,
-        totalFarmHa: bf.totalBlockFarmArea || 30.11,
-        status: 'SRA Verified ✓'
+        totalHa,
+        totalFarmHa: totalHa,
+        status: resolvedMgr === 'Pending Appointment' ? 'Pending Manager' : 'SRA Verified ✓'
       };
     });
   }, [fields]);
@@ -40,6 +41,12 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
   const totalPlots = React.useMemo(() => {
     return blockFarmsList.reduce((s, f) => s + f.plots, 0);
   }, [blockFarmsList]);
+
+  const complianceRate = React.useMemo(() => {
+    if (!auditReports || auditReports.length === 0) return 100;
+    const certified = auditReports.filter(a => a.status === 'Certified').length;
+    return Math.round((certified / auditReports.length) * 100);
+  }, [auditReports]);
 
   return (
     <View style={s.container}>
@@ -71,7 +78,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             <Text style={s.statLabel}>{t('registered_plots_lbl', 'Registered Plots')}</Text>
           </TouchableOpacity>
           <View style={s.statBox}>
-            <Text style={[s.statNumber, { color: COLORS.success }]}>100%</Text>
+            <Text style={[s.statNumber, { color: complianceRate >= 80 ? COLORS.success : '#D97706' }]}>{complianceRate}%</Text>
             <Text style={s.statLabel}>{t('compliance_lbl', 'Compliance')}</Text>
           </View>
         </View>

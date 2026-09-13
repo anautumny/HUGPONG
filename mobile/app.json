@@ -13,7 +13,10 @@
       "backgroundColor": "#F7F9F4"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "HUGPONG needs camera access to scan and verify SRA compliance QR codes."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,8 +24,19 @@
         "backgroundColor": "#F7F9F4"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.hugpong"
+      "package": "com.anonymous.hugpong",
+      "permissions": [
+        "CAMERA"
+      ]
     },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "HUGPONG needs camera access to scan and verify SRA compliance QR codes."
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/HUGPONG LOGO.png"
     }

@@ -1,3 +1,4 @@
+import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — Member Field Operations View Component
 // Role: Sugarcane Block Farm Member
@@ -10,9 +11,9 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 
 function MemberFieldOpsView({
-  session,
+  session = {},
   fields = [],
-  selectedField = {},
+  selectedField = null,
   onSelectField,
   fieldLogs = [],
   draftLogsCount = 0,
@@ -21,44 +22,71 @@ function MemberFieldOpsView({
   onOpenPlanner
 }) {
   const { t, formatSyncTime, formatStageName } = useTranslation();
-  const safeField = selectedField || fields[0] || {};
+  const safeFields = (fields || []).filter(Boolean);
+  const safeField = selectedField || (safeFields.length > 0 ? safeFields[0] : null);
+
+  if (!safeField || safeFields.length === 0) {
+    return (
+      <View style={s.container}>
+        <Text style={s.sectionLabel}>{t('my_fields', 'My Sugarcane Plots')}</Text>
+        <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+          <View style={s.fieldCardTop}>
+            <View style={[s.fieldIdBadge, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={[s.fieldIdText, { color: '#B45309' }]}>UNASSIGNED</Text>
+            </View>
+            <Text style={[s.fieldHa, { color: '#B45309' }]}>0.0 Ha</Text>
+          </View>
+          <Text style={[s.fieldMember, { color: '#92400E' }]}>
+            {t('member_label', 'Member')}: <Text style={{ fontWeight: '700' }}>{session?.name || 'Member'}</Text>
+          </Text>
+          <Text style={{ fontSize: 12, color: '#78350F', marginTop: 4, lineHeight: 16 }}>
+            No sugarcane plot has been allocated to your account yet. Your Block Farm Manager will allocate your plot in the cooperative registry.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.container}>
       {/* My Fields Selector */}
       <Text style={s.sectionLabel}>{t('my_fields', 'My Sugarcane Plots')}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.selectorScroll} contentContainerStyle={{ gap: 8 }}>
-        {fields.map(field => (
-          <TouchableOpacity
-            key={field.id}
-            style={[s.fieldChip, safeField.id === field.id && s.fieldChipActive]}
-            onPress={() => onSelectField(field)}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="leaf" size={13} color={safeField.id === field.id ? COLORS.primary : COLORS.textMuted} />
-            <Text style={[s.fieldChipText, safeField.id === field.id && s.fieldChipTextActive]}>
-              {field.id} ({field.ha} Ha)
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {safeFields.map(field => {
+          if (!field || !field.id) return null;
+          const isSelected = safeField?.id === field.id;
+          return (
+            <TouchableOpacity
+              key={field.id}
+              style={[s.fieldChip, isSelected && s.fieldChipActive]}
+              onPress={() => onSelectField && onSelectField(field)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="leaf" size={13} color={isSelected ? COLORS.primary : COLORS.textMuted} />
+              <Text style={[s.fieldChipText, isSelected && s.fieldChipTextActive]}>
+                {field.id} ({field.ha || 1.5} Ha)
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       {/* Selected Field Details Card */}
       <Text style={s.sectionLabel}>{t('field_plot', 'Selected Field Details')}</Text>
       <View style={s.fieldCard}>
         <View style={s.fieldCardTop}>
-          <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField.id || 'No Field'}</Text></View>
-          <Text style={s.fieldHa}>{safeField.ha ? `${safeField.ha} Ha` : ''}</Text>
+          <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField?.id || 'No Field'}</Text></View>
+          <Text style={s.fieldHa}>{safeField?.ha ? `${safeField.ha} Ha` : ''}</Text>
         </View>
         <Text style={s.fieldMember}>
-          {t('member_label', 'Member')}: <Text style={{ fontWeight: '700' }}>{safeField.member || session?.name}</Text>
-          {(safeField.memberId || session?.employeeId) ? (
-            <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {safeField.memberId || session?.employeeId}</Text>
+          {t('member_label', 'Member')}: <Text style={{ fontWeight: '700' }}>{safeField?.member || safeField?.memberName || session?.name || 'Member'}</Text>
+          {(safeField?.memberId || session?.employeeId) ? (
+            <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {safeField?.memberId || session?.employeeId}</Text>
           ) : null}
         </Text>
         <Text style={s.fieldSync}>
-          <Ionicons name={safeField.synced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={14} color={safeField.synced ? '#267326' : '#C97A00'} />
-          {' '}{safeField.synced ? `${t('synced', 'Synced')} ${formatSyncTime(safeField.lastSync)}` : `${t('not_synced', 'Not synced')} (${formatSyncTime(safeField.lastSync)})`}
+          <Ionicons name={safeField?.synced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={14} color={safeField?.synced ? '#267326' : '#C97A00'} />
+          {' '}{safeField?.synced ? `${t('synced', 'Synced')} ${formatSyncTime(safeField?.lastSync)}` : `${t('not_synced', 'Not synced')} (${formatSyncTime(safeField?.lastSync)})`}
         </Text>
       </View>
 
@@ -79,26 +107,26 @@ function MemberFieldOpsView({
         <View style={s.historyHeader}>
           <View>
             <Text style={s.historyTitle}>{t('ops_title', 'Field Activity & Ledger')}</Text>
-            <Text style={s.historySub}>{fieldLogs.length} submitted{draftLogsCount > 0 ? ` · ${draftLogsCount} draft${draftLogsCount !== 1 ? 's' : ''}` : ''}</Text>
+            <Text style={s.historySub}>{(fieldLogs || []).length} submitted{draftLogsCount > 0 ? ` · ${draftLogsCount} draft${draftLogsCount !== 1 ? 's' : ''}` : ''}</Text>
           </View>
           <TouchableOpacity onPress={onOpenLedger}>
             <Text style={s.seeAllText}>{t('view_all_link', 'View All →')}</Text>
           </TouchableOpacity>
         </View>
 
-        {fieldLogs.length === 0 ? (
+        {(!fieldLogs || fieldLogs.length === 0) ? (
           <View style={s.emptyBox}>
             <Text style={s.emptyText}>{t('no_ops_recorded_plot', 'No operations recorded for this plot yet.')}</Text>
           </View>
         ) : (
-          fieldLogs.slice(0, 3).map(log => (
-            <View key={log.id} style={s.logItem}>
+          fieldLogs.filter(Boolean).slice(0, 3).map(log => (
+            <View key={log.id || String(Math.random())} style={s.logItem}>
               <View style={s.logDot} />
               <View style={{ flex: 1 }}>
-                <Text style={s.logActivity}>{log.activity}</Text>
-                <Text style={s.logDate}>{log.date} · {formatStageName ? formatStageName(log.stageName) : (log.stageName || 'General Stage')}</Text>
+                <Text style={s.logActivity}>{log.activity || log.operationName || 'Operation'}</Text>
+                <Text style={s.logDate}>{log.date || 'Today'} · {formatStageName ? formatStageName(log.stageName) : (log.stageName || 'General Stage')}</Text>
               </View>
-              <Text style={s.logCost}>₱{Number(log.cost || 0).toLocaleString()}</Text>
+              <Text style={s.logCost}>₱{Number(log.cost || log.totalCost || 0).toLocaleString()}</Text>
             </View>
           ))
         )}

@@ -162,7 +162,7 @@ export function generateUserNumericId(role, seedIndex = null) {
  * Format: LOG-{FIELD}-{TIMESTAMP_HEX}-{RAND} e.g. LOG-FLDNCY001-M7A9X2-8F2A
  */
 export function generateDeterministicLogId(fieldId) {
-  const cleanField = (fieldId || 'FLD-NCY-001').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const timeHex = Date.now().toString(36).toUpperCase();
   const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `LOG-${cleanField}-${timeHex}-${randHex}`;
@@ -177,7 +177,7 @@ export function generateLogId(fieldId) {
  * Format: DFT-{FIELD}-{TIMESTAMP_HEX}-{RAND}
  */
 export function generateDraftId(fieldId) {
-  const cleanField = (fieldId || 'FLD-NCY-001').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const timeHex = Date.now().toString(36).toUpperCase();
   const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `DFT-${cleanField}-${timeHex}-${randHex}`;
@@ -374,8 +374,12 @@ export async function flushOutboxToFirestore() {
 
       if (type === 'operation_log' || type === 'takeover_log') {
         const docRef = doc(db, 'operation_logs', payload.id);
+        const cleanPayload = {};
+        for (const [k, v] of Object.entries(payload || {})) {
+          if (v !== undefined) cleanPayload[k] = v;
+        }
         await setDoc(docRef, {
-          ...payload,
+          ...cleanPayload,
           synced: true,
           syncedAt: new Date().toISOString()
         }, { merge: true });

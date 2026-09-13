@@ -1,3 +1,4 @@
+import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — SRA Administrator Field Operations View Component
 // Role: SRA (Admin) · Silay Sugar Regulatory Administration
@@ -10,7 +11,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 
 function SRAFieldOpsView({
-  session,
+  session = {},
   fields = [],
   logs = [],
   selectedFarm = 'All Block Farms',
@@ -21,11 +22,11 @@ function SRAFieldOpsView({
   const { t } = useTranslation();
 
   const availableFarms = React.useMemo(() => {
-    return ['All Block Farms', ...new Set(fields.map(f => f.blockFarm || f.blockFarmName || 'Nacayao Block Farm'))];
+    return ['All Block Farms', ...new Set(fields.map(f => f.blockFarm || f.blockFarmName || (session?.farm || session?.blockFarm || 'District Central')))];
   }, [fields]);
 
   const filteredFields = React.useMemo(() => {
-    return selectedFarm === 'All Block Farms' ? fields : fields.filter(f => (f.blockFarm || f.blockFarmName || 'Nacayao Block Farm') === selectedFarm);
+    return selectedFarm === 'All Block Farms' ? fields : fields.filter(f => (f.blockFarm || f.blockFarmName || (session?.farm || session?.blockFarm || 'District Central')) === selectedFarm);
   }, [fields, selectedFarm]);
 
   const totalHectares = React.useMemo(() => {

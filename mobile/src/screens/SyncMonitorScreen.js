@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput, Linking, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput, Linking, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
@@ -13,6 +13,18 @@ export default function SyncMonitorScreen({ navigation }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState('attention'); // 'attention', 'all', 'active', 'warning', 'critical'
   const [memberPage, setMemberPage] = useState(1);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    try {
+      await performMobileSync();
+      await new Promise(res => setTimeout(res, 500));
+      Alert.alert(t('sync_status_synced', 'Sync Successful'), `Your local logs are now fully synchronized with ${session?.farm || (session?.farm || session?.blockFarm || 'District Central')}.`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   React.useEffect(() => {
     const unsubscribe = subscribe(() => {
@@ -22,8 +34,8 @@ export default function SyncMonitorScreen({ navigation }) {
     return unsubscribe;
   }, []);
 
-  const isFarmManager = session.role === 'Farm Manager';
-  const isSRA = session.role === 'SRA (Admin)';
+  const isFarmManager = session?.role === 'Farm Manager';
+  const isSRA = session?.role === 'SRA (Admin)';
 
   // Member terminal telemetry dynamically derived from fields
   const memberTelemetry = React.useMemo(() => {
@@ -60,7 +72,7 @@ export default function SyncMonitorScreen({ navigation }) {
         status,
         statusLabel,
         device: devices[idx % devices.length],
-        blockFarm: f.blockFarm || 'Nacayao Block Farm'
+        blockFarm: f.blockFarm || (session?.farm || session?.blockFarm || 'District Central')
       };
     });
   }, []);
@@ -131,7 +143,7 @@ export default function SyncMonitorScreen({ navigation }) {
   const handleTakeOver = (member) => {
     Alert.alert(
       t('btn_take_over', 'Take Over Field Plot'),
-      `Take operational supervision of ${member.id} (${member.name})? You will be navigated to Field Ops to log activities directly on behalf of this member.`,
+      `Take operational supervision of ${member.id} (${member.name})? You will be navigated to Field Ops to enter your manager account password and authorize supervisor take over.`,
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
         {
@@ -139,7 +151,7 @@ export default function SyncMonitorScreen({ navigation }) {
           onPress: () => {
             navigation.navigate('Field Ops', {
               screen: 'SchedMain',
-              params: { takeOverFieldId: member.id, isTakeOver: true }
+              params: { takeOverFieldId: member.id, requestTakeOver: true }
             });
           }
         }
@@ -156,7 +168,7 @@ export default function SyncMonitorScreen({ navigation }) {
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={s.headerTitle}>{isFarmManager ? t('telemetry_title', 'Member Sync Monitor') : (isSRA ? 'SRA Terminal' : t('action_sync_hub', 'Sync Status'))}</Text>
-          <Text style={s.headerSub}>{isFarmManager ? `${session.farm || 'Nacayao Block Farm'} Supervision` : (isSRA ? 'Administrative Authority' : 'Mobile Terminal Connection')}</Text>
+          <Text style={s.headerSub}>{isFarmManager ? `${session.farm || (session?.farm || session?.blockFarm || 'District Central')} Supervision` : (isSRA ? 'Administrative Authority' : 'Mobile Terminal Connection')}</Text>
         </View>
         <View style={{ width: 36 }} />
       </View>
@@ -414,7 +426,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <Ionicons name="shield-checkmark" size={28} color={COLORS.success} />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text, textAlign: 'center' }}>
-              {t('sync_status_synced', 'Terminal Connected to')} {session.farm || 'Nacayao Block Farm'}
+              {t('sync_status_synced', 'Terminal Connected to')} {session.farm || (session?.farm || session?.blockFarm || 'District Central')}
             </Text>
             <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4, lineHeight: 18 }}>
               {t('sync_toast_synced', 'Your offline operation logs and resource entries are automatically synchronized when online connectivity is detected.')}
@@ -423,11 +435,11 @@ export default function SyncMonitorScreen({ navigation }) {
             <View style={{ width: '100%', backgroundColor: '#F8FAF6', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#E2E8DC', marginVertical: 16, gap: 8 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('my_field', 'My Field')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{session.fieldId || 'FLD-NCY-001'} (1.5 Ha)</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{session.fieldId || (fields[0]?.id || '')} (1.5 Ha)</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_supervising_farm', 'Supervising Manager')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>Jose Reyes ({session.farm || 'Nacayao Block Farm'})</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{session?.farmManager || session?.managerName || 'Farm Manager'} ({session.farm || session.blockFarm || 'Block Farm'})</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('sync_info', 'Latest Sync')}:</Text>
@@ -437,16 +449,21 @@ export default function SyncMonitorScreen({ navigation }) {
 
             <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
               <TouchableOpacity
-                style={{ flex: 1, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 6, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 }}
-                onPress={() => {
-                  performMobileSync();
-                  Alert.alert(t('sync_status_synced', 'Sync Successful'), `Your local logs are now fully synchronized with ${session.farm || 'Nacayao Block Farm'}.`);
-                }}
+                style={[{ flex: 1, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 6, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 }, isSyncing && { opacity: 0.7 }]}
+                onPress={handleSyncNow}
+                disabled={isSyncing}
+                activeOpacity={0.8}
               >
-                <Ionicons name="sync" size={15} color="#FFF" />
-                <Text style={{ color: '#FFF', fontSize: 11.5, fontWeight: '700', textAlign: 'center', flexShrink: 1 }} numberOfLines={1}>
-                  {t('profile_sync_now', 'Sync Now')}
-                </Text>
+                {isSyncing ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="sync" size={15} color="#FFF" />
+                    <Text style={{ color: '#FFF', fontSize: 11.5, fontWeight: '700', textAlign: 'center', flexShrink: 1 }} numberOfLines={1}>
+                      {t('profile_sync_now', 'Sync Now')}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -454,7 +471,7 @@ export default function SyncMonitorScreen({ navigation }) {
                 onPress={() => {
                   Alert.alert(
                     t('btn_call_manager', 'Contact Farm Manager'),
-                    'Jose Reyes (0918-987-6543)\nWould you like to place a call?',
+                    `${session?.farmManager || 'Farm Manager'}\nWould you like to place a call?`,
                     [
                       { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
                       { text: t('btn_call_manager', 'Call Now'), onPress: () => Alert.alert('Dialing...', 'Calling 0918-987-6543') }

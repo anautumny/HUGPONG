@@ -10,7 +10,7 @@ import { COLORS, FONTS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 
 export default function ManagerAnalyticsView({
-  session,
+  session = {},
   managedFields = [],
   farmLogs = [],
   benchmarks = {}
@@ -25,7 +25,7 @@ export default function ManagerAnalyticsView({
     <View style={s.container}>
       <View style={s.summaryCard}>
         <Text style={s.cardLabel}>{t('block_farm_agg_analytics', 'Block Farm Production Overview')}</Text>
-        <Text style={s.cardTitle}>{session.farm || 'Nacayao Block Farm'} · {managedFields.length} {t('plots_lbl', 'Plots')}</Text>
+        <Text style={s.cardTitle}>{(session?.farm || session?.blockFarm || 'District Central')} · {managedFields.length} {t('plots_lbl', 'Plots')}</Text>
 
         <View style={s.statsGrid}>
           <View style={s.statCell}>

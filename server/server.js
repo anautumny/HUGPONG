@@ -19,6 +19,7 @@ const blockFarmRoutes = require('./routes/blockFarms');
 const fieldRoutes = require('./routes/fields');
 const logRoutes = require('./routes/logs');
 const ticketRoutes = require('./routes/tickets');
+const smsRoutes = require('./routes/sms');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,8 +53,27 @@ app.use(session({
   }
 }));
 
-// Request Logger
+// Request Logger & Token Session Hydration
 app.use((req, res, next) => {
+  const authHeader = req.headers.authorization || req.headers.token;
+  if (!req.session.user && authHeader) {
+    const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (rawToken.startsWith('HUGPONG.')) {
+      try {
+        const payloadJson = Buffer.from(rawToken.split('.')[1], 'base64').toString('utf8');
+        const payload = JSON.parse(payloadJson);
+        if (payload && payload.role) {
+          req.session.user = {
+            employeeId: payload.uid,
+            name: payload.name || payload.uid,
+            role: payload.role === 'superadmin' ? 'Super Admin' : (payload.role === 'manager' ? 'Farm Manager' : 'SRA Admin'),
+            roleKey: payload.role
+          };
+        }
+      } catch (e) {}
+    }
+  }
+
   const timestamp = new Date().toLocaleTimeString();
   const sessionUser = req.session && req.session.user ? `[${req.session.user.name} (${req.session.user.role})]` : '[Guest]';
   console.log(`[${timestamp}] ${req.method} ${req.originalUrl} ${sessionUser}`);
@@ -68,6 +88,7 @@ app.use('/api/block-farms', blockFarmRoutes);
 app.use('/api/fields', fieldRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/sms', smsRoutes);
 
 // ── Static Web Dashboard Serving ────────────────────────────
 app.use(express.static(path.join(__dirname, '../web')));

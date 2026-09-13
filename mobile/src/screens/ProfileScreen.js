@@ -1,13 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Modal, Dimensions, Alert, Switch, TextInput, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser, performMobileSync } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
+import { getNetworkStatus, subscribeToNetwork, checkConnectivity } from '../services/networkService';
 import { useTranslation, LANGUAGES } from '../services/i18n';
 
 const { height } = Dimensions.get('window');
@@ -16,25 +18,74 @@ export default function ProfileScreen({ navigation }) {
   const { t, language, setLanguage, formatSyncTime } = useTranslation();
   const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
+  const [isOnline, setIsOnline] = useState(getNetworkStatus());
+  const [dataVersion, setDataVersion] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState('Today, 8:05 AM');
   const [langExpanded, setLangExpanded] = useState(false);
   const [autoSync, setAutoSync] = useState(true);
   const [showTicketsModal, setShowTicketsModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
   const [ticketTab, setTicketTab] = useState('submit');
   const [ticketForm, setTicketForm] = useState({ title: '', category: 'Offline Sync', priority: 'Normal', details: '' });
   const [ticketsList, setTicketsList] = useState(supportTickets);
 
   useEffect(() => {
-    const unsubscribe = subscribe(() => {
+    const unsubscribeSession = subscribe(() => {
       const sess = getCurrentSession();
       setSessionState({ ...sess });
       setSyncedState(getIsSynced());
+      setDataVersion(v => v + 1);
     });
-    return unsubscribe;
+    const unsubscribeNetwork = subscribeToNetwork((online) => {
+      setIsOnline(online);
+    });
+    return () => {
+      unsubscribeSession();
+      unsubscribeNetwork();
+    };
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      setSessionState({ ...getCurrentSession() });
+      setSyncedState(getIsSynced());
+      setIsOnline(getNetworkStatus());
+      setDataVersion(v => v + 1);
+    }, [])
+  );
+
   const doSync = async () => {
+    if (!isOnline) {
+      Alert.alert(
+        'Offline Mode Active',
+        'You are currently offline. Operations are stored locally and will sync once reconnected.',
+        [
+          {
+            text: 'Check Connection',
+            onPress: async () => {
+              setSyncing(true);
+              try {
+                const online = await checkConnectivity(3500);
+                if (online) {
+                  await performMobileSync();
+                  setSyncedState(true);
+                  Alert.alert(t('sync_complete_title', 'Online & Synced'), t('sync_complete_msg', 'Your records have been synchronized with the cloud server.'));
+                } else {
+                  Alert.alert('Still Offline', 'Could not establish internet connection. Local storage remains active.');
+                }
+              } catch (e) {
+                Alert.alert('Connection Check', 'Unable to complete connection check.');
+              } finally {
+                setSyncing(false);
+              }
+            }
+          },
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
+      return;
+    }
     setSyncing(true);
     try {
       await performMobileSync();
@@ -72,7 +123,14 @@ export default function ProfileScreen({ navigation }) {
         t('signout_unsynced_msg', 'You have pending unsynced records. Signing out without syncing may cause data loss. Please sync first or proceed anyway.'),
         [
           { text: t('btn_sync_now', 'Sync First'), onPress: doSync },
-          { text: t('signout_btn_anyway', 'Sign Out Anyway'), style: 'destructive', onPress: () => navigation.replace('Login') },
+          { 
+            text: t('signout_btn_anyway', 'Sign Out Anyway'), 
+            style: 'destructive', 
+            onPress: async () => {
+              await logoutUser();
+              navigation.replace('Login');
+            } 
+          },
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
         ]
       );
@@ -82,7 +140,14 @@ export default function ProfileScreen({ navigation }) {
         t('signout_confirm_msg', 'Are you sure you want to sign out?'),
         [
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-          { text: t('profile_logout', 'Sign Out'), style: 'destructive', onPress: () => navigation.replace('Login') },
+          { 
+            text: t('profile_logout', 'Sign Out'), 
+            style: 'destructive', 
+            onPress: async () => {
+              await logoutUser();
+              navigation.replace('Login');
+            } 
+          },
         ]
       );
     }
@@ -94,64 +159,86 @@ export default function ProfileScreen({ navigation }) {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
+        {!isOnline && (
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: '#FFFBEB',
+            borderWidth: 1,
+            borderColor: '#FDE68A',
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            borderRadius: RADIUS.md,
+            marginBottom: 12
+          }}>
+            <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
+            <Text style={{ flex: 1, fontSize: 11.5, color: '#92400E', fontWeight: '600', lineHeight: 15 }}>
+              Offline Mode Active · Profile credentials and cloud sync settings are read-only until reconnected.
+            </Text>
+          </View>
+        )}
+
         {/* ── Identity Card ── */}
         <View style={[s.card, s.identityCard]}>
           <View style={s.avatarWrap}>
             <Text style={s.avatarText}>
-              {session.name ? session.name.split(' ').map(n => n[0]).join('').slice(0, 2) : 'U'}
+              {session?.name ? session.name.split(' ').map(n => n[0]).join('').slice(0, 2) : 'U'}
             </Text>
           </View>
           <View style={s.identityInfo}>
-            <Text style={s.identityName}>{session.name}</Text>
+            <Text style={s.identityName}>{session?.name || 'User'}</Text>
             <View style={s.roleBadge}>
               <Text style={s.roleText}>
-                {session.role === 'Member' ? t('role_member', 'Sugarcane Block Farm Member') : (session.role === 'Farm Manager' ? t('role_manager', 'Block Farm Manager') : t('role_sra', 'SRA Administrator'))}
+                {session?.role === 'Member' ? t('role_member', 'Sugarcane Block Farm Member') : (session?.role === 'Farm Manager' ? t('role_manager', 'Block Farm Manager') : t('role_sra', 'SRA Administrator'))}
               </Text>
             </View>
-            <Text style={s.identityId}>ID: {session.employeeId}</Text>
+            <Text style={s.identityId}>ID: {session?.employeeId || session?.contact || '—'}</Text>
           </View>
         </View>
 
         {/* ── Operational Assignment ── */}
         <View style={s.card}>
           <Text style={s.cardTitle}>
-            {session.role === 'SRA (Admin)' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Operational Assignment')}
+            {session?.role === 'SRA (Admin)' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Operational Assignment')}
           </Text>
           {[
             { 
               key: 'farm_agency',
               icon: 'business', 
-              label: session.role === 'SRA (Admin)' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm Location')), 
-              value: session.role === 'SRA (Admin)' ? 'Sugar Regulatory Administration (SRA)' : (session.farm || 'Nacayao Block Farm')
+              label: session?.role === 'SRA (Admin)' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm Location')), 
+              value: session?.role === 'SRA (Admin)' ? 'Sugar Regulatory Administration (SRA)' : (session?.farm || (session?.farm || session?.blockFarm || 'District Central'))
             },
             { 
               key: 'field_scope',
               icon: 'map', 
-              label: session.role === 'SRA (Admin)' 
+              label: session?.role === 'SRA (Admin)' 
                 ? t('profile_admin_jurisdiction', 'Jurisdiction') 
-                : (session.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
+                : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
               value: (() => {
-                if (session.role === 'SRA (Admin)') {
-                  return 'District 3 · Silay City, Negros Occidental';
+                if (session?.role === 'SRA (Admin)') {
+                  const districtName = session?.district || 'District 3';
+                  const loc = session?.location || (blockFarms.length > 0 && blockFarms[0]?.location ? blockFarms[0].location : 'Silay City, Negros Occidental');
+                  return `${districtName} · ${loc}`;
                 }
-                if (session.role === 'Farm Manager') {
-                  const totalPlots = fields.length || 5;
-                  const totalHa = fields.reduce((s, f) => s + (Number(f.ha) || 0), 0) || 15.25;
-                  return `${session.farm || 'Nacayao Block Farm'} (${totalPlots} Plots · ${totalHa.toFixed(1)} Ha)`;
+                if (session?.role === 'Farm Manager') {
+                  const totalPlots = fields.length;
+                  const totalHa = fields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
+                  return `${session?.farm || (session?.farm || session?.blockFarm || 'District Central')} (${totalPlots} Plots · ${totalHa.toFixed(1)} Ha)`;
                 }
                 // Member Role: Show assigned plots
                 const memberPlots = fields.filter(f => 
-                  f.member === session.name || 
-                  f.memberId === session.employeeId || 
-                  f.id === session.fieldId
+                  f.member === session?.name || 
+                  f.memberId === session?.employeeId || 
+                  f.id === session?.fieldId
                 );
                 if (memberPlots.length > 0) {
                   return memberPlots.map(f => `${f.id} (${f.ha} Ha)`).join(', ');
                 }
-                return session.fieldId || 'FLD-NCY-001 (1.5 Ha)';
+                return session.fieldId ? `${session.fieldId}` : 'No Plot Assigned';
               })()
             },
-            { key: 'mobile_contact', icon: 'call', label: t('profile_mobile_contact', 'Mobile Contact'), value: session.mobile || session.contact || '0919 444 8888' },
+            { key: 'mobile_contact', icon: 'call', label: t('profile_mobile_contact', 'Mobile Contact'), value: session.mobile || session.contact || '—' },
           ].map(r => (
             <View key={r.key} style={s.infoRow}>
               <Ionicons name={r.icon} size={16} color={COLORS.primaryLight} style={{ width: 24 }} />
@@ -162,47 +249,90 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         {/* ── SRA Regulatory Status (SRA Admin only) ── */}
-        {session.role === 'SRA (Admin)' && (
+        {session?.role === 'SRA (Admin)' && (
           <View style={s.card}>
             <View style={s.syncHeader}>
               <Text style={s.cardTitle}>{t('profile_sra_status', 'SRA Regulatory System Status')}</Text>
-              <View style={[s.syncStatusDot, { backgroundColor: COLORS.success }]} />
+              <View style={[s.syncStatusDot, { backgroundColor: getNetworkStatus() ? COLORS.success : COLORS.accent }]} />
             </View>
+            
+            {/* 1. District Certification & Supervised Compliance */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC', marginTop: 4 }}>
               <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_district_cert', 'District Certification:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.success }}>{t('profile_sra_certified', 'Silay SRA Certified')}</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.success }}>
+                {(() => {
+                  const district = session?.district || (blockFarms.length > 0 && blockFarms[0]?.location ? blockFarms[0].location.split(',')[0] : 'Silay District 3');
+                  const certCount = (auditReports || []).filter(a => a.status === 'Certified').length;
+                  const totalAudits = (auditReports || []).length;
+                  const totalHa = (fields || []).reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
+                  if (totalAudits > 0) {
+                    return `${district} · ${certCount}/${totalAudits} Certified (${totalHa.toFixed(1)} Ha)`;
+                  }
+                  if (totalHa > 0) {
+                    return `${district} · ${totalHa.toFixed(1)} Ha Monitored`;
+                  }
+                  return `${district} · 0 Registered Plots`;
+                })()}
+              </Text>
             </View>
+
+            {/* 2. Active SRA Sugar Order Circular */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
               <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_sra_circular', 'SRA Circular Version:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>Circular #104 (Active)</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>
+                {(() => {
+                  const sorted = getSortedPrices();
+                  if (sorted.length > 0 && sorted[0].source) {
+                    return `${sorted[0].source} (${sorted[0].week || 'Active'})`;
+                  }
+                  if (sorted.length > 0 && sorted[0].week) {
+                    return `SRA Millgate · ${sorted[0].week} (Active)`;
+                  }
+                  return 'No Active Circular in Database';
+                })()}
+              </Text>
             </View>
+
+            {/* 3. Cloud Central Node Live Telemetry */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
               <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_central_node', 'Cloud Central Node:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{t('profile_operational_uptime', 'Operational (100% Uptime)')}</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: getNetworkStatus() ? COLORS.text : COLORS.accent }}>
+                {getNetworkStatus() ? `Firebase & Gateway · ${synced ? 'Synced' : 'Syncing'}` : 'Offline Local Store Active'}
+              </Text>
+            </View>
+
+            {/* 4. Live Ledger Audit Volume */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Audit Ledger Telemetry:</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textSecondary }}>
+                {`${(operationLogs || []).length} Ops Logs · ${(auditReports || []).length} Audit Dossiers`}
+              </Text>
             </View>
           </View>
         )}
 
-        {/* ── Auto Sync Option ── */}
-        <View style={s.card}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
-              <View style={{ width: 36, height: 36, borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
+        {/* ── Auto Sync Option (Field Roles only: Member & Farm Manager) ── */}
+        {(session?.role === 'Member' || session?.role === 'Farm Manager') && (
+          <View style={s.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={{ width: 36, height: 36, borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.text }}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Sync records automatically when online</Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.text }}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Sync records automatically when online</Text>
-              </View>
+              <Switch
+                value={autoSync}
+                onValueChange={setAutoSync}
+                trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
+                thumbColor={autoSync ? COLORS.primary : '#f4f3f4'}
+              />
             </View>
-            <Switch
-              value={autoSync}
-              onValueChange={setAutoSync}
-              trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-              thumbColor={autoSync ? COLORS.primary : '#f4f3f4'}
-            />
           </View>
-        </View>
+        )}
 
         {/* ── Language ── */}
         <TouchableOpacity style={[s.card, s.expandRow]} onPress={() => setLangExpanded(e => !e)}>
@@ -231,13 +361,14 @@ export default function ProfileScreen({ navigation }) {
           <Text style={s.cardTitle}>{t('profile_settings_mgmt', 'Settings & Management')}</Text>
           {[
             { icon: 'help-buoy-outline', label: t('profile_support', 'Help & Support Desk'), color: COLORS.accent, onPress: () => setShowTicketsModal(true) },
+            { icon: 'document-text-outline', label: t('profile_legal', 'Privacy Policy & Terms (RA 10173)'), color: COLORS.primary, onPress: () => setShowLegalModal(true) },
             { icon: 'shield-outline', label: t('profile_security', 'Security & Password'), color: COLORS.primary, onPress: () => navigation.navigate('Security') },
-            ...(session.role === 'Farm Manager' ? [{ 
+            ...(session?.role === 'Farm Manager' ? [{ 
               icon: 'cloud-upload-outline', 
               label: t('profile_sync_monitor', 'Member Sync Telemetry Monitor'), 
               color: COLORS.blue, 
               onPress: () => navigation.navigate('SyncMonitor') 
-            }] : (session.role === 'Member' ? [{
+            }] : (session?.role === 'Member' ? [{
               icon: 'cloud-upload-outline', 
               label: t('action_sync_hub', 'Sync Status & Diagnostics'), 
               color: COLORS.blue, 
@@ -342,7 +473,7 @@ export default function ProfileScreen({ navigation }) {
                     <Text style={s.formLabel}>{t('ticket_subject', 'Subject / Short Summary')}</Text>
                     <TextInput
                       style={s.ticketInput}
-                      placeholder="e.g. Cannot sync FLD-NCY-001 logs"
+                      placeholder="e.g. Cannot sync field operation logs"
                       placeholderTextColor={COLORS.textMuted}
                       value={ticketForm.title}
                       onChangeText={val => setTicketForm(p => ({ ...p, title: val }))}
@@ -432,6 +563,87 @@ export default function ProfileScreen({ navigation }) {
                   )}
                 </>
               )}
+            </ScrollView>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* ── Legal & Privacy Policy Modal (RA 10173) ── */}
+      <Modal visible={showLegalModal} transparent animationType="slide">
+        <View style={s.ticketOverlay}>
+          <SafeAreaView style={s.ticketContainer}>
+            {/* Header */}
+            <View style={s.ticketHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.ticketTitle}>Privacy, Terms &amp; Compliance</Text>
+                <Text style={s.ticketSub}>Republic Act No. 10173 · Data Privacy Act of 2012</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowLegalModal(false)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={22} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable Content */}
+            <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+              {/* SRA & DPA Notice Box */}
+              <View style={{ backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', borderRadius: RADIUS.md, padding: 12, gap: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="shield-checkmark" size={18} color={COLORS.primary} />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>Philippine Legal Governance</Text>
+                </View>
+                <Text style={{ fontSize: 11.5, color: '#166534', lineHeight: 16 }}>
+                  HUGPONG processes agricultural telemetry in full adherence to the Philippine Data Privacy Act of 2012 (RA 10173) and Sugar Regulatory Administration (SRA) district farm regulations.
+                </Text>
+              </View>
+
+              {/* Data Collected */}
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>1. Personal &amp; Agronomic Data Collected</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 }}>
+                  • Farmer Name, Mobile Contact, and System User ID{'\n'}
+                  • Farm Block Name, Association, Coordinates &amp; Hectarage{'\n'}
+                  • 6-Stage Agronomic Logs (Plowing to Harvesting){'\n'}
+                  • Delivery &amp; Support Verification Records
+                </Text>
+              </View>
+
+              {/* Purpose & Legal Grounds */}
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>2. Lawful Processing Grounds</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 }}>
+                  Data is collected solely for cooperative operational management, offline field activity reconciliation, disaster assistance assessment, and SRA district quota monitoring. No data is sold or commercialized.
+                </Text>
+              </View>
+
+              {/* Offline Storage */}
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>3. Offline Storage &amp; Encryption</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 }}>
+                  Your draft logs and credentials are saved locally in on-device encrypted storage (AsyncStorage/SQLite) to enable full functionality during remote field outages. When reconnected, data syncs over TLS encryption. Zero third-party ad trackers or analytics pixels exist in this app.
+                </Text>
+              </View>
+
+              {/* Data Subject Rights */}
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>4. Your Rights under RA 10173</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 }}>
+                  Under RA 10173, you hold the right to be informed, right of access to your records, right to rectify errors, right to erasure/blocking, and right to lodge a complaint with the National Privacy Commission (NPC).
+                </Text>
+              </View>
+
+              {/* Contact / DPO */}
+              <View style={{ backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12, gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>Data Protection Office (DPO)</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Email: dpo@hugpong.ph | Tel: (034) 495-0123</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Silay City Sugarcane District, Negros Occidental</Text>
+              </View>
+
+              <TouchableOpacity
+                style={{ backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: RADIUS.md, alignItems: 'center', marginTop: 8 }}
+                onPress={() => setShowLegalModal(false)}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>I Understand &amp; Agree</Text>
+              </TouchableOpacity>
             </ScrollView>
           </SafeAreaView>
         </View>

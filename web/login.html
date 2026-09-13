@@ -72,6 +72,15 @@
       <!-- Login Form -->
       <form id="login-form" onsubmit="handleLoginSubmit(event)" class="flex flex-col gap-4 mt-2" novalidate>
 
+        <!-- Offline Warning Banner -->
+        <div id="web-offline-banner" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-800 flex items-start gap-2.5">
+          <svg class="w-4 h-4 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m-3.536-3.536a4 4 0 010-5.656m-7.072 0a4 4 0 010 5.656m-3.536-3.536a9 9 0 010-12.728M12 12h.01"/></svg>
+          <div>
+            <p class="font-bold text-amber-900">You are currently offline</p>
+            <p class="text-[11px] text-amber-700 mt-0.5">An active internet connection is required to sign in for the first time. If you were already signed in, your session token is preserved.</p>
+          </div>
+        </div>
+
         <!-- Error Alert Box -->
         <div id="error-box" class="hidden rounded-xl border border-danger/40 bg-danger-bg p-3.5 text-xs font-semibold text-danger flex items-center gap-2.5">
           <svg class="w-4 h-4 shrink-0 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -88,7 +97,7 @@
             <input
               type="text"
               id="contact-input"
-              placeholder="e.g. 04000001 or 0917 123 4567"
+              placeholder="e.g. 04000001 or 09171234567"
               required
               autocomplete="username"
               class="w-full rounded-xl border border-border bg-bg pl-10 pr-4 py-2.5 text-sm text-hug-text placeholder-hug-muted outline-none focus:border-primary focus:ring-2 focus:ring-primary-bg transition-all"
@@ -137,11 +146,28 @@
           </button>
         </div>
 
+        <!-- DPA (RA 10173) Form Consent -->
+        <div class="pt-2">
+          <label class="flex items-start gap-2.5 cursor-pointer select-none text-[11px] text-hug-text2">
+            <input
+              type="checkbox"
+              id="login-consent-checkbox"
+              required
+              class="mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 focus:outline-none h-3.5 w-3.5 shrink-0"
+            />
+            <span class="leading-tight">
+              I acknowledge that my session and agricultural records are processed in accordance with the
+              <a href="privacy-policy.html" target="_blank" class="text-primary font-bold hover:underline">Privacy Policy (RA 10173)</a> and
+              <a href="terms-and-conditions.html" target="_blank" class="text-primary font-bold hover:underline">Terms</a>.
+            </span>
+          </label>
+        </div>
+
         <!-- Submit Button -->
         <button
           id="submit-btn"
           type="submit"
-          class="mt-2 w-full bg-primary hover:bg-primary-light text-white font-extrabold text-sm rounded-xl py-3.5 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+          class="mt-2 w-full bg-primary hover:bg-primary-light text-white font-extrabold text-sm rounded-xl py-3.5 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-sm focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none"
         >
           <span id="btn-spinner" class="btn-spinner"></span>
           <span id="btn-text">Sign In</span>
@@ -153,44 +179,18 @@
         </div>
 
       </form>
-
-      <!-- Instant Role Access Section (No Emojis) -->
-      <div class="mt-6 pt-5 border-t border-border flex flex-col gap-2.5">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-bold text-hug-text2 uppercase tracking-wider">Instant Role Access</span>
-          <span class="text-[10px] text-hug-muted">1-Click Fast Switch</span>
-        </div>
-        <div class="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onclick="quickLogin('superadmin')"
-            class="flex flex-col items-center justify-center p-2.5 rounded-xl border border-border bg-bg hover:bg-primary-bg hover:border-primary/40 transition-all cursor-pointer group"
-          >
-            <span class="text-xs font-extrabold text-hug-text group-hover:text-primary">Super Admin</span>
-            <span class="text-[10px] text-hug-muted mt-0.5">Capstone Group</span>
-          </button>
-          <button
-            type="button"
-            onclick="quickLogin('manager')"
-            class="flex flex-col items-center justify-center p-2.5 rounded-xl border border-border bg-bg hover:bg-primary-bg hover:border-primary/40 transition-all cursor-pointer group"
-          >
-            <span class="text-xs font-extrabold text-hug-text group-hover:text-primary">Farm Manager</span>
-            <span class="text-[10px] text-hug-muted mt-0.5">Jose Reyes</span>
-          </button>
-          <button
-            type="button"
-            onclick="quickLogin('admin')"
-            class="flex flex-col items-center justify-center p-2.5 rounded-xl border border-border bg-bg hover:bg-primary-bg hover:border-primary/40 transition-all cursor-pointer group"
-          >
-            <span class="text-xs font-extrabold text-hug-text group-hover:text-primary">SRA Admin</span>
-            <span class="text-[10px] text-hug-muted mt-0.5">Engr. Santos</span>
-          </button>
-        </div>
-      </div>
-
     </div>
 
-    <p class="text-xs text-hug-muted text-center">
+    <!-- Legal Footer Links -->
+    <div class="flex flex-wrap items-center justify-center gap-3 text-xs text-hug-muted">
+      <a href="privacy-policy.html" class="hover:text-primary transition-colors">Privacy Policy</a>
+      <span>&middot;</span>
+      <a href="terms-and-conditions.html" class="hover:text-primary transition-colors">Terms of Use</a>
+      <span>&middot;</span>
+      <a href="cookie-policy.html" class="hover:text-primary transition-colors">Cookie Policy</a>
+    </div>
+
+    <p class="text-[11px] text-hug-muted text-center">
       Silay Sugar Regulatory Administration &middot; Cloud-Synchronized Network
     </p>
 
@@ -240,8 +240,8 @@
             Because HUGPONG protects official land tenure, sugarcane allocations, and financial subsidies, online password recovery requires verified identity. Please visit your:
           </p>
           <ul class="list-disc list-inside space-y-1 text-[11px] font-medium text-hug-text2 pl-1">
-            <li><strong>Block Farm Manager</strong> (Jose Reyes &middot; Nacayao Block Farm)</li>
-            <li><strong>SRA District Administrator</strong> (Engr. Maria Santos &middot; District 3 Silay)</li>
+            <li><strong>Assigned Block Farm Manager</strong></li>
+            <li><strong>SRA District Regulatory Officer</strong></li>
           </ul>
           <p class="text-[11px] text-hug-muted">
             They will verify your identity in person and update your registered mobile contact or issue an authorized password reset directly from the cooperative console.
@@ -260,6 +260,8 @@
           Understood, Return to Sign In
         </button>
       </div>
+    </div>
+  </div>
 
   <!-- Modal: First-Login Phone Verification -->
   <div id="modal-first-login-verify" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 hidden backdrop-blur-xs">
@@ -301,6 +303,87 @@
     </div>
   </div>
 
+  <!-- Modal: First-Login Force Change Password -->
+  <div id="modal-first-login-change-password" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 hidden backdrop-blur-xs">
+    <div class="bg-white border border-border rounded-2xl p-6 sm:p-7 max-w-md w-full shadow-2xl animate-fade-in flex flex-col gap-4">
+      <div class="flex items-start gap-3">
+        <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="text-base font-extrabold text-hug-text">Set Your New Secure Password</h3>
+          <p class="text-xs text-hug-muted mt-0.5">Welcome to HUGPONG! Since this is your first time logging in, please create a new secure password to protect your account and farm records.</p>
+        </div>
+      </div>
+
+      <div class="p-3 bg-bg rounded-xl border border-border text-xs text-hug-text2 flex flex-col gap-1.5">
+        <div class="flex justify-between items-center">
+          <span class="text-[10px] uppercase font-bold text-hug-muted">Account Holder</span>
+          <span id="first-login-pwd-name" class="font-bold text-hug-text text-xs">Personnel Name</span>
+        </div>
+        <div class="flex justify-between items-center pt-1 border-t border-border/60">
+          <span class="text-[10px] uppercase font-bold text-hug-muted">User ID / Role</span>
+          <span id="first-login-pwd-meta" class="font-mono font-semibold text-primary text-xs">02000001 (SRA Admin)</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-hug-text2">New Password <span class="text-danger">*</span></label>
+          <div class="relative">
+            <input type="password" id="first-login-new-password" oninput="handleFirstLoginPwdInput(this)" placeholder="Minimum 8 characters (Uppercase, lowercase, numbers)" class="w-full text-xs font-semibold px-3 py-2.5 pr-9 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+            <button type="button" onclick="toggleFirstLoginPwdVisibility('first-login-new-password', this)" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-hug-muted hover:text-hug-text cursor-pointer">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-hug-text2">Confirm New Password <span class="text-danger">*</span></label>
+          <div class="relative">
+            <input type="password" id="first-login-confirm-password" placeholder="Re-enter new password" class="w-full text-xs font-semibold px-3 py-2.5 pr-9 border border-border rounded-xl bg-white focus:border-primary outline-none" />
+            <button type="button" onclick="toggleFirstLoginPwdVisibility('first-login-confirm-password', this)" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-hug-muted hover:text-hug-text cursor-pointer">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-primary-bg/40 p-2.5 rounded-xl border border-primary/20 text-[11px] text-hug-text2 flex flex-col gap-1.5">
+          <span class="font-bold text-primary">Security Requirements:</span>
+          <div class="grid grid-cols-1 gap-1 text-[10.5px]">
+            <div id="pwd-req-len" class="flex items-center gap-1.5 text-hug-muted font-medium transition-colors">
+              <span class="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] font-bold shrink-0">○</span>
+              <span>At least 8 characters long</span>
+            </div>
+            <div id="pwd-req-case" class="flex items-center gap-1.5 text-hug-muted font-medium transition-colors">
+              <span class="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] font-bold shrink-0">○</span>
+              <span>Contains both UPPERCASE &amp; lowercase letters (A-Z, a-z)</span>
+            </div>
+            <div id="pwd-req-num" class="flex items-center gap-1.5 text-hug-muted font-medium transition-colors">
+              <span class="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] font-bold shrink-0">○</span>
+              <span>Contains at least one number (0-9)</span>
+            </div>
+            <div id="pwd-req-diff" class="flex items-center gap-1.5 text-hug-muted font-medium transition-colors">
+              <span class="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] font-bold shrink-0">○</span>
+              <span>Cannot be default password ("hugpong" / "hugpong2026")</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="first-login-pwd-error" class="hidden text-xs font-bold text-danger bg-danger-bg p-2.5 rounded-lg border border-danger/30"></div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-border">
+        <button type="button" onclick="cancelFirstLoginChangePassword()" class="px-4 py-2.5 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg transition-all cursor-pointer">
+          Sign Out
+        </button>
+        <button type="button" id="btn-submit-first-login-pwd" onclick="submitFirstLoginChangePassword()" class="px-4 py-2.5 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-light transition-all cursor-pointer shadow-sm">
+          Save Password &amp; Open Workspace
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Loading Overlay -->
   <div
     id="loading-overlay"
@@ -319,6 +402,26 @@
   <script type="module" src="shared/firebase-init.js?v=2.2"></script>
   <script src="shared/core.js?v=2.2"></script>
   <script>
+    function toast(msg) {
+      let tc = document.getElementById('toast-container');
+      if (!tc) {
+        tc = document.createElement('div');
+        tc.id = 'toast-container';
+        tc.className = 'fixed bottom-5 right-5 z-60 flex flex-col gap-2 max-w-sm pointer-events-none';
+        document.body.appendChild(tc);
+      }
+      const t = document.createElement('div');
+      t.className = 'p-3.5 bg-hug-text text-white text-xs font-semibold rounded-xl shadow-2xl border border-white/10 flex items-center gap-2 pointer-events-auto animate-in fade-in slide-in-from-bottom-2 duration-200';
+      t.innerHTML = `<span>${msg}</span>`;
+      tc.appendChild(t);
+      setTimeout(() => {
+        t.style.opacity = '0';
+        t.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => t.remove(), 300);
+      }, 4000);
+    }
+    window.toast = toast;
+
     let failedAttempts = 0;
     let lockoutUntil = 0;
 
@@ -345,58 +448,6 @@
         showIcon.classList.remove('hidden');
         hideIcon.classList.add('hidden');
       }
-    }
-
-    const ROLE_ACCOUNTS = {
-      superadmin: {
-        employeeId: '01000001',
-        contact: '09187654321',
-        name: 'Capstone Group (Admin)',
-        role: 'Super Admin',
-        roleKey: 'superadmin',
-        blockFarmId: '',
-        fieldId: '',
-        redirectUrl: 'roles/super-admin/dashboard.html'
-      },
-      manager: {
-        employeeId: '03000001',
-        contact: '09189876543',
-        name: 'Jose Reyes',
-        role: 'Farm Manager',
-        roleKey: 'manager',
-        blockFarmId: 'BLK-NCY-01',
-        blockFarm: 'Nacayao Block Farm',
-        fieldId: '',
-        redirectUrl: 'roles/farm-manager/dashboard.html'
-      },
-      admin: {
-        employeeId: '02000001',
-        contact: '09194448888',
-        name: 'Engr. Maria Santos',
-        role: 'SRA (Admin)',
-        roleKey: 'admin',
-        blockFarmId: 'BLK-NCY-01',
-        blockFarm: 'Nacayao Block Farm',
-        fieldId: '',
-        redirectUrl: 'roles/sra-admin/dashboard.html'
-      }
-    };
-
-    function quickLogin(roleKey) {
-      const user = ROLE_ACCOUNTS[roleKey];
-      if (!user) return;
-      localStorage.setItem('hugpong_role', user.roleKey);
-      localStorage.setItem('hugpong_user', JSON.stringify(user));
-
-      const overlay = document.getElementById('loading-overlay');
-      const statusText = document.getElementById('overlay-status');
-      overlay.classList.remove('opacity-0', 'pointer-events-none');
-      overlay.classList.add('opacity-100', 'pointer-events-auto');
-      statusText.textContent = `Opening ${user.role.toUpperCase()} workspace...`;
-
-      setTimeout(() => {
-        window.location.href = user.redirectUrl;
-      }, 300);
     }
 
     async function handleLoginSubmit(e) {
@@ -427,6 +478,15 @@
         return;
       }
 
+      // Enforce Data Privacy Act (RA 10173) Mandatory Form Consent
+      const consentBox = document.getElementById('login-consent-checkbox');
+      if (consentBox && !consentBox.checked) {
+        errorMsg.textContent = 'Please acknowledge and agree to the Privacy Policy (RA 10173) and Terms to proceed.';
+        errorBox.classList.remove('hidden');
+        consentBox.focus();
+        return;
+      }
+
       spinner.style.display = 'inline-block';
       btnText.textContent = 'Authenticating...';
       submitBtn.disabled = true;
@@ -452,7 +512,7 @@
           console.warn('[HUGPONG Auth] Server endpoint offline, checking database/registry directly...');
         }
 
-        // 2. If not returned from server, verify with Cloud Firestore or Canonical Registry
+        // 2. If not returned from server, verify with Cloud Firestore or Local DB
         if (!authResult) {
           let matched = null;
           if (window.firebaseDB && window.firestore) {
@@ -463,7 +523,7 @@
                 const u = docSnap.data();
                 const uContact = (u.contact || u.mobile || '').replace(/\D/g, '');
                 const uEmp = (u.employeeId || '').trim();
-                if (uContact === cleanContact || uEmp === cleanContact || docSnap.id === cleanContact) {
+                if (uContact === cleanContact || uEmp === cleanContact || docSnap.id === cleanContact || docSnap.id === contactNum) {
                   matched = { id: docSnap.id, ...u };
                 }
               });
@@ -482,18 +542,14 @@
           }
 
           if (!matched) {
-            const canonicalList = Object.values(ROLE_ACCOUNTS);
-            matched = canonicalList.find(u => u.contact.replace(/\D/g, '') === cleanContact || u.employeeId === cleanContact);
-          }
-
-          if (!matched) {
             throw new Error('Account not found. Please verify your User ID or mobile number, or contact your administrator.');
           }
 
-          const storedHash = matched.passwordHash || matched.password || '';
+          const storedHash = matched.passwordHash || '';
+          const storedPlain = matched.password || '';
           const isValid = typeof verifyPassword === 'function' 
-            ? verifyPassword(password, storedHash)
-            : (password === storedHash || password === 'password123' || password === 'hugpong2026');
+            ? (verifyPassword(password, storedHash) || verifyPassword(password, storedPlain) || password === storedPlain || password === storedHash)
+            : (password === storedPlain || password === storedHash || password === 'password123' || password === 'hugpong2026');
           if (!isValid) {
             throw new Error('Invalid password. Please try again.');
           }
@@ -511,19 +567,57 @@
         // Authentication successful
         failedAttempts = 0;
 
-        // Set role context
-        localStorage.setItem('hugpong_role', authResult.roleKey);
-        if (authResult.user) {
-          localStorage.setItem('hugpong_user', JSON.stringify(authResult.user));
-        }
+        // Check for deferred phone verification on first login (or unverified SIM)
+        const isVerified = authResult.user && authResult.user.phoneVerified === true;
+        const isSuperAdminDefault = authResult.user && (authResult.user.role === 'Super Admin' || authResult.roleKey === 'superadmin') && authResult.user.phoneVerified !== false;
+        const needsVerification = authResult.user && (
+          authResult.user.phoneVerified === false ||
+          authResult.user.pendingFirstLoginVerification === true ||
+          (!isVerified && !isSuperAdminDefault)
+        );
 
-        // Check for deferred phone verification on first login
-        if (authResult.user && (authResult.user.phoneVerified === false || authResult.user.pendingFirstLoginVerification)) {
+        if (needsVerification) {
           spinner.style.display = 'none';
           btnText.textContent = 'Sign In';
           submitBtn.disabled = false;
+          // Purge any preexisting session credentials so unauthorized bypass is strictly blocked
+          if (typeof clearWebAuthSession === 'function') clearWebAuthSession();
+          localStorage.removeItem('hugpong_user');
+          localStorage.removeItem('hugpong_role');
+          localStorage.removeItem('hugpong_auth_token');
+          
           openFirstLoginVerificationModal(authResult.user, authResult.redirectUrl);
           return;
+        }
+
+        // Check for required password change on first login
+        const isDefaultPasswordUsed = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
+        const needsPasswordChange = authResult.user && (
+          (authResult.user.requiresPasswordChange === true && authResult.user.passwordChanged !== true) ||
+          isDefaultPasswordUsed
+        );
+
+        if (needsPasswordChange) {
+          spinner.style.display = 'none';
+          btnText.textContent = 'Sign In';
+          submitBtn.disabled = false;
+          if (typeof clearWebAuthSession === 'function') clearWebAuthSession();
+          localStorage.removeItem('hugpong_user');
+          localStorage.removeItem('hugpong_role');
+          localStorage.removeItem('hugpong_auth_token');
+          
+          openFirstLoginChangePasswordModal(authResult.user, authResult.redirectUrl);
+          return;
+        }
+
+        // Save persistent tokenized session ONLY after phone verification and password setup are guaranteed
+        if (typeof saveWebAuthSession === 'function' && authResult.user) {
+          saveWebAuthSession(authResult.user, authResult.roleKey);
+        } else {
+          localStorage.setItem('hugpong_role', authResult.roleKey);
+          if (authResult.user) {
+            localStorage.setItem('hugpong_user', JSON.stringify(authResult.user));
+          }
         }
 
         // Animated Sign-in Overlay
@@ -549,6 +643,63 @@
         errorBox.classList.remove('hidden');
       }
     }
+
+    // ── Persistent Auto-Login & Network State Monitoring ───────
+    function updateWebOfflineStatus() {
+      const banner = document.getElementById('web-offline-banner');
+      if (banner) {
+        if (!navigator.onLine) {
+          banner.classList.remove('hidden');
+        } else {
+          banner.classList.add('hidden');
+        }
+      }
+    }
+
+    window.addEventListener('online', updateWebOfflineStatus);
+    window.addEventListener('offline', updateWebOfflineStatus);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      updateWebOfflineStatus();
+
+      // Check if user has an active, valid session token
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('logout') === 'true' || urlParams.get('verify') === 'required') {
+        if (typeof clearWebAuthSession === 'function') {
+          clearWebAuthSession();
+        } else {
+          localStorage.removeItem('hugpong_auth_token');
+          localStorage.removeItem('hugpong_user');
+          localStorage.removeItem('hugpong_role');
+        }
+        return;
+      }
+
+      if (typeof getWebAuthSession === 'function') {
+        const session = getWebAuthSession();
+        if (session && session.roleKey && session.user) {
+          const u = session.user;
+          const isVerified = u.phoneVerified === true;
+          const isSuperAdminDefault = (u.role === 'Super Admin' || session.roleKey === 'superadmin') && u.phoneVerified !== false;
+
+          // Security check: If phone verification is pending, open modal and do NOT loop-redirect
+          if (u.phoneVerified === false || u.pendingFirstLoginVerification === true || (!isVerified && !isSuperAdminDefault)) {
+            console.log('[HUGPONG Auth] Session requires phone verification before entering workspace.');
+            openFirstLoginVerificationModal(u);
+            return;
+          }
+
+          const roleKey = session.roleKey.toLowerCase();
+          const targetUrl = roleKey.includes('super') 
+            ? 'roles/super-admin/dashboard.html' 
+            : (roleKey.includes('manager') ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html');
+          
+          console.log('[HUGPONG Auth] Valid session token found. Auto-opening workspace:', targetUrl);
+          window.location.href = targetUrl;
+        }
+      }
+    });
   </script>
+  <script src="shared/consent-banner.js"></script>
 </body>
 </html>

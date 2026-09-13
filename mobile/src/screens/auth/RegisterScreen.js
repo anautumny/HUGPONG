@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, Modal, Share,
+  KeyboardAvoidingView, Platform, ScrollView, Alert, Modal, Share, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +19,7 @@ const ROLE_DESCRIPTIONS = {
 };
 
 const getAvailableBlockFarms = () => {
-  return blockFarms.length > 0 ? blockFarms.map(b => b.name) : ['Nacayao Block Farm'];
+  return blockFarms.map(b => b.name);
 };
 
 function ProgressBar({ step, totalSteps, t }) {
@@ -99,6 +99,7 @@ export default function RegisterScreen({ navigation }) {
   const [verificationCode, setVerificationCode] = useState('');
   const [expectedCode, setExpectedCode] = useState('');
   const [countdown, setCountdown] = useState(0);
+  const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
@@ -162,17 +163,17 @@ export default function RegisterScreen({ navigation }) {
     setLoading(true);
 
     try {
-      const smsResult = await sendFirebasePhoneSMS(raw, randomOtp);
+      const smsResult = await sendFirebasePhoneSMS(raw, randomOtp, form.firstName);
       setLoading(false);
 
       if (smsResult.success) {
         Alert.alert(
-          '🔥 Firebase SMS Dispatched',
-          `A real SMS verification request was sent to ${formatted} through your Firebase project (hugpong-ff).\n\nPlease enter your verification code below to verify your SIM.`,
+          '📱 SMS Code Dispatched',
+          `A 6-digit one-time SMS verification code has been dispatched to ${formatted}.\n\nPlease enter your code below to verify your mobile number.`,
           [{ text: 'Enter Code', onPress: () => {} }]
         );
       } else {
-        Alert.alert('Firebase Notice', smsResult.error || 'Verification code dispatched.');
+        Alert.alert('SMS Notice', smsResult.error || 'Verification code dispatched.');
       }
     } catch (err) {
       setLoading(false);
@@ -225,6 +226,10 @@ export default function RegisterScreen({ navigation }) {
         e.confirmPassword = 'Confirm your password';
       } else if (form.password !== form.confirmPassword) {
         e.confirmPassword = 'Passwords do not match';
+      }
+
+      if (!consentAgreed) {
+        e.consent = 'Please agree to the Data Privacy Notice (RA 10173) to proceed.';
       }
     }
     setErrors(e);
@@ -319,8 +324,8 @@ export default function RegisterScreen({ navigation }) {
               <Field label={t('reg_first_name', 'First Name *')} error={errors.firstName}>
                 <InputBox value={form.firstName} onChangeText={v => set('firstName', v)} placeholder="e.g. Juan" error={errors.firstName} autoCapitalize="words" />
               </Field>
-              <Field label={t('reg_middle_initial', 'Middle Initial (Optional)')}>
-                <InputBox value={form.middleInitial} onChangeText={v => set('middleInitial', v)} placeholder="e.g. D" autoCapitalize="characters" maxLength={3} />
+              <Field label={t('reg_middle_name', 'Middle Name (Optional)')}>
+                <InputBox value={form.middleInitial} onChangeText={v => set('middleInitial', v)} placeholder="e.g. Mendoza or M" autoCapitalize="words" />
               </Field>
               <Field label={t('reg_last_name', 'Last Name *')} error={errors.lastName}>
                 <InputBox value={form.lastName} onChangeText={v => set('lastName', v)} placeholder="e.g. Dela Cruz" error={errors.lastName} autoCapitalize="words" />
@@ -523,14 +528,43 @@ export default function RegisterScreen({ navigation }) {
                       </TouchableOpacity>
                     </View>
                   </Field>
+
+                  {/* DPA (RA 10173) Consent Checkbox */}
+                  <TouchableOpacity
+                    style={s.consentRow}
+                    onPress={() => {
+                      setConsentAgreed(p => !p);
+                      setErrors(p => ({ ...p, consent: null }));
+                    }}
+                    activeOpacity={0.8}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: consentAgreed }}
+                    accessibilityLabel="Consent to Data Privacy Act Republic Act 10173"
+                  >
+                    <Ionicons
+                      name={consentAgreed ? 'checkbox' : 'square-outline'}
+                      size={20}
+                      color={consentAgreed ? COLORS.primary : COLORS.textMuted}
+                    />
+                    <Text style={s.consentText}>
+                      I consent to the collection and processing of my agricultural and personal records in compliance with the <Text style={{ color: COLORS.primary, fontWeight: '700' }}>Philippine Data Privacy Act of 2012 (RA 10173)</Text>.
+                    </Text>
+                  </TouchableOpacity>
+                  {errors.consent ? <Text style={s.consentErr}>{errors.consent}</Text> : null}
                 </>
               );
             })()}
           </View>
 
-          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleMainButtonPress} disabled={loading}>
-            <Text style={s.btnText}>{btnInfo.text}</Text>
-            {btnInfo.icon && <Ionicons name={btnInfo.icon} size={18} color="#fff" />}
+          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleMainButtonPress} disabled={loading} activeOpacity={0.8}>
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Text style={s.btnText}>{btnInfo.text}</Text>
+                {btnInfo.icon && <Ionicons name={btnInfo.icon} size={18} color="#fff" />}
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={s.adminNoteBox}>
@@ -688,4 +722,7 @@ const s = StyleSheet.create({
   shareCredBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
   proceedBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md },
   proceedBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4, marginTop: 2 },
+  consentText: { flex: 1, fontSize: 11.5, color: COLORS.textSecondary, lineHeight: 16 },
+  consentErr: { fontSize: 11, color: '#D9534F', marginTop: -2 },
 });
