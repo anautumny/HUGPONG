@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing, Alert } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { subscribe, getIsSynced, getCurrentSession, setSynced, performMobileSync, getPendingSyncCount } from '../data/dataStore';
 import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
 import { useTranslation } from '../services/i18n';
+import { safeAlert } from '../utils/dialogs';
 
 const LOGO = require('../../assets/HUGPONG LOGO.png');
 
@@ -76,18 +77,18 @@ function AppHeader({ right }) {
         setSynced(true);
         setSyncedState(true);
         setPendingCount(0);
-        Alert.alert(
+        safeAlert(
           t('sync_status_synced', 'Online & Synced'),
           t('sync_toast_complete', 'Internet connection re-established! All local sugarcane operation logs have been successfully synchronized with HUGPONG cloud.')
         );
       } else {
-        Alert.alert(
+        safeAlert(
           t('offline_status', 'Still Offline'),
           t('offline_recheck_msg', 'Could not establish an internet connection. Your sugarcane logs remain safe and intact in local device storage.')
         );
       }
     } catch (err) {
-      Alert.alert(
+      safeAlert(
         t('connection_notice', 'Connection Check'),
         t('connection_check_err', 'Unable to reach the network. Field operations continue to work offline seamlessly.')
       );
@@ -103,7 +104,7 @@ function AppHeader({ right }) {
     const safeCount = Math.max(0, Number(pendingCount || 0));
 
     if (!isOnline) {
-      Alert.alert(
+      safeAlert(
         'Offline Mode Active',
         safeCount > 0
           ? `${safeCount} sugarcane operation(s) are stored securely in local device storage. They will automatically sync to Cloud Firestore when internet connectivity is re-established.`
@@ -117,7 +118,7 @@ function AppHeader({ right }) {
     }
 
     if (synced && safeCount === 0) {
-      Alert.alert(
+      safeAlert(
         t('synced', 'Synced'),
         t('sync_toast_synced', 'Your sugarcane records are fully synchronized with the HUGPONG cloud. Safe to work offline.'),
         [
@@ -137,12 +138,12 @@ function AppHeader({ right }) {
       setSynced(true);
       setSyncedState(true);
       setPendingCount(0);
-      Alert.alert(
+      safeAlert(
         t('sync_status_synced', 'Sync Successful'),
         t('sync_toast_complete', 'All local sugarcane operation logs have been successfully uploaded and compiled.')
       );
     } catch (err) {
-      Alert.alert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');
+      safeAlert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');
     } finally {
       stopSpinAnimation();
       setIsSyncing(false);

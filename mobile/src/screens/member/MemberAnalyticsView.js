@@ -31,11 +31,11 @@ export default function MemberAnalyticsView({
 
         <View style={s.statsGrid}>
           <View style={s.statCell}>
-            <Text style={s.statVal}>₱{totalSpent.toLocaleString()}</Text>
+            <Text style={s.statVal}>₱{Number(totalSpent || 0).toLocaleString()}</Text>
             <Text style={s.statDesc}>{t('total_logged_input', 'Production Cost')}</Text>
           </View>
           <View style={s.statCell}>
-            <Text style={[s.statVal, { color: COLORS.primary }]}>₱{costPerHa.toLocaleString()}</Text>
+            <Text style={[s.statVal, { color: COLORS.primary }]}>₱{Number(costPerHa || 0).toLocaleString()}</Text>
             <Text style={s.statDesc}>{t('cost_per_hectare', 'Cost / Hectare')}</Text>
           </View>
           <View style={s.statCell}>

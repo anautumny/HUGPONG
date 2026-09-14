@@ -19,6 +19,8 @@ export const STORAGE_KEYS = {
   AUDIT_REPORTS: '@hugpong_audit_reports',
   SYSTEM_HISTORY: '@hugpong_system_history',
   DELETED_LOG_IDS: '@hugpong_deleted_log_ids',
+  READ_NOTIF_IDS: '@hugpong_read_notif_ids',
+  DISMISSED_NOTIF_IDS: '@hugpong_dismissed_notif_ids',
 };
 
 // In-memory shadow cache for synchronous reads after initial hydration

@@ -87,6 +87,13 @@ router.post('/certify', requireAuth, requireRole(['farm manager', 'sra (admin)',
     if (db) {
       await db.collection('operation_logs').doc(logId).set(certificationPayload, { merge: true });
     }
+    console.log(`[HUGPONG Logs] Log Certified: ${logId} as ${certificationPayload.status}`);
+    return res.json({ success: true, data: certificationPayload });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── DELETE /api/logs/:id (Delete/Void Operation Log) ───────
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;

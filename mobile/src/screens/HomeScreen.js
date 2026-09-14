@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Alert, ActivityIndicator,
+  Modal, Dimensions, TextInput, Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,8 @@ import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
 import OfflineBanner from '../components/OfflineBanner';
 import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
+import { getItem, saveItem, STORAGE_KEYS } from '../services/storageService';
+import { safeAlert } from '../utils/dialogs';
 
 // Role-Specific Modular Views
 import MemberHomeView from './member/MemberHomeView';
@@ -149,6 +151,25 @@ export default function HomeScreen({ navigation }) {
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
 
+  // Hydrate persistent read and dismissed notification states from AsyncStorage
+  useEffect(() => {
+    (async () => {
+      try {
+        const [savedRead, savedDismissed] = await Promise.all([
+          getItem(STORAGE_KEYS.READ_NOTIF_IDS, []),
+          getItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, [])
+        ]);
+        const readSet = new Set(Array.isArray(savedRead) ? savedRead : []);
+        const dismissedSet = new Set(Array.isArray(savedDismissed) ? savedDismissed : []);
+        setReadNotifIds(readSet);
+        setDismissedNotifIds(dismissedSet);
+        setNotifs(generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs, readSet, dismissedSet));
+      } catch (e) {
+        console.warn('[HomeScreen] Failed loading persisted notifications state:', e);
+      }
+    })();
+  }, []);
+
   const handleCheckNetConnection = async () => {
     if (isCheckingNet) return;
     setIsCheckingNet(true);
@@ -158,18 +179,18 @@ export default function HomeScreen({ navigation }) {
         try {
           await performMobileSync();
         } catch (_) {}
-        Alert.alert(
+        safeAlert(
           t('connection_restored', 'Connection Restored'),
           t('connection_restored_msg', 'Connected to the internet! The dashboard, live price circulars, and weather telemetry are now active.')
         );
       } else {
-        Alert.alert(
+        safeAlert(
           t('offline_status', 'Still Offline'),
           t('offline_recheck_msg', 'Could not establish an internet connection. Field operations and the Growth Stage Planner remain available offline.')
         );
       }
     } catch (e) {
-      Alert.alert(
+      safeAlert(
         t('connection_notice', 'Connection Check'),
         t('connection_check_err', 'Unable to reach the network. Offline tools remain ready.')
       );
@@ -209,13 +230,17 @@ export default function HomeScreen({ navigation }) {
   }, [readNotifIds, dismissedNotifIds]);
 
   const handleDismissNotif = React.useCallback((id) => {
-    setDismissedNotifIds(prev => new Set([...prev, id]));
+    setDismissedNotifIds(prev => {
+      const next = new Set([...prev, id]);
+      saveItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, Array.from(next));
+      return next;
+    });
     setNotifs(prev => prev.filter(n => n.id !== id));
   }, []);
 
   const handleClearAllNotifs = () => {
     if (notifs.length === 0) return;
-    Alert.alert(
+    safeAlert(
       'Clear All Notifications',
       'Are you sure you want to dismiss all notifications?',
       [
@@ -224,7 +249,12 @@ export default function HomeScreen({ navigation }) {
           text: 'Clear All', 
           style: 'destructive', 
           onPress: () => {
-            setDismissedNotifIds(prev => new Set([...prev, ...notifs.map(n => n.id)]));
+            const allIds = notifs.map(n => n.id);
+            setDismissedNotifIds(prev => {
+              const next = new Set([...prev, ...allIds]);
+              saveItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, Array.from(next));
+              return next;
+            });
             setNotifs([]);
           } 
         }
@@ -234,7 +264,11 @@ export default function HomeScreen({ navigation }) {
 
   const handleMarkAllRead = () => {
     const allIds = notifs.map(n => n.id);
-    setReadNotifIds(prev => new Set([...prev, ...allIds]));
+    setReadNotifIds(prev => {
+      const next = new Set([...prev, ...allIds]);
+      saveItem(STORAGE_KEYS.READ_NOTIF_IDS, Array.from(next));
+      return next;
+    });
     setNotifs(prev => prev.map(n => ({ ...n, unread: false })));
   };
 
@@ -243,8 +277,12 @@ export default function HomeScreen({ navigation }) {
 
   const handleNotifPress = (notif) => {
     setShowNotifs(false);
-    // Mark this notification as read so the badge count clears immediately
-    setReadNotifIds(prev => new Set([...prev, notif.id]));
+    // Mark this notification as read and persist to storage
+    setReadNotifIds(prev => {
+      const next = new Set([...prev, notif.id]);
+      saveItem(STORAGE_KEYS.READ_NOTIF_IDS, Array.from(next));
+      return next;
+    });
     setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, unread: false } : n));
 
     if (notif.actionType === 'sync') {

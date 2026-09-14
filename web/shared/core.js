@@ -1260,34 +1260,39 @@ function initFirestoreRealtimeSync() {
 
   // 7. Listen on Audit Reports (QR Certified Records)
   onSnapshot(collection(fDb, 'audit_reports'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remoteReports = [];
-    snapshot.forEach(docSnap => {
-      const data = { id: docSnap.id, ...docSnap.data() };
-      const p = (data.period || data.month || '').toLowerCase();
-      if (p.includes('may 2026') || docSnap.id === 'AUD-2026-09' || docSnap.id === 'RPT-2026-05-NCY01' || docSnap.id === 'AUD-2026-0001') {
-        if (fDb && window.firestore?.deleteDoc && window.firestore?.doc) {
-          window.firestore.deleteDoc(window.firestore.doc(fDb, 'audit_reports', docSnap.id)).catch(() => {});
+    if (!snapshot.empty) {
+      snapshot.forEach(docSnap => {
+        const data = { id: docSnap.id, ...docSnap.data() };
+        // Retain certification only if the exact same cryptographic QR hash was certified by an SRA Inspector
+        const localMatch = Array.isArray(db.auditReports) && db.auditReports.find(r => 
+          (r.id === data.id || r.reportId === data.reportId) &&
+          (data.qrHash && (r.qrHash === data.qrHash || r.qrSignature === data.qrHash))
+        );
+        if (localMatch && localMatch.status === 'Certified' && localMatch.certifiedBy && data.status !== 'Certified') {
+          data.status = 'Certified';
+          data.certifiedBy = localMatch.certifiedBy;
+          data.certifiedRole = localMatch.certifiedRole || 'SRA Officer';
+          data.certifiedAt = localMatch.certifiedAt;
+        } else if (data.status !== 'Certified') {
+          data.status = 'Pending';
         }
-        return;
+        remoteReports.push(data);
+      });
+    }
+
+    // Merge remote reports with existing local reports
+    const reportMap = new Map();
+    remoteReports.forEach(r => reportMap.set(r.reportId || r.id, r));
+    (db.auditReports || []).forEach(lr => {
+      const key = lr.reportId || lr.id;
+      if (!reportMap.has(key)) {
+        reportMap.set(key, lr);
       }
-      // Regulatory Safeguard: If local report is already Certified, keep Certified
-      const localMatch = Array.isArray(db.auditReports) && db.auditReports.find(r => 
-        r.id === data.id || 
-        r.reportId === data.id || 
-        (data.reportId && (r.reportId === data.reportId || r.id === data.reportId)) ||
-        (data.qrHash && (r.qrHash === data.qrHash || r.qrSignature === data.qrHash))
-      );
-      if (localMatch && localMatch.status === 'Certified' && data.status !== 'Certified') {
-        data.status = 'Certified';
-        data.certifiedBy = localMatch.certifiedBy || data.certifiedBy;
-        data.certifiedRole = localMatch.certifiedRole || data.certifiedRole;
-        data.certifiedAt = localMatch.certifiedAt || data.certifiedAt;
-      }
-      remoteReports.push(data);
     });
-    db.auditReports = remoteReports;
+
+    db.auditReports = Array.from(reportMap.values());
     saveDB(db, false);
     if (typeof renderAuditDashboard === 'function') renderAuditDashboard();
     if (typeof renderDashboard === 'function') renderDashboard();
@@ -4265,10 +4270,10 @@ function renderOperations() {
           return `
             <div class="flex justify-between items-center mb-2 px-1">
               <span class="text-[11px] font-bold text-hug-muted">Historical Archived Cycle Records (${pastFieldLogs.length})</span>
-              <button onclick="promptDeletePastLogs('${f.id}')" class="px-2.5 py-1 text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer">
-                <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                Clear Past History for ${f.id}
-              </button>
+              <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Regulatory Archived Preservation
+              </span>
             </div>
             ${pastFieldLogs.map(fl => {
               const inputTxt = fl.inputQty ? ` · ${fl.inputQty} ${fl.inputUnit || ''} (${fl.inputName || ''})` : '';
@@ -4281,11 +4286,10 @@ function renderOperations() {
                   <span class="text-hug-muted text-[11px] mt-0.5 block">Php ${(Number(fl.totalCost != null ? fl.totalCost : (fl.cost || 0))).toLocaleString('en-PH')} · ${formatDisplayDate(fl.date || fl.period)}${inputTxt} · Stage ${fl.stageNumber || 1}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-200">Archived Record</span>
-                  <button onclick="promptDeleteOperationLog('${fl.id}')" class="px-2 py-1 border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1" title="Delete this past cycle record">
-                    <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    Delete
-                  </button>
+                  <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200/80 flex items-center gap-1">
+                    <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+                    Archived Record
+                  </span>
                 </div>
               </div>`;
             }).join('')}
@@ -7224,43 +7228,74 @@ function loadAuditCertificate(hash) {
   } else {
     // Dynamic Monthly Batch Report from db.auditReports (100% Data-Driven)
     const allReports = db.auditReports || [];
+    const cleanHash = (hash || '').trim().toUpperCase();
     const report = allReports.find(r => 
-      (r.qrHash && r.qrHash === hash) ||
-      (r.qrSignature && r.qrSignature === hash) ||
-      (r.reportId && r.reportId === hash) ||
-      (r.id && r.id === hash) ||
-      (r.qrPayload && r.qrPayload.includes(hash)) ||
-      (r.envelope && r.envelope.includes(hash))
+      (r.qrHash && r.qrHash.trim().toUpperCase() === cleanHash) ||
+      (r.qrSignature && r.qrSignature.trim().toUpperCase() === cleanHash) ||
+      (r.reportId && r.reportId.trim().toUpperCase() === cleanHash) ||
+      (r.id && r.id.trim().toUpperCase() === cleanHash) ||
+      (r.qrPayload && r.qrPayload.includes(cleanHash)) ||
+      (r.envelope && r.envelope.includes(cleanHash))
     ) || allReports[0] || {
-      id: `RPT-${(db.activeCropYear || '2026').replace(/[^0-9]/g, '')}-BF01`,
-      reportId: `RPT-${(db.activeCropYear || '2026').replace(/[^0-9]/g, '')}-BF01`,
-      period: db.activeCropYear || 'CY 2026-2027',
-      month: db.activeCropYear || 'CY 2026-2027',
-      blockFarmName: (db.blockFarms?.[0]?.name || 'Silay District Block Farm'),
+      id: `RPT-2026-09-NCY01`,
+      reportId: `RPT-2026-09-NCY01`,
+      period: 'September 2026',
+      month: 'September 2026',
+      blockFarmName: (db.blockFarms?.[0]?.name || 'Nacayao Block Farm, Silay'),
       status: 'Pending',
-      qrHash: hash || `HUG-${(db.activeCropYear || '2026').replace(/[^0-9]/g, '')}-ACTIVE`,
+      qrHash: cleanHash || `HUG-202609-0D67`,
+      qrSignature: cleanHash || `HUG-202609-0D67`,
       compiledBy: (getActiveWebUser()?.name || 'Farm Manager')
     };
 
     // Retrieve the actual active operations for this specific compiled report
     const targetReportId = report.reportId || report.id;
-    const reportMonth = report.period || report.month;
-    let reportLogs = (db.logs || []).filter(l => 
-      !l.isDeleted && 
-      !l.isPastCycle && 
-      !l.isArchived && 
-      l.status !== 'Archived' &&
-      (l.compiledReportId === targetReportId || (reportMonth && isLogFromMonth(l.date || l.createdAt, reportMonth)))
-    );
+    const reportMonth = report.period || report.month || 'September 2026';
+    let reportLogs = (Array.isArray(report.operations) && report.operations.length > 0)
+      ? report.operations
+      : (Array.isArray(report.logs) && report.logs.length > 0)
+        ? report.logs
+        : (db.logs || []).filter(l => 
+            !l.isDeleted && 
+            !l.isPastCycle && 
+            !l.isArchived && 
+            l.status !== 'Archived' &&
+            (l.compiledReportId === targetReportId || (reportMonth && isLogFromMonth(l.date || l.createdAt, reportMonth)))
+          );
 
     // If report has totalCost & totalLogs stored, use them
-    const displayCount = (report.totalLogs != null && report.totalLogs > 0) ? report.totalLogs : (reportLogs.length || 0);
-    const displayCost = Number((report.totalCost != null && report.totalCost > 0) ? report.totalCost : reportLogs.reduce((s, l) => s + Number(l.totalCost || l.cost || 0), 0));
+    const displayCount = (report.totalLogs != null && Number(report.totalLogs) > 0) 
+      ? Number(report.totalLogs) 
+      : (report.logsCount != null && Number(report.logsCount) > 0)
+        ? Number(report.logsCount)
+        : (reportLogs.length || 0);
+
+    const calculatedLogsCost = reportLogs.reduce((s, l) => s + Number(l.totalCost != null ? l.totalCost : (l.cost || 0)), 0);
+    const displayCost = Number((report.totalCost != null && Number(report.totalCost) > 0) 
+      ? report.totalCost 
+      : (calculatedLogsCost || 0));
+
     const isCert = report.status === 'Certified';
-    const reportHash = report.qrHash || report.qrSignature || hash;
+    const reportHash = report.qrHash || report.qrSignature || cleanHash;
+    const farmName = report.blockFarmName || report.blockFarm || (db.blockFarms?.[0]?.name || 'Nacayao Block Farm, Silay');
+    const compilerName = report.compiledBy || (sessionUser?.name || 'Farm Manager');
+
+    // Populate Header & Metadata Card
+    if (titleEl) titleEl.textContent = 'SRA Audit Certificate';
+    if (subtitleEl) subtitleEl.textContent = 'Sugar Regulatory Administration · Silay Block Farm Auditor';
+    if (hashEl) hashEl.textContent = reportHash;
+    if (farmEl) farmEl.textContent = farmName;
+    if (compilerEl) compilerEl.textContent = compilerName;
+    if (dateEl) dateEl.textContent = report.verifiedAt ? formatDisplayDate(report.verifiedAt) : (isCert ? (report.dateGenerated || 'Certified') : '—');
+    if (badgeEl) {
+      badgeEl.innerHTML = isCert ? '&#10003; Fully Certified' : '&#9203; Pending Certification';
+      badgeEl.className = isCert 
+        ? 'px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800' 
+        : 'px-3 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800';
+    }
 
     if (totalLogsEl) totalLogsEl.textContent = `${displayCount} Operations`;
-    if (approvedLogsEl) approvedLogsEl.textContent = isCert ? `${displayCount} / ${displayCount} Certified` : 'Pending Review';
+    if (approvedLogsEl) approvedLogsEl.textContent = isCert ? `${displayCount} / ${displayCount} Certified` : `0 / ${displayCount} Certified`;
     if (areaEl) areaEl.textContent = `${Number(report.totalHectares || (db.blockFarms?.[0]?.declaredHa || 2.0)).toFixed(4)} Ha`;
     if (totalCostEl) totalCostEl.textContent = `Php ${displayCost.toLocaleString()}`;
 
@@ -7294,31 +7329,74 @@ function loadAuditCertificate(hash) {
         <tr class="bg-bg">
           <th class="text-center px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border w-12">No.</th>
           <th class="text-left px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Operation</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Total Area</th>
+          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Plot Area</th>
           <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Qty</th>
           <th class="text-center px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Unit</th>
           <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Unit Cost</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Cost Per Hectare</th>
+          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Total Amount</th>
         </tr>
       `;
     }
 
     if (tableBody) {
-      const ha = Number(report.totalHectares || (db.blockFarms?.[0]?.declaredHa || 2.0)).toFixed(2);
+      const defaultHa = Number(report.totalHectares || (db.blockFarms?.[0]?.declaredHa || 2.0)).toFixed(2);
       
       let rowsHtml = '';
       if (reportLogs.length > 0) {
         rowsHtml = reportLogs.map((l, idx) => {
-          const logCost = Number(l.totalCost || l.cost || 0);
-          const logQty = l.qty || l.quantity || '1';
-          const logUnit = l.unit || 'ha';
-          const logUnitCost = l.unitCost ? Number(l.unitCost) : (logCost / (Number(logQty) || 1));
+          const logCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
           const opName = l.activity || l.operationName || l.task || `Operation ${idx + 1}`;
+          const itemHa = (l.hectares || l.ha) ? `${Number(l.hectares || l.ha).toFixed(2)} ha` : `${defaultHa} ha`;
+
+          // If operation has child items / subItems (e.g. Land Preparation, Basal Fertilization, etc.)
+          const hasChildren = Array.isArray(l.subItems) && l.subItems.length > 0;
+          if (hasChildren) {
+            const parentRow = `
+              <tr class="bg-[#F8FAF5] font-bold border-b border-border/80">
+                <td class="px-3 py-2.5 text-center text-xs text-primary font-black">${idx + 1}</td>
+                <td class="px-3 py-2.5 text-xs text-hug-text font-black uppercase tracking-wide">
+                  <span>${opName}</span>
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 bg-primary/10 text-primary rounded ml-1.5">Group (${l.subItems.length} items)</span>
+                </td>
+                <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">${itemHa}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">—</td>
+                <td class="px-3 py-2.5 text-center text-xs text-hug-muted font-semibold">—</td>
+                <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted font-semibold">—</td>
+                <td class="px-3 py-2.5 text-right font-mono text-xs text-primary font-black">₱${logCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              </tr>
+            `;
+
+            const childrenRows = l.subItems.map((si, cIdx) => {
+              const childQty = si.qty != null ? si.qty : '1';
+              const childUnit = si.unit || 'ha';
+              const childUnitCost = Number(si.unitCost || (Number(si.subTotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
+              const childSubTotal = Number(si.subTotal != null ? si.subTotal : (Number(childQty) * childUnitCost));
+              const childDesc = si.description || si.name || `Sub-item ${cIdx + 1}`;
+              return `
+                <tr class="border-b border-border/40 hover:bg-bg/40 transition-colors bg-white">
+                  <td class="px-3 py-2 text-center text-[11px] font-mono text-hug-muted">${idx + 1}.${cIdx + 1}</td>
+                  <td class="px-3 py-2 text-xs text-hug-text2 pl-6 font-medium">↳ ${childDesc}</td>
+                  <td class="px-3 py-2 text-right font-mono text-xs text-hug-muted">${itemHa}</td>
+                  <td class="px-3 py-2 text-right font-mono text-xs text-hug-text font-semibold">${childQty}</td>
+                  <td class="px-3 py-2 text-center text-xs text-hug-muted font-medium">${childUnit}</td>
+                  <td class="px-3 py-2 text-right font-mono text-xs text-hug-text font-medium">₱${childUnitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="px-3 py-2 text-right font-mono text-xs text-hug-text font-bold">₱${childSubTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `;
+            }).join('');
+
+            return parentRow + childrenRows;
+          }
+
+          // Direct input operation
+          const logQty = l.qty || l.quantity || l.inputQty || '1';
+          const logUnit = l.unit || l.inputUnit || 'ha';
+          const logUnitCost = Number(l.unitCost || l.directRate || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
           return `
-            <tr class="border-b border-border/60 hover:bg-bg/50 transition-colors">
+            <tr class="border-b border-border/60 hover:bg-bg/50 transition-colors bg-white">
               <td class="px-3 py-2.5 text-center font-bold text-xs text-primary">${idx + 1}</td>
               <td class="px-3 py-2.5 font-bold text-xs text-hug-text">${opName}</td>
-              <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">${ha} ha</td>
+              <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">${itemHa}</td>
               <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-semibold">${logQty}</td>
               <td class="px-3 py-2.5 text-center text-xs text-hug-muted font-medium">${logUnit}</td>
               <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-medium">₱${logUnitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -7544,54 +7622,115 @@ function printCertifiedAuditReport() {
   const totalCostVal = isFullSeason ? '₱1,797,550.00' : '₱280,370.00';
   const totalCostPerHa = isFullSeason ? '₱117,900.00' : '₱52,900.00';
 
-  const operations = isFullSeason ? [
-    { no: 1, name: 'Soil Sampling', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
-    { no: 2, name: 'Land Preparation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
-    { no: 3, name: 'Cost of Planting Material', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
-    { no: 4, name: 'Planting (including hauling/selection)', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
-    { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
-    { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
-    { isSubItem: true, name: '18-46-00', total: activeFarmHa.toFixed(2), qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
-    { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
-    { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
-    { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
-    { isSubItem: true, name: 'Rock Phosphate', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
-    { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
-    { isCategoryHeader: true, no: 7, name: 'Cultivation' },
-    { isSubItem: true, name: 'Ridge busting', total: activeFarmHa.toFixed(2), qty: '1', unit: 'pass', unitCost: 300.00, costPerHa: 300.00 },
-    { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-    { isSubItem: true, name: 'On-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-    { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-    { isSubItem: true, name: 'Hilling-up', total: activeFarmHa.toFixed(2), qty: '3', unit: 'pass', unitCost: 300.00, costPerHa: 900.00 },
-    { isCategoryHeader: true, no: 8, name: 'Fertilization (2nd dose)' },
-    { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 1600.00, costPerHa: 1600.00 },
-    { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 2200.00, costPerHa: 2200.00 },
-    { no: 9, name: 'Fertilizer Application (Labor 2nd dose)', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 100.00, costPerHa: 200.00 },
-    { isCategoryHeader: true, no: 10, name: 'Weeding' },
-    { isSubItem: true, name: '1st Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2500.00, costPerHa: 2500.00 },
-    { isSubItem: true, name: '2nd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2000.00, costPerHa: 2000.00 },
-    { isSubItem: true, name: '3rd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1500.00, costPerHa: 1500.00 },
-    { no: 11, name: 'Drainage/Irrigation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1000.00, costPerHa: 1000.00 },
-    { isDirectSubtotal: true },
-    { no: 12, name: 'Cutting and Loading', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-    { no: 13, name: 'Hauling (Trucking)', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-    { no: 14, name: 'Bull Cart', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 150.00, costPerHa: 9000.00 },
-    { isMillingSubtotal: true }
-  ] : [
-    { no: 1, name: 'Soil Sampling', total: '5.30', qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
-    { no: 2, name: 'Land Preparation', total: '5.30', qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
-    { no: 3, name: 'Cost of Planting Material', total: '5.30', qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
-    { no: 4, name: 'Planting (including hauling/selection)', total: '5.30', qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
-    { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
-    { isSubItem: true, name: '46-00-00', total: '5.30', qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
-    { isSubItem: true, name: '18-46-00', total: '5.30', qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
-    { isSubItem: true, name: '00-00-60', total: '5.30', qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
-    { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
-    { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
-    { isSubItem: true, name: 'Rock Phosphate', total: '5.30', qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
-    { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
-    { isDirectSubtotal: true, subtotalLabel: 'TOTAL MONTHLY DIRECT COST (Ops 1–6):', subtotalVal: '₱52,900.00' }
-  ];
+  const targetReportLogs = (Array.isArray(activeReport.operations) && activeReport.operations.length > 0)
+    ? activeReport.operations
+    : (Array.isArray(activeReport.logs) && activeReport.logs.length > 0)
+      ? activeReport.logs
+      : [];
+
+  let operations = [];
+  if (isFullSeason) {
+    operations = [
+      { no: 1, name: 'Soil Sampling', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
+      { no: 2, name: 'Land Preparation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
+      { no: 3, name: 'Cost of Planting Material', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
+      { no: 4, name: 'Planting (including hauling/selection)', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
+      { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
+      { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
+      { isSubItem: true, name: '18-46-00', total: activeFarmHa.toFixed(2), qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
+      { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
+      { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
+      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
+      { isSubItem: true, name: 'Rock Phosphate', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
+      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
+      { isCategoryHeader: true, no: 7, name: 'Cultivation' },
+      { isSubItem: true, name: 'Ridge busting', total: activeFarmHa.toFixed(2), qty: '1', unit: 'pass', unitCost: 300.00, costPerHa: 300.00 },
+      { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
+      { isSubItem: true, name: 'On-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
+      { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
+      { isSubItem: true, name: 'Hilling-up', total: activeFarmHa.toFixed(2), qty: '3', unit: 'pass', unitCost: 300.00, costPerHa: 900.00 },
+      { isCategoryHeader: true, no: 8, name: 'Fertilization (2nd dose)' },
+      { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 1600.00, costPerHa: 1600.00 },
+      { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 2200.00, costPerHa: 2200.00 },
+      { no: 9, name: 'Fertilizer Application (Labor 2nd dose)', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 100.00, costPerHa: 200.00 },
+      { isCategoryHeader: true, no: 10, name: 'Weeding' },
+      { isSubItem: true, name: '1st Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2500.00, costPerHa: 2500.00 },
+      { isSubItem: true, name: '2nd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2000.00, costPerHa: 2000.00 },
+      { isSubItem: true, name: '3rd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1500.00, costPerHa: 1500.00 },
+      { no: 11, name: 'Drainage/Irrigation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1000.00, costPerHa: 1000.00 },
+      { isDirectSubtotal: true },
+      { no: 12, name: 'Cutting and Loading', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
+      { no: 13, name: 'Hauling (Trucking)', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
+      { no: 14, name: 'Bull Cart', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 150.00, costPerHa: 9000.00 },
+      { isMillingSubtotal: true }
+    ];
+  } else if (targetReportLogs.length > 0) {
+    let opCounter = 1;
+    targetReportLogs.forEach(l => {
+      const logCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
+      const opName = l.activity || l.operationName || l.task || `Operation ${opCounter}`;
+      const itemHa = (l.hectares || l.ha) ? `${Number(l.hectares || l.ha).toFixed(2)}` : `${Number(activeReport.totalHectares || activeFarmHa).toFixed(2)}`;
+
+      if (Array.isArray(l.subItems) && l.subItems.length > 0) {
+        operations.push({
+          isCategoryHeader: true,
+          no: opCounter++,
+          name: `${opName} (Group — ₱${logCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+        });
+        l.subItems.forEach((si, cIdx) => {
+          const childQty = si.qty != null ? String(si.qty) : '1';
+          const childUnit = si.unit || 'ha';
+          const childUnitCost = Number(si.unitCost || (Number(si.subTotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
+          const childSubTotal = Number(si.subTotal != null ? si.subTotal : (Number(childQty) * childUnitCost));
+          operations.push({
+            isSubItem: true,
+            name: si.description || si.name || `Sub-item ${cIdx + 1}`,
+            total: itemHa,
+            qty: childQty,
+            unit: childUnit,
+            unitCost: childUnitCost,
+            costPerHa: childSubTotal
+          });
+        });
+      } else {
+        const logQty = l.qty || l.quantity || l.inputQty || '1';
+        const logUnit = l.unit || l.inputUnit || 'ha';
+        const logUnitCost = Number(l.unitCost || l.directRate || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
+        operations.push({
+          no: opCounter++,
+          name: opName,
+          total: itemHa,
+          qty: String(logQty),
+          unit: logUnit,
+          unitCost: logUnitCost,
+          costPerHa: logCost
+        });
+      }
+    });
+
+    const totalCostNumber = targetReportLogs.reduce((s, l) => s + Number(l.totalCost != null ? l.totalCost : (l.cost || 0)), 0);
+    operations.push({
+      isDirectSubtotal: true,
+      subtotalLabel: `TOTAL MONTHLY DIRECT EXPENDITURE (${activeReport.period || activeReport.month || 'Monthly Batch'}):`,
+      subtotalVal: `₱${totalCostNumber.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    });
+  } else {
+    operations = [
+      { no: 1, name: 'Soil Sampling', total: '5.30', qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
+      { no: 2, name: 'Land Preparation', total: '5.30', qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
+      { no: 3, name: 'Cost of Planting Material', total: '5.30', qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
+      { no: 4, name: 'Planting (including hauling/selection)', total: '5.30', qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
+      { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
+      { isSubItem: true, name: '46-00-00', total: '5.30', qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
+      { isSubItem: true, name: '18-46-00', total: '5.30', qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
+      { isSubItem: true, name: '00-00-60', total: '5.30', qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
+      { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
+      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
+      { isSubItem: true, name: 'Rock Phosphate', total: '5.30', qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
+      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
+      { isDirectSubtotal: true, subtotalLabel: 'TOTAL MONTHLY DIRECT COST (Ops 1–6):', subtotalVal: '₱52,900.00' }
+    ];
+  }
 
   const tableRowsHtml = operations.map(op => {
     if (op.isCategoryHeader) {
@@ -15934,46 +16073,88 @@ function executeCompileMonthlyAudit() {
   });
 
   const reports = db.auditReports || [];
-  const existingReport = reports.find(r => 
+  const existingReportsForMonth = reports.filter(r => 
     (r.period && r.period.toLowerCase() === month.toLowerCase()) || 
     (r.month && r.month.toLowerCase() === month.toLowerCase())
   );
-  const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
+  const certifiedReports = existingReportsForMonth.filter(r => r.status === 'Certified');
+  const certifiedReportIds = new Set(certifiedReports.map(cr => cr.reportId || cr.id));
 
-  // PREVENT COMPILING AGAIN IF NO NEW OPERATIONS
-  if (existingReport && uncompiledLogs.length === 0 && (monthLogs.length > 0 || (existingReport.totalLogs && existingReport.totalLogs > 0))) {
-    toast(`All operations for ${month} are already compiled into ${existingReport.qrHash || existingReport.reportId}!`);
-    updateCompileAuditPreview();
-    return;
+  // Determine operations to compile: If certified reports exist, compile ONLY newly logged / uncertified operations
+  let logsToCompile = monthLogs;
+  let isRevisionBatch = false;
+
+  if (certifiedReports.length > 0) {
+    logsToCompile = monthLogs.filter(l => !l.compiled || !certifiedReportIds.has(l.compiledReportId));
+    isRevisionBatch = true;
+    if (logsToCompile.length === 0) {
+      toast(`All operations for ${month} are already certified by SRA in report ${certifiedReports[0].reportId || certifiedReports[0].id}.`);
+      updateCompileAuditPreview();
+      return;
+    }
+  } else {
+    const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
+    if (existingReportsForMonth.length > 0 && uncompiledLogs.length === 0) {
+      toast(`All operations for ${month} are already compiled into ${existingReportsForMonth[0].qrHash || existingReportsForMonth[0].reportId}!`);
+      updateCompileAuditPreview();
+      return;
+    }
   }
 
-  if (monthLogs.length === 0 && !existingReport) {
+  if (logsToCompile.length === 0) {
     toast(`Cannot compile: No operations found for ${month}.`);
     return;
   }
 
   const cleanMonthStr = month.replace(/[^a-zA-Z0-9]/g, '-').toUpperCase();
   const farmCode = (db.blockFarms?.[0]?.id || 'BF01').replace(/[^a-zA-Z0-9]/g, '');
-  const reportId = existingReport ? existingReport.reportId : `RPT-${cleanMonthStr}-${farmCode}`;
-  const qrHash = existingReport ? existingReport.qrHash : `HUG-${cleanMonthStr}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   
-  const cost = monthLogs.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0);
-  const count = monthLogs.length;
+  let reportId = `RPT-${cleanMonthStr}-${farmCode}`;
+  let qrHash = `HUG-${cleanMonthStr}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+  if (isRevisionBatch) {
+    const batchNum = existingReportsForMonth.length + 1;
+    reportId = `RPT-${cleanMonthStr}-${farmCode}-B${batchNum}`;
+    qrHash = `HUG-${cleanMonthStr}-B${batchNum}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  }
+  
+  const cost = logsToCompile.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0);
+  const count = logsToCompile.length;
   const ha = Number(db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || db.blockFarms?.[0]?.declaredHa || 0);
 
-  // Mark all logs for this month as compiled
+  // Mark all compiled logs for this batch
   const nowIso = new Date().toISOString();
-  allLogs.forEach(l => {
-    const d = l.date || l.createdAt || '';
-    if (isLogFromMonth(d, month)) {
-      l.compiled = true;
-      l.compiledReportId = reportId;
-      l.compiledAt = nowIso;
-    }
+  logsToCompile.forEach(l => {
+    l.compiled = true;
+    l.compiledReportId = reportId;
+    l.compiledAt = nowIso;
   });
 
   const currentUser = getActiveWebUser();
   const userName = currentUser?.name || 'Farm Manager';
+
+  // Serialize operations
+  const serializedOps = logsToCompile.map(l => ({
+    id: l.id,
+    fieldId: l.fieldId,
+    activity: l.activity || l.operationName || 'Operation',
+    operationName: l.operationName || l.activity || 'Operation',
+    category: l.category || 'prep',
+    stageNumber: l.stageNumber || 1,
+    stageName: l.stageName || `Stage ${l.stageNumber || 1}`,
+    cost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
+    totalCost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
+    qty: l.inputQty || l.qty || '1',
+    quantity: l.inputQty || l.qty || '1',
+    unit: l.inputUnit || l.unit || 'ha',
+    unitCost: Number(l.directRate || l.unitCost || (Number(l.totalCost || l.cost || 0) / Math.max(parseFloat(l.hectares || l.inputQty || 1), 0.1))),
+    date: l.date || l.period || nowIso.split('T')[0],
+    period: l.period || l.date || nowIso.split('T')[0],
+    status: l.status || 'Recorded',
+    subItems: Array.isArray(l.subItems) ? l.subItems : [],
+    isGroup: Boolean(l.isGroup || (l.subItems && l.subItems.length > 0)),
+    hectares: l.hectares || l.ha || '1.0'
+  }));
 
   const newReport = {
     id: reportId,
@@ -15993,15 +16174,22 @@ function executeCompileMonthlyAudit() {
     certifiedBy: null,
     certifiedRole: null,
     certifiedAt: null,
+    logs: serializedOps,
+    operations: serializedOps,
     notes: `Compiled by Farm Manager ${userName}. Transmitted to SRA District Cloud Queue for Official SRA Review & Certification.`
   };
 
   if (!db.auditReports) db.auditReports = [];
-  const existingIdx = db.auditReports.findIndex(r => r.reportId === reportId || r.id === reportId || r.period === month);
-  if (existingIdx >= 0) {
-    db.auditReports[existingIdx] = { ...db.auditReports[existingIdx], ...newReport };
-  } else {
+  if (isRevisionBatch) {
+    // Distinct new audit report, preserving certified report
     db.auditReports.unshift(newReport);
+  } else {
+    const existingIdx = db.auditReports.findIndex(r => r.reportId === reportId || r.id === reportId);
+    if (existingIdx >= 0) {
+      db.auditReports[existingIdx] = { ...db.auditReports[existingIdx], ...newReport };
+    } else {
+      db.auditReports.unshift(newReport);
+    }
   }
 
   if (!db.systemHistory) db.systemHistory = [];
@@ -16020,13 +16208,16 @@ function executeCompileMonthlyAudit() {
   saveDB(db);
 
   // Sync to Firestore Cloud if available
-  if (typeof syncAuditReportToFirestore === 'function') {
-    syncAuditReportToFirestore(newReport).catch(e => console.warn('[Firestore] Async audit report sync:', e));
+  if (window.firebaseDB && window.firestore) {
+    const { doc, setDoc } = window.firestore;
+    const docId = newReport.reportId || newReport.id;
+    setDoc(doc(window.firebaseDB, 'audit_reports', docId), newReport, { merge: true })
+      .catch(e => console.warn('[Firestore] Async audit report sync:', e));
   }
 
   // Refresh UI Panels
   if (typeof renderFarmManagerView === 'function') renderFarmManagerView();
-  if (typeof renderDistrictCloudAuditQueue === 'function') renderDistrictCloudAuditQueue();
+  if (typeof renderAuditQueue === 'function') renderAuditQueue();
   if (typeof updateCompileAuditPreview === 'function') updateCompileAuditPreview();
 
   // Show Success Step with real QR code

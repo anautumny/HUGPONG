@@ -21,6 +21,7 @@ import SRAFieldOpsView from './sra/SRAFieldOpsView';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
+import { safeAlert } from '../utils/dialogs';
 
 const { height, width } = Dimensions.get('window');
 
@@ -730,22 +731,13 @@ const CompactLogItem = React.memo(function CompactLogItem({
                 <Text style={{ fontSize: 11.5, fontWeight: '700', color: COLORS.success }}>Certified Record (Locked)</Text>
               </TouchableOpacity>
             ) : isPastCycleLog ? (
-              <View style={{ flex: 1, flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: RADIUS.sm, paddingVertical: 8 }}
-                  onPress={() => Alert.alert('Archived Past Cycle', 'This operation log belongs to a previous crop cycle and is archived for historical reference.')}
-                >
-                  <Ionicons name="archive-outline" size={13} color="#6B7280" />
-                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#6B7280' }}>Past Cycle Record</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{ flex: 0.8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#FFF5F5', borderWidth: 1, borderColor: '#FFD4D4', borderRadius: RADIUS.sm, paddingVertical: 8 }}
-                  onPress={() => deleteSubmittedLog(log)}
-                >
-                  <Ionicons name="trash-outline" size={14} color="#D9534F" />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#D9534F' }}>Delete</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: RADIUS.sm, paddingVertical: 8 }}
+                onPress={() => Alert.alert('Archived Past Cycle', 'This operation log belongs to a previous crop cycle and is permanently preserved in the historical archive for regulatory compliance.')}
+              >
+                <Ionicons name="archive-outline" size={13} color="#6B7280" />
+                <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#6B7280' }}>Past Cycle Record (Archived)</Text>
+              </TouchableOpacity>
             ) : isLocked ? (
               <TouchableOpacity
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: RADIUS.sm, paddingVertical: 8 }}
@@ -1348,13 +1340,48 @@ export default function FieldOpsScreen({ navigation, route }) {
       l.status !== 'Archived'
     );
 
-    let farmLogs = activeCycleLogs.filter(l => isLogFromMonth(l, compileMonth));
+    const farmLogs = activeCycleLogs.filter(l => isLogFromMonth(l, compileMonth));
 
-    const uncompiledLogs = farmLogs.filter(l => !l.compiled && !l.compiledReportId);
-    const alreadyCompiledLogs = farmLogs.filter(l => l.compiled || l.compiledReportId);
+    // Existing reports for this month
+    const existingReportsForMonth = auditReports.filter(a => 
+      (a.period && a.period.toLowerCase() === compileMonth.toLowerCase()) || 
+      (a.month && a.month.toLowerCase() === compileMonth.toLowerCase())
+    );
+    const certifiedReports = existingReportsForMonth.filter(a => a.status === 'Certified');
+    const certifiedReportIds = new Set(certifiedReports.map(cr => cr.reportId || cr.id));
 
-    const totalCost = farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
-    const logsCount = farmLogs.length;
+    // Identify operations to compile: If certified reports exist, compile ONLY newly logged / uncertified operations
+    let logsToCompile = farmLogs;
+    let isRevisionBatch = false;
+
+    if (certifiedReports.length > 0) {
+      logsToCompile = farmLogs.filter(l => !l.compiled || !certifiedReportIds.has(l.compiledReportId));
+      isRevisionBatch = true;
+      if (logsToCompile.length === 0) {
+        safeAlert(
+          'All Operations Certified',
+          `All field operations for ${compileMonth} have already been certified by SRA in report ${certifiedReports[0].reportId || certifiedReports[0].id}. No new operations require compilation.`
+        );
+        setActiveQRData({
+          reportId: certifiedReports[0].reportId || certifiedReports[0].id,
+          month: certifiedReports[0].month || compileMonth,
+          blockFarm: certifiedReports[0].blockFarm || targetFarm,
+          totalCost: certifiedReports[0].totalCost || 0,
+          totalHectares: certifiedReports[0].totalHectares || totalHa,
+          totalFields: certifiedReports[0].fieldsReported || farmFields.length || 0,
+          totalLogs: certifiedReports[0].logsCount || certifiedReports[0].totalLogs || 0,
+          hash: certifiedReports[0].qrSignature || certifiedReports[0].qrHash || 'HUG-202605-A3F9',
+          envelope: certifiedReports[0].envelope || `HUGPONG|${certifiedReports[0].reportId}|${session?.blockFarmId || 'BLK-01'}|${compileMonth}|${totalHa.toFixed(2)}|${certifiedReports[0].logsCount || 0}|${certifiedReports[0].totalCost || 0}|A3F9`,
+          cloudQueueStatus: 'transmitted',
+          cloudQueuedAt: certifiedReports[0].certifiedAt || certifiedReports[0].dateGenerated
+        });
+        setShowQR(true);
+        return;
+      }
+    }
+
+    const totalCost = logsToCompile.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
+    const logsCount = logsToCompile.length;
 
     // Dynamic IDs based on selected month
     const monthParts = compileMonth.split(' ');
@@ -1368,28 +1395,47 @@ export default function FieldOpsScreen({ navigation, route }) {
     };
     const monthNum = monthMap[monthName] || '05';
     const farmShort = (session?.blockFarmId || 'BLK-01').replace('BLK-', '').replace('-', '');
-    const reportId = `RPT-${yearStr}-${monthNum}-${farmShort}`;
-    const auditId = `AUD-${yearStr}-${monthNum}`;
-    const hashSuffix = ((totalCost * 17 + logsCount * 31) % 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
-    const hash = `HUG-${yearStr}${monthNum}-${hashSuffix || 'A3F9'}`;
+    
+    let reportId = `RPT-${yearStr}-${monthNum}-${farmShort}`;
+    let auditId = `AUD-${yearStr}-${monthNum}`;
+    let hashPrefix = `HUG-${yearStr}${monthNum}`;
+
+    if (isRevisionBatch) {
+      const batchNum = existingReportsForMonth.length + 1;
+      reportId = `RPT-${yearStr}-${monthNum}-${farmShort}-B${batchNum}`;
+      auditId = `AUD-${yearStr}-${monthNum}-B${batchNum}`;
+      hashPrefix = `HUG-${yearStr}${monthNum}-B${batchNum}`;
+    }
+
+    const hashSuffix = ((totalCost * 17 + logsCount * 31 + Date.now()) % 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    const hash = `${hashPrefix}-${hashSuffix || 'A3F9'}`;
     const monthCode = `${monthName.substring(0, 3).toUpperCase()}${yearStr}`;
     const envelope = `HUGPONG|${reportId}|${session?.blockFarmId || 'BLK-01'}|${monthCode}|${totalHa.toFixed(2)}|${logsCount}|${totalCost}|${hashSuffix || 'A3F9'}`;
 
-    // Mark newly compiled logs as compiled
+    // Mark newly compiled logs as compiled and update in Firestore
     const nowIso = new Date().toISOString();
-    if (uncompiledLogs.length > 0) {
-      uncompiledLogs.forEach(l => {
+    if (logsToCompile.length > 0) {
+      logsToCompile.forEach(l => {
         l.compiled = true;
         l.compiledReportId = reportId;
         l.compiledAt = nowIso;
       });
       saveItem(STORAGE_KEYS.LOGS, logs);
       setLogs([...logs]);
+
+      if (db) {
+        try {
+          logsToCompile.forEach(l => {
+            const lRef = doc(db, 'operation_logs', l.id);
+            setDoc(lRef, { compiled: true, compiledReportId: reportId, compiledAt: nowIso }, { merge: true }).catch(() => {});
+          });
+        } catch (e) {}
+      }
     }
 
     // Build stage breakdown dynamically
     const stageGroups = {};
-    farmLogs.forEach(l => {
+    logsToCompile.forEach(l => {
       const stName = l.stageName || `Stage ${l.stageNumber || 1}`;
       if (!stageGroups[stName]) stageGroups[stName] = { cost: 0, fields: new Set() };
       stageGroups[stName].cost += Number(l.totalCost || l.cost || 0);
@@ -1402,34 +1448,64 @@ export default function FieldOpsScreen({ navigation, route }) {
       fields: Array.from(stageGroups[st].fields).join(', ')
     }));
 
+    // Serialize operations for audit package
+    const serializedOps = logsToCompile.map(l => ({
+      id: l.id,
+      fieldId: l.fieldId,
+      activity: l.activity || l.operationName || 'Operation',
+      operationName: l.operationName || l.activity || 'Operation',
+      category: l.category || 'prep',
+      stageNumber: l.stageNumber || 1,
+      stageName: l.stageName || `Stage ${l.stageNumber || 1}`,
+      cost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
+      totalCost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
+      qty: l.inputQty || l.qty || '1',
+      quantity: l.inputQty || l.qty || '1',
+      unit: l.inputUnit || l.unit || 'ha',
+      unitCost: Number(l.directRate || l.unitCost || (Number(l.totalCost || l.cost || 0) / Math.max(parseFloat(l.hectares || l.inputQty || 1), 0.1))),
+      date: l.date || l.period || formatDisplayDate(new Date()),
+      period: l.period || l.date || formatDisplayDate(new Date()),
+      status: l.status || 'Recorded',
+      subItems: Array.isArray(l.subItems) ? l.subItems : [],
+      isGroup: Boolean(l.isGroup || (l.subItems && l.subItems.length > 0)),
+      hectares: l.hectares || l.ha || '1.0'
+    }));
+
     // Save / update compiled report in auditReports
     let cloudQueueStatus = 'offline_queued';
     let cloudQueuedAt = null;
 
+    const targetReportId = reportId || auditId;
     const newReport = {
-      id: auditId,
-      reportId: reportId,
+      id: targetReportId,
+      reportId: targetReportId,
       month: compileMonth,
+      period: compileMonth,
       blockFarm: targetFarm,
+      blockFarmName: targetFarm,
       blockFarmId: session?.blockFarmId || 'BLK-01',
       totalCost: totalCost,
       totalHectares: totalHa,
       fieldsReported: farmFields.length || 5,
       logsCount: logsCount,
+      totalLogs: logsCount,
       status: 'Pending',
       cloudQueueStatus: 'offline_queued',
       dateGenerated: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       qrSignature: hash,
+      qrHash: hash,
       envelope: envelope,
       verifiedBy: null,
       stageBreakdown: stageBreakdown.length > 0 ? stageBreakdown : [],
+      logs: serializedOps,
+      operations: serializedOps,
       notes: `Compiled by Farm Manager ${session?.name || 'Farm Manager'}. Awaiting SRA District inspection.`
     };
 
     // Sync to Firestore if online (Cloud Audit Queue)
     if (db) {
       try {
-        const docRef = doc(db, 'audit_reports', newReport.reportId);
+        const docRef = doc(db, 'audit_reports', targetReportId);
         const cleanedData = cleanDataForFirestore({ 
           ...newReport, 
           cloudQueueStatus: 'transmitted',
@@ -1446,16 +1522,17 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
     }
 
-    const existingIdx = auditReports.findIndex(a => a.id === newReport.id || a.reportId === newReport.reportId);
+    const existingIdx = auditReports.findIndex(a => a.id === targetReportId || a.reportId === targetReportId);
     if (existingIdx >= 0) {
       auditReports[existingIdx] = { ...auditReports[existingIdx], ...newReport };
     } else {
       auditReports.unshift(newReport);
     }
     saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+    notifyDataUpdate();
 
     setActiveQRData({
-      reportId,
+      reportId: targetReportId,
       month: compileMonth,
       blockFarm: targetFarm,
       totalCost,
@@ -1472,13 +1549,13 @@ export default function FieldOpsScreen({ navigation, route }) {
     const countLabel = `${deltaCount} operation log${deltaCount !== 1 ? 's' : ''}`;
 
     if (cloudQueueStatus === 'transmitted') {
-      Alert.alert(
+      safeAlert(
         'Audit Transmitted ☁️',
         `Successfully compiled ${countLabel} for ${compileMonth}.\n\n☁️ Sent to Cloud Audit Queue!\nSRA District Officers can review remotely on the district portal or verify via QR.`,
         [{ text: 'View SRA QR Code', onPress: () => setShowQR(true) }]
       );
     } else {
-      Alert.alert(
+      safeAlert(
         'Audit Stored in Offline Queue 📦',
         `Successfully compiled ${countLabel} for ${compileMonth}.\n\n📦 Stored in Local Offline Queue.\nWill automatically sync to SRA Cloud Queue once online. Regulators can scan this offline QR code immediately.`,
         [{ text: 'View SRA QR Code', onPress: () => setShowQR(true) }]
@@ -3022,6 +3099,14 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
+    if (isLogPastCycle(log) || log.isArchived === true) {
+      Alert.alert(
+        'Archived Record (Protected)',
+        'This operation belongs to past cycle history and is archived for regulatory reference. It cannot be deleted.'
+      );
+      return;
+    }
+
     Alert.alert(
       'Delete Operation Log',
       `Delete "${log.activity || log.operationName}" (#${log.id})?\n\nThis will remove the log from local device memory, cloud database, and operations ledger.`,
@@ -4462,21 +4547,43 @@ export default function FieldOpsScreen({ navigation, route }) {
                       paddingHorizontal: 16,
                       borderRadius: RADIUS.lg,
                       flexDirection: 'row',
-                      justifyContent: 'center',
                       alignItems: 'center',
+                      justifyContent: 'center',
                       gap: 8,
-                      ...SHADOW.card
+                      ...SHADOW.card,
                     }}
-                    onPress={isAllCompiled ? handleViewExistingAudit : handleGenerateAudit}
+                    onPress={() => {
+                      if (isAllCompiled) {
+                        compileAndShow(true);
+                      } else {
+                        const countToCompile = uncompiledLogs.length > 0 ? uncompiledLogs.length : farmLogs.length;
+                        safeAlert(
+                          t('confirm_compile_title', 'Compile Monthly SRA Audit Package?'),
+                          `Compile ${countToCompile} recorded sugarcane field operation(s) for ${compileMonth} into an encrypted SRA QR audit package?\n\nThis will compile and transmit the records to the SRA Cloud Queue for district regulatory inspection.`,
+                          [
+                            { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
+                            { 
+                              text: t('btn_confirm_compile', 'Compile & Transmit'), 
+                              style: 'default', 
+                              onPress: () => compileAndShow(false) 
+                            }
+                          ]
+                        );
+                      }
+                    }}
                     activeOpacity={0.85}
                   >
-                    <Ionicons name="qr-code-outline" size={18} color="#fff" />
+                    <Ionicons 
+                      name={isAllCompiled ? "qr-code" : "flash"} 
+                      size={17} 
+                      color="#fff" 
+                    />
                     <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.3 }}>
-                      {isAllCompiled 
-                        ? 'View Compiled SRA QR'
-                        : (uncompiledLogs.length > 0 
-                          ? `Compile ${uncompiledLogs.length} New Operations & QR` 
-                          : t('btn_compile_generate_qr', 'Compile & Generate SRA QR'))}
+                      {isAllCompiled
+                        ? t('btn_view_compiled_qr', 'View SRA Regulatory QR Certificate')
+                        : (uncompiledLogs.length > 0 && compiledLogs.length > 0
+                          ? `Compile ${uncompiledLogs.length} New Logs · Update QR`
+                          : t('btn_compile_sra_audit', 'Compile Monthly SRA Audit Package'))}
                     </Text>
                     <Ionicons name="arrow-forward" size={15} color="#fff" style={{ opacity: 0.85, marginLeft: 2 }} />
                   </TouchableOpacity>
@@ -4796,9 +4903,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                   const uniqueFarms = isAll ? blockFarms.length : (farmFields.length > 0 ? 1 : 0);
                   const uniqueMembers = new Set(farmFields.map(f => f.member || f.memberName || resolveFieldMember(f)).filter(Boolean)).size;
                   const fManagers = users.filter(u => u.role === 'Farm Manager').length;
-                  const totalCost = farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
-                  const costPerHa = totalHa > 0 ? Math.round(totalCost / totalHa) : 0;
-                  const compiledLogsCount = farmLogs.length;
+                  const totalCost = Number(farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0) || 0);
+                  const costPerHa = Number(totalHa > 0 ? Math.round(totalCost / totalHa) : 0 || 0);
+                  const compiledLogsCount = Number(farmLogs.length || 0);
 
                   return [
                     {
@@ -7107,7 +7214,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             const pastTotalCost = pastLogs.reduce((sum, l) => sum + Number(l.cost || 0), 0);
 
             let statCostLabel = t('stat_total_cost', 'Total Recorded Cost');
-            let statCostValue = `Php ${submittedTotalCost.toLocaleString()}`;
+            let statCostValue = `Php ${Number(submittedTotalCost || 0).toLocaleString()}`;
             let statCostColor = COLORS.primary;
             let statCountLabel = t('stat_records', 'Submitted Records');
             let statCountValue = `${fieldLogs.length} ${t('total_records_lbl', 'Total Records')}`;
@@ -7117,20 +7224,20 @@ export default function FieldOpsScreen({ navigation, route }) {
                 const managerCost = managerSubmittedLogs.reduce((sum, l) => sum + Number(l.cost || l.totalCost || 0), 0);
                 const managerAmendedCount = managerSubmittedLogs.filter(l => l.isAmended || (Array.isArray(l.editHistory) && l.editHistory.length > 0)).length;
                 statCostLabel = managerLedgerScope === 'all' ? t('stat_total_cost', 'Total Recorded Cost') : `${selectedField?.id || 'Field'} Total Cost`;
-                statCostValue = `Php ${managerCost.toLocaleString()}`;
+                statCostValue = `Php ${Number(managerCost || 0).toLocaleString()}`;
                 statCostColor = COLORS.primary;
                 statCountLabel = managerLedgerScope === 'all' ? t('farm_operations_lbl', 'Farm Operations & Edits') : `${selectedField?.id || 'Field'} Operations & Edits`;
                 statCountValue = `${managerSubmittedLogs.length} Logs (${managerAmendedCount} Edited)`;
               } else if (logTab === 'past') {
                 statCostLabel = t('past_cycles_cost_lbl', 'Past Cycles Total Cost');
-                statCostValue = `Php ${pastTotalCost.toLocaleString()}`;
+                statCostValue = `Php ${Number(pastTotalCost || 0).toLocaleString()}`;
                 statCostColor = '#64748B';
                 statCountLabel = t('archived_logs_lbl', 'Archived Logs');
                 statCountValue = `${pastLogs.length} ${t('past_records_lbl', 'Past Records')}`;
               } else {
                 const auditTotalCost = (auditLogs || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
                 statCostLabel = t('compiled_audited_cost_lbl', 'Compiled Audited Cost');
-                statCostValue = `Php ${auditTotalCost.toLocaleString()}`;
+                statCostValue = `Php ${Number(auditTotalCost || 0).toLocaleString()}`;
                 statCostColor = COLORS.primary;
                 statCountLabel = t('verified_sra_audits_lbl', 'Verified SRA Audits');
                 statCountValue = `${(auditLogs || []).length} ${t('monthly_reports_lbl', 'Monthly Reports')}`;
@@ -7138,19 +7245,19 @@ export default function FieldOpsScreen({ navigation, route }) {
             } else if (activeRole === 'SRA (Admin)' || logTab === 'audit_history') {
               const auditTotalCost = (auditLogs || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
               statCostLabel = t('compiled_audited_cost_lbl', 'Compiled Audited Cost');
-              statCostValue = `Php ${auditTotalCost.toLocaleString()}`;
+              statCostValue = `Php ${Number(auditTotalCost || 0).toLocaleString()}`;
               statCostColor = COLORS.primary;
               statCountLabel = t('verified_sra_audits_lbl', 'Verified SRA Audits');
               statCountValue = `${(auditLogs || []).length} ${t('monthly_reports_lbl', 'Monthly Reports')}`;
             } else if (logTab === 'drafts') {
               statCostLabel = t('estimated_draft_cost_lbl', 'Estimated Draft Cost');
-              statCostValue = `Php ${draftsTotalCost.toLocaleString()}`;
+              statCostValue = `Php ${Number(draftsTotalCost || 0).toLocaleString()}`;
               statCostColor = '#C97A00';
               statCountLabel = t('pending_draft_pipeline_lbl', 'Pending Draft Pipeline');
               statCountValue = `${scopedDrafts.length} ${t('draft_records_lbl', 'Draft Records')}`;
             } else if (logTab === 'past') {
               statCostLabel = t('past_cycles_cost_lbl', 'Past Cycles Total Cost');
-              statCostValue = `Php ${pastTotalCost.toLocaleString()}`;
+              statCostValue = `Php ${Number(pastTotalCost || 0).toLocaleString()}`;
               statCostColor = '#64748B';
               statCountLabel = t('archived_logs_lbl', 'Archived Logs');
               statCountValue = `${pastLogs.length} ${t('past_records_lbl', 'Past Records')}`;
@@ -7389,8 +7496,8 @@ export default function FieldOpsScreen({ navigation, route }) {
             ) : (
               <View style={{ gap: SPACING.md }}>
                 <Text style={s.sectionLabel}>{t('compiled_monthly_audit_title', 'Compiled Monthly Regulatory Audit')}</Text>
-                {auditLogs.map(audit => (
-                  <View key={audit.id} style={[s.auditCard, { marginBottom: 6 }]}>
+                {Array.from(new Map((auditLogs || []).map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => (
+                  <View key={audit.reportId || audit.id || `audit-${idx}`} style={[s.auditCard, { marginBottom: 6 }]}>
                     {/* Header: Audit ID & Status */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -7425,7 +7532,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('summary_metrics_lbl', 'Summary Metrics:')}</Text>
                         <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>
-                          {audit.fieldsReported} {t('plots_word', 'Plots')} · {audit.logsCount} {t('logs_unit', 'Logs')} · ₱{audit.totalCost.toLocaleString()}
+                          {(audit.fieldsReported != null ? audit.fieldsReported : 1)} {t('plots_word', 'Plots')} · {(audit.logsCount != null ? audit.logsCount : (audit.totalLogs || 0))} {t('logs_unit', 'Logs')} · ₱{Number(audit.totalCost || 0).toLocaleString()}
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

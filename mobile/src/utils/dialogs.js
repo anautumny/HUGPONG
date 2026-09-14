@@ -1,8 +1,19 @@
 import { Alert } from 'react-native';
 
+// Activity-safe alert wrapper to prevent Android 'not attached to Activity' crashes
+export const safeAlert = (title, message, buttons, options) => {
+  setTimeout(() => {
+    try {
+      Alert.alert(title, message, buttons, options);
+    } catch (e) {
+      console.warn('[safeAlert] Failed to show alert safely:', e.message);
+    }
+  }, 100);
+};
+
 // Generic confirm
 export const confirm = ({ title, message, onConfirm, confirmText = 'Confirm', destructive = false }) => {
-  Alert.alert(title, message, [
+  safeAlert(title, message, [
     { text: 'Cancel', style: 'cancel' },
     { text: confirmText, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
   ]);

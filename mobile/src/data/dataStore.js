@@ -2704,7 +2704,8 @@ export const listenToCloudSync = () => {
             (ra.qrSignature && (a.qrSignature === ra.qrSignature || a.qrHash === ra.qrSignature))
           );
           if (existingIdx >= 0) {
-            const isCertified = auditReports[existingIdx].status === 'Certified' || ra.status === 'Certified';
+            const hasSameHash = (auditReports[existingIdx].qrSignature === ra.qrSignature || auditReports[existingIdx].qrHash === ra.qrSignature || auditReports[existingIdx].qrSignature === ra.qrHash);
+            const isCertified = ra.status === 'Certified' || (auditReports[existingIdx].status === 'Certified' && hasSameHash);
             auditReports[existingIdx] = { 
               ...auditReports[existingIdx], 
               ...ra,
@@ -2714,6 +2715,17 @@ export const listenToCloudSync = () => {
             auditReports.unshift(ra);
           }
         });
+
+        // Strictly deduplicate auditReports in place
+        const reportMap = new Map();
+        auditReports.forEach(r => {
+          if (!r) return;
+          const key = r.reportId || r.id;
+          if (key) reportMap.set(key, r);
+        });
+        auditReports.length = 0;
+        auditReports.push(...reportMap.values());
+
         saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
         saveItem('@hugpong_audit_logs', auditReports);
         notify();
@@ -2810,12 +2822,16 @@ export const performMobileSync = async () => {
         try {
           const snap = await getDoc(docRef);
           if (snap.exists() && snap.data()?.status === 'Certified') {
-            rep.status = 'Certified';
-            rep.certifiedBy = snap.data().certifiedBy || rep.certifiedBy;
-            rep.certifiedRole = snap.data().certifiedRole || rep.certifiedRole;
-            rep.certifiedAt = snap.data().certifiedAt || rep.certifiedAt;
-            rep.cloudQueueStatus = 'transmitted';
-            return;
+            const snapHash = snap.data().qrHash || snap.data().qrSignature;
+            const repHash = rep.qrHash || rep.qrSignature;
+            if (snapHash && snapHash === repHash) {
+              rep.status = 'Certified';
+              rep.certifiedBy = snap.data().certifiedBy || rep.certifiedBy;
+              rep.certifiedRole = snap.data().certifiedRole || rep.certifiedRole;
+              rep.certifiedAt = snap.data().certifiedAt || rep.certifiedAt;
+              rep.cloudQueueStatus = 'transmitted';
+              return;
+            }
           }
         } catch (ge) {}
         const cleanedRep = cleanDataForFirestore({ ...rep, updatedAt: new Date().toISOString() });

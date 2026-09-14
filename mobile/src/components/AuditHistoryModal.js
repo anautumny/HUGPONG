@@ -51,13 +51,14 @@ export default function AuditHistoryModal({
           {/* Monthly Selector Horizontal Chips */}
           <Text style={s.sectionLabel}>{t('select_report_month', 'Select Report Month')}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.monthScroll} contentContainerStyle={{ gap: 8 }}>
-            {auditLogs.map(audit => {
-              const isSel = audit.id === selectedAuditId;
+            {Array.from(new Map((auditLogs || []).map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => {
+              const auditKey = audit.reportId || audit.id || `audit-${idx}`;
+              const isSel = audit.id === selectedAuditId || audit.reportId === selectedAuditId;
               return (
                 <TouchableOpacity
-                  key={audit.id}
+                  key={auditKey}
                   style={[s.monthChip, isSel && s.monthChipActive]}
-                  onPress={() => setSelectedAuditId(audit.id)}
+                  onPress={() => setSelectedAuditId(audit.id || audit.reportId)}
                   activeOpacity={0.8}
                 >
                   <Ionicons name="calendar-outline" size={13} color={isSel ? COLORS.primary : COLORS.textMuted} />

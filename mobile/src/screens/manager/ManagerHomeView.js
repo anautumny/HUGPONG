@@ -200,7 +200,7 @@ function ManagerHomeView({
                 </View>
               ) : <View />}
               <View style={s.costGroup}>
-                <Text style={s.costText}>₱{item.cost.toLocaleString()}</Text>
+                <Text style={s.costText}>₱{Number(item.cost || 0).toLocaleString()}</Text>
                 <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
               </View>
             </View>

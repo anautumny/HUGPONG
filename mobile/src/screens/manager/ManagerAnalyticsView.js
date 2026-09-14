@@ -33,11 +33,11 @@ export default function ManagerAnalyticsView({
             <Text style={s.statDesc}>{t('total_area_lbl', 'Total Area')}</Text>
           </View>
           <View style={s.statCell}>
-            <Text style={[s.statVal, { color: COLORS.primary }]}>₱{totalSpent.toLocaleString()}</Text>
+            <Text style={[s.statVal, { color: COLORS.primary }]}>₱{Number(totalSpent || 0).toLocaleString()}</Text>
             <Text style={s.statDesc}>{t('total_logged_costs', 'Production Cost')}</Text>
           </View>
           <View style={s.statCell}>
-            <Text style={s.statVal}>₱{avgCostPerHa.toLocaleString()}</Text>
+            <Text style={s.statVal}>₱{Number(avgCostPerHa || 0).toLocaleString()}</Text>
             <Text style={s.statDesc}>{t('avg_cost_ha', 'Cost / Hectare')}</Text>
           </View>
           <View style={s.statCell}>

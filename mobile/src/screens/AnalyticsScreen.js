@@ -637,13 +637,13 @@ export default function AnalyticsScreen({ navigation, route }) {
               )}
 
               <View style={s.spendValueRow}>
-                <Text style={s.spendMainValue}>₱ {costPerHa.toLocaleString()}</Text>
+                <Text style={s.spendMainValue}>₱ {Number(costPerHa || 0).toLocaleString()}</Text>
                 <Text style={s.spendMainUnit}>/ Ha</Text>
               </View>
 
               <View style={s.spendFooterRow}>
                 <Text style={s.spendFooterText}>
-                  Total Recorded: <Text style={{ fontWeight: '800', color: COLORS.text }}>₱ {totalCost.toLocaleString()}</Text>
+                  Total Recorded: <Text style={{ fontWeight: '800', color: COLORS.text }}>₱ {Number(totalCost || 0).toLocaleString()}</Text>
                 </Text>
                 <Text style={s.spendFooterSub}>{totalHa.toFixed(2)} Ha · {activeLogsCount} recorded ops</Text>
               </View>
@@ -668,7 +668,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={{ fontSize: 10, color: COLORS.textMuted }}>{item.count} {item.count === 1 ? 'op' : 'ops'}</Text>
-                        <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>₱ {item.amount.toLocaleString()}</Text>
+                        <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>₱ {Number(item.amount || 0).toLocaleString()}</Text>
                         <Text style={{ fontSize: 10, fontWeight: '600', color: COLORS.textSecondary }}>({item.costPct}%)</Text>
                       </View>
                     </View>
@@ -1028,7 +1028,7 @@ export default function AnalyticsScreen({ navigation, route }) {
           <View style={s.historyStatBar}>
             <View style={s.historyStatItem}>
               <Text style={s.historyStatLbl}>Total Recorded Cost</Text>
-              <Text style={s.historyStatVal}>Php {totalCost.toLocaleString()}</Text>
+              <Text style={s.historyStatVal}>Php {Number(totalCost || 0).toLocaleString()}</Text>
             </View>
             <View style={[s.historyStatItem, { borderLeftWidth: 1, borderLeftColor: COLORS.border, paddingLeft: 14 }]}>
               <Text style={s.historyStatLbl}>Submitted Records</Text>
