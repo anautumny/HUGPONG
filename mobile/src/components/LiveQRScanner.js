@@ -251,7 +251,7 @@ export default function LiveQRScanner({
             <View style={styles.manualInputRow}>
               <TextInput
                 style={styles.manualInput}
-                placeholder="e.g. HUG-202605-A3F9"
+                placeholder="Enter report QR hash"
                 placeholderTextColor="#888"
                 value={manualCode}
                 onChangeText={setManualCode}

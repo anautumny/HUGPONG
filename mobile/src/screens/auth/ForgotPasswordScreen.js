@@ -6,8 +6,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
-import { findUserByIdOrContact, resetUserPasswordByIdentifier } from '../../data/dataStore';
-import { sendFirebasePhoneSMS } from '../../services/smsService';
 import { useTranslation } from '../../services/i18n';
 
 export default function ForgotPasswordScreen({ navigation }) {
@@ -18,7 +16,6 @@ export default function ForgotPasswordScreen({ navigation }) {
   const [identifier, setIdentifier] = useState('');
   const [matchedUser, setMatchedUser] = useState(null);
   const [otpCode, setOtpCode] = useState('');
-  const [sentOtp, setSentOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -32,59 +29,10 @@ export default function ForgotPasswordScreen({ navigation }) {
       return;
     }
 
-    setLoading(true);
-    const user = findUserByIdOrContact(raw);
-
-    if (!user) {
-      setLoading(false);
-      Alert.alert(
-        'Account Not Found',
-        'No registered account found matching this User ID or Mobile Number. Please verify with your cooperative administrator.'
-      );
-      return;
-    }
-
-    setMatchedUser(user);
-
-    // Generate 6-digit random code
-    const generatedOtp = String(Math.floor(100000 + Math.random() * 900000));
-    setSentOtp(generatedOtp);
-
-    const userPhone = user.contact || user.mobile || raw;
-
-    try {
-      const res = await sendFirebasePhoneSMS(userPhone, generatedOtp);
-      setLoading(false);
-
-      if (res && res.success) {
-        Alert.alert(
-          'SMS Code Dispatched',
-          `A 6-digit SMS verification code was dispatched to ${userPhone}.`
-        );
-      } else {
-        // Fallback for offline / dev simulation
-        if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          Alert.alert(
-            'SMS Simulation (Dev Mode)',
-            `Verification code for ${userPhone}:\n\nCode: ${generatedOtp}`
-          );
-        } else {
-          Alert.alert(
-            'SMS Dispatch Notice',
-            `A 6-digit verification code was sent to ${userPhone}. Please check your SMS inbox.`
-          );
-        }
-      }
-      setStep(2);
-    } catch (e) {
-      setLoading(false);
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        Alert.alert('SMS Simulation (Dev Mode)', `Verification code for ${userPhone}: ${generatedOtp}`);
-      } else {
-        Alert.alert('SMS Dispatch Notice', `A verification code was dispatched to ${userPhone}.`);
-      }
-      setStep(2);
-    }
+    Alert.alert(
+      'Administrator Assistance Required',
+      'Self-service password reset is not enabled. Contact your Farm Manager or SRA Administrator for identity verification and a temporary password.'
+    );
   };
 
   // ── Step 2: Verify SMS OTP ───────────────────────────────────
@@ -94,11 +42,7 @@ export default function ForgotPasswordScreen({ navigation }) {
       Alert.alert('Required', 'Please enter the 6-digit SMS code.');
       return;
     }
-    if (cleanOtp !== sentOtp) {
-      Alert.alert('Invalid Code', 'The verification code you entered is incorrect. Please try again.');
-      return;
-    }
-    setStep(3);
+    Alert.alert('Reset Unavailable', 'Password-reset verification must be completed by an authorized administrator.');
   };
 
   // ── Step 3: Save New Password ────────────────────────────────
@@ -113,8 +57,7 @@ export default function ForgotPasswordScreen({ navigation }) {
     }
 
     setLoading(true);
-    const targetId = matchedUser ? (matchedUser.employeeId || matchedUser.contact) : identifier;
-    const res = await resetUserPasswordByIdentifier(targetId, newPassword);
+    const res = { success: false, error: 'Self-service password reset is temporarily unavailable. Contact an authorized administrator.' };
     setLoading(false);
 
     if (!res.success) {
@@ -149,7 +92,7 @@ export default function ForgotPasswordScreen({ navigation }) {
               <View style={s.textBlock}>
                 <Text style={s.title}>{t('reset_pw_heading', 'Reset your password')}</Text>
                 <Text style={s.sub}>
-                  Enter your 8-digit User ID (e.g. 04000001) or registered mobile number to receive a verification code.
+                  Enter your User ID or registered mobile number, then contact an authorized administrator for identity verification.
                 </Text>
               </View>
 
@@ -177,7 +120,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 {loading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={s.btnText}>Send Verification Code via SMS</Text>
+                  <Text style={s.btnText}>View Reset Instructions</Text>
                 )}
               </TouchableOpacity>
 

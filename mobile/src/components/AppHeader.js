@@ -156,7 +156,7 @@ function AppHeader({ right }) {
     outputRange: ['0deg', '360deg'],
   });
 
-  const isFieldRole = session?.role === 'Member' || session?.role === 'Farm Manager';
+  const isFieldRole = session?.role === 'Member Farmer' || session?.role === 'Farm Manager';
   const liveCount = getPendingSyncCount(session);
   const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
   const isFullySynced = isOnline && safeCount === 0;

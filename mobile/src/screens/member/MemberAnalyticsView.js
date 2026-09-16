@@ -16,7 +16,7 @@ export default function MemberAnalyticsView({
   benchmarks = {}
 }) {
   const { t } = useTranslation();
-  const totalHa = myFields.reduce((sum, f) => sum + (Number(f.ha) || 1.5), 0);
+  const totalHa = myFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
   const totalSpent = myLogs.reduce((sum, l) => sum + (Number(l.cost || l.totalCost) || 0), 0);
   const costPerHa = totalHa > 0 ? Math.round(totalSpent / totalHa) : 0;
   const opsCount = myLogs.length;
@@ -27,7 +27,7 @@ export default function MemberAnalyticsView({
       {/* Member Yield & Investment Card */}
       <View style={s.summaryCard}>
         <Text style={s.cardLabel}>{t('plot_perf_title', 'Plot Production Overview')}</Text>
-        <Text style={s.cardTitle}>{myFields[0]?.id || (fields[0]?.id || '')} · {totalHa.toFixed(2)} {t('lbl_hectares', 'Hectares')}</Text>
+        <Text style={s.cardTitle}>{myFields[0]?.id || t('no_plot_assigned', 'No Plot Assigned')} · {totalHa.toFixed(2)} {t('lbl_hectares', 'Hectares')}</Text>
 
         <View style={s.statsGrid}>
           <View style={s.statCell}>

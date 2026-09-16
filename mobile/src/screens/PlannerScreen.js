@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { getCurrentSession, fields, fieldsStore, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
+import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { db } from '../firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
@@ -118,7 +118,7 @@ export default function PlannerScreen({ navigation }) {
   const { t, formatOperationName, formatStageName, formatPhaseMonth } = useTranslation();
   const [session, setSession] = useState(getCurrentSession());
   const [allFields, setAllFields] = useState([...fieldsStore]);
-  const isMember = session?.role === 'Member';
+  const isMember = session?.role === 'Member Farmer';
 
   useEffect(() => {
     const unsub = subscribe(() => {
@@ -134,24 +134,26 @@ export default function PlannerScreen({ navigation }) {
   const [pickerPage, setPickerPage] = useState(1);
 
   const displayedFields = useMemo(() => {
-    if (isMember || fieldScope === 'my') {
-      const filtered = allFields.filter(f => 
-        f.memberId === session.employeeId || 
-        f.member === session.name || 
-        f.memberName === session.name || 
-        f.owner === session.name || 
-        (session.fieldId && f.id === session.fieldId)
-      );
-      return filtered;
+    const userId = session?.employeeId || session?.id || '';
+    if (isMember) {
+      return allFields.filter(field => field.memberUserId === userId);
+    }
+    if (session?.role === 'Farm Manager') {
+      const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
+      return allFields.filter(field => managedFarmIds.has(field.blockFarmId));
     }
     return allFields;
   }, [session, isMember, fieldScope, allFields]);
 
   const [selectedField, setSelectedField] = useState(() => {
     const cur = getCurrentSession();
-    if (cur.role === 'Member') {
-      const memberFields = fieldsStore.filter(f => f.memberId === cur.employeeId || f.member === cur.name || f.owner === cur.name);
-      return memberFields.length > 0 ? memberFields[0] : (fieldsStore.length > 0 ? fieldsStore[0] : null);
+    if (cur.role === 'Member Farmer') {
+      return fieldsStore.find(field => field.memberUserId === (cur.employeeId || cur.id)) || null;
+    }
+    if (cur.role === 'Farm Manager') {
+      const userId = cur.employeeId || cur.id;
+      const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
+      return fieldsStore.find(field => managedFarmIds.has(field.blockFarmId)) || null;
     }
     return fieldsStore.length > 0 ? fieldsStore[0] : null;
   });
@@ -162,7 +164,7 @@ export default function PlannerScreen({ navigation }) {
     }
   }, [displayedFields, selectedField]);
 
-  const [landArea, setLandArea] = useState(() => selectedField?.ha ? String(selectedField?.ha) : '1.50');
+  const [landArea, setLandArea] = useState(() => selectedField?.ha ? String(selectedField?.ha) : '');
   
   // Clean Master-Detail UX State: null = Stages Hub, 1..6 = Stage Detail View
   const [activeStageNum, setActiveStageNum] = useState(null);
@@ -183,7 +185,7 @@ export default function PlannerScreen({ navigation }) {
   const [stageOperationsMap, setStageOperationsMap] = useState(() => {
     const map = {};
     for (let i = 1; i <= 6; i++) {
-      map[i] = getFieldCustomOperations(selectedField?.id || (selectedField?.id || fields[0]?.id || ''), i);
+        map[i] = getFieldCustomOperations(selectedField?.id || '', i);
     }
     return map;
   });
@@ -211,11 +213,10 @@ export default function PlannerScreen({ navigation }) {
     const unsub = subscribe(() => {
       const cur = getCurrentSession();
       setSession({ ...cur });
-      if (cur.role === 'Member') {
-        const memberFields = fields.filter(f => f.member === cur.name || f.owner === cur.name);
-        const defaultField = memberFields.length > 0 ? memberFields[0] : fields[0];
+      if (cur.role === 'Member Farmer') {
+        const defaultField = fields.find(field => field.memberUserId === (cur.employeeId || cur.id)) || null;
         setSelectedField(defaultField);
-        setLandArea(defaultField?.ha ? String(defaultField.ha) : '1.50');
+        setLandArea(defaultField?.ha ? String(defaultField.ha) : '');
       }
     });
     return unsub;
@@ -229,7 +230,7 @@ export default function PlannerScreen({ navigation }) {
         map[i] = getFieldCustomOperations(selectedField?.id, i);
       }
       setStageOperationsMap(map);
-      setLandArea(selectedField?.ha ? String(selectedField?.ha) : '1.50');
+      setLandArea(selectedField?.ha ? String(selectedField?.ha) : '');
     }
   }, [selectedField?.id]);
 
@@ -526,7 +527,7 @@ export default function PlannerScreen({ navigation }) {
               map[i] = getDefaultStageOperations(i);
             }
             setStageOperationsMap(map);
-            saveFieldFullPlan(selectedField?.id || (selectedField?.id || fields[0]?.id || ''), map);
+            if (selectedField?.id) saveFieldFullPlan(selectedField.id, map);
             Alert.alert('Restored', 'All 6 stages restored to standard templates.');
           }
         }
@@ -536,7 +537,7 @@ export default function PlannerScreen({ navigation }) {
 
   // Save full custom plan for this field
   const handleSaveFieldPlan = async () => {
-    const targetFieldId = selectedField?.id || fields[0]?.id || '';
+    const targetFieldId = selectedField?.id || '';
     if (!targetFieldId) {
       Alert.alert('No Field Selected', 'Please select a field plot before saving a customized plan.');
       return;
@@ -607,7 +608,7 @@ export default function PlannerScreen({ navigation }) {
 
   // Helper to create and insert a draft log object
   const createDraftLogForOp = (op, isSupplemental = false) => {
-    const fieldId = selectedField?.id || (selectedField?.id || fields[0]?.id || '');
+    const fieldId = selectedField?.id || '';
     const draftId = generateDraftId(fieldId);
     let subItems = [];
     let totalOpCost = 0;
@@ -669,7 +670,7 @@ export default function PlannerScreen({ navigation }) {
     const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
     const executeSendAll = async (isSupplemental) => {
-      const targetFieldId = (selectedField?.id || (selectedField?.id || fields[0]?.id || '')).trim().toUpperCase();
+      const targetFieldId = (selectedField?.id || '').trim().toUpperCase();
       const createdIds = [];
       currentOperations.forEach(op => {
         const d = createDraftLogForOp(op, isSupplemental);
@@ -813,7 +814,7 @@ export default function PlannerScreen({ navigation }) {
               <View style={s.fieldCardHeader}>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={s.fieldIdText}>{selectedField?.id || (selectedField?.id || fields[0]?.id || '')}</Text>
+                    <Text style={s.fieldIdText}>{selectedField?.id || 'No field selected'}</Text>
                     <Text style={s.fieldFarmText}>· {selectedField?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
                   </View>
                   <Text style={s.fieldMemberText}>{t('assigned_lbl', 'Assigned')}: {selectedField?.member || session.name}</Text>

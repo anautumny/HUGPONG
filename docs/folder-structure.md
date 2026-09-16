@@ -19,11 +19,9 @@ HUGPONG/
 │   ├── dashboard.html                      ← Workspace auto-redirector
 │   ├── admin.css                           ← Global styling and theme tokens
 │   ├── logo.png                            ← Platform brand logo
-│   ├── seedFirestore.js                    ← Cloud Firestore database seeder
-│   │
 │   ├── shared/                             ← Web Shared Infrastructure
 │   │   ├── firebase-init.js                ← Web Firebase SDK connector & event emitter
-│   │   ├── webDataStore.js                 ← Offline fallback seed & SRA benchmarks
+│   │   ├── webDataStore.js                 ← Empty-state store & SRA domain configuration
 │   │   └── core.js                         ← Database engine, Firestore listeners, session verification
 │   │
 │   └── roles/                              ← Role-Isolated Workspaces

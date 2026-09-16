@@ -1,0 +1,118 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.accountReady == true;
+    }
+
+    function role() {
+      return signedIn() ? request.auth.token.role : null;
+    }
+
+    function hasRole(roles) {
+      return signedIn() && role() in roles;
+    }
+
+    function staff() {
+      return hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+    }
+
+    function ownsField(fieldId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/fields/$(fieldId)).data.memberUserId == request.auth.uid;
+    }
+
+    function containsCredentialFields(data) {
+      return data.keys().hasAny([
+        'password', 'passwordHash', 'credentialHash', 'salt',
+        'resetToken', 'resetTokenHash'
+      ]);
+    }
+
+    // Password material is server-only. Firebase Admin bypasses these rules.
+    match /user_credentials/{userId} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn()
+        && !containsCredentialFields(resource.data)
+        && (request.auth.uid == userId || staff());
+      allow create, update, delete: if false;
+    }
+
+    match /block_farms/{farmId} {
+      allow read: if signedIn();
+      allow create, update: if hasRole(['SUPER_ADMIN']);
+      allow delete: if false;
+    }
+
+    match /fields/{fieldId} {
+      allow read: if signedIn()
+        && (staff() || resource.data.memberUserId == request.auth.uid);
+      allow create, update: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow delete: if false;
+    }
+
+    match /crop_cycles/{cycleId} {
+      allow read: if signedIn()
+        && (staff() || ownsField(resource.data.fieldId));
+      allow create, update: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow delete: if false;
+    }
+
+    match /operation_logs/{logId} {
+      allow read: if signedIn()
+        && (staff() || ownsField(resource.data.fieldId));
+      allow create: if signedIn()
+        && request.resource.data.submittedByUserId == request.auth.uid
+        && request.resource.data.status == 'ACTIVE';
+      allow update: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN'])
+        || (role() == 'MEMBER_FARMER'
+          && resource.data.submittedByUserId == request.auth.uid
+          && resource.data.status == 'ACTIVE'
+          && request.resource.data.status == 'ACTIVE');
+      allow delete: if false;
+    }
+
+    match /audit_reports/{reportId} {
+      allow read: if staff();
+      allow create: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow update: if hasRole(['SRA_ADMIN', 'SUPER_ADMIN'])
+        || (role() == 'FARM_MANAGER'
+          && resource.data.status == 'PENDING'
+          && request.resource.data.status == 'PENDING');
+      allow delete: if false;
+    }
+
+    match /audit_logs/{eventId} {
+      allow read: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow create: if signedIn() && request.resource.data.actorUserId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /sra_prices/{priceId} {
+      allow read: if signedIn();
+      allow create, update: if hasRole(['SRA_ADMIN', 'SUPER_ADMIN']);
+      allow delete: if false;
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if staff() || (signedIn() && resource.data.createdByUserId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.createdByUserId == request.auth.uid;
+      allow update: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow delete: if false;
+    }
+
+    match /terminal_diagnostics/{terminalId} {
+      allow read: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow create, update: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

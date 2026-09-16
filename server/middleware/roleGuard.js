@@ -3,6 +3,8 @@
 // Ensures the user has the required clearance level
 // ══════════════════════════════════════════════════════════════
 
+const { canonicalRole } = require('../schema/firestoreSchema');
+
 function requireRole(allowedRoles = []) {
   return (req, res, next) => {
     if (!req.session || !req.session.user) {
@@ -13,26 +15,9 @@ function requireRole(allowedRoles = []) {
       });
     }
 
-    const userRole = (req.session.user.role || '').toLowerCase();
-    const normalizedAllowed = allowedRoles.map(r => r.toLowerCase());
-
-    // Super Admin has universal access
-    if (userRole === 'super admin' || userRole === 'superadmin') {
-      return next();
-    }
-
-    const hasPermission = normalizedAllowed.some(allowed => {
-      if (allowed === 'admin' || allowed === 'sra' || allowed === 'sra (admin)') {
-        return userRole.includes('admin') || userRole.includes('sra');
-      }
-      if (allowed === 'manager' || allowed === 'farm manager') {
-        return userRole.includes('manager');
-      }
-      if (allowed === 'member') {
-        return userRole.includes('member');
-      }
-      return userRole === allowed;
-    });
+    const userRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    const normalizedAllowed = allowedRoles.map(canonicalRole).filter(Boolean);
+    const hasPermission = Boolean(userRole && normalizedAllowed.includes(userRole));
 
     if (hasPermission) {
       return next();
@@ -40,7 +25,7 @@ function requireRole(allowedRoles = []) {
 
     return res.status(403).json({
       success: false,
-      error: `Access Denied: Required clearance [${allowedRoles.join(', ')}]. Current role: ${req.session.user.role}`,
+      error: `Access Denied: Required clearance [${normalizedAllowed.join(', ')}]. Current role: ${userRole || 'UNKNOWN'}`,
       code: 'FORBIDDEN'
     });
   };

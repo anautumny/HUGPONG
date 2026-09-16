@@ -1,111 +1,195 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — User Management API
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
 const express = require('express');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
+const { hashPassword, validatePassword } = require('../security/password');
+const { publicUser } = require('../security/userProjection');
+const { issueOtp, verifyOtp, consumeVerifiedOtp, discardOtp } = require('../security/otp');
+const { sendSemaphoreSms } = require('../services/smsGateway');
+const {
+  COLLECTIONS,
+  ROLES,
+  canonicalRole,
+  requiredString,
+  nowIso
+} = require('../schema/firestoreSchema');
 
-// ── GET /api/users ───────────────────────────────────────────
-router.get('/', async (req, res) => {
+function createUserId(role) {
+  const prefixes = {
+    [ROLES.SUPER_ADMIN]: '01',
+    [ROLES.SRA_ADMIN]: '02',
+    [ROLES.FARM_MANAGER]: '03',
+    [ROLES.MEMBER_FARMER]: '04'
+  };
+  return `${prefixes[role]}${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+function phoneChallengeSubject(actorUserId, phone) {
+  return `${actorUserId}:${phone}`;
+}
+
+router.post('/phone-verification/request', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+  const phone = String(req.body?.phone || '').replace(/\D/g, '');
+  if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
+  const subject = phoneChallengeSubject(req.session.user.employeeId, phone);
   try {
-    let users = [];
-    if (db) {
-      const snap = await db.collection('users').get();
-      if (!snap.empty) {
-        snap.forEach(docSnap => users.push({ id: docSnap.id, ...docSnap.data() }));
-      }
+    const challenge = issueOtp('personnel-phone', subject, phone);
+    const greeting = req.body?.displayName ? `Hello ${String(req.body.displayName).trim()}, ` : '';
+    try {
+      const result = await sendSemaphoreSms(phone, `[HUGPONG] ${greeting}Your personnel phone verification code is ${challenge.code}. Valid for 5 minutes.`);
+      if (!result.success) throw new Error('SMS delivery failed.');
+    } catch (error) {
+      discardOtp('personnel-phone', subject);
+      throw error;
     }
-    return res.json({ success: true, count: users.length, data: users });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.json({ success: true, phone, expiresAt: challenge.expiresAt });
+  } catch (error) {
+    const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
+    return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
   }
 });
 
-// ── POST /api/users/approve (Super Admin & Managers) ────────
-router.post('/approve', requireAuth, requireRole(['super admin', 'farm manager', 'admin']), async (req, res) => {
-  const { contact, name, role, blockFarm, blockFarmId, fieldId } = req.body;
-
-  if (!contact) {
-    return res.status(400).json({ success: false, error: 'User contact is required.' });
+router.post('/phone-verification/verify', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), (req, res) => {
+  const phone = String(req.body?.phone || '').replace(/\D/g, '');
+  const code = String(req.body?.code || '').trim();
+  if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'A valid phone and 6-digit code are required.' });
   }
+  const result = verifyOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone, code);
+  return res.status(result.success ? 200 : 400).json(result);
+});
 
-  const sessionUser = req.session ? req.session.user : null;
-  const isManager = sessionUser && String(sessionUser.role || '').toLowerCase().includes('manager');
-  const isSuperAdmin = sessionUser && String(sessionUser.role || '').toLowerCase().includes('super');
-  const isSRAAdmin = sessionUser && (String(sessionUser.role || '').toLowerCase().includes('sra') || (String(sessionUser.role || '').toLowerCase().includes('admin') && !isManager));
-
-  let assignedRole = role || 'Member';
-  let assignedBlockFarm = blockFarm ? String(blockFarm).trim() : '';
-
-  // Privilege escalation guard: Farm Managers can ONLY approve Members for their assigned block farm
-  if (isManager && !isSuperAdmin && !isSRAAdmin) {
-    if (assignedRole !== 'Member') {
-      return res.status(403).json({
-        success: false,
-        error: 'Permission Denied: Farm Managers are only authorized to approve cooperative Members.'
-      });
-    }
-    if (sessionUser.blockFarm) {
-      assignedBlockFarm = sessionUser.blockFarm;
-    }
-  }
-
-  const cleanContact = contact.replace(/\D/g, '');
-  let prefix = '04';
-  const roleLower = String(assignedRole).toLowerCase();
-  if (roleLower.includes('super admin')) prefix = '01';
-  else if (roleLower.includes('sra') || (roleLower.includes('admin') && !roleLower.includes('farm'))) prefix = '02';
-  else if (roleLower.includes('manager')) prefix = '03';
-  const employeeId = req.body.employeeId || `${prefix}${Math.floor(100000 + Math.random() * 900000)}`;
-
-  const roleKey = roleLower.includes('super') ? 'super_admin' : (roleLower.includes('sra') || (roleLower.includes('admin') && !roleLower.includes('farm')) ? 'sra_admin' : (roleLower.includes('manager') ? 'farm_manager' : 'member'));
-  const userPayload = {
-    employeeId,
-    contact: cleanContact,
-    name: name ? String(name).trim() : 'Approved Member',
-    role: assignedRole,
-    roleKey,
-    blockFarm: assignedBlockFarm,
-    blockFarmId: blockFarmId || '',
-    fieldId: fieldId || '',
-    status: 'Active',
-    approvedBy: sessionUser ? sessionUser.name : 'Administrator',
-    approvedAt: new Date().toISOString()
-  };
-
+router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
-    if (db) {
-      await db.collection('users').doc(employeeId || cleanContact).set(userPayload, { merge: true });
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const snapshot = await db.collection(COLLECTIONS.USERS).get();
+    const data = snapshot.docs.map(doc => {
+      return publicUser(doc.data(), doc.id);
+    });
+    return res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-      // 2-Way Symmetrical Synchronization: If Farm Manager assigned to a Block Farm, update block_farms
-      if (roleKey === 'farm_manager' && assignedBlockFarm) {
-        let bfTargetDoc = null;
-        if (blockFarmId) {
-          bfTargetDoc = db.collection('block_farms').doc(blockFarmId);
-        } else {
-          // Search by name
-          const bfSnap = await db.collection('block_farms').where('name', '==', assignedBlockFarm).limit(1).get();
-          if (!bfSnap.empty) {
-            bfTargetDoc = bfSnap.docs[0].ref;
-          }
-        }
+router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    let role = canonicalRole(req.body.role || ROLES.MEMBER_FARMER);
+    if (!role) throw new Error('role must be a canonical HUGPONG role.');
+    if (actorRole === ROLES.FARM_MANAGER && role !== ROLES.MEMBER_FARMER) {
+      return res.status(403).json({ success: false, error: 'Farm Managers may approve only Member Farmer accounts.' });
+    }
+    const userId = req.body.id ? requiredString(req.body.id, 'id', { max: 8 }) : createUserId(role);
+    if (!/^\d{8}$/.test(userId)) throw new Error('id must be an eight-digit HUGPONG user ID.');
+    const userRef = db.collection(COLLECTIONS.USERS).doc(userId);
+    const existingUser = await userRef.get();
+    const now = nowIso();
+    if (existingUser.exists) {
+      const current = existingUser.data();
+      if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
+      if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
+      const approved = {
+        ...current,
+        status: 'ACTIVE',
+        approvedByUserId: String(req.session.user.employeeId || '').trim(),
+        approvedAt: now,
+        updatedAt: now
+      };
+      await userRef.update({
+        status: approved.status,
+        approvedByUserId: approved.approvedByUserId,
+        approvedAt: approved.approvedAt,
+        updatedAt: approved.updatedAt
+      });
+      return res.json({ success: true, data: publicUser(approved, userId) });
+    }
+    const phone = requiredString(req.body.phone, 'phone', { max: 20 }).replace(/\D/g, '');
+    if (!/^09\d{9}$/.test(phone)) throw new Error('phone must be an 11-digit Philippine mobile number.');
+    const existing = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+    if (!existing.empty) return res.status(409).json({ success: false, error: 'phone is already registered.' });
+    validatePassword(req.body.password);
+    const phoneVerifiedAt = req.body.phoneVerified === true
+      && consumeVerifiedOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone)
+      ? now
+      : null;
+    const payload = {
+      displayName: requiredString(req.body.displayName, 'displayName', { max: 200 }),
+      phone,
+      role,
+      status: 'ACTIVE',
+      // Provisioned accounts verify their own registered phone through the
+      // authenticated server OTP flow. An administrator cannot assert this.
+      phoneVerifiedAt,
+      requiresPasswordChange: req.body.requiresPasswordChange !== false,
+      passwordChangedAt: req.body.passwordChangedAt || null,
+      approvedByUserId: String(req.session.user.employeeId || req.session.user.userId || '').trim(),
+      approvedAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
+    const passwordHash = await hashPassword(req.body.password);
+    const batch = db.batch();
+    batch.create(db.collection(COLLECTIONS.USERS).doc(userId), payload);
+    batch.create(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), {
+      passwordHash,
+      createdAt: now,
+      updatedAt: now
+    });
+    await batch.commit();
+    return res.status(201).json({ success: true, data: publicUser(payload, userId) });
+  } catch (error) {
+    const status = /already exists/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+});
 
-        if (bfTargetDoc) {
-          await bfTargetDoc.set({
-            farmManagerId: employeeId,
-            farmManagerName: userPayload.name,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        }
+router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const targetRef = db.collection(COLLECTIONS.USERS).doc(requiredString(req.params.userId, 'userId', { max: 80 }));
+    const targetSnapshot = await targetRef.get();
+    if (!targetSnapshot.exists) return res.status(404).json({ success: false, error: 'User was not found.' });
+    const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    const current = targetSnapshot.data();
+    const targetRole = canonicalRole(req.body.role || current.role);
+    if (!targetRole) throw new Error('role must be a canonical HUGPONG role.');
+    if (actorRole === ROLES.FARM_MANAGER && targetRole !== ROLES.MEMBER_FARMER) {
+      return res.status(403).json({ success: false, error: 'Farm Managers may update only Member Farmer accounts.' });
+    }
+    if (actorRole === ROLES.SRA_ADMIN && targetRole === ROLES.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: 'SRA Admins cannot update Super Admin accounts.' });
+    }
+    const phone = req.body.phone == null ? current.phone : String(req.body.phone).replace(/\D/g, '');
+    if (!/^09\d{9}$/.test(phone)) throw new Error('phone must be an 11-digit Philippine mobile number.');
+    if (phone !== current.phone) {
+      const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+      if (!duplicate.empty && duplicate.docs[0].id !== targetSnapshot.id) {
+        return res.status(409).json({ success: false, error: 'phone is already registered.' });
       }
     }
-    console.log(`[HUGPONG Users] User Approved: ${userPayload.name} (${userPayload.role}) -> Block Farm: ${assignedBlockFarm || 'Unassigned'}`);
-    return res.json({ success: true, data: userPayload });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    const phoneChanged = phone !== current.phone;
+    const phoneVerifiedAt = phoneChanged && req.body.phoneVerified === true
+      && consumeVerifiedOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone)
+      ? nowIso()
+      : (phoneChanged ? null : (current.phoneVerifiedAt || null));
+    const update = {
+      displayName: req.body.displayName == null ? current.displayName : requiredString(req.body.displayName, 'displayName', { max: 200 }),
+      phone,
+      role: targetRole,
+      status: req.body.status == null ? current.status : String(req.body.status).trim().toUpperCase(),
+      phoneVerifiedAt,
+      updatedAt: nowIso()
+    };
+    if (!['PENDING', 'ACTIVE', 'DISABLED'].includes(update.status)) throw new Error('status is invalid.');
+    await targetRef.update(update);
+    return res.json({ success: true, data: publicUser({ ...current, ...update }, targetSnapshot.id) });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 

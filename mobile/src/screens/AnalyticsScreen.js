@@ -48,24 +48,23 @@ export default function AnalyticsScreen({ navigation, route }) {
     return unsubscribe;
   }, []);
 
-  const isMember = session?.role === 'Member';
-  const isSRA = session?.role === 'SRA (Admin)';
+  const isMember = session?.role === 'Member Farmer';
+  const isSRA = session?.role === 'SRA Admin';
   const isManager = session?.role === 'Farm Manager';
 
   // 1. Scoped Fields by Role
   const scopedFields = React.useMemo(() => {
     if (isMember) {
-      const myFields = allFields.filter(f => f.member === session.name || f.memberId === session.employeeId);
-      return myFields.length > 0 ? myFields : allFields.slice(0, 1);
+      return allFields.filter(f => f.memberUserId === session.employeeId || f.memberUserId === session.id);
     }
     if (isSRA) {
       if (selectedBlockFarm === 'All') return allFields;
       return allFields.filter(f => resolveFieldBlockFarm(f) === selectedBlockFarm || f.blockFarmId === selectedBlockFarm);
     }
     // Farm Manager: scoped to assigned farm
-    const mgrFarm = session.blockFarm || session.farm || '';
-    const mgrFields = allFields.filter(f => resolveFieldBlockFarm(f) === mgrFarm || f.blockFarmId === session.blockFarmId );
-    return mgrFields.length > 0 ? mgrFields : allFields;
+    const managerUserId = session.employeeId || session.id;
+    const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === managerUserId).map(farm => farm.id));
+    return allFields.filter(field => managedFarmIds.has(field.blockFarmId));
   }, [isMember, isSRA, selectedBlockFarm, session.name, session.farm, session.employeeId, session.blockFarmId, allFields]);
 
   // Block farms list for SRA filter (from canonical block_farms collection)
@@ -125,15 +124,16 @@ export default function AnalyticsScreen({ navigation, route }) {
     const fieldAllLogs = logs.filter(l => {
       const fId = (l.fieldId || '').trim().toUpperCase();
       if (!activeFieldIds.includes(fId)) return false;
-      if (l.isDeleted || l.isDraft) return false;
+      if (l.isDraft) return false;
+      if (l.status !== 'ACTIVE' && l.status !== 'ARCHIVED') return false;
       return true;
     });
 
-    const pastLogs = fieldAllLogs.filter(l => Boolean(l.isPastCycle || l.isArchived || l.status === 'Archived'));
+    const pastLogs = fieldAllLogs.filter(l => l.status === 'ARCHIVED');
 
     // Filter submitted logs according to cycleFilter ('active' or 'all') and sort newest first
     const activeLogs = fieldAllLogs.filter(l => {
-      const isPast = Boolean(l.isPastCycle || l.isArchived || l.status === 'Archived');
+      const isPast = l.status === 'ARCHIVED';
       if (cycleFilter === 'active' && isPast) return false;
       if (!isMember && l.isOffline) return false;
       return true;
@@ -237,15 +237,16 @@ export default function AnalyticsScreen({ navigation, route }) {
   const memberCurrentStage = React.useMemo(() => {
     if (isMember) {
       const myField = scopedFields[0];
+      if (!myField) return null;
       const stageKey = myField ? matchFieldToStageKey(myField) : 'stage-2';
       const stageObj = SRA_GROWTH_STAGES.find(s => s.key === stageKey) || SRA_GROWTH_STAGES[1];
       return {
         ...stageObj,
-        fieldId: myField?.id || (fields[0]?.id || ''),
-        member: myField?.member || session.name,
-        ha: Number(myField?.ha || 1.5),
-        variety: myField?.variety || 'Phil 2006-2282',
-        blockFarm: myField?.blockFarm || (session.farm || session.blockFarm || 'Block Farm')
+        fieldId: myField.id,
+        member: resolveFieldMember(myField),
+        ha: Number(myField.ha || 0),
+        variety: myField.variety || '',
+        blockFarm: resolveFieldBlockFarm(myField)
       };
     }
     if (selectedFieldId !== 'All' && activeFields.length === 1) {
@@ -268,7 +269,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   const memberLogs = React.useMemo(() => {
     if (!isMember) return [];
     const myFieldIds = scopedFields.map(f => (f.id || '').trim().toUpperCase());
-    return logs.filter(l => myFieldIds.includes((l.fieldId || '').trim().toUpperCase()) && !l.isArchived && !l.isDeleted);
+    return logs.filter(l => myFieldIds.includes((l.fieldId || '').trim().toUpperCase()) && l.status === 'ACTIVE');
   }, [isMember, scopedFields, logs]);
 
   // Member cycle progress based on 6 stages with active operations
@@ -279,7 +280,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     const currentStageLogs = (logs || []).filter(l => 
       (l.fieldId || '').trim().toUpperCase() === (memberCurrentStage.fieldId || '').trim().toUpperCase() &&
       (l.stageNumber === stageNum || (l.stageName || '').toLowerCase().includes(`stage ${stageNum}`)) &&
-      !l.isPastCycle
+      l.status === 'ACTIVE'
     );
     const distinctLogged = new Set(currentStageLogs.map(l => l.sraOperationId || l.activity || l.operationName)).size;
     const activePlannedCount = (stageNum === 5 || stageNum === 6) ? 3 : 2;
@@ -1089,7 +1090,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                                 <Text style={{ fontSize: 10, fontWeight: '900', color: COLORS.primary }}>{log.sraOperationId}</Text>
                               </View>
                             )}
-                            {log.isPastCycle && (
+                            {log.status === 'ARCHIVED' && (
                               <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#E2E8F0' }}>
                                 <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#64748B' }}>Past Cycle</Text>
                               </View>

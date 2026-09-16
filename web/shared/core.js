@@ -13,9 +13,7 @@ try {
   sessionUser = activeUser;
 } catch (e) {}
 
-// ── CRYPTOGRAPHIC PASSWORD HASHING (SHA-256 + Salt) ───────
-const PASSWORD_SALT_PREFIX = 'hugpong_salt_2026:';
-
+// Generic SHA-256 utility for non-password integrity identifiers.
 function sha256(ascii) {
   function rightRotate(value, amount) { return (value >>> amount) | (value << (32 - amount)); }
   var words = [];
@@ -73,29 +71,16 @@ function sha256(ascii) {
   return result;
 }
 
-function hashPassword(plainPassword) {
-  if (!plainPassword) return '';
-  return sha256(PASSWORD_SALT_PREFIX + String(plainPassword));
-}
-
-const DEFAULT_SEED_PASSWORD_HASH = hashPassword('password123'); // e6ae0a8605ad39ce73bcfe4eb671f4e7fd4d58ebfcc4a477adefea318db9b972
-const DEFAULT_MASTER_PASSWORD_HASH = hashPassword('hugpong2026'); // e92f049beccbfc47312b7662d4742dc3beeeff8edd4b74c94af0601ab6b5188d
-
-function verifyPassword(inputPassword, storedHash) {
-  if (!inputPassword) return false;
-  const inputHash = hashPassword(inputPassword);
-  if (storedHash && storedHash.length === 64 && inputHash === storedHash) return true;
-  if (storedHash && storedHash.length < 64 && inputPassword === storedHash) return true;
-  if (inputHash === DEFAULT_SEED_PASSWORD_HASH || inputHash === DEFAULT_MASTER_PASSWORD_HASH) return true;
-  return false;
-}
-
 if (typeof window !== 'undefined') {
   window.sha256 = sha256;
-  window.hashPassword = hashPassword;
-  window.verifyPassword = verifyPassword;
-  window.DEFAULT_SEED_PASSWORD_HASH = DEFAULT_SEED_PASSWORD_HASH;
-  window.DEFAULT_MASTER_PASSWORD_HASH = DEFAULT_MASTER_PASSWORD_HASH;
+}
+function stripClientCredentialFields(value = {}) {
+  const safe = {};
+  for (const [key, fieldValue] of Object.entries(value || {})) {
+    if (/password|credential|salt|reset.*token/i.test(key)) continue;
+    safe[key] = fieldValue;
+  }
+  return safe;
 }
 
 // ── ASYNC BUTTON LOADING & SPINNER UTILITY ──────────────────
@@ -182,90 +167,20 @@ if (typeof window !== 'undefined') {
 }
 
 // ── TOKENIZATION & WEB AUTH SESSION PERSISTENCE ───────────
-function generateWebAuthToken(user) {
-  if (!user) return null;
-  const uid = String(user.employeeId || user.contact || user.id || 'USER').trim();
-  const rawRole = String(user.roleKey || user.role || 'admin').toLowerCase();
-  const roleKey = rawRole.includes('super') ? 'superadmin' : (rawRole.includes('manager') ? 'manager' : 'admin');
-  const now = Date.now();
-  // Rolling expiry: 7 days for admin/superadmin, 30 days for manager/member
-  const durationDays = roleKey.includes('admin') || roleKey.includes('super') ? 7 : 30;
-  const expiresAt = now + durationDays * 24 * 60 * 60 * 1000;
-  
-  const payload = {
-    uid,
-    role: roleKey,
-    name: user.name || '',
-    issuedAt: now,
-    expiresAt
-  };
-  
-  let payloadB64 = '';
-  try {
-    payloadB64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-  } catch(e) {
-    payloadB64 = btoa(JSON.stringify(payload));
-  }
-  const signature = hashPassword(`${uid}:${roleKey}:${expiresAt}:HUGPONG_WEB_SEC_2026`).slice(0, 16);
-  return `HUGPONG.${payloadB64}.${signature}`;
-}
-
-function verifyWebAuthToken(token) {
-  if (!token || typeof token !== 'string') {
-    return { valid: false, reason: 'empty_token' };
-  }
-  
-  // Support Base64 structured tokens
-  if (token.startsWith('HUGPONG.')) {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return { valid: false, reason: 'malformed_token' };
-    }
-    try {
-      let payloadJson = '';
-      try {
-        payloadJson = decodeURIComponent(escape(atob(parts[1])));
-      } catch(e) {
-        payloadJson = atob(parts[1]);
-      }
-      const payload = JSON.parse(payloadJson);
-      const signature = parts[2];
-      
-      if (!payload.expiresAt || Date.now() > payload.expiresAt) {
-        return { valid: false, reason: 'expired', expiresAt: payload.expiresAt };
-      }
-      
-      const expectedSig = hashPassword(`${payload.uid}:${payload.role}:${payload.expiresAt}:HUGPONG_WEB_SEC_2026`).slice(0, 16);
-      if (signature !== expectedSig) {
-        return { valid: false, reason: 'invalid_signature' };
-      }
-      return { valid: true, role: payload.role, uid: payload.uid, expiresAt: payload.expiresAt };
-    } catch (e) {
-      return { valid: false, reason: 'parse_error' };
-    }
-  }
-
-  // Fallback compatibility
-  if (token.startsWith('HUGPONG_TOK_')) {
-    return { valid: true, role: 'superadmin' };
-  }
-  
-  return { valid: false, reason: 'unknown_format' };
-}
-
-function saveWebAuthSession(user, roleKey) {
+function saveWebAuthSession(user, roleKey, serverToken = null) {
   if (!user) return null;
   const rawRole = String(roleKey || user.roleKey || user.role || 'admin').toLowerCase();
   const normalizedRole = rawRole.includes('super') ? 'superadmin' : (rawRole.includes('manager') ? 'manager' : 'admin');
   
-  const token = generateWebAuthToken({ ...user, roleKey: normalizedRole });
+  const token = serverToken || localStorage.getItem('hugpong_auth_token') || null;
+  const safeUser = stripClientCredentialFields(user);
   const sessionData = {
-    ...user,
+    ...safeUser,
     token,
     roleKey: normalizedRole,
     lastActiveAt: Date.now()
   };
-  localStorage.setItem('hugpong_auth_token', token);
+  if (token) localStorage.setItem('hugpong_auth_token', token);
   localStorage.setItem('hugpong_role', normalizedRole);
   localStorage.setItem('hugpong_user', JSON.stringify(sessionData));
   if (user.name) {
@@ -280,15 +195,8 @@ function getWebAuthSession() {
   const role = localStorage.getItem('hugpong_role');
   if (!userJson) return null;
 
-  if (token) {
-    const check = verifyWebAuthToken(token);
-    if (!check.valid && check.reason === 'expired') {
-      clearWebAuthSession();
-      return null;
-    }
-  }
   try {
-    const user = JSON.parse(userJson);
+    const user = stripClientCredentialFields(JSON.parse(userJson));
     return { user, token, roleKey: role || user.roleKey || 'superadmin' };
   } catch (e) {
     clearWebAuthSession();
@@ -303,12 +211,42 @@ function clearWebAuthSession() {
   localStorage.removeItem('hugpong_user_name');
 }
 
+async function authenticatedWebRequest(path, options = {}) {
+  const token = options.token || localStorage.getItem('hugpong_auth_token');
+  const response = await fetch(path, {
+    method: options.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    credentials: 'include'
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) throw new Error(result.error || 'Authenticated request was rejected.');
+  if (result.token) localStorage.setItem('hugpong_auth_token', result.token);
+  if (result.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
+    await window.signInHugpongWithCustomToken(result.firebaseCustomToken);
+  }
+  return result;
+}
+
+async function verifyCurrentWebPassword(password) {
+  try {
+    await authenticatedWebRequest('/auth/verify-password', { method: 'POST', body: { password } });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 if (typeof window !== 'undefined') {
-  window.generateWebAuthToken = generateWebAuthToken;
-  window.verifyWebAuthToken = verifyWebAuthToken;
   window.saveWebAuthSession = saveWebAuthSession;
   window.getWebAuthSession = getWebAuthSession;
   window.clearWebAuthSession = clearWebAuthSession;
+  window.authenticatedWebRequest = authenticatedWebRequest;
+  window.verifyCurrentWebPassword = verifyCurrentWebPassword;
 }
 // ── SRA REGULATORY CALENDAR & WEEK CALCULATION ─────────
 function parseLocalDate(dateInput) {
@@ -471,6 +409,7 @@ function getCanonicalInitialDB() {
   return {
     blockFarms: [],
     fields: [],
+    cropCycles: [],
     users: [],
     logs: [],
     priceHistory: [],
@@ -483,7 +422,7 @@ function getCanonicalInitialDB() {
 }
 
 function getDB() {
-  const CURRENT_DB_VERSION = '2026_09_13_clean_v5';
+  const CURRENT_DB_VERSION = '2026_09_16_canonical_v1';
   const savedVersion = localStorage.getItem('hugpong_db_version');
   const data = localStorage.getItem('hugpong_db');
   const canonical = getCanonicalInitialDB();
@@ -504,242 +443,17 @@ function getDB() {
     return canonical;
   }
 
-  let updated = false;
-  if (!parsed.blockFarms || !Array.isArray(parsed.blockFarms)) {
-    parsed.blockFarms = [];
-    updated = true;
-  }
-  if (!parsed.fields || !Array.isArray(parsed.fields)) {
-    parsed.fields = [];
-    updated = true;
-  }
-  if (!parsed.archivedFields || !Array.isArray(parsed.archivedFields)) {
-    parsed.archivedFields = [];
-    updated = true;
-  }
-  if (!parsed.logs || !Array.isArray(parsed.logs)) {
-    parsed.logs = [];
-    updated = true;
-  }
-  if (!parsed.users || !Array.isArray(parsed.users)) {
-    parsed.users = [];
-    updated = true;
-  }
-  if (!parsed.pendingUsers || !Array.isArray(parsed.pendingUsers) || (parsed.pendingUsers.length === 0 && canonical.pendingUsers && canonical.pendingUsers.length > 0)) {
-    parsed.pendingUsers = JSON.parse(JSON.stringify(canonical.pendingUsers || []));
-    updated = true;
-  }
-  if (!parsed.priceHistory || !Array.isArray(parsed.priceHistory)) {
-    parsed.priceHistory = [];
-    updated = true;
-  }
-  if (!parsed.systemHistory || !Array.isArray(parsed.systemHistory)) {
-    parsed.systemHistory = [];
-    updated = true;
-  }
-  if (!parsed.registryHistory || !Array.isArray(parsed.registryHistory)) {
-    parsed.registryHistory = [];
-    updated = true;
-  }
-  if (!parsed.supportTickets || !Array.isArray(parsed.supportTickets)) {
-    parsed.supportTickets = [];
-    updated = true;
-  }
-  if (!parsed.terminalDiagnostics || !Array.isArray(parsed.terminalDiagnostics)) {
-    parsed.terminalDiagnostics = [];
-    updated = true;
-  }
-  if (!parsed.auditReports || !Array.isArray(parsed.auditReports)) {
-    parsed.auditReports = [];
-    updated = true;
-  } else {
-    const origLen = parsed.auditReports.length;
-    parsed.auditReports = parsed.auditReports.filter(r => {
-      const p = (r.period || r.month || '').toLowerCase();
-      if (p.includes('may 2026') || r.id === 'AUD-2026-09' || r.id === 'RPT-2026-05-NCY01' || r.id === 'AUD-2026-0001') {
-        return false;
-      }
-      return true;
-    });
-    if (parsed.auditReports.length !== origLen) {
-      updated = true;
-    }
-  }
-      const initialSeedIds = new Set(['LOG-2026-NCY-001-001', 'LOG-2026-NCY-002-001', 'LOG-2026-NCY-003-001', 'LOG-2026-NCY-004-001', 'LOG-2026-NCY-005-001']);
-      parsed.logs = cleanupDuplicateLogs(parsed.logs);
-      parsed.logs.forEach(l => {
-        let costVal = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-        // Repair 0 cost for cutting & loading operations
-        const opName = (l.sraOperationId || l.task || l.activity || '').toLowerCase();
-        if (costVal === 0 && (opName.includes('cutting') || opName.includes('loading') || opName.includes('sra-11') || opName.includes('harvest'))) {
-          const ha = Number(l.hectares) || 1.5;
-          costVal = Math.round(ha * 60 * 450); // 60 tons/ha @ 450 = 27,000/ha -> 40,500
-          l.subItems = [{
-            id: 'SI-DIR-REPAIR',
-            description: 'Cutting and Loading Operations (60 tons/ha @ ₱450/ton)',
-            qty: Math.round(ha * 60),
-            unit: 'ton',
-            unitCost: 450,
-            subTotal: costVal
-          }];
-          updated = true;
-        }
-        l.cost = costVal;
-        l.totalCost = costVal;
-        if (l.date || l.period) {
-          l.date = formatDisplayDate(l.date || l.period);
-          l.period = l.date;
-          l.isoDate = toISODateString(l.date);
-        }
-        if (l.isAmended && l.status === 'Recorded') {
-          l.status = 'Amended';
-          updated = true;
-        }
-        if (l.id === 'LOG-2026-NCY-004-001' && !l.actionSource) {
-          l.loggedBy = (activeUser?.name ? `${activeUser.name} (Farm Manager)` : 'Farm Manager');
-          l.loggedById = '03000001';
-          l.actionSource = 'takeover';
-          updated = true;
-        }
-      });
-
-  // Filter out legacy/mock fields that are archived or from other block farms
-  if (Array.isArray(parsed.fields)) {
-    const beforeCount = parsed.fields.length;
-    const archivedIds = new Set((parsed.archivedFields || []).map(f => (typeof f === 'string' ? f : f.id).toUpperCase()));
-    parsed.fields = parsed.fields.filter(f => {
-      if (!f || !f.id) return false;
-      const fIdUpper = f.id.toUpperCase();
-      if (f.id.startsWith('FLD-KTR') || f.id.startsWith('FLD-VIC') || f.id.startsWith('FLD-TLS') || f.id.startsWith('FLD-MNP')) return false;
-      if (archivedIds.has(fIdUpper) || f.isArchived === true || f.status === 'Archived') {
-        archivedIds.add(fIdUpper);
-        if (!parsed.archivedFields.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === fIdUpper)) {
-          parsed.archivedFields.push({ ...f, isArchived: true, status: 'Archived' });
-        }
-        return false;
-      }
-      return true;
-    });
-    if (parsed.fields.length !== beforeCount) updated = true;
-  }
-  if (Array.isArray(parsed.blockFarms)) {
-    const beforeBF = parsed.blockFarms.length;
-    parsed.blockFarms = parsed.blockFarms.filter(b => b.id && b.id !== 'BLK-VIC-01' && b.id !== 'BLK-TLS-01' && b.id !== 'BLK-MNP-01' && !b.name?.includes('Block Farm B') && !b.name?.includes('Block Farm C') && !b.name?.includes('Block Farm D'));
-    if (parsed.blockFarms.length !== beforeBF) updated = true;
-  }
-
-  // Remove duplicates by field ID if any exist
-  if (parsed.fields.length > 0) {
-    const uniqueFields = [];
-    const seenFieldIds = new Set();
-    parsed.fields.forEach(f => {
-      if (f.id && !seenFieldIds.has(f.id)) {
-        seenFieldIds.add(f.id);
-        uniqueFields.push(f);
-      }
-    });
-    if (uniqueFields.length !== parsed.fields.length) {
-      parsed.fields = uniqueFields;
-      updated = true;
-    }
-  }
-
-  if (Array.isArray(parsed.systemHistory)) {
-    parsed.systemHistory.forEach(h => {
-      if (h.status === 'Completed') {
-        h.status = 'Recorded';
-        updated = true;
-      }
-      if (h.details && /\bparcel\b/i.test(h.details)) {
-        h.details = h.details.replace(/\bfield parcel\b/gi, 'field plot').replace(/\bplot parcel\b/gi, 'field plot').replace(/\bparcels\b/gi, 'plots').replace(/\bparcel\b/gi, 'plot');
-        updated = true;
-      }
-      if (h.entity && /\bparcel\b/i.test(h.entity)) {
-        h.entity = h.entity.replace(/\bfield parcel\b/gi, 'field plot').replace(/\bplot parcel\b/gi, 'field plot').replace(/\bparcels\b/gi, 'plots').replace(/\bparcel\b/gi, 'plot');
-        updated = true;
-      }
-      if (h.eventType && /\bparcel\b/i.test(h.eventType)) {
-        h.eventType = h.eventType.replace(/\bfield parcel\b/gi, 'field plot').replace(/\bplot parcel\b/gi, 'field plot').replace(/\bparcels\b/gi, 'plots').replace(/\bparcel\b/gi, 'plot');
-        updated = true;
-      }
-    });
-  }
-
-  if (Array.isArray(parsed.registryHistory)) {
-    parsed.registryHistory.forEach(r => {
-      if (r.action && /\bparcel\b/i.test(r.action)) {
-        r.action = r.action.replace(/\bfield parcel\b/gi, 'field plot').replace(/\bplot parcel\b/gi, 'field plot').replace(/\bparcels\b/gi, 'plots').replace(/\bparcel\b/gi, 'plot');
-        updated = true;
-      }
-    });
-  }
-
-  // Normalize operational logs (No Pending/Approved in HUGPONG - always Recorded/Certified)
-  if (Array.isArray(parsed.logs)) {
-    parsed.logs.forEach(l => {
-      if (l.status === 'Approved' || l.status === 'Pending' || l.status === 'pending' || l.status === 'approved' || l.status === 'In Review' || l.status === '3 in Review') {
-        l.status = 'Recorded';
-        updated = true;
-      }
-      if (l.fieldId && l.fieldId.startsWith('FLD-KTR')) {
-        // Remap legacy FLD-KTR IDs
-        l.fieldId = l.fieldId
-          // Legacy KTR IDs are remapped at import time; no static remap needed here.
-        updated = true;
-      }
-      if (l.task === 'Chemical spray' || l.activity === 'Chemical spray') {
-        l.activity = 'Basal Fertilization & Amending';
-        l.task = 'Basal Fertilization & Amending';
-        l.sraOperationId = 'SRA-06';
-        updated = true;
-      }
-      if (l.task === 'Harvesting labor' || l.activity === 'Harvesting labor') {
-        l.activity = 'Cutting and Loading';
-        l.task = 'Cutting and Loading';
-        l.sraOperationId = 'SRA-12';
-        updated = true;
-      }
-      if (l.task === 'Harvesting transport' || l.activity === 'Harvesting transport') {
-        l.activity = 'Hauling (Trucking)';
-        l.task = 'Hauling (Trucking)';
-        l.sraOperationId = 'SRA-13';
-        updated = true;
-      }
-    });
-  }
-
-  // Auto-reconcile past-cycle logs: Preserve authentic active vs past cycle segregation
-  if (Array.isArray(parsed.logs)) {
-    parsed.logs.forEach(l => {
-      if (!l) return;
-      const isPastRecord = Boolean(
-        l.isPastCycle === true ||
-        l.isPastCycle === 'true' ||
-        l.isArchived === true ||
-        l.status === 'Archived' ||
-        (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-      );
-
-      if (isPastRecord) {
-        if (!l.isPastCycle || !l.isArchived) {
-          l.isPastCycle = true;
-          l.isArchived = true;
-          updated = true;
-        }
-      } else {
-        if (l.isPastCycle !== false || l.isArchived !== false) {
-          l.isPastCycle = false;
-          l.isArchived = false;
-          updated = true;
-        }
-      }
-    });
-  }
-
-  if (updated) {
-    localStorage.setItem('hugpong_db', JSON.stringify(parsed));
-  }
-
+  const canonicalArrayKeys = ['blockFarms', 'fields', 'archivedFields', 'cropCycles', 'logs', 'users', 'pendingUsers',
+    'priceHistory', 'systemHistory', 'registryHistory', 'supportTickets', 'terminalDiagnostics', 'auditReports', 'securityLogs'];
+  canonicalArrayKeys.forEach(key => { if (!Array.isArray(parsed[key])) parsed[key] = []; });
+  parsed.users = parsed.users.map(stripClientCredentialFields);
+  parsed.pendingUsers = parsed.pendingUsers.map(stripClientCredentialFields);
+  parsed.logs = cleanupDuplicateLogs(parsed.logs).filter(log =>
+    log && log.cycleId && (log.status === 'ACTIVE' || log.status === 'ARCHIVED')
+  );
+  parsed.auditReports = parsed.auditReports.filter(report =>
+    report && (report.status === 'PENDING' || report.status === 'CERTIFIED')
+  );
   return parsed;
 }
 
@@ -757,70 +471,27 @@ function saveDB(db, syncToCloud = true) {
 }
 
 async function syncLocalChangesToFirestore(db) {
-  if (!window.firestore || !window.firebaseDB) return;
+  if (!window.firestore || !window.firebaseDB || !window.HugpongSchema) return;
   const { doc, setDoc } = window.firestore;
   const fDb = window.firebaseDB;
+  const schema = window.HugpongSchema;
 
   // 1. Sync fields
   if (Array.isArray(db.fields)) {
     for (const f of db.fields) {
       if (f.id) {
-        const payload = {
-          id: f.id,
-          blockFarmId: f.blockFarmId || (db.blockFarms?.[0]?.id || ''),
-          blockFarmName: f.blockFarmName || f.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm'),
-          blockFarm: f.blockFarm || f.blockFarmName || (db.blockFarms?.[0]?.name || 'Block Farm'),
-          memberId: f.memberId || f.contact || '',
-          memberName: f.memberName || f.member || 'Member',
-          ha: Number(f.ha || f.area) || 1.5,
-          stage: f.stage || 'Pre-Planting & Land Preparation',
-          stageNumber: Number(f.stageNumber) || (typeof getFieldStageNumber === 'function' ? getFieldStageNumber(f) : 1),
-          month: Number(f.month) || 0.5,
-          batchMonth: Number(f.batchMonth) || 1,
-          synced: true,
-          lastSync: f.lastSync || 'Just now',
-          variety: f.variety || 'VMC 84-524',
-          soilType: f.soilType || 'Clay Loam',
-          updatedAt: new Date().toISOString()
-        };
-        if (Array.isArray(f.customStages)) payload.customStages = f.customStages;
-        if (f.customOperations && typeof f.customOperations === 'object') payload.customOperations = f.customOperations;
-        await setDoc(doc(fDb, 'fields', f.id), payload, { merge: true });
+        await setDoc(doc(fDb, schema.COLLECTIONS.FIELDS, f.id), schema.toField(f));
       }
     }
   }
 
-  // 2. Sync users
-  if (Array.isArray(db.users)) {
-    for (const u of db.users) {
-      const cleanContact = (u.contact || u.employeeId || '').replace(/\D/g, '');
-      if (cleanContact) {
-        const payload = {
-          employeeId: u.employeeId || cleanContact,
-          contact: (u.contact || cleanContact).replace(/\D/g, ''),
-          name: u.name || 'User',
-          role: u.role || 'Member',
-          roleKey: u.roleKey || (u.role === 'Super Admin' ? 'super_admin' : (u.role === 'Farm Manager' ? 'farm_manager' : (u.role === 'SRA (Admin)' ? 'sra_admin' : 'member'))),
-          blockFarmId: u.blockFarmId || (u.blockFarm?.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")) ? (db.blockFarms?.[0]?.id || '') : ''),
-          blockFarm: u.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm'),
-          fieldId: u.fieldId || '',
-          regDate: u.regDate || new Date().toISOString().split('T')[0],
-          passwordHash: u.passwordHash || (u.password ? hashPassword(u.password) : DEFAULT_SEED_PASSWORD_HASH),
-          updatedAt: new Date().toISOString()
-        };
-        const docId = u.employeeId || cleanContact;
-        await setDoc(doc(fDb, 'users', docId), payload, { merge: true });
-      }
-    }
-  }
+  // 2. User profiles and credentials are mutated only through Express APIs.
 
   // 3. Sync block farms
   if (Array.isArray(db.blockFarms)) {
     for (const b of db.blockFarms) {
       if (b.id) {
-        const bfPayload = { ...b, updatedAt: new Date().toISOString() };
-        delete bfPayload.activePlots;
-        await setDoc(doc(fDb, 'block_farms', b.id), bfPayload, { merge: true });
+        await setDoc(doc(fDb, schema.COLLECTIONS.BLOCK_FARMS, b.id), schema.toBlockFarm(b));
       }
     }
   }
@@ -829,28 +500,15 @@ async function syncLocalChangesToFirestore(db) {
   if (Array.isArray(db.priceHistory)) {
     for (const p of db.priceHistory) {
       const pId = p.id || `PRC-${(p.date || '').replace(/\D/g, '') || Date.now()}`;
-      await setDoc(doc(fDb, 'sra_prices', pId), { ...p, id: pId }, { merge: true });
+      await setDoc(doc(fDb, schema.COLLECTIONS.SRA_PRICES, pId), schema.toPrice(p, activeUser?.employeeId || activeUser?.id || ''));
     }
   }
 
   // 5. Sync operation logs
   if (Array.isArray(db.logs)) {
     for (const l of db.logs) {
-      if (l.id) {
-        const effCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-        const logPayload = { 
-          ...l, 
-          cost: effCost,
-          totalCost: effCost,
-          date: formatDisplayDate(l.date || l.period),
-          period: formatDisplayDate(l.date || l.period),
-          isoDate: toISODateString(l.date || l.period),
-          synced: true, 
-          syncedAt: new Date().toISOString() 
-        };
-        if (!logPayload.loggedById && l.memberId) logPayload.loggedById = l.memberId;
-        logPayload.hectares = Number(logPayload.hectares) || 1.5;
-        await setDoc(doc(fDb, 'operation_logs', l.id), logPayload, { merge: true });
+      if (l.id && l.cycleId && (l.status === 'ACTIVE' || l.status === 'ARCHIVED')) {
+        await setDoc(doc(fDb, schema.COLLECTIONS.OPERATION_LOGS, l.id), schema.toOperation(l));
       }
     }
   }
@@ -859,7 +517,16 @@ async function syncLocalChangesToFirestore(db) {
   if (Array.isArray(db.supportTickets)) {
     for (const t of db.supportTickets) {
       if (t.id) {
-        await setDoc(doc(fDb, 'support_tickets', t.id), { ...t, synced: true, syncedAt: new Date().toISOString() }, { merge: true });
+        await setDoc(doc(fDb, schema.COLLECTIONS.SUPPORT_TICKETS, t.id), schema.toTicket(t, activeUser?.employeeId || activeUser?.id || ''));
+      }
+    }
+  }
+
+  if (Array.isArray(db.auditReports)) {
+    for (const report of db.auditReports) {
+      const reportId = report.reportId || report.id;
+      if (reportId && (report.status === 'PENDING' || report.status === 'CERTIFIED')) {
+        await setDoc(doc(fDb, schema.COLLECTIONS.AUDIT_REPORTS, reportId), schema.toReport(report));
       }
     }
   }
@@ -870,18 +537,10 @@ let firestoreSyncInitialized = false;
 // ── Relational Derivation Resolvers ──────────────────────────
 function resolveFieldMember(field, db = null) {
   if (!field) return 'Unassigned';
-  if (field.member && typeof field.member === 'string' && field.member.length > 0 && field.member !== 'Unassigned') return field.member;
-  if (field.memberName && typeof field.memberName === 'string' && field.memberName.length > 0 && field.memberName !== 'Unassigned') return field.memberName;
-  if (field.owner && typeof field.owner === 'string' && field.owner.length > 0 && field.owner !== 'Unassigned') return field.owner;
 
   const currentDb = db || (typeof getDB === 'function' ? getDB() : null);
   if (currentDb && Array.isArray(currentDb.users)) {
-    const u = currentDb.users.find(usr => 
-      usr.employeeId === field.memberId || 
-      usr.contact === field.memberId || 
-      usr.fieldId === field.id ||
-      (usr.role === 'Member' && usr.fieldId === field.id)
-    );
+    const u = currentDb.users.find(usr => (usr.id || usr.employeeId) === field.memberUserId);
     if (u && u.name) return u.name;
   }
 
@@ -892,29 +551,7 @@ function resolveFieldMember(field, db = null) {
 
 function resolveFieldMemberId(field, db = null) {
   if (!field) return '';
-  if (field.memberId && typeof field.memberId === 'string' && field.memberId.trim().length > 0 && field.memberId !== '04XXXXXX') {
-    return field.memberId.trim();
-  }
-  if (field.userId && typeof field.userId === 'string' && field.userId.trim().length > 0) {
-    return field.userId.trim();
-  }
-
-  const currentDb = db || (typeof getDB === 'function' ? getDB() : null);
-  const memberName = field.member || field.memberName || field.owner || (typeof resolveFieldMember === 'function' ? resolveFieldMember(field, currentDb) : '');
-
-  if (typeof findUserByIdOrContact === 'function') {
-    const u = findUserByIdOrContact(field.memberId || field.memberContact || memberName || field.id);
-    if (u && (u.employeeId || u.contact)) return u.employeeId || u.contact;
-  }
-
-  if (currentDb && Array.isArray(currentDb.users)) {
-    const u = currentDb.users.find(usr => 
-      (usr.fieldId && usr.fieldId === field.id) ||
-      (memberName && usr.name && usr.name.toLowerCase() === memberName.toLowerCase()) ||
-      (field.memberContact && (usr.contact === field.memberContact || usr.mobile === field.memberContact))
-    );
-    if (u && (u.employeeId || u.contact)) return u.employeeId || u.contact;
-  }
+  return String(field.memberUserId || '').trim();
 
   // No static ID fallback map — DB resolution above handles field-to-memberId lookup
 
@@ -923,28 +560,42 @@ function resolveFieldMemberId(field, db = null) {
 
 function resolveFieldBlockFarm(field, db = null) {
   if (!field) return 'Unassigned';
-  if (field.blockFarm && typeof field.blockFarm === 'string' && field.blockFarm.length > 0) return field.blockFarm;
   const currentDb = db || (typeof getDB === 'function' ? getDB() : null);
   if (currentDb && Array.isArray(currentDb.blockFarms) && currentDb.blockFarms.length > 0) {
-    const bf = currentDb.blockFarms.find(b => b.id === field.blockFarmId || b.code === field.blockFarmId);
+    const bf = currentDb.blockFarms.find(b => b.id === field.blockFarmId);
     if (bf) return bf.name;
-    return currentDb.blockFarms[0].name;
   }
-  return (db.blockFarms?.[0]?.name || 'Block Farm');
+  return 'Unassigned';
 }
 
 function resolveBlockFarmManager(blockFarm, db = null) {
   if (!blockFarm) return 'Assigned Farm Manager';
   const currentDb = db || (typeof getDB === 'function' ? getDB() : null);
   if (currentDb && Array.isArray(currentDb.users)) {
-    const mgr = currentDb.users.find(u => u.employeeId === blockFarm.farmManagerId || u.contact === blockFarm.farmManagerId || (u.role === 'Farm Manager' && (u.blockFarmId === blockFarm.id || u.blockFarm === blockFarm.name)));
+    const mgr = currentDb.users.find(u => (u.id || u.employeeId) === blockFarm.managerUserId);
     if (mgr) return mgr.name;
   }
-  return (activeUser?.name || 'Farm Manager');
+  return 'Pending Appointment';
+}
+
+function getSessionUser() {
+  if (typeof getWebAuthSession === 'function') {
+    const session = getWebAuthSession();
+    if (session?.user) return session.user;
+  }
+  try { return JSON.parse(localStorage.getItem('hugpong_user')) || null; } catch (e) { return null; }
+}
+
+function resolveManagedBlockFarm(db = null, user = null) {
+  const currentDb = db || (typeof getDB === 'function' ? getDB() : null);
+  const currentUser = user || getSessionUser();
+  const userId = currentUser?.id || currentUser?.employeeId || '';
+  if (!userId || !Array.isArray(currentDb?.blockFarms)) return null;
+  return currentDb.blockFarms.find(farm => farm.managerUserId === userId) || null;
 }
 
 function initFirestoreRealtimeSync() {
-  if (firestoreSyncInitialized || !window.firebaseDB || !window.firestore) return;
+  if (firestoreSyncInitialized || !window.firebaseDB || !window.firestore || !window.firebaseAuth?.currentUser) return;
   firestoreSyncInitialized = true;
   const { collection, onSnapshot } = window.firestore;
   const fDb = window.firebaseDB;
@@ -955,10 +606,9 @@ function initFirestoreRealtimeSync() {
 
   // 1. Listen on Block Farms
   onSnapshot(collection(fDb, 'block_farms'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remoteBF = [];
-    snapshot.forEach(docSnap => remoteBF.push({ id: docSnap.id, ...docSnap.data() }));
+    snapshot.forEach(docSnap => remoteBF.push(window.HugpongSchema.fromBlockFarm(docSnap.id, docSnap.data())));
 
     db.blockFarms = remoteBF;
     saveDB(db, false);
@@ -966,80 +616,30 @@ function initFirestoreRealtimeSync() {
     if (typeof renderBlockFarms === 'function') renderBlockFarms();
   }, (err) => console.warn('[Firestore] block_farms listener notice:', err));
 
+  onSnapshot(collection(fDb, window.HugpongSchema.COLLECTIONS.CROP_CYCLES), (snapshot) => {
+    const db = getDB();
+    db.cropCycles = [];
+    snapshot.forEach(docSnap => db.cropCycles.push({ id: docSnap.id, ...docSnap.data() }));
+    db.fields = (db.fields || []).map(field => {
+      const cycle = db.cropCycles.find(item => item.id === field.currentCycleId);
+      return window.HugpongSchema.fromField(field.id, field, cycle);
+    });
+    saveDB(db, false);
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (typeof renderOperations === 'function') renderOperations();
+  }, (err) => console.warn('[Firestore] crop_cycles listener notice:', err));
+
   // 2. Listen on Fields
   onSnapshot(collection(fDb, 'fields'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
-    const remoteFields = [];
-    const archivedList = Array.isArray(db.archivedFields) ? [...db.archivedFields] : [];
-    const archivedIds = new Set(archivedList.map(f => (typeof f === 'string' ? f : f.id).toUpperCase()));
-
+    const allFields = [];
     snapshot.forEach(docSnap => {
-      const data = { id: docSnap.id, ...docSnap.data() };
-      // Normalize member name: Firestore may store it as memberName
-      if (!data.member && data.memberName) data.member = data.memberName;
-      if (!data.memberName && data.member) data.memberName = data.member;
-
-      const docIdUpper = docSnap.id.toUpperCase();
-      if (data.isArchived === true || data.status === 'Archived' || archivedIds.has(docIdUpper)) {
-        archivedIds.add(docIdUpper);
-        if (!archivedList.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === docIdUpper)) {
-          archivedList.push({ ...data, isArchived: true, status: 'Archived' });
-        }
-      } else {
-        remoteFields.push(data);
-      }
+      const value = docSnap.data();
+      const cycle = (db.cropCycles || []).find(item => item.id === value.currentCycleId);
+      allFields.push(window.HugpongSchema.fromField(docSnap.id, value, cycle));
     });
-
-    db.archivedFields = archivedList;
-    db.fields = remoteFields;
-
-    // Auto-reconcile field cycle transitions: If a field was reset to Stage 1 or started a new cycle,
-    // ensure past logs for this field with older cycle number or marked archived are kept archived
-    if (Array.isArray(db.logs)) {
-      remoteFields.forEach(rf => {
-        if (rf && rf.id) {
-          const rfIdUpper = rf.id.toUpperCase();
-          const fieldLogs = db.logs.filter(l => l && l.fieldId && l.fieldId.toUpperCase() === rfIdUpper && !l.isDeleted);
-          fieldLogs.sort((a, b) => {
-            const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
-            const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
-            if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
-            return (b.id || '').localeCompare(a.id || '');
-          });
-          const seenActiveTaskKeys = new Set();
-          fieldLogs.forEach(l => {
-            const taskKey = (l.taskId || l.sraOperationId || l.task || l.activity || '').toLowerCase().trim();
-            const isPast = Boolean(
-              l.isPastCycle === true ||
-              l.isPastCycle === 'true' ||
-              l.isArchived === true ||
-              l.status === 'Archived' ||
-              l.status === 'Certified' ||
-              (typeof l.id === 'string' && l.id.startsWith('PAST-')) ||
-              (l.date && l.date.includes('2025')) ||
-              (Number(l.totalCost || l.cost) === 4200) ||
-              (l.amendedCount > 0 || (Array.isArray(l.amendments) && l.amendments.length > 0)) ||
-              (Number(rf.cycleNumber) > 1 && l.cycleNumber && Number(l.cycleNumber) < Number(rf.cycleNumber)) ||
-              (Number(rf.cycleNumber) > 1 && seenActiveTaskKeys.has(taskKey))
-            );
-            if (isPast) {
-              l.isPastCycle = true;
-              l.isArchived = true;
-              l.cycleNumber = 1;
-            } else {
-              if (taskKey) seenActiveTaskKeys.add(taskKey);
-              if (!l.cycleNumber || Number(l.cycleNumber) < (Number(rf.cycleNumber) || 1)) {
-                l.cycleNumber = Number(rf.cycleNumber) || 1;
-              }
-              l.isPastCycle = false;
-              l.isArchived = false;
-            }
-          });
-        }
-      });
-    }
-
+    db.fields = allFields.filter(field => field.status === 'ACTIVE');
+    db.archivedFields = allFields.filter(field => field.status === 'ARCHIVED');
     saveDB(db, false);
     if (typeof renderDashboard === 'function') renderDashboard();
     if (typeof renderFields === 'function') renderFields();
@@ -1047,45 +647,7 @@ function initFirestoreRealtimeSync() {
     if (typeof renderManager === 'function') renderManager();
     if (typeof renderEfficiency === 'function') renderEfficiency();
     if (typeof renderSync === 'function') renderSync();
-    if (activeTakeOverFieldId && typeof renderTakeOverTimeline === 'function') {
-      const modal = document.getElementById('takeover-modal');
-      if (modal && !modal.classList.contains('hidden')) {
-        const updatedF = remoteFields.find(f => f.id === activeTakeOverFieldId);
-        if (updatedF) {
-          const raw = (Array.isArray(updatedF.customStages) && updatedF.customStages.length > 0)
-            ? updatedF.customStages
-            : SRA_STANDARD_STAGES;
-          const targetStageNum = getFieldStageNumber(updatedF);
-          const isFieldCompleted = Boolean(
-            updatedF.isCompleted ||
-            targetStageNum > 6 ||
-            (updatedF.stage || '').toLowerCase().includes('complete')
-          );
-          activeTakeOverStages = raw.map((s, idx) => {
-            const sNum = s.stageNumber || s.stageNum || (idx + 1);
-            const standardRef = SRA_STANDARD_STAGES.find(std => std.stageNum === sNum || std.id === s.id) || SRA_STANDARD_STAGES[idx] || {};
-            const rawName = s.name || s.stageName || (s.label ? s.label.replace(/^Stage\s*\d+:\s*/i, '') : '') || standardRef.short || standardRef.label?.replace(/^Stage\s*\d+:\s*/i, '') || `Stage ${sNum}`;
-            const stageLabel = s.label || (rawName.startsWith('Stage ') ? rawName : `Stage ${sNum}: ${rawName}`);
-            const stageShort = s.short || s.shortLabel || standardRef.short || rawName.slice(0, 15);
-            const stageColor = s.color || standardRef.color || '#2D5016';
-            return {
-              ...s,
-              id: stageId,
-              stageNum: sNum,
-              stageNumber: sNum,
-              label: stageLabel,
-              name: rawName,
-              stageName: stageLabel,
-              short: stageShort,
-              color: stageColor,
-              done: isFieldCompleted || sNum < targetStageNum,
-              active: !isFieldCompleted && sNum === targetStageNum
-            };
-          });
-        }
-        renderTakeOverTimeline();
-      }
-    }
+   return;
   }, (err) => console.warn('[Firestore] fields listener notice:', err));
 
   // Listen to remote operation logs collection (Strict parity with Mobile)
@@ -1093,71 +655,16 @@ function initFirestoreRealtimeSync() {
     const db = getDB();
     const remoteLogs = [];
     const remoteIds = new Set();
-    const localNewSet = new Set((db.logs || []).filter(l => l.isNew).map(l => l.id));
-    const localPastSet = new Set((db.logs || []).filter(l => l.isPastCycle || l.isArchived).map(l => l.id));
-    
-    const deletedSet = new Set(db.deletedLogIds || []);
-    
     snapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.isDeleted === true || deletedSet.has(docSnap.id)) {
-        deletedSet.add(docSnap.id);
-        return;
-      }
+      const value = docSnap.data();
+      if (!value.cycleId || (value.status !== 'ACTIVE' && value.status !== 'ARCHIVED')) return;
       remoteIds.add(docSnap.id);
-      if (localNewSet.has(data.id)) {
-        data.isNew = true;
-      }
-      const targetF = (db.fields || []).find(f => f.id === data.fieldId);
-      
-      const isPast = Boolean(
-        data.isPastCycle === true ||
-        data.isPastCycle === 'true' ||
-        data.isArchived === true ||
-        data.status === 'Archived' ||
-        (typeof data.id === 'string' && data.id.startsWith('PAST-')) ||
-        (localPastSet.has(data.id) && data.isPastCycle !== false && data.status !== 'Approved' && data.status !== 'Pending' && data.status !== 'Certified') ||
-        (targetF && Number(targetF.cycleNumber) > 1 && data.cycleNumber && Number(data.cycleNumber) < Number(targetF.cycleNumber))
-      );
-      if (isPast) {
-        data.isPastCycle = true;
-        data.isArchived = true;
-        data.cycleNumber = 1;
-      } else {
-        data.cycleNumber = data.cycleNumber || (targetF ? Number(targetF.cycleNumber) || 1 : 1);
-        data.isPastCycle = false;
-        data.isArchived = false;
-      }
-      const effCost = Number(data.totalCost != null ? data.totalCost : (data.cost || 0));
-      data.cost = effCost;
-      data.totalCost = effCost;
-      if (data.date || data.period) {
-        data.date = formatDisplayDate(data.date || data.period);
-        data.period = data.date;
-        data.isoDate = toISODateString(data.date);
-      }
-      remoteLogs.push(data);
+      remoteLogs.push(window.HugpongSchema.fromOperation(docSnap.id, value));
     });
-
-    db.deletedLogIds = Array.from(deletedSet);
-
-    // Merge remote logs with existing local logs, preserving local logs not yet in cloud!
-    const localOnly = (db.logs || []).filter(l => !remoteIds.has(l.id) && !l.isArchived && !l.isDeleted && !deletedSet.has(l.id));
-
-    // Preserve past-cycle/archived logs: Firestore snapshot excludes them, so without this
-    // they vanish from the local DB on every sync — causing old-cycle ops to look like new-cycle entries.
-    const preservedPastLogs = (db.logs || []).filter(l =>
-      (l.isPastCycle === true || l.isArchived === true) && !l.isDeleted && !deletedSet.has(l.id) && !remoteIds.has(l.id)
+    const canonicalLocalOnly = (db.logs || []).filter(log =>
+      log && log.id && log.cycleId && log.status === 'ACTIVE' && log.synced === false && !remoteIds.has(log.id)
     );
-
-    if (localOnly.length > 0 && fDb) {
-      localOnly.forEach(l => {
-        setDoc(doc(fDb, 'operation_logs', l.id), { ...l, synced: true, syncedAt: new Date().toISOString() }, { merge: true }).catch(e => console.warn(e));
-      });
-    }
-
-    const merged = [...remoteLogs, ...localOnly, ...preservedPastLogs];
-    db.logs = cleanupDuplicateLogs(merged);
+    db.logs = cleanupDuplicateLogs([...remoteLogs, ...canonicalLocalOnly]);
     saveDB(db, false);
     historyCurrentPage = 1;
     logCurrentPage = 1;
@@ -1169,14 +676,14 @@ function initFirestoreRealtimeSync() {
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderProductionCostChart === 'function') renderProductionCostChart();
     if (typeof renderFarmOperationsChart === 'function') renderFarmOperationsChart();
+   return;
   }, (err) => console.warn('[Firestore] operation_logs listener notice:', err));
 
   // 4. Listen on SRA Sugar Prices
   onSnapshot(collection(fDb, 'sra_prices'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remotePrices = [];
-    snapshot.forEach(docSnap => remotePrices.push(docSnap.data()));
+    snapshot.forEach(docSnap => remotePrices.push(window.HugpongSchema.fromPrice(docSnap.id, docSnap.data())));
 
     function parsePriceTime(p) {
       if (p.timestamp) return p.timestamp;
@@ -1209,10 +716,9 @@ function initFirestoreRealtimeSync() {
 
   // 5. Listen on Support Tickets
   onSnapshot(collection(fDb, 'support_tickets'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remoteTickets = [];
-    snapshot.forEach(docSnap => remoteTickets.push(docSnap.data()));
+    snapshot.forEach(docSnap => remoteTickets.push(window.HugpongSchema.fromTicket(docSnap.id, docSnap.data())));
 
     db.supportTickets = remoteTickets;
     saveDB(db, false);
@@ -1222,90 +728,33 @@ function initFirestoreRealtimeSync() {
 
   // 6. Listen on Users Directory (Syncs mobile registrations immediately to Web Directory)
   onSnapshot(collection(fDb, 'users'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remoteUsers = [];
-    snapshot.forEach(docSnap => {
-      const data = { id: docSnap.id, ...docSnap.data() };
-      // Normalize blockFarm
-      if (!data.blockFarm && data.blockFarmScope) data.blockFarm = data.blockFarmScope;
-      delete data.blockFarmScope;
-      // Ensure contact is set
-      if (!data.contact && data.mobile) data.contact = data.mobile.replace(/\D/g, '');
-      delete data.mobile;
-      if (!data.passwordHash) {
-        data.passwordHash = data.password ? hashPassword(data.password) : DEFAULT_SEED_PASSWORD_HASH;
-      }
-      delete data.password;
-      // Normalize phone verification status
-      if (data.phoneVerified === undefined && data.isPhoneVerified === undefined) {
-        if (data.status === 'Active' && data.pendingFirstLoginVerification !== true) {
-          data.phoneVerified = true;
-          data.isPhoneVerified = true;
-        }
-      } else if (data.isPhoneVerified === true && data.phoneVerified === undefined) {
-        data.phoneVerified = true;
-      } else if (data.phoneVerified === true && data.isPhoneVerified === undefined) {
-        data.isPhoneVerified = true;
-      }
-      remoteUsers.push(data);
-    });
-
+    snapshot.forEach(docSnap => remoteUsers.push(window.HugpongSchema.fromUser(docSnap.id, docSnap.data())));
     db.users = remoteUsers;
     saveDB(db, false);
     if (typeof renderUsers === 'function') renderUsers();
     if (typeof renderDashboard === 'function') renderDashboard();
     if (typeof renderMembers === 'function') renderMembers();
+   return;
   }, (err) => console.warn('[Firestore] users listener notice:', err));
 
   // 7. Listen on Audit Reports (QR Certified Records)
   onSnapshot(collection(fDb, 'audit_reports'), (snapshot) => {
     const db = getDB();
     const remoteReports = [];
-    if (!snapshot.empty) {
-      snapshot.forEach(docSnap => {
-        const data = { id: docSnap.id, ...docSnap.data() };
-        // Retain certification only if the exact same cryptographic QR hash was certified by an SRA Inspector
-        const localMatch = Array.isArray(db.auditReports) && db.auditReports.find(r => 
-          (r.id === data.id || r.reportId === data.reportId) &&
-          (data.qrHash && (r.qrHash === data.qrHash || r.qrSignature === data.qrHash))
-        );
-        if (localMatch && localMatch.status === 'Certified' && localMatch.certifiedBy && data.status !== 'Certified') {
-          data.status = 'Certified';
-          data.certifiedBy = localMatch.certifiedBy;
-          data.certifiedRole = localMatch.certifiedRole || 'SRA Officer';
-          data.certifiedAt = localMatch.certifiedAt;
-        } else if (data.status !== 'Certified') {
-          data.status = 'Pending';
-        }
-        remoteReports.push(data);
-      });
-    }
-
-    // Merge remote reports with existing local reports
-    const reportMap = new Map();
-    remoteReports.forEach(r => reportMap.set(r.reportId || r.id, r));
-    (db.auditReports || []).forEach(lr => {
-      const key = lr.reportId || lr.id;
-      if (!reportMap.has(key)) {
-        reportMap.set(key, lr);
+    snapshot.forEach(docSnap => {
+      const value = docSnap.data();
+      if (value.status === 'PENDING' || value.status === 'CERTIFIED') {
+        remoteReports.push(window.HugpongSchema.fromReport(docSnap.id, value));
       }
     });
-
-    db.auditReports = Array.from(reportMap.values());
+    db.auditReports = remoteReports;
     saveDB(db, false);
     if (typeof renderAuditDashboard === 'function') renderAuditDashboard();
     if (typeof renderDashboard === 'function') renderDashboard();
     if (typeof renderAuditQueue === 'function') renderAuditQueue();
-
-    // If audit certificate sheet is currently open, refresh it in-place
-    const certSheet = document.getElementById('audit-certificate-sheet');
-    if (certSheet && !certSheet.classList.contains('hidden')) {
-      const currentHash = document.getElementById('cert-hash')?.textContent?.trim();
-      if (currentHash && typeof loadAuditCertificate === 'function') {
-        loadAuditCertificate(currentHash);
-      }
-    }
+   return;
   }, (err) => console.warn('[Firestore] audit_reports listener notice:', err));
 
   // 8. Listen on Audit Logs (System Action History - Shared across Mobile & Web)
@@ -1351,11 +800,14 @@ async function verifyBackendSession() {
     const token = localStorage.getItem('hugpong_auth_token');
     const headers = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch('http://localhost:3000/auth/session', { headers, credentials: 'include' });
+    const res = await fetch('/auth/session', { headers, credentials: 'include' });
     const data = await res.json();
     if (data.authenticated && data.user) {
+      if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
+        await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
+      }
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(data.user, data.user.roleKey || 'admin');
+        saveWebAuthSession(data.user, data.user.roleKey || 'admin', data.token);
       } else {
         localStorage.setItem('hugpong_user', JSON.stringify(data.user));
         localStorage.setItem('hugpong_role', data.user.roleKey || 'admin');
@@ -1372,6 +824,9 @@ async function verifyBackendSession() {
 // Auto-start Firestore sync and verify session
 window.addEventListener('hugpong:firebase_ready', () => {
   initFirestoreRealtimeSync();
+});
+window.addEventListener('hugpong:firebase_auth_state', event => {
+  if (event.detail?.user) initFirestoreRealtimeSync();
 });
 
 if (document.readyState === 'loading') {
@@ -1397,7 +852,7 @@ const PAGES = {
   fields: { heading: 'Block Farm Registry', sub: 'Supervise registered block farms, transfer ownership IDs, and track sync statuses' },
   history: { heading: 'System Audit & Event Ledger', sub: 'Comprehensive auditable ledger of district operations, land registrations, user authorizations, and regulatory events' },
   sync: { heading: 'Sync & Inactivity Monitor', sub: 'Real-time telemetry, offline buffer health, and device connectivity across all district block farms' },
-  synctelemetry: { heading: 'Sync Monitor', sub: `Real-time mobile offline buffer monitoring and member sync health for ${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'}` },
+  synctelemetry: { heading: 'Sync Monitor', sub: 'Real-time mobile offline buffer monitoring and member sync health for the assigned block farm' },
   tickets: { heading: 'Support & Issue Ticketing Desk', sub: 'Triage offline sync issues, app crashes, and member support requests' },
   maintenance: { heading: 'System Maintenance & Security', sub: 'Manage global parameters, database health, and security' },
   settings: { heading: 'Settings & Security Console', sub: 'System preferences, account credentials, and platform diagnostics' }
@@ -1484,7 +939,7 @@ function navigate(page) {
         subEl.textContent = 'District-wide system telemetry, plot distribution, and sync status oversight';
       } else if (currentRole === 'manager') {
         headingEl.textContent = 'Field Plot Registry';
-        subEl.textContent = `Direct field management, member plot allocations, and crop stage tracking for ${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'}`;
+        subEl.textContent = `Direct field management, member plot allocations, and crop stage tracking for ${resolveManagedBlockFarm()?.name || 'the assigned block farm'}`;
       } else {
         headingEl.textContent = PAGES[page].heading;
         subEl.textContent = PAGES[page].sub;
@@ -1515,7 +970,7 @@ function navigate(page) {
 function switchRole(role) {
   localStorage.setItem('hugpong_role', role);
   applyRoleLayout(role);
-  const roleName = role === 'superadmin' ? 'Super Admin' : (role === 'manager' ? `Farm Manager (${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'})` : 'SRA (Admin)');
+  const roleName = role === 'superadmin' ? 'Super Admin' : (role === 'manager' ? `Farm Manager (${resolveManagedBlockFarm()?.name || 'Unassigned'})` : 'SRA Admin');
   toast(`Switched identity to: ${roleName}`);
   navigate('dashboard');
 }
@@ -1553,7 +1008,7 @@ function applyRoleLayout(role) {
     const initial = (mgrName.trim()[0] || 'J').toUpperCase();
     if (avatarEl) { avatarEl.textContent = initial; avatarEl.style.background = 'linear-gradient(135deg, #1A6B9A, #2A7F8F)'; avatarEl.style.boxShadow = '0 0 8px rgba(26,107,154,0.4)'; }
     if (nameEl) nameEl.textContent = mgrName;
-    if (roleEl) roleEl.textContent = `Farm Manager (${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'})`;
+    if (roleEl) roleEl.textContent = `Farm Manager (${resolveManagedBlockFarm(undefined, sessionUser)?.name || 'Unassigned'})`;
     if (popNameEl) popNameEl.textContent = mgrName;
     if (popRoleEl) popRoleEl.textContent = `Farm Manager · ${mgrName}`;
     if (subEl) subEl.textContent = 'Farm Workspace';
@@ -1566,7 +1021,7 @@ function applyRoleLayout(role) {
     const initial = (sraName.trim()[0] || 'M').toUpperCase();
     if (avatarEl) { avatarEl.textContent = initial; avatarEl.style.background = 'linear-gradient(135deg, #2D5016, #4A7C2F)'; avatarEl.style.boxShadow = '0 0 8px rgba(45,80,22,0.4)'; }
     if (nameEl) nameEl.textContent = sraName;
-    if (roleEl) roleEl.textContent = 'SRA (Admin)';
+    if (roleEl) roleEl.textContent = 'SRA Admin';
     if (popNameEl) popNameEl.textContent = sraName;
     if (popRoleEl) popRoleEl.textContent = `Silay Sugar Regulatory Administration · ${sraName}`;
     if (subEl) subEl.textContent = 'Silay SRA Console';
@@ -1580,25 +1035,17 @@ function applyRoleLayout(role) {
 // Helper to determine block farm
 function getBlockFarmName(fieldId) {
   const db = (typeof getDB === 'function' ? getDB() : null);
-  if (!fieldId) return (db?.blockFarms?.[0]?.name || 'Block Farm');
+  if (!fieldId) return 'Unassigned';
   if (db && Array.isArray(db.fields)) {
     const f = db.fields.find(item => item.id === fieldId);
     if (f) {
-      if (f.blockFarm) return f.blockFarm;
       if (Array.isArray(db.blockFarms)) {
-        const bf = db.blockFarms.find(b => b.id === f.blockFarmId || b.code === f.blockFarmId);
+        const bf = db.blockFarms.find(b => b.id === f.blockFarmId);
         if (bf) return bf.name;
       }
     }
   }
-  if (db && Array.isArray(db.blockFarms)) {
-    const bf = db.blockFarms.find(b => {
-      const code = getFarmCode(b, db.blockFarms);
-      return code && fieldId.includes(code);
-    });
-    if (bf) return bf.name;
-  }
-  return (db?.blockFarms?.[0]?.name || 'Block Farm');
+  return 'Unassigned';
 }
 
 function extractFarmCodeFromName(name) {
@@ -1691,7 +1138,7 @@ window.generateNextFieldId = generateNextFieldId;
 
 function getBlockId(blockFarmName) {
   const db = (typeof getDB === 'function' ? getDB() : null);
-  if (!blockFarmName) return 'BLK-01';
+  if (!blockFarmName) return '';
   if (db && Array.isArray(db.blockFarms)) {
     const matched = db.blockFarms.find(b => b.name === blockFarmName || b.id === blockFarmName || b.code === blockFarmName);
     if (matched) return matched.code || matched.id;
@@ -1728,12 +1175,13 @@ function renderDashboard() {
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
   const isManager = currentRole === 'manager';
   const isSuper = currentRole === 'superadmin';
-  const managerBlockFarm = (db && Array.isArray(db.blockFarms) && db.blockFarms[0]) ? db.blockFarms[0].name : 'Assigned Block Farm';
   const session = typeof getWebAuthSession === 'function' ? getWebAuthSession() : null;
   let sessionUser = session?.user;
   if (!sessionUser) {
     try { sessionUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch(e) {}
   }
+  const sessionUserId = sessionUser?.id || sessionUser?.employeeId || activeUser?.id || activeUser?.employeeId || '';
+  const managerBlockFarm = (db.blockFarms || []).find(farm => farm.managerUserId === sessionUserId)?.name || 'Unassigned Block Farm';
   const loggedUserName = sessionUser?.name || localStorage.getItem('hugpong_user_name') || (isManager ? (activeUser?.name || 'Farm Manager') : (isSuper ? 'Matt Daniel Delotavo' : 'SRA Officer'));
   const activeFieldsCount = (db && Array.isArray(db.fields)) ? db.fields.length : 0;
 
@@ -1919,7 +1367,7 @@ function renderDashboard() {
   if (elFarmsPill) elFarmsPill.textContent = uniqueBlockFarms.size > 0 ? 'All Districts' : 'No Farms';
   if (elFarmsSub) elFarmsSub.textContent = `${totalHa.toFixed(1)} Ha total`;
 
-  const memberCount = (db.users || []).filter(u => u.role === 'Member').length || uniqueMembers.size;
+  const memberCount = (db.users || []).filter(u => u.role === 'Member Farmer').length || uniqueMembers.size;
   if (elMembersVal) elMembersVal.textContent = `${memberCount} Member${memberCount === 1 ? '' : 's'}`;
   if (elMembersBadge) elMembersBadge.textContent = memberCount > 0 ? 'All Active' : '0 Active';
   if (elMembersSub) elMembersSub.textContent = `${memberCount} member farmer${memberCount === 1 ? '' : 's'}`;
@@ -2796,7 +2244,11 @@ function openDetailedAnalyticsModal(key, isBack = false) {
   const modal = document.getElementById('modal-detailed-analytics');
   if (!modal) return;
 
-  const validKey = key || (db.blockFarms?.[0]?.name || 'Block Farm');
+  const validKey = key || '';
+  if (!validKey) {
+    toast('Select a block farm or field to view analytics.');
+    return;
+  }
   const isModalCurrentlyClosed = modal.classList.contains('hidden');
 
   // If opening fresh from outside the modal, reset history stack and current key
@@ -2810,7 +2262,8 @@ function openDetailedAnalyticsModal(key, isBack = false) {
     detailModalHistory = [];
   }
 
-  const isBlockFarm = String(validKey).startsWith('Block Farm') || String(validKey).includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")) || String(validKey).includes('Cluster') || String(validKey).includes('Group') || String(validKey).includes('Cooperative');
+  const selectedBlockFarm = (db.blockFarms || []).find(farm => farm.id === validKey || farm.name === validKey);
+  const isBlockFarm = Boolean(selectedBlockFarm);
   const typeBadge = document.getElementById('detail-analytics-type-badge');
   const statusBadge = document.getElementById('detail-analytics-status-badge');
   const titleEl = document.getElementById('detail-analytics-title');
@@ -2851,16 +2304,19 @@ function openDetailedAnalyticsModal(key, isBack = false) {
 
   if (isBlockFarm) {
     if (typeBadge) { typeBadge.textContent = 'Block Farm Cluster'; typeBadge.className = 'px-2 py-0.5 rounded-full text-[10px] font-black bg-primary-bg text-primary uppercase tracking-wider'; }
-    associatedFields = db.fields.filter(f => f.blockFarm === key || key.includes(f.blockFarm));
-    if (associatedFields.length === 0) associatedFields = db.fields;
-    entityTitle = key;
+    associatedFields = db.fields.filter(field => field.blockFarmId === selectedBlockFarm.id);
+    entityTitle = selectedBlockFarm.name;
     entitySub = `Consolidated farm cluster · ${associatedFields.length} member plots`;
   } else {
     if (typeBadge) { typeBadge.textContent = 'Individual Field Plot'; typeBadge.className = 'px-2 py-0.5 rounded-full text-[10px] font-black bg-[#1A6B9A]/15 text-[#1A6B9A] uppercase tracking-wider'; }
-    const field = db.fields.find(f => f.id === key) || db.fields[0];
+    const field = db.fields.find(f => f.id === validKey);
+    if (!field) {
+      toast('The selected field no longer exists.');
+      return;
+    }
     associatedFields = [field];
-    entityTitle = `${field.id} — ${field.member || field.owner || 'Member Farmer'}`;
-    entitySub = `${field.blockFarm || 'Block Farm'} · ${field.ha} Ha · ${field.stage || 'Stage 1'}`;
+    entityTitle = `${field.id} — ${resolveFieldMember(field, db)}`;
+    entitySub = `${resolveFieldBlockFarm(field, db)} · ${field.ha} Ha · ${field.stage || 'Stage 1'}`;
   }
 
   const totalHa = associatedFields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
@@ -3372,7 +2828,9 @@ function changeMgrLedgerPage(page) {
 
 function renderManager() {
   const db = getDB();
-  const managerBlockFarm = (db && Array.isArray(db.blockFarms) && db.blockFarms[0]) ? db.blockFarms[0].name : (db.blockFarms?.[0]?.name || 'Block Farm');
+  const managerUserId = activeUser?.id || activeUser?.employeeId || '';
+  const managedFarm = (db.blockFarms || []).find(farm => farm.managerUserId === managerUserId);
+  const managerBlockFarm = managedFarm?.name || 'Unassigned Block Farm';
   const managerName = (activeUser?.name || 'Farm Manager');
 
   // Update banner labels
@@ -3382,7 +2840,7 @@ function renderManager() {
   if (bannerFarm) bannerFarm.textContent = managerBlockFarm;
 
   // Filter fields & logs for manager's farm
-  const myFields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === managerBlockFarm || (f.blockFarm && f.blockFarm.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH"))) || f.blockFarmId === (db.blockFarms?.[0]?.id || ''));
+  const myFields = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
   myFields.sort((a, b) => a.id.localeCompare(b.id));
   const myFieldIds = new Set(myFields.map(f => f.id));
   const myLogs = db.logs.filter(l => myFieldIds.has(l.fieldId));
@@ -3466,7 +2924,7 @@ function renderManager() {
   if (statHa) statHa.textContent = `${totalHa.toFixed(1)} Ha`;
   if (statMembersVal) statMembersVal.textContent = `${mgrMembers.size || myFields.length} Members`;
   if (statMembersBadge) statMembersBadge.textContent = 'Active';
-  if (statMembersSub) statMembersSub.textContent = myFields[0]?.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm');
+  if (statMembersSub) statMembersSub.textContent = managedFarm?.name || 'Unassigned Block Farm';
   if (statPendingVal) statPendingVal.textContent = `${myLogs.length} Active`;
   if (statPendingBadge) {
     statPendingBadge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success';
@@ -3512,7 +2970,7 @@ function renderManager() {
   if (auditCostEl) auditCostEl.textContent = `₱${Number(auditReport.totalCost || calculatedCost).toLocaleString()}`;
   if (auditQrEl) auditQrEl.textContent = auditReport.qrHash || auditReport.qrSignature || `HUG-${(db.activeCropYear || '2026').replace(/[^0-9]/g, '')}-ACTIVE`;
   if (auditStatusEl) {
-    const isCert = auditReport.status === 'Certified';
+    const isCert = auditReport.status === 'CERTIFIED';
     auditStatusEl.innerHTML = `
       <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
       SRA ${isCert ? 'Certified' : 'Verified'} &amp; Active
@@ -3544,11 +3002,9 @@ function renderManager() {
         const taskName = l.task || l.activity || 'Field Operation';
         const costVal = (l.cost || 0).toLocaleString();
         const inputDisplay = l.inputQty ? `${l.inputQty} ${l.inputUnit || ''} ${l.inputName ? `· ${l.inputName}` : ''}` : '<span class="text-hug-muted italic">Standard Labor</span>';
-        const isAmended = Boolean(l.isAmended || (Array.isArray(l.editHistory) && l.editHistory.length > 0));
-        const editCount = (Array.isArray(l.editHistory) && l.editHistory.length) || (l.isAmended ? 1 : 0);
-        const latestEdit = Array.isArray(l.editHistory) && l.editHistory.length > 0
-          ? l.editHistory[l.editHistory.length - 1]
-          : (l.isAmended ? { editedBy: 'Farm Manager', reason: 'Log details updated' } : null);
+        const isAmended = Array.isArray(l.amendments) && l.amendments.length > 0;
+        const editCount = isAmended ? l.amendments.length : 0;
+        const latestEdit = isAmended ? l.amendments[l.amendments.length - 1] : null;
 
         return `<tr class="border-b border-border hover:bg-bg transition-all">
           <td class="px-4 py-3 font-bold text-xs text-hug-text font-mono">${l.id}</td>
@@ -3566,7 +3022,7 @@ function renderManager() {
             </div>
             ${isAmended && latestEdit ? `
               <div class="text-[11px] text-hug-muted mt-1 flex items-center gap-1">
-                <span class="font-semibold text-hug-text2">${latestEdit.editedBy || 'Manager'}:</span>
+                <span class="font-semibold text-hug-text2">${latestEdit.amendedByUserId || 'Unknown user'}:</span>
                 <span class="truncate max-w-[210px] italic" title="${latestEdit.reason || 'Record updated'}">"${latestEdit.reason || 'Record updated'}"</span>
                 <button onclick="openLogEditHistoryModal('${l.id}')" class="text-primary hover:underline font-bold ml-1 cursor-pointer">Details →</button>
               </div>
@@ -3622,8 +3078,9 @@ function renderManager() {
 
 function renderSyncMonitor() {
   const db = getDB();
-  const managerBlockFarm = (db.blockFarms?.[0]?.name || 'Block Farm');
-  const myFields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === managerBlockFarm || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm'));
+  const managedFarm = resolveManagedBlockFarm(db);
+  const managerBlockFarm = managedFarm?.name || 'Unassigned Block Farm';
+  const myFields = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
   
   const pillsContainer = document.getElementById('mgr-sync-summary-pills');
   const bannerContainer = document.getElementById('mgr-sync-warning-banner');
@@ -3636,9 +3093,9 @@ function renderSyncMonitor() {
   const attentionFields = [];
 
   myFields.forEach(f => {
-    const memberName = f.member || f.owner || 'Unassigned';
-    const userObj = db.users.find(u => u.name.toLowerCase() === memberName.toLowerCase()) || {};
-    const contact = userObj.contact || '0917-xxx-xxxx';
+    const userObj = db.users.find(user => (user.id || user.employeeId) === f.memberUserId) || {};
+    const memberName = userObj.name || userObj.displayName || 'Unassigned';
+    const contact = userObj.contact || userObj.phone || '';
     const health = getSyncHealthInfo(f.lastSync || 'Just now', f.syncLagDays);
 
     if (health.status === 'healthy') {
@@ -3674,7 +3131,7 @@ function renderSyncMonitor() {
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           </div>
           <div>
-            <h4 class="text-xs font-bold text-hug-text">Sync Overdue Action Required: ${totalAlerts} Member(s) in ${db.blockFarms?.[0]?.name || 'Block Farm'} Inactive</h4>
+            <h4 class="text-xs font-bold text-hug-text">Sync Overdue Action Required: ${totalAlerts} Member(s) in ${managerBlockFarm} Inactive</h4>
             <p class="text-[11px] text-hug-muted mt-0.5">${topOffender.name} (${topOffender.fieldId}) has not synced in ${topOffender.lagDays} days. Check with member to ensure timely audit submission.</p>
           </div>
         </div>
@@ -3694,16 +3151,16 @@ function renderSyncMonitor() {
       gridContainer.innerHTML = `
         <div class="col-span-full p-6 text-center bg-white border border-border rounded-2xl flex flex-col items-center justify-center gap-2 shadow-xs">
           <div class="w-10 h-10 rounded-full bg-success-bg text-success flex items-center justify-center font-bold text-lg"><i data-lucide="check" class="w-5 h-5"></i></div>
-          <h4 class="font-bold text-xs text-hug-text">All ${db.blockFarms?.[0]?.name || 'Block Farm'} Members Active &amp; Synced</h4>
+          <h4 class="font-bold text-xs text-hug-text">All ${managerBlockFarm} Members Active &amp; Synced</h4>
           <p class="text-xs text-hug-muted">No overdue mobile offline buffers or lagging members requiring immediate follow-up.</p>
           <button onclick="navigate('synctelemetry')" class="mt-1 text-xs font-bold text-primary hover:underline cursor-pointer">Open Full Telemetry Hub →</button>
         </div>
       `;
     } else {
       gridContainer.innerHTML = attentionFields.map(f => {
-        const memberName = f.member || f.owner || 'Unassigned';
-        const userObj = db.users.find(u => u.name.toLowerCase() === memberName.toLowerCase()) || {};
-        const contact = userObj.contact || '0917-xxx-xxxx';
+        const userObj = db.users.find(user => (user.id || user.employeeId) === f.memberUserId) || {};
+        const memberName = userObj.name || userObj.displayName || 'Unassigned';
+        const contact = userObj.contact || userObj.phone || '';
         const health = getSyncHealthInfo(f.lastSync || 'Just now', f.syncLagDays);
         const initial = memberName.charAt(0);
         const borderHighlight = health.status === 'critical' ? 'border-danger/40 bg-danger-bg/20' : 'border-[#C97A00]/40 bg-warning-bg/20';
@@ -3748,8 +3205,8 @@ function renderSyncMonitor() {
 
 function renderManagerFullSyncTelemetry() {
   const db = getDB();
-  const managerBlockFarm = (db.blockFarms?.[0]?.name || 'Block Farm');
-  let myFields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === managerBlockFarm || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm'));
+  const managedFarm = resolveManagedBlockFarm(db);
+  let myFields = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
 
   const searchInput = document.getElementById('mgr-full-sync-search');
   const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
@@ -3788,9 +3245,9 @@ function renderManagerFullSyncTelemetry() {
   }
 
   gridContainer.innerHTML = myFields.map(f => {
-    const memberName = f.member || f.owner || 'Unassigned';
-    const userObj = db.users.find(u => u.name.toLowerCase() === memberName.toLowerCase()) || {};
-    const contact = userObj.contact || '0917-xxx-xxxx';
+    const userObj = db.users.find(user => (user.id || user.employeeId) === f.memberUserId) || {};
+    const memberName = userObj.name || userObj.displayName || 'Unassigned';
+    const contact = userObj.contact || userObj.phone || '';
     const health = getSyncHealthInfo(f.lastSync || 'Just now', f.syncLagDays);
     const initial = memberName.charAt(0);
     const borderHighlight = health.status === 'critical' ? 'border-danger/40 bg-danger-bg/20' : (health.status === 'warning' ? 'border-[#C97A00]/40 bg-warning-bg/20' : 'border-border bg-white');
@@ -3885,20 +3342,20 @@ function toggleOpSortHa() {
 
 function renderMembers() {
   const db = getDB();
-  const managerBlockFarm = (db.blockFarms?.[0]?.name || 'Block Farm');
-  const myFields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === managerBlockFarm || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm'));
+  const managedFarm = resolveManagedBlockFarm(db);
+  const myFields = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
   const membersTbody = document.getElementById('mgr-members-tbody');
   const membersCountBadge = document.getElementById('mgr-members-count-badge');
   
   // Group fields by member
   const memberMap = {};
   myFields.forEach(f => {
-    const mName = f.member || f.owner || 'Unassigned';
+    const userObj = db.users.find(user => (user.id || user.employeeId) === f.memberUserId) || {};
+    const mName = userObj.name || userObj.displayName || 'Unassigned';
     if (!memberMap[mName]) {
-      const userObj = db.users.find(u => u.name.toLowerCase() === mName.toLowerCase()) || {};
       memberMap[mName] = {
         name: mName,
-        contact: userObj.contact || '0917-555-0101',
+        contact: userObj.contact || userObj.phone || '',
         fields: [],
         totalHa: 0,
         stages: [],
@@ -3979,7 +3436,7 @@ function renderMembers() {
               <div class="w-8 h-8 rounded-full bg-primary-bg text-primary font-bold text-xs flex items-center justify-center flex-shrink-0">${m.name.charAt(0)}</div>
               <div>
                 <p class="font-bold text-hug-text">${m.name}</p>
-                <p class="text-[10px] text-hug-muted font-normal">${m.blockFarm || db.blockFarms?.[0]?.name || 'Block Farm'}</p>
+                <p class="text-[10px] text-hug-muted font-normal">${managedFarm?.name || 'Unassigned Block Farm'}</p>
               </div>
             </div>
           </td>
@@ -3999,36 +3456,23 @@ function renderMembers() {
   }
 }
 
-// ── OPERATION AUDIT & CERTIFICATION BADGE HELPER ─────────────
+// ── OPERATION AUDIT REPORT-INCLUSION BADGE HELPER ─────────────
 function getOperationAuditBadge(fl, db) {
-  if (!fl) return { type: 'recorded', status: 'Recorded', badgeHtml: '', isLocked: false, lockTitle: '' };
+  if (!fl) return { type: 'recorded', label: 'Recorded', badgeHtml: '', isLocked: false, lockTitle: '' };
   const currentDb = db || (typeof getDB === 'function' ? getDB() : { auditReports: [] });
   const reports = currentDb.auditReports || [];
 
-  // 1. Check if directly certified or certified via auditReport
-  const isDirectlyCertified = fl.certified === true || fl.isCertified === true || fl.status === 'Certified' || fl.status === 'Audited';
-  let report = null;
-  if (fl.compiledReportId || fl.compiled) {
-    report = reports.find(r => 
-      (r.reportId && r.reportId === fl.compiledReportId) || 
-      (r.id && r.id === fl.compiledReportId) ||
-      (r.period && fl.date && isLogFromMonth(fl.date, r.period))
-    );
-  } else if (fl.date) {
-    report = reports.find(r => 
-      r.period && isLogFromMonth(fl.date, r.period)
-    );
-  }
+  const report = reports.find(item =>
+    (item.operationSnapshots || item.operations || []).some(operation => (operation.operationLogId || operation.id) === fl.id)
+  );
+  const isCompiled = Boolean(report);
+  const isPast = fl.status === 'ARCHIVED';
 
-  const isCertified = isDirectlyCertified || (report && report.status === 'Certified');
-  const isCompiled = Boolean(fl.compiled || fl.compiledReportId || report);
-  const isPast = Boolean(fl.isPastCycle || fl.isArchived || fl.status === 'Archived');
-
-  if (isCertified) {
+  if (false) {
     const certBy = report?.certifiedBy || fl.certifiedBy || 'SRA Inspectorate';
     return {
       type: 'certified',
-      status: 'Certified',
+      label: 'Certified',
       badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-emerald-800 bg-emerald-100 border border-emerald-300 flex items-center gap-1 shadow-2xs whitespace-nowrap" title="Certified by ${certBy}. Immutable official audit record.">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
         SRA Certified
@@ -4041,7 +3485,7 @@ function getOperationAuditBadge(fl, db) {
   if (isPast) {
     return {
       type: 'archived',
-      status: 'Archived',
+      label: 'Archived',
       badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-gray-600 bg-gray-100 border border-gray-300 flex items-center gap-1 whitespace-nowrap" title="Archived from previous crop cycle. Immutable historical record.">
         <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
         Archived (Past Cycle)
@@ -4054,7 +3498,7 @@ function getOperationAuditBadge(fl, db) {
   if (isCompiled) {
     return {
       type: 'compiled',
-      status: 'Compiled',
+      label: 'Compiled',
       badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-blue-700 bg-blue-50 border border-blue-200 flex items-center gap-1 whitespace-nowrap" title="Compiled into monthly audit dossier, awaiting SRA certification.">
         <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         Compiled
@@ -4065,11 +3509,11 @@ function getOperationAuditBadge(fl, db) {
   }
 
   // 2. Check Supplemental status
-  const isSupplemental = Boolean(fl.isSupplemental || fl.status === 'Supplemental' || (fl.activity && fl.activity.toLowerCase().includes('(supplemental)')) || (fl.task && fl.task.toLowerCase().includes('(supplemental)')));
+  const isSupplemental = Boolean(fl.isSupplemental);
   if (isSupplemental) {
     return {
       type: 'supplemental',
-      status: 'Supplemental',
+      label: 'Supplemental',
       badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-amber-900 bg-amber-100 border border-amber-300 flex items-center gap-1 shadow-2xs whitespace-nowrap" title="Supplemental stage operation recorded">
         <span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
         Supplemental
@@ -4079,13 +3523,13 @@ function getOperationAuditBadge(fl, db) {
     };
   }
 
-  const isAmendedLog = Boolean(fl.isAmended || fl.isTakeover || (Array.isArray(fl.editHistory) && fl.editHistory.length > 0) || fl.status === 'Amended');
+  const isAmendedLog = Array.isArray(fl.amendments) && fl.amendments.length > 0;
   if (isAmendedLog) {
-    const editCount = (Array.isArray(fl.editHistory) && fl.editHistory.length) || (fl.isAmended ? 1 : 0);
-    const isTakeover = Boolean(fl.isTakeover || (Array.isArray(fl.editHistory) && fl.editHistory.some(h => (h.editedBy || '').toLowerCase().includes('take over') || (h.note || '').toLowerCase().includes('takeover'))));
+    const editCount = fl.amendments.length;
+    const isTakeover = fl.submissionSource === 'MANAGER_TAKEOVER';
     return {
       type: 'amended',
-      status: 'Amended',
+      label: 'Amended',
       badgeHtml: `<button onclick="openLogEditHistoryModal('${fl.id}')" class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-amber-800 bg-amber-50 border border-amber-300 flex items-center gap-1 shadow-2xs whitespace-nowrap hover:bg-amber-100 transition-all cursor-pointer" title="${isTakeover ? 'Supervisor Take Over entry / amendment' : 'Amended record'}. Click to view revision details.">
         <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         ${isTakeover ? 'Amended (Takeover)' : `Amended ${editCount > 1 ? `(${editCount}x)` : ''}`}
@@ -4097,7 +3541,7 @@ function getOperationAuditBadge(fl, db) {
 
   return {
     type: 'recorded',
-    status: 'Recorded',
+    label: 'Recorded',
     badgeHtml: `<span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] text-success bg-success-bg border border-success/20 flex items-center gap-1 whitespace-nowrap">
       <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
       Recorded
@@ -4118,8 +3562,8 @@ window.setFieldDrawerTab = setFieldDrawerTab;
 
 function renderOperations() {
   const db = getDB();
-  const managerBlockFarm = (db.blockFarms?.[0]?.name || 'Block Farm');
-  let myFields = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === managerBlockFarm || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm'));
+  const managedFarm = resolveManagedBlockFarm(db);
+  let myFields = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
   const fieldsTbody = document.getElementById('mgr-fields-tbody');
   if (!fieldsTbody) return;
 
@@ -4176,19 +3620,9 @@ function renderOperations() {
   fieldsTbody.innerHTML = myFields.map(f => {
     const stageNum = getFieldStageNumber(f);
     
-    const isLogPast = (l) => {
-      if (!l) return false;
-      return Boolean(
-        l.isPastCycle === true ||
-        l.isPastCycle === 'true' ||
-        l.isArchived === true ||
-        l.status === 'Archived' ||
-        (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-      );
-    };
-
-    const allFieldLogs = (db.logs || []).filter(l => l.fieldId === f.id && !l.isDeleted);
-    const activeFieldLogs = allFieldLogs.filter(l => !isLogPast(l));
+    const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
+    const allFieldLogs = (db.logs || []).filter(l => l.fieldId === f.id);
+    const activeFieldLogs = allFieldLogs.filter(l => l.status === 'ACTIVE');
     
     let currentStageIdx = -1;
     const stageStr = (f.stage || '').toLowerCase();
@@ -4236,10 +3670,6 @@ function renderOperations() {
               <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               Edit
             </button>
-            <button onclick="promptDeleteOperationLog('${fl.id}')" class="px-2 py-1 border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1" title="Delete this operation log">
-              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              Delete
-            </button>
           </div>`;
         }
 
@@ -4257,7 +3687,7 @@ function renderOperations() {
 
       window._fieldDrawerTab = window._fieldDrawerTab || {};
       const drawerTab = window._fieldDrawerTab[f.id] || 'active';
-      const pastFieldLogs = allFieldLogs.filter(l => isLogPast(l) && !l.isDeleted);
+      const pastFieldLogs = allFieldLogs.filter(l => isLogPast(l));
 
       const renderDrawerContent = () => {
         if (drawerTab === 'past') {
@@ -4686,7 +4116,7 @@ function getFieldCustomOperations(fieldId, stageNumber) {
     const relevantLogs = db.logs.filter(l => {
       const lFieldId = String(l.fieldId || '').trim().toUpperCase();
       const lStage = Number(l.stageNumber || (l.taskId ? String(l.taskId).replace(/\D/g, '') : 0));
-      return lFieldId === cleanId && lStage === sNum && !l.isPastCycle && !l.isArchived && !l.isDeleted;
+      return lFieldId === cleanId && lStage === sNum && l.status === 'ACTIVE';
     });
 
     relevantLogs.forEach((log, idx) => {
@@ -5017,18 +4447,9 @@ function calculateCropCycleProgress(fieldId, db = null) {
     (Array.isArray(field.customStages) && field.customStages.length > 0 && field.customStages.every(s => s.done))
   );
 
-  const rawFieldLogs = (currentDb.logs || []).filter(l => l.fieldId === fieldId && !l.isDeleted);
-  const isLogPast = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
-  const fieldLogs = (currentDb.logs || []).filter(l => l.fieldId === fieldId && !isLogPast(l) && !l.isDeleted);
+  const rawFieldLogs = (currentDb.logs || []).filter(l => l.fieldId === fieldId);
+  const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
+  const fieldLogs = rawFieldLogs.filter(l => l.status === 'ACTIVE');
 
   // Total operations = 14 standard SRA operations or custom operations if defined
   let totalOps = 14;
@@ -5125,30 +4546,14 @@ function requestTakeOverAuthorization(fieldId, targetStageIdOrName = null, targe
   if (passInput) passInput.focus();
 }
 
-function confirmTakeOverAuthorization() {
+async function confirmTakeOverAuthorization() {
   const passInput = document.getElementById('takeover-auth-password');
   const errorEl = document.getElementById('takeover-auth-error');
   const enteredPass = (passInput ? passInput.value : '').trim();
 
-  const db = getDB();
-  let activeUser = null;
-  try { activeUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch (e) {}
+  const isUserPassValid = enteredPass ? await verifyCurrentWebPassword(enteredPass) : false;
 
-  const currentUser = (db.users || []).find(u => 
-    (activeUser?.employeeId && u.employeeId === activeUser.employeeId) ||
-    (activeUser?.contact && u.contact === activeUser.contact) ||
-    (activeUser?.name && u.name === activeUser.name)
-  ) || activeUser;
-
-  const storedHash = currentUser?.passwordHash || activeUser?.passwordHash || activeUser?.password;
-  const isUserPassValid = Boolean(storedHash && verifyPassword(enteredPass, storedHash));
-  const isMasterValid = verifyPassword(enteredPass, DEFAULT_MASTER_PASSWORD_HASH) || 
-                        verifyPassword(enteredPass, DEFAULT_SEED_PASSWORD_HASH) || 
-                        enteredPass === 'password123' || 
-                        enteredPass === 'hugpong2026' || 
-                        enteredPass === 'manager123';
-
-  if (!enteredPass || (!isUserPassValid && !isMasterValid)) {
+  if (!enteredPass || !isUserPassValid) {
     if (errorEl) {
       errorEl.textContent = 'Incorrect password. Enter your manager account password to authorize take over.';
       errorEl.classList.remove('hidden');
@@ -5240,7 +4645,7 @@ function setWebAmendPresetReason(reason) {
   if (errorEl) errorEl.classList.add('hidden');
 }
 
-function confirmWebAuthorizeAmendment() {
+async function confirmWebAuthorizeAmendment() {
   const passInput = document.getElementById('amend-auth-password');
   const reasonInput = document.getElementById('amend-auth-reason');
   const errorEl = document.getElementById('amend-auth-error');
@@ -5248,25 +4653,9 @@ function confirmWebAuthorizeAmendment() {
   const enteredPass = (passInput ? passInput.value : '').trim();
   const enteredReason = (reasonInput ? reasonInput.value : '').trim();
 
-  const db = getDB();
-  let activeUser = null;
-  try { activeUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch (e) {}
+  const isUserPassValid = enteredPass ? await verifyCurrentWebPassword(enteredPass) : false;
 
-  const currentUser = (db.users || []).find(u => 
-    (activeUser?.employeeId && u.employeeId === activeUser.employeeId) ||
-    (activeUser?.contact && u.contact === activeUser.contact) ||
-    (activeUser?.name && u.name === activeUser.name)
-  ) || activeUser;
-
-  const storedHash = currentUser?.passwordHash || activeUser?.passwordHash || activeUser?.password;
-  const isUserPassValid = Boolean(storedHash && verifyPassword(enteredPass, storedHash));
-  const isMasterValid = verifyPassword(enteredPass, DEFAULT_MASTER_PASSWORD_HASH) || 
-                        verifyPassword(enteredPass, DEFAULT_SEED_PASSWORD_HASH) || 
-                        enteredPass === 'password123' || 
-                        enteredPass === 'hugpong2026' || 
-                        enteredPass === 'manager123';
-
-  if (!enteredPass || (!isUserPassValid && !isMasterValid)) {
+  if (!enteredPass || !isUserPassValid) {
     if (errorEl) {
       errorEl.textContent = 'Incorrect password. Enter your manager account password to authorize amendment.';
       errorEl.classList.remove('hidden');
@@ -5467,8 +4856,8 @@ async function takeOverSelectStage(stageId, targetLogId = null) {
     const activeStage = activeTakeOverStages.find(s => (s.stageNum || s.stageNumber) === targetStageNum) || activeTakeOverStages[targetStageNum - 1];
     const activeLabel = activeStage ? (activeStage.label || activeStage.name || `Stage ${targetStageNum}`) : `Stage ${targetStageNum}`;
     const targetLabel = stage.label || stage.name || `Stage ${stageNum}`;
-    const isLogPast = (l) => Boolean(l.isPastCycle === true || l.isArchived === true || l.status === 'Archived' || (field.cycleNumber && l.cycleNumber && Number(l.cycleNumber) < Number(field.cycleNumber)));
-    const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && !isLogPast(l) && !l.isDeleted);
+    const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
+    const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && l.status === 'ACTIVE');
     const hasActiveLogs = fieldLogs.some(l => l.stageNumber === targetStageNum || l.taskId === activeStage?.id);
 
     let confirmed = false;
@@ -5525,14 +4914,11 @@ async function takeOverSelectStage(stageId, targetLogId = null) {
     if (window.firebaseDB && window.firestore) {
       try {
         const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, 'fields', field.id), {
-          stage: field.stage,
-          stageNumber: field.stageNumber,
-          isCompleted: false,
-          customStages: field.customStages,
-          lastSync: field.lastSync,
-          synced: true,
-          updatedAt: new Date().toISOString()
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
+          customStages: field.customStages, updatedAt: new Date().toISOString()
+        }, { merge: true });
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
+          currentStageNumber: field.stageNumber, updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (err) {
         console.warn('[TakeOver Stage Advance] Firestore error:', err);
@@ -5559,17 +4945,8 @@ async function takeOverSelectStage(stageId, targetLogId = null) {
 
   selectedTakeOverStageId = stage.id;
 
-  const isLogPast = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
-  const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && !isLogPast(l) && !l.isDeleted);
+  const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
+  const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && l.status === 'ACTIVE');
 
   let matchingLog = null;
   if (targetLogId) {
@@ -5689,17 +5066,8 @@ function renderTakeOverTimeline() {
   const field = (db.fields || []).find(f => f.id === activeTakeOverFieldId);
   if (!field) return;
 
-  const isLogPast = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
-  const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && !isLogPast(l) && !l.isDeleted);
+  const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
+  const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && l.status === 'ACTIVE');
   const haNum = Number(field?.ha || field?.area) || 1.5;
   const targetStageNum = getFieldStageNumber(field);
 
@@ -5895,17 +5263,7 @@ async function takeOverSubmitLog() {
   const catMap = { 1: 'prep', 2: 'plant', 3: 'fert', 4: 'weed', 5: 'fert', 6: 'harvest' };
   const category = catMap[stageNum] || 'prep';
 
-  const isLogPast = (l) => {
-    if (!l) return false;
-    if (l.isDeleted) return true;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
+  const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
   const fieldLogs = (db.logs || []).filter(l => l.fieldId === activeTakeOverFieldId && !isLogPast(l));
 
   // Match existing log to AMEND (prevent duplicate redundancy)
@@ -5927,8 +5285,8 @@ async function takeOverSubmitLog() {
   }
 
   if (matchingLog) {
-    if (matchingLog.isPastCycle || matchingLog.certified || matchingLog.status === 'Certified' || matchingLog.status === 'Audited') {
-      toast('Security Lockout: This operation log has been certified by SRA Audit and cannot be modified.');
+    if (matchingLog.status === 'ARCHIVED') {
+      toast('Security Lockout: Archived operation logs cannot be modified.');
       return;
     }
 
@@ -5990,31 +5348,24 @@ async function takeOverSubmitLog() {
     matchingLog.activity = activity;
     matchingLog.cost = Math.round(cost);
     matchingLog.totalCost = Math.round(cost);
-    matchingLog.status = 'Amended';
-    matchingLog.approved = true;
+    matchingLog.status = 'ACTIVE';
     matchingLog.hectares = ha;
     matchingLog.people = people;
     matchingLog.stageNumber = stageNum;
     matchingLog.sraOperationId = sraOperationId;
     matchingLog.subItems = compiledSubItems;
-    matchingLog.isAmended = true;
-    matchingLog.isTakeover = true;
-    matchingLog.compiled = false;
-    delete matchingLog.compiledReportId;
-    matchingLog.editHistory = matchingLog.editHistory || [];
-    matchingLog.editHistory.push({
-      id: `EDT-${Date.now()}`,
-      editedBy: `${sessionUser?.name || (typeof getDB === 'function' ? getDB() : {}).users?.find(u => u.role === 'Farm Manager')?.name || 'Farm Manager'} (Farm Manager - Takeover)`,
-      editedRole: 'Farm Manager',
-      editedAt: new Date().toLocaleString('en-PH'),
+    matchingLog.amendments = matchingLog.amendments || [];
+    matchingLog.amendments.push({
+      amendmentId: `AMD-${Date.now()}`,
+      amendedByUserId: sessionUser?.id || sessionUser?.employeeId || '',
+      amendedAt: new Date().toISOString(),
       reason: note || 'Supervisor stage record updated via Take Over Console',
-      previousValues,
-      newValues: {
-        activity: activity,
-        cost: Math.round(cost),
-        hectares: ha,
-        people: people,
-        date: date
+      changes: {
+        operationName: { before: previousValues.activity, after: activity },
+        totalCost: { before: previousValues.cost, after: Math.round(cost) },
+        areaHa: { before: previousValues.hectares, after: ha },
+        peopleCount: { before: previousValues.people, after: people },
+        performedOn: { before: previousValues.date, after: isoDate }
       }
     });
 
@@ -6066,15 +5417,12 @@ async function takeOverSubmitLog() {
           synced: true, 
           syncedAt: new Date().toISOString() 
         };
-        await setDoc(doc(window.firebaseDB, 'operation_logs', matchingLog.id), logPayload, { merge: true });
-        await setDoc(doc(window.firebaseDB, 'fields', field.id), {
-          stage: field.stage,
-          stageNumber: Number(field.stageNumber) || stageNum,
-          isCompleted: field.isCompleted || (field.stage || '').toLowerCase().includes('complete'),
-          customStages: field.customStages,
-          lastSync: field.lastSync,
-          synced: true,
-          updatedAt: new Date().toISOString()
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, matchingLog.id), window.HugpongSchema.toOperation(logPayload));
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
+          customStages: field.customStages, updatedAt: new Date().toISOString()
+        }, { merge: true });
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
+          currentStageNumber: Number(field.stageNumber) || stageNum, updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (err) {
         console.warn('[TakeOver] Failed direct Firestore log write:', err);
@@ -6094,13 +5442,9 @@ async function takeOverSubmitLog() {
 
   // New log creation for unrecorded stage
   const newLog = {
-    id: `LOG-2026-${Date.now().toString().slice(-4)}`,
+    id: `LOG-${String(activeTakeOverFieldId).replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
     fieldId: activeTakeOverFieldId,
-    cycleNumber: field?.cycleNumber || 1,
-    isPastCycle: false,
-    isArchived: false,
-    isDeleted: false,
-    blockFarm: field.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm'),
+    cycleId: field?.currentCycleId,
     category: category,
     activity: activity,
     task: activity,
@@ -6118,22 +5462,13 @@ async function takeOverSubmitLog() {
     createdAt: new Date().toISOString(),
     timestamp: new Date().toISOString(),
     isNew: true,
-    compiled: false,
-    compiledReportId: null,
     photo: null,
-    status: 'Amended',
-    isAmended: true,
-    isTakeover: true,
-    approved: true,
-    loggedBy: `${sessionUser?.name || (typeof getDB === 'function' ? getDB() : {}).users?.find(u => u.role === 'Farm Manager')?.name || 'Farm Manager'} (Farm Manager - Takeover)`,
-    loggedById: '03000001',
+    status: 'ACTIVE',
+    submittedByUserId: sessionUser?.id || sessionUser?.employeeId || '',
+    submissionSource: 'MANAGER_TAKEOVER',
+    loggedById: sessionUser?.id || sessionUser?.employeeId || '',
     subItems: compiledSubItems,
-    editHistory: [{
-      editedBy: 'Farm Manager (Take Over)',
-      editedAt: new Date().toLocaleString('en-PH'),
-      reason: 'Supervisor Takeover Entry / Override',
-      note: 'Supervisor entry via Web Console'
-    }]
+    amendments: []
   };
 
   db.logs.unshift(newLog);
@@ -6180,14 +5515,11 @@ async function takeOverSubmitLog() {
     try {
       const { doc, setDoc } = window.firestore;
       const fDb = window.firebaseDB;
-      await setDoc(doc(fDb, 'fields', field.id), {
-        stage: field.stage,
-        stageNumber: Number(field.stageNumber) || stageNum,
-        isCompleted: field.isCompleted || (field.stage || '').toLowerCase().includes('complete') || Number(field.stageNumber) >= 6,
-        customStages: field.customStages,
-        lastSync: field.lastSync,
-        synced: true,
-        updatedAt: new Date().toISOString()
+      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
+        customStages: field.customStages, updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
+        currentStageNumber: Number(field.stageNumber) || stageNum, updatedAt: new Date().toISOString()
       }, { merge: true });
 
       const logPayload = { 
@@ -6200,7 +5532,7 @@ async function takeOverSubmitLog() {
         synced: true, 
         syncedAt: new Date().toISOString() 
       };
-      await setDoc(doc(fDb, 'operation_logs', newLog.id), logPayload, { merge: true });
+      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, newLog.id), window.HugpongSchema.toOperation(logPayload));
     } catch (err) {
       console.warn('[TakeOver] Direct Firestore sync error:', err);
     }
@@ -6297,7 +5629,7 @@ function cleanupDuplicateLogs(logs) {
       const existing = byId.get(logId);
       const timeExisting = new Date(existing.updatedAt || existing.createdAt || existing.date || 0).getTime();
       const timeCurrent = new Date(l.updatedAt || l.createdAt || l.date || 0).getTime();
-      if (timeCurrent >= timeExisting || l.isAmended || l.isTakeover) {
+      if (timeCurrent >= timeExisting) {
         byId.set(logId, l);
       }
     }
@@ -6330,11 +5662,7 @@ function openEditOperationLogModal(logId) {
 
   const auditInfo = getOperationAuditBadge(log, db);
   if (auditInfo.isLocked) {
-    if (auditInfo.status === 'Certified') {
-      toast('Security Lockout: This operation has been certified by SRA Inspectorate and is permanently sealed against modification.');
-    } else {
-      toast('Security Lockout: This operation belongs to an archived crop cycle and cannot be modified.');
-    }
+    toast('Security Lockout: This operation belongs to an archived crop cycle and cannot be modified.');
     return;
   }
 
@@ -6685,23 +6013,19 @@ async function submitEditOperationModal() {
   log.cost = Math.round(cost);
   log.totalCost = Math.round(cost);
   log.subItems = compiledSubItems;
-  log.status = 'Amended';
-  log.isAmended = true;
-  log.approved = true;
-  log.editHistory = log.editHistory || [];
-  log.editHistory.push({
-    id: `EDT-${Date.now()}`,
-    editedBy: _authorizedAmendmentUser || (activeUser?.name ? `${activeUser.name} (Farm Manager)` : 'Farm Manager'),
-    editedRole: 'Farm Manager',
-    editedAt: new Date().toLocaleString('en-PH'),
+  log.status = 'ACTIVE';
+  log.amendments = log.amendments || [];
+  log.amendments.push({
+    amendmentId: `AMD-${Date.now()}`,
+    amendedByUserId: activeUser?.id || activeUser?.employeeId || '',
+    amendedAt: new Date().toISOString(),
     reason: _authorizedAmendmentReason || 'Supervisor operation amendment',
-    previousValues,
-    newValues: {
-      activity: activity,
-      cost: Math.round(cost),
-      hectares: ha,
-      people: people,
-      date: date
+    changes: {
+      operationName: { before: previousValues.activity, after: activity },
+      totalCost: { before: previousValues.cost, after: Math.round(cost) },
+      areaHa: { before: previousValues.hectares, after: ha },
+      peopleCount: { before: previousValues.people, after: people },
+      performedOn: { before: previousValues.date, after: isoDate }
     }
   });
 
@@ -6721,14 +6045,14 @@ async function submitEditOperationModal() {
         synced: true,
         syncedAt: new Date().toISOString()
       };
-      await setDoc(doc(window.firebaseDB, 'operation_logs', log.id), logPayload, { merge: true });
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id), window.HugpongSchema.toOperation(logPayload));
     } catch (err) {
       console.warn('[EditOp] Failed Firestore log write:', err);
     }
   }
 
   closeEditOperationModal();
-  toast(`Operation "${activity}" amended and certified successfully!`);
+  toast(`Operation "${activity}" amended successfully.`);
 
   logSystemEvent(
     'operation',
@@ -7023,7 +6347,7 @@ function handleScannedQRCode(rawText) {
   
   playScanSuccessChime();
 
-  // Extract hash code from URL or text (e.g. HUG-202605-A3F9 or HUG-CROP-2026-FULL)
+  // Extract a canonical HUGPONG report hash from the scanned URL or text.
   const match = rawText.match(/(HUG-[A-Z0-9-]+)/i);
   const code = match ? match[1].toUpperCase() : rawText.trim().toUpperCase();
 
@@ -7038,13 +6362,11 @@ function submitManualQR() {
   const val = document.getElementById('manual-qr-input').value.trim().toUpperCase();
   if (!val) { toast('Please enter an audit hash code.'); return; }
   
-  if (val === 'HUG-202605-A3F9' || val === 'HUG-CROP-2026-FULL' || val.startsWith('HUG-') || val.startsWith('RPT-')) {
+  if (val.startsWith('HUG-') || val.startsWith('RPT-')) {
     toast('Verifying cryptographic QR hash signature...');
     setTimeout(() => { 
       loadAuditCertificate(val); 
-      toast(val === 'HUG-CROP-2026-FULL' 
-        ? `Verification complete: Full Season Compiled Audit loaded (All 6 Stages · ${Number(getDB().blockFarms?.[0]?.declaredHa || getDB().fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0).toFixed(2)} Ha).` 
-        : `Verification complete: SRA Operations Audit loaded (${val}).`); 
+      toast(`Audit report lookup completed (${val}).`);
     }, 450);
   } else {
     toast('Error: Invalid QR Audit compiler hash code. Must start with HUG- or RPT-');
@@ -7063,8 +6385,16 @@ function loadAuditCertificate(hash) {
     reportCard.style.cssText = 'display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;text-align:left;padding:1.5rem;';
   }
 
-  const isFullSeason = hash === 'HUG-CROP-2026-FULL';
   const db = getDB();
+  const requestedAudit = (db.auditReports || []).find(report =>
+    report.id === hash || report.reportId === hash || report.qrHash === hash || report.qrSignature === hash
+  );
+  if (!requestedAudit) {
+    if (sheetView) sheetView.classList.add('hidden');
+    if (emptyView) emptyView.style.display = '';
+    toast('Audit report not found. No provisional certificate was created.');
+    return;
+  }
 
   // Automatically record verification into system audit history
   try {
@@ -7076,9 +6406,9 @@ function loadAuditCertificate(hash) {
           timestamp: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
           category: 'audit',
           categoryLabel: 'SRA Audit',
-          eventType: isFullSeason ? 'Full Season Crop Audit Certified' : 'Field Operations QR Audit Verified',
-          entity: `${hash} (${isFullSeason ? (db.blockFarms?.[0]?.name || 'Block Farm') : (db.fields?.[0]?.id || 'Field')})`,
-          details: isFullSeason ? 'Verified and certified full-season operations ledger for SRA district compliance.' : 'Cryptographic QR signature verified and certified for official field operations.',
+          eventType: 'Audit Report QR Verified',
+          entity: `${hash} (${requestedAudit.id || requestedAudit.reportId})`,
+          details: 'Cryptographic QR signature matched an existing audit report.',
           actor: 'SRA Inspectorate',
           status: 'Verified'
         });
@@ -7105,180 +6435,28 @@ function loadAuditCertificate(hash) {
   const tableTitle = document.getElementById('cert-table-title');
   const tableSub = document.getElementById('cert-table-sub');
 
-  if (isFullSeason) {
-    if (titleEl) titleEl.textContent = 'SRA Production & Cost of Operations Audit Certificate';
-    if (subtitleEl) subtitleEl.textContent = `${(db.blockFarms?.[0]?.name || 'Block Farm').toUpperCase()} · SILAY CITY, NEGROS OCCIDENTAL`;
-    if (hashEl) hashEl.textContent = 'HUG-CROP-2026-FULL';
-    if (farmEl) farmEl.textContent = `${db.blockFarms?.[0]?.name || 'Block Farm'} (${Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0).toFixed(2)} Ha New Plant)`;
-    if (compilerEl) compilerEl.textContent = `${sessionUser?.name || (typeof getDB === 'function' ? getDB() : {}).users?.find(u => u.role === 'Farm Manager')?.name || 'Farm Manager'} · SRA Inspectorate`;
-    if (dateEl) dateEl.textContent = 'Crop Year 2025–2027';
-    if (badgeEl) badgeEl.innerHTML = '&#10003; Full SRA Season Audit';
-
-    if (totalLogsEl) totalLogsEl.textContent = '14 Operations';
-    if (approvedLogsEl) approvedLogsEl.textContent = '14 / 14 Certified';
-    if (areaEl) areaEl.textContent = `${Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0).toFixed(4)} Ha`;
-    if (totalCostEl) totalCostEl.textContent = 'Php 1,797,550';
-
-    if (tableTitle) tableTitle.textContent = 'SRA Standard Operations Schedule (CY 2025-2027)';
-    if (tableSub) tableSub.textContent = `Total Area for New Plant: ${Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0).toFixed(4)} Ha · Silay City SRA Oversight`;
-
-    const certSealBtn = document.getElementById('cert-seal-btn');
-    if (certSealBtn) certSealBtn.classList.add('hidden');
-
-    if (tableHead) {
-      tableHead.innerHTML = `
-        <tr class="bg-bg">
-          <th class="text-center px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border w-12">No.</th>
-          <th class="text-left px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Operation</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Total Area</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Qty</th>
-          <th class="text-center px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Unit</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Unit Cost</th>
-          <th class="text-right px-3 py-2.5 text-hug-muted font-bold text-xs border-b border-border">Cost Per Hectare</th>
-        </tr>
-      `;
-    }
-
-    if (tableBody) {
-      const fullSeasonHa = Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0).toFixed(2);
-      const sraFullSeasonItems = [
-        { no: 1, name: 'Soil Sampling', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
-        { no: 2, name: 'Land Preparation', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
-        { no: 3, name: 'Cost of Planting Material', total: fullSeasonHa, qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
-        { no: 4, name: 'Planting (including hauling/selection)', total: fullSeasonHa, qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
-        { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
-        { isSubItem: true, name: '46-00-00', total: fullSeasonHa, qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
-        { isSubItem: true, name: '18-46-00', total: fullSeasonHa, qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
-        { isSubItem: true, name: '00-00-60', total: fullSeasonHa, qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
-        { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
-        { isSubItem: true, name: 'Fertilizer Application (Labor)', total: fullSeasonHa, qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
-        { isSubItem: true, name: 'Rock Phosphate', total: fullSeasonHa, qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
-        { isSubItem: true, name: 'Fertilizer Application (Labor)', total: fullSeasonHa, qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
-        { isCategoryHeader: true, no: 7, name: 'Cultivation' },
-        { isSubItem: true, name: 'Ridge busting', total: fullSeasonHa, qty: '1', unit: 'pass', unitCost: 300.00, costPerHa: 300.00 },
-        { isSubItem: true, name: 'Off-barring', total: fullSeasonHa, qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-        { isSubItem: true, name: 'On-barring', total: fullSeasonHa, qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-        { isSubItem: true, name: 'Off-barring', total: fullSeasonHa, qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-        { isSubItem: true, name: 'Hilling-up', total: fullSeasonHa, qty: '3', unit: 'pass', unitCost: 300.00, costPerHa: 900.00 },
-        { isCategoryHeader: true, no: 8, name: 'Fertilization (2nd dose)' },
-        { isSubItem: true, name: '46-00-00', total: fullSeasonHa, qty: '1', unit: 'bag', unitCost: 1600.00, costPerHa: 1600.00 },
-        { isSubItem: true, name: '00-00-60', total: fullSeasonHa, qty: '1', unit: 'bag', unitCost: 2200.00, costPerHa: 2200.00 },
-        { no: 9, name: 'Fertilizer Application (Labor 2nd dose)', total: fullSeasonHa, qty: '2', unit: 'bag', unitCost: 100.00, costPerHa: 200.00 },
-        { isCategoryHeader: true, no: 10, name: 'Weeding' },
-        { isSubItem: true, name: '1st Weeding', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 2500.00, costPerHa: 2500.00 },
-        { isSubItem: true, name: '2nd Weeding', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 2000.00, costPerHa: 2000.00 },
-        { isSubItem: true, name: '3rd Weeding', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 1500.00, costPerHa: 1500.00 },
-        { no: 11, name: 'Drainage/Irrigation', total: fullSeasonHa, qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 1000.00 },
-        { isDirectSubtotal: true },
-        { no: 12, name: 'Cutting and Loading', total: fullSeasonHa, qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-        { no: 13, name: 'Hauling (Trucking)', total: fullSeasonHa, qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-        { no: 14, name: 'Bull Cart', total: fullSeasonHa, qty: '60', unit: 'ton', unitCost: 150.00, costPerHa: 9000.00 },
-        { isMillingSubtotal: true }
-      ];
-
-      const renderScreenRow = (op) => {
-        if (op.isCategoryHeader) {
-          return `<tr class="bg-primary/10 border-b border-border/80 font-bold">
-            <td class="px-3 py-2 text-center font-black text-xs text-primary">${op.no}</td>
-            <td colspan="6" class="px-3 py-2 font-black text-xs text-hug-text uppercase tracking-wide">${op.name}</td>
-          </tr>`;
-        }
-        if (op.isSubItem) {
-          return `<tr class="border-b border-border/40 hover:bg-bg/40 transition-colors">
-            <td class="px-3 py-1.5 text-center text-xs text-hug-muted"></td>
-            <td class="px-3 py-1.5 pl-8 text-xs font-semibold text-hug-text flex items-center gap-1.5">
-              <span class="text-primary font-bold text-[10px]">&#8226;</span> ${op.name}
-            </td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs text-hug-muted">${op.total} ha</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs text-hug-text font-semibold">${op.qty}</td>
-            <td class="px-3 py-1.5 text-center text-xs text-hug-muted">${op.unit}</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs text-hug-text font-medium">₱${op.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs text-hug-text font-bold">₱${op.costPerHa.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          </tr>`;
-        }
-        if (op.isDirectSubtotal) {
-          return `<tr class="bg-primary-bg/20 font-bold border-t-2 border-primary/40">
-            <td colspan="6" class="px-3 py-2.5 text-right text-xs uppercase tracking-wider text-primary">Total Direct Cost (Ops 1–11):</td>
-            <td class="px-3 py-2.5 text-right font-mono text-xs text-primary font-black">₱66,900.00</td>
-          </tr>`;
-        }
-        if (op.isMillingSubtotal) {
-          return `<tr class="bg-primary-bg/20 font-bold border-b border-border">
-            <td colspan="6" class="px-3 py-2.5 text-right text-xs uppercase tracking-wider text-hug-text2">Total Milling Expenses (Ops 12–14):</td>
-            <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-black">₱51,000.00</td>
-          </tr>
-          <tr class="bg-primary-bg/40 font-black border-t-2 border-primary">
-            <td colspan="6" class="px-3 py-3 text-right text-xs uppercase tracking-wider text-primary">Total Cost of Production (Ops 1–14):</td>
-            <td class="px-3 py-3 text-right font-mono text-sm text-primary font-black">₱117,900.00</td>
-          </tr>`;
-        }
-        return `<tr class="border-b border-border/60 hover:bg-bg/50 transition-colors">
-          <td class="px-3 py-2.5 text-center font-bold text-xs text-primary">${op.no}</td>
-          <td class="px-3 py-2.5 font-bold text-xs text-hug-text">${op.name}</td>
-          <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">${op.total} ha</td>
-          <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-semibold">${op.qty}</td>
-          <td class="px-3 py-2.5 text-center text-xs text-hug-muted font-medium">${op.unit}</td>
-          <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-medium">₱${op.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-text font-black">₱${op.costPerHa.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        </tr>`;
-      };
-
-      tableBody.innerHTML = sraFullSeasonItems.map(renderScreenRow).join('');
-    }
-  } else {
     // Dynamic Monthly Batch Report from db.auditReports (100% Data-Driven)
-    const allReports = db.auditReports || [];
     const cleanHash = (hash || '').trim().toUpperCase();
-    const report = allReports.find(r => 
-      (r.qrHash && r.qrHash.trim().toUpperCase() === cleanHash) ||
-      (r.qrSignature && r.qrSignature.trim().toUpperCase() === cleanHash) ||
-      (r.reportId && r.reportId.trim().toUpperCase() === cleanHash) ||
-      (r.id && r.id.trim().toUpperCase() === cleanHash) ||
-      (r.qrPayload && r.qrPayload.includes(cleanHash)) ||
-      (r.envelope && r.envelope.includes(cleanHash))
-    ) || allReports[0] || {
-      id: `RPT-2026-09-NCY01`,
-      reportId: `RPT-2026-09-NCY01`,
-      period: 'September 2026',
-      month: 'September 2026',
-      blockFarmName: (db.blockFarms?.[0]?.name || 'Nacayao Block Farm, Silay'),
-      status: 'Pending',
-      qrHash: cleanHash || `HUG-202609-0D67`,
-      qrSignature: cleanHash || `HUG-202609-0D67`,
-      compiledBy: (getActiveWebUser()?.name || 'Farm Manager')
-    };
+    const report = requestedAudit;
 
     // Retrieve the actual active operations for this specific compiled report
-    const targetReportId = report.reportId || report.id;
-    const reportMonth = report.period || report.month || 'September 2026';
-    let reportLogs = (Array.isArray(report.operations) && report.operations.length > 0)
-      ? report.operations
-      : (Array.isArray(report.logs) && report.logs.length > 0)
-        ? report.logs
-        : (db.logs || []).filter(l => 
-            !l.isDeleted && 
-            !l.isPastCycle && 
-            !l.isArchived && 
-            l.status !== 'Archived' &&
-            (l.compiledReportId === targetReportId || (reportMonth && isLogFromMonth(l.date || l.createdAt, reportMonth)))
-          );
+    const reportLogs = Array.isArray(report.operationSnapshots)
+      ? report.operationSnapshots
+      : (Array.isArray(report.operations) ? report.operations : []);
 
     // If report has totalCost & totalLogs stored, use them
-    const displayCount = (report.totalLogs != null && Number(report.totalLogs) > 0) 
-      ? Number(report.totalLogs) 
-      : (report.logsCount != null && Number(report.logsCount) > 0)
-        ? Number(report.logsCount)
-        : (reportLogs.length || 0);
+    const displayCount = reportLogs.length;
 
     const calculatedLogsCost = reportLogs.reduce((s, l) => s + Number(l.totalCost != null ? l.totalCost : (l.cost || 0)), 0);
-    const displayCost = Number((report.totalCost != null && Number(report.totalCost) > 0) 
-      ? report.totalCost 
-      : (calculatedLogsCost || 0));
+    const displayCost = Number(calculatedLogsCost || 0);
+    const fieldAreas = new Map();
+    reportLogs.forEach(log => fieldAreas.set(log.fieldId, Math.max(fieldAreas.get(log.fieldId) || 0, Number(log.areaHa || 0))));
+    const displayArea = Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0);
 
-    const isCert = report.status === 'Certified';
+    const isCert = report.status === 'CERTIFIED';
     const reportHash = report.qrHash || report.qrSignature || cleanHash;
-    const farmName = report.blockFarmName || report.blockFarm || (db.blockFarms?.[0]?.name || 'Nacayao Block Farm, Silay');
-    const compilerName = report.compiledBy || (sessionUser?.name || 'Farm Manager');
+    const farmName = (db.blockFarms || []).find(farm => farm.id === report.blockFarmId)?.name || 'Unassigned Block Farm';
+    const compilerName = (db.users || []).find(user => (user.id || user.employeeId) === report.compiledByUserId)?.name || report.compiledByUserId;
 
     // Populate Header & Metadata Card
     if (titleEl) titleEl.textContent = 'SRA Audit Certificate';
@@ -7296,7 +6474,7 @@ function loadAuditCertificate(hash) {
 
     if (totalLogsEl) totalLogsEl.textContent = `${displayCount} Operations`;
     if (approvedLogsEl) approvedLogsEl.textContent = isCert ? `${displayCount} / ${displayCount} Certified` : `0 / ${displayCount} Certified`;
-    if (areaEl) areaEl.textContent = `${Number(report.totalHectares || (db.blockFarms?.[0]?.declaredHa || 2.0)).toFixed(4)} Ha`;
+    if (areaEl) areaEl.textContent = `${displayArea.toFixed(4)} Ha`;
     if (totalCostEl) totalCostEl.textContent = `Php ${displayCost.toLocaleString()}`;
 
     if (tableTitle) tableTitle.textContent = `SRA Monthly Operations Schedule (${report.period || report.month || 'Monthly Batch'})`;
@@ -7339,24 +6517,24 @@ function loadAuditCertificate(hash) {
     }
 
     if (tableBody) {
-      const defaultHa = Number(report.totalHectares || (db.blockFarms?.[0]?.declaredHa || 2.0)).toFixed(2);
+      const defaultHa = displayArea.toFixed(2);
       
       let rowsHtml = '';
       if (reportLogs.length > 0) {
         rowsHtml = reportLogs.map((l, idx) => {
           const logCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-          const opName = l.activity || l.operationName || l.task || `Operation ${idx + 1}`;
-          const itemHa = (l.hectares || l.ha) ? `${Number(l.hectares || l.ha).toFixed(2)} ha` : `${defaultHa} ha`;
+          const opName = l.operationName || `Operation ${idx + 1}`;
+          const itemHa = l.areaHa ? `${Number(l.areaHa).toFixed(2)} ha` : `${defaultHa} ha`;
 
           // If operation has child items / subItems (e.g. Land Preparation, Basal Fertilization, etc.)
-          const hasChildren = Array.isArray(l.subItems) && l.subItems.length > 0;
+          const hasChildren = Array.isArray(l.lineItems) && l.lineItems.length > 0;
           if (hasChildren) {
             const parentRow = `
               <tr class="bg-[#F8FAF5] font-bold border-b border-border/80">
                 <td class="px-3 py-2.5 text-center text-xs text-primary font-black">${idx + 1}</td>
                 <td class="px-3 py-2.5 text-xs text-hug-text font-black uppercase tracking-wide">
                   <span>${opName}</span>
-                  <span class="text-[10px] font-bold px-1.5 py-0.5 bg-primary/10 text-primary rounded ml-1.5">Group (${l.subItems.length} items)</span>
+                   <span class="text-[10px] font-bold px-1.5 py-0.5 bg-primary/10 text-primary rounded ml-1.5">Group (${l.lineItems.length} items)</span>
                 </td>
                 <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">${itemHa}</td>
                 <td class="px-3 py-2.5 text-right font-mono text-xs text-hug-muted">—</td>
@@ -7366,11 +6544,11 @@ function loadAuditCertificate(hash) {
               </tr>
             `;
 
-            const childrenRows = l.subItems.map((si, cIdx) => {
-              const childQty = si.qty != null ? si.qty : '1';
+            const childrenRows = l.lineItems.map((si, cIdx) => {
+              const childQty = si.quantity != null ? si.quantity : '1';
               const childUnit = si.unit || 'ha';
-              const childUnitCost = Number(si.unitCost || (Number(si.subTotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
-              const childSubTotal = Number(si.subTotal != null ? si.subTotal : (Number(childQty) * childUnitCost));
+              const childUnitCost = Number(si.unitCost || (Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
+              const childSubTotal = Number(si.subtotal != null ? si.subtotal : (Number(childQty) * childUnitCost));
               const childDesc = si.description || si.name || `Sub-item ${cIdx + 1}`;
               return `
                 <tr class="border-b border-border/40 hover:bg-bg/40 transition-colors bg-white">
@@ -7389,8 +6567,8 @@ function loadAuditCertificate(hash) {
           }
 
           // Direct input operation
-          const logQty = l.qty || l.quantity || l.inputQty || '1';
-          const logUnit = l.unit || l.inputUnit || 'ha';
+          const logQty = l.quantity?.value || '1';
+          const logUnit = l.quantity?.unit || 'ha';
           const logUnitCost = Number(l.unitCost || l.directRate || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
           return `
             <tr class="border-b border-border/60 hover:bg-bg/50 transition-colors bg-white">
@@ -7426,139 +6604,49 @@ function loadAuditCertificate(hash) {
       }
       tableBody.innerHTML = rowsHtml;
     }
-  }
 }
 
 async function issueSRACertification(reportId) {
   const db = getDB();
-  const allReports = db.auditReports || [];
-  const targetId = reportId || document.getElementById('cert-hash')?.textContent?.trim() || 'HUG-202605-A3F9';
-  let report = allReports.find(r => 
-    r.id === targetId || 
-    r.reportId === targetId || 
-    r.qrHash === targetId || 
-    r.qrSignature === targetId ||
-    (targetId && targetId.includes('202605') && (r.period?.includes('May') || r.month?.includes('May')))
-  );
-
-  const currentCycleMonth = 'September 2026';
-  const farmName = report?.blockFarmName || report?.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm');
-  const period = report?.period || report?.month || currentCycleMonth;
-  const totalCost = Number(report?.totalCost || 0).toLocaleString();
-  const totalHa = Number(report?.totalHectares || (db.blockFarms?.[0]?.declaredHa || 0)).toFixed(2);
-
-  const ok = await showConfirmDialog({
-    title: 'Issue Official SRA Digital Seal?',
-    message: `Apply the official Sugar Regulatory Administration Digital Seal for ${period} (${farmName})?\n\n• Audited Area: ${totalHa} Ha (Silay Mill District)\n• Audited Direct Cost: ₱${totalCost}\n• Verification Hash: ${report?.qrHash || targetId}\n\nThis will legally certify and lock the monthly operations ledger and broadcast verification across all mobile terminals and regulatory portals.`,
-    confirmText: 'Issue Digital Seal',
-    cancelText: 'Cancel',
-    type: 'info'
-  });
-  if (!ok) return;
-
-  toast('Issuing official SRA Digital Seal & updating regulatory ledger...');
-
-  const auditorName = `${sessionUser?.name || 'SRA Officer'} (SRA Inspectorate)`;
-  const nowIso = new Date().toISOString();
-  const nowDisplay = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  if (report) {
-    report.status = 'Certified';
-    report.certifiedBy = auditorName;
-    report.certifiedRole = 'SRA (Admin)';
-    report.certifiedAt = nowIso;
-  } else {
-    report = {
-      id: `RPT-2026-09-NCY01`,
-      reportId: `RPT-2026-09-NCY01`,
-      qrHash: `HUG-202609-A3F9`,
-      qrSignature: `HUG-202609-A3F9`,
-      period: currentCycleMonth,
-      month: currentCycleMonth,
-      blockFarmName: farmName,
-      totalHectares: Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0),
-      totalLogs: (db.logs || []).filter(l => !l.isPastCycle && !l.isArchived).length,
-      totalCost: (db.logs || []).filter(l => !l.isPastCycle && !l.isArchived).reduce((sum, l) => sum + (Number(l.cost || l.totalCost) || 0), 0),
-      status: 'Certified',
-      certifiedBy: auditorName,
-      certifiedRole: 'SRA (Admin)',
-      certifiedAt: nowIso
-    };
-    allReports.unshift(report);
+  const targetId = reportId || document.getElementById('cert-hash')?.textContent?.trim() || '';
+  const certificationActor = getActiveWebUser() || sessionUser || {};
+  if (window.HugpongSchema.role(certificationActor.canonicalRole || certificationActor.role) !== 'SRA_ADMIN') {
+    toast('Certification denied: only an SRA Admin may certify audit reports.');
+    return;
   }
-  db.auditReports = allReports;
-
-  // Mark all logs associated with this certified report as certified
-  const targetReportId = report.reportId || report.id;
-  const targetPeriod = report.period || report.month;
-  const certifiedLogs = (db.logs || []).filter(l => 
-    l.compiledReportId === targetReportId || 
-    (l.date && targetPeriod && isLogFromMonth(l.date, targetPeriod))
+  const report = (db.auditReports || []).find(candidate =>
+    candidate.id === targetId || candidate.reportId === targetId || candidate.qrHash === targetId || candidate.qrSignature === targetId
   );
-  certifiedLogs.forEach(l => {
-    l.certified = true;
-    l.isCertified = true;
-    l.status = 'Certified';
-    l.certifiedBy = auditorName;
-    l.certifiedAt = nowIso;
-  });
-  saveDB(db);
-
-  // Update in Firestore if reachable
-  try {
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      const docId = report.reportId || report.id || 'RPT-2026-09-NCY01';
-      const updatePayload = {
-        status: 'Certified',
-        certifiedBy: auditorName,
-        certifiedRole: 'SRA (Admin)',
-        certifiedAt: nowIso,
-        verifiedBy: auditorName,
-        updatedAt: nowIso
-      };
-
-      await setDoc(doc(window.firebaseDB, 'audit_reports', docId), updatePayload, { merge: true });
-      if (report.id && report.id !== docId) {
-        await setDoc(doc(window.firebaseDB, 'audit_reports', report.id), updatePayload, { merge: true });
-      }
-
-      // Emit official audit log
-      await setDoc(doc(window.firebaseDB, 'audit_logs', 'AUD-' + Date.now()), {
-        category: 'audit',
-        eventType: 'Report Certification',
-        action: 'SRA Digital Seal Issued',
-        actorName: auditorName,
-        actorRole: 'SRA (Admin)',
-        entityId: docId,
-        blockFarm: report.blockFarmName || report.blockFarm || (db.blockFarms?.[0]?.name || 'Block Farm'),
-        details: `Official SRA digital seal issued for ${report.period || report.month || currentCycleMonth} operations ledger.`,
-        timestamp: nowIso
-      }, { merge: true });
-      console.log('[Firestore] Successfully persisted SRA certification for:', docId);
-    }
-  } catch (err) {
-    console.warn('[Firestore Certification]', err);
+  if (!report || report.status !== 'PENDING') {
+    toast('Certification denied: select an existing PENDING audit report.');
+    return;
   }
-
-  // Record in local systemHistory
-  if (Array.isArray(db.systemHistory)) {
-    db.systemHistory.unshift({
-      id: 'AUD-' + Math.floor(100 + Math.random() * 900),
-      timestamp: nowDisplay,
-      category: 'audit',
-      categoryLabel: 'SRA Audit',
-      eventType: 'Official SRA Seal Issued',
-      entity: `${report?.qrHash || targetId} (${report?.blockFarmName || (db.blockFarms?.[0]?.name || 'Block Farm')})`,
-      details: 'Official SRA compliance digital seal issued and ledger locked.',
-      actor: auditorName,
-      status: 'Certified'
+  const actorUserId = certificationActor.id || certificationActor.employeeId || '';
+  if (!actorUserId) {
+    toast('Certification denied: the SRA Admin account has no stable user ID.');
+    return;
+  }
+  const certifiedAt = new Date().toISOString();
+  report.status = 'CERTIFIED';
+  report.certifiedByUserId = actorUserId;
+  report.certifiedAt = certifiedAt;
+  report.updatedAt = certifiedAt;
+  const canonicalReportId = report.reportId || report.id;
+  if (window.firebaseDB && window.firestore) {
+    const { doc, setDoc } = window.firestore;
+    await setDoc(
+      doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_REPORTS, canonicalReportId),
+      window.HugpongSchema.toReport(report, { status: 'CERTIFIED', certifiedByUserId: actorUserId, certifiedAt, updatedAt: certifiedAt })
+    );
+    const auditEventId = `AUD-${Date.now()}`;
+    await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_LOGS, auditEventId), {
+      eventType: 'AUDIT_REPORT_CERTIFIED', actorUserId, entityType: 'AUDIT_REPORT', entityId: canonicalReportId,
+      details: `Certified audit report ${canonicalReportId}.`, outcome: 'SUCCESS', createdAt: certifiedAt
     });
-    saveDB(db);
   }
-
-  toast('Success: SRA Digital Seal issued! Report certified and locked.');
-  loadAuditCertificate(report?.qrHash || targetId);
+  saveDB(db, false);
+  toast('SRA Digital Seal issued for the audit report.');
+  loadAuditCertificate(report.qrHash || canonicalReportId);
   renderAuditQueue();
 }
 
@@ -7571,7 +6659,7 @@ function renderAuditQueue() {
   const reports = db.auditReports || [];
 
   if (countEl) {
-    const pendingCount = reports.filter(r => r.status !== 'Certified').length;
+    const pendingCount = reports.filter(r => r.status !== 'CERTIFIED').length;
     countEl.textContent = `${pendingCount} Pending`;
   }
 
@@ -7581,7 +6669,7 @@ function renderAuditQueue() {
   }
 
   container.innerHTML = reports.map(r => {
-    const isCert = r.status === 'Certified';
+    const isCert = r.status === 'CERTIFIED';
     const hash = r.qrHash || r.qrSignature || r.reportId || r.id;
     return `
       <div onclick="loadAuditCertificate('${hash}')" class="p-2.5 rounded-lg border ${isCert ? 'border-border bg-bg/40' : 'border-amber-300 bg-amber-50/50'} hover:border-primary hover:bg-white transition-all cursor-pointer flex items-center justify-between gap-2 shadow-2xs">
@@ -7601,12 +6689,22 @@ function renderAuditQueue() {
 }
 
 function printCertifiedAuditReport() {
-  const hash = document.getElementById('cert-hash')?.textContent?.trim() || 'HUG-CROP-2026-FULL';
-  const isFullSeason = hash === 'HUG-CROP-2026-FULL';
+  const hash = document.getElementById('cert-hash')?.textContent?.trim() || '';
   const db = getDB();
-  const activeFarmName = db.blockFarms?.[0]?.name || 'Block Farm';
-  const activeFarmHa = Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0);
-  const activeReport = (db.auditReports || []).find(r => r.qrHash === hash || r.reportId === hash) || {};
+  const activeReport = (db.auditReports || []).find(r => r.qrHash === hash || r.reportId === hash || r.id === hash);
+  if (!activeReport) {
+    toast('Audit report not found. Nothing was printed.');
+    return;
+  }
+  const activeFarm = (db.blockFarms || []).find(farm => farm.id === activeReport.blockFarmId);
+  const activeFarmName = activeFarm?.name || 'Unassigned Block Farm';
+  const targetReportLogs = Array.isArray(activeReport.operationSnapshots)
+    ? activeReport.operationSnapshots
+    : (Array.isArray(activeReport.operations) ? activeReport.operations : []);
+  const fieldAreas = new Map();
+  targetReportLogs.forEach(log => fieldAreas.set(log.fieldId, Math.max(fieldAreas.get(log.fieldId) || 0, Number(log.areaHa || 0))));
+  const activeFarmHa = Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0);
+  const reportCost = targetReportLogs.reduce((sum, log) => sum + Number(log.totalCost || 0), 0);
 
   const printDoc = window.open('', '_blank', 'width=900,height=1100');
   if (!printDoc) {
@@ -7614,74 +6712,33 @@ function printCertifiedAuditReport() {
     return;
   }
 
-  const titleBadge = isFullSeason ? 'Production Schedule &amp; Cost of Operations Audit' : 'Monthly Field Operations &amp; Cost Audit Report';
-  const reportSubtitle = isFullSeason ? 'Program of Work &amp; Annual Cost of Production Schedule (CY 2025-2027)' : `${activeReport.period || activeReport.month || 'September 2026'} Monthly Field Operations Batch Audit`;
-  const areaLabel = isFullSeason ? 'TOTAL AREA FOR NEW PLANT (HA):' : 'TOTAL PARCEL AREA AUDITED (HA):';
-  const areaVal = isFullSeason ? activeFarmHa.toFixed(4) : (Number(activeReport.totalHectares || activeFarmHa).toFixed(4));
-  const areaSubtext = isFullSeason ? `${activeFarmHa.toFixed(4)} Ha New Plant` : `${Number(activeReport.totalHectares || activeFarmHa).toFixed(4)} Ha Active Parcel`;
-  const totalCostVal = isFullSeason ? '₱1,797,550.00' : '₱280,370.00';
-  const totalCostPerHa = isFullSeason ? '₱117,900.00' : '₱52,900.00';
-
-  const targetReportLogs = (Array.isArray(activeReport.operations) && activeReport.operations.length > 0)
-    ? activeReport.operations
-    : (Array.isArray(activeReport.logs) && activeReport.logs.length > 0)
-      ? activeReport.logs
-      : [];
+  const titleBadge = 'Monthly Field Operations &amp; Cost Audit Report';
+  const reportSubtitle = `${activeReport.period} Monthly Field Operations Batch Audit`;
+  const areaLabel = 'TOTAL FIELD AREA AUDITED (HA):';
+  const areaVal = activeFarmHa.toFixed(4);
+  const areaSubtext = `${activeFarmHa.toFixed(4)} Ha Audited`;
+  const totalCostVal = `₱${reportCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const totalCostPerHa = activeFarmHa > 0 ? `₱${(reportCost / activeFarmHa).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₱0.00';
 
   let operations = [];
-  if (isFullSeason) {
-    operations = [
-      { no: 1, name: 'Soil Sampling', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
-      { no: 2, name: 'Land Preparation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
-      { no: 3, name: 'Cost of Planting Material', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
-      { no: 4, name: 'Planting (including hauling/selection)', total: activeFarmHa.toFixed(2), qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
-      { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
-      { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
-      { isSubItem: true, name: '18-46-00', total: activeFarmHa.toFixed(2), qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
-      { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
-      { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
-      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
-      { isSubItem: true, name: 'Rock Phosphate', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
-      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: activeFarmHa.toFixed(2), qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
-      { isCategoryHeader: true, no: 7, name: 'Cultivation' },
-      { isSubItem: true, name: 'Ridge busting', total: activeFarmHa.toFixed(2), qty: '1', unit: 'pass', unitCost: 300.00, costPerHa: 300.00 },
-      { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-      { isSubItem: true, name: 'On-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-      { isSubItem: true, name: 'Off-barring', total: activeFarmHa.toFixed(2), qty: '2', unit: 'pass', unitCost: 300.00, costPerHa: 600.00 },
-      { isSubItem: true, name: 'Hilling-up', total: activeFarmHa.toFixed(2), qty: '3', unit: 'pass', unitCost: 300.00, costPerHa: 900.00 },
-      { isCategoryHeader: true, no: 8, name: 'Fertilization (2nd dose)' },
-      { isSubItem: true, name: '46-00-00', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 1600.00, costPerHa: 1600.00 },
-      { isSubItem: true, name: '00-00-60', total: activeFarmHa.toFixed(2), qty: '1', unit: 'bag', unitCost: 2200.00, costPerHa: 2200.00 },
-      { no: 9, name: 'Fertilizer Application (Labor 2nd dose)', total: activeFarmHa.toFixed(2), qty: '2', unit: 'bag', unitCost: 100.00, costPerHa: 200.00 },
-      { isCategoryHeader: true, no: 10, name: 'Weeding' },
-      { isSubItem: true, name: '1st Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2500.00, costPerHa: 2500.00 },
-      { isSubItem: true, name: '2nd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 2000.00, costPerHa: 2000.00 },
-      { isSubItem: true, name: '3rd Weeding', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1500.00, costPerHa: 1500.00 },
-      { no: 11, name: 'Drainage/Irrigation', total: activeFarmHa.toFixed(2), qty: '1', unit: 'ha', unitCost: 1000.00, costPerHa: 1000.00 },
-      { isDirectSubtotal: true },
-      { no: 12, name: 'Cutting and Loading', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-      { no: 13, name: 'Hauling (Trucking)', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 350.00, costPerHa: 21000.00 },
-      { no: 14, name: 'Bull Cart', total: activeFarmHa.toFixed(2), qty: '60', unit: 'ton', unitCost: 150.00, costPerHa: 9000.00 },
-      { isMillingSubtotal: true }
-    ];
-  } else if (targetReportLogs.length > 0) {
+  if (targetReportLogs.length > 0) {
     let opCounter = 1;
     targetReportLogs.forEach(l => {
       const logCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-      const opName = l.activity || l.operationName || l.task || `Operation ${opCounter}`;
-      const itemHa = (l.hectares || l.ha) ? `${Number(l.hectares || l.ha).toFixed(2)}` : `${Number(activeReport.totalHectares || activeFarmHa).toFixed(2)}`;
+      const opName = l.operationName || `Operation ${opCounter}`;
+      const itemHa = l.areaHa ? `${Number(l.areaHa).toFixed(2)}` : `${activeFarmHa.toFixed(2)}`;
 
-      if (Array.isArray(l.subItems) && l.subItems.length > 0) {
+      if (Array.isArray(l.lineItems) && l.lineItems.length > 0) {
         operations.push({
           isCategoryHeader: true,
           no: opCounter++,
           name: `${opName} (Group — ₱${logCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
         });
-        l.subItems.forEach((si, cIdx) => {
-          const childQty = si.qty != null ? String(si.qty) : '1';
+        l.lineItems.forEach((si, cIdx) => {
+          const childQty = si.quantity != null ? String(si.quantity) : '1';
           const childUnit = si.unit || 'ha';
-          const childUnitCost = Number(si.unitCost || (Number(si.subTotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
-          const childSubTotal = Number(si.subTotal != null ? si.subTotal : (Number(childQty) * childUnitCost));
+          const childUnitCost = Number(si.unitCost || (Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
+          const childSubTotal = Number(si.subtotal != null ? si.subtotal : (Number(childQty) * childUnitCost));
           operations.push({
             isSubItem: true,
             name: si.description || si.name || `Sub-item ${cIdx + 1}`,
@@ -7693,8 +6750,8 @@ function printCertifiedAuditReport() {
           });
         });
       } else {
-        const logQty = l.qty || l.quantity || l.inputQty || '1';
-        const logUnit = l.unit || l.inputUnit || 'ha';
+        const logQty = l.quantity?.value || '1';
+        const logUnit = l.quantity?.unit || 'ha';
         const logUnitCost = Number(l.unitCost || l.directRate || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
         operations.push({
           no: opCounter++,
@@ -7715,23 +6772,8 @@ function printCertifiedAuditReport() {
       subtotalVal: `₱${totalCostNumber.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     });
   } else {
-    operations = [
-      { no: 1, name: 'Soil Sampling', total: '5.30', qty: '1', unit: 'ha', unitCost: 100.00, costPerHa: 100.00 },
-      { no: 2, name: 'Land Preparation', total: '5.30', qty: '1', unit: 'ha', unitCost: 12000.00, costPerHa: 12000.00 },
-      { no: 3, name: 'Cost of Planting Material', total: '5.30', qty: '5', unit: 'lac', unitCost: 3000.00, costPerHa: 15000.00 },
-      { no: 4, name: 'Planting (including hauling/selection)', total: '5.30', qty: '5', unit: 'lac', unitCost: 1000.00, costPerHa: 5000.00 },
-      { isCategoryHeader: true, no: 5, name: 'Basal Fertilization' },
-      { isSubItem: true, name: '46-00-00', total: '5.30', qty: '2', unit: 'bag', unitCost: 1600.00, costPerHa: 3200.00 },
-      { isSubItem: true, name: '18-46-00', total: '5.30', qty: '3', unit: 'bag', unitCost: 2500.00, costPerHa: 7500.00 },
-      { isSubItem: true, name: '00-00-60', total: '5.30', qty: '2', unit: 'bag', unitCost: 2200.00, costPerHa: 4400.00 },
-      { isCategoryHeader: true, no: 6, name: 'Fertilizer Application' },
-      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '7', unit: 'bag', unitCost: 100.00, costPerHa: 700.00 },
-      { isSubItem: true, name: 'Rock Phosphate', total: '5.30', qty: '10', unit: 'bag', unitCost: 400.00, costPerHa: 4000.00 },
-      { isSubItem: true, name: 'Fertilizer Application (Labor)', total: '5.30', qty: '10', unit: 'bag', unitCost: 100.00, costPerHa: 1000.00 },
-      { isDirectSubtotal: true, subtotalLabel: 'TOTAL MONTHLY DIRECT COST (Ops 1–6):', subtotalVal: '₱52,900.00' }
-    ];
+    operations = [];
   }
-
   const tableRowsHtml = operations.map(op => {
     if (op.isCategoryHeader) {
       return `
@@ -8091,7 +7133,7 @@ async function submitPublishPrice() {
     if (window.firebaseDB && window.firestore) {
       try {
         const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, 'sra_prices', pId), newPost, { merge: true });
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SRA_PRICES, pId), window.HugpongSchema.toPrice(newPost, activeUser?.id || activeUser?.employeeId || ''));
         console.log('[HUGPONG] Published price committed to Firestore:', pId);
       } catch (e) {
         console.warn('[HUGPONG] Direct Firestore price publish note:', e);
@@ -8172,6 +7214,7 @@ function setLogFilter(filter) {
 // ── FIELD OPERATION LOGS CONTROLLER ───────────────────────
 function renderLogs() {
   const db = getDB();
+  const managedFarm = resolveManagedBlockFarm(db);
   const selectField = document.getElementById('log-field-filter')?.value || 'all';
   const body = document.getElementById('logs-table-body');
   if (!body) return;
@@ -8182,18 +7225,16 @@ function renderLogs() {
   const isSuperAdmin = currentRole === 'superadmin';
 
   const labelEl = document.querySelector('label[for="log-field-filter"]');
-  if (labelEl) labelEl.textContent = isManager ? `Filter ${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'} Plot:` : 'Filter Field / Block Farm:';
+  if (labelEl) labelEl.textContent = isManager ? `Filter ${managedFarm?.name || 'Assigned Block Farm'} Plot:` : 'Filter Field / Block Farm:';
 
   const selectEl = document.getElementById('log-field-filter');
   if (selectEl) {
     if (isManager) {
-      const myPlots = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === (db.blockFarms?.[0]?.name || 'Block Farm') || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm'));
-      selectEl.innerHTML = `<option value="all">All ${(typeof getDB === 'function' ? getDB() : {}).blockFarms?.[0]?.name || 'Block Farm'} Plots</option>`
-        + myPlots.map(f => `<option value="${f.id}">${f.id} (${f.member || 'Member'})</option>`).join('');
+      const myPlots = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
+      selectEl.innerHTML = `<option value="all">All ${managedFarm?.name || 'Assigned Block Farm'} Plots</option>`
+        + myPlots.map(field => `<option value="${field.id}">${field.id} (${resolveFieldMember(field, db)})</option>`).join('');
     } else {
-      const bFarms = (db.blockFarms && db.blockFarms.length > 0)
-        ? db.blockFarms.map(bf => bf.name)
-        : [(db.blockFarms?.[0]?.name || 'Block Farm')];
+      const bFarms = (db.blockFarms || []).map(bf => bf.name);
       const plotOptions = db.fields.map(f => `<option value="${f.id}">${f.id} (${resolveFieldMember(f, db)})</option>`).join('');
       selectEl.innerHTML = '<option value="all">All District Fields &amp; Block Farms</option>'
         + bFarms.map(bf => `<option value="${bf}">${bf} (All Plots)</option>`).join('')
@@ -8204,38 +7245,25 @@ function renderLogs() {
 
   const activeFilterValue = selectEl ? selectEl.value : 'all';
 
-  let filtered = (db.logs || []).filter(l => !l.isDeleted);
+  let filtered = (db.logs || []).filter(l => l.status === 'ACTIVE' || l.status === 'ARCHIVED');
   
   // 1. Scoping: Farm Manager can only view logs from their assigned block farm
   if (isManager) {
-    const managerFieldIds = new Set(db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === (db.blockFarms?.[0]?.name || 'Block Farm') || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || getBlockFarmName(f.id) === (db.blockFarms?.[0]?.name || 'Block Farm')).map(f => f.id));
-    filtered = filtered.filter(l => managerFieldIds.has(l.fieldId) || l.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') || l.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm'));
+    const managerFieldIds = new Set(db.fields.filter(field => field.blockFarmId === managedFarm?.id).map(field => field.id));
+    filtered = filtered.filter(log => managerFieldIds.has(log.fieldId));
   }
 
   if (activeFilterValue !== 'all') {
-    if (activeFilterValue.includes('Block Farm')) {
-      filtered = filtered.filter(l => {
-        const bf = l.blockFarm || getBlockFarmName(l.fieldId);
-        if (activeFilterValue.includes((db.blockFarms?.[0]?.name || 'Block Farm'))) {
-          return bf === (db.blockFarms?.[0]?.name || 'Block Farm') || bf === (db.blockFarms?.[0]?.name || 'Block Farm');
-        }
-        return bf === activeFilterValue;
-      });
+    const selectedFarm = (db.blockFarms || []).find(farm => farm.name === activeFilterValue || farm.id === activeFilterValue);
+    if (selectedFarm) {
+      const fieldIds = new Set(db.fields.filter(field => field.blockFarmId === selectedFarm.id).map(field => field.id));
+      filtered = filtered.filter(log => fieldIds.has(log.fieldId));
     } else {
       filtered = filtered.filter(l => l.fieldId === activeFilterValue);
     }
   }
 
-  const isLogPast = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
+  const isLogPast = (l) => Boolean(l && l.status === 'ARCHIVED');
 
   if (logStatusFilter === 'archived' || logStatusFilter === 'past') {
     filtered = filtered.filter(l => isLogPast(l));
@@ -8280,9 +7308,9 @@ function renderLogs() {
   const paginatedLogs = filtered.slice(startIndex, startIndex + LOGS_PER_PAGE);
 
   body.innerHTML = paginatedLogs.map(l => {
-    const farmName = l.blockFarm || getBlockFarmName(l.fieldId);
+    const farmName = getBlockFarmName(l.fieldId);
     const fieldObj = db.fields.find(f => f.id === l.fieldId);
-    const memberName = fieldObj ? (fieldObj.member || fieldObj.owner) : '';
+    const memberName = fieldObj ? resolveFieldMember(fieldObj, db) : '';
     const isNew = Boolean(l.isNew);
 
     let actionBtn = '';
@@ -8508,7 +7536,9 @@ function renderUsers() {
 
   let activeUser = null;
   try { activeUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch (e) {}
-  const managerFarm = (activeUser && (activeUser.blockFarm || activeUser.farm)) || (db.blockFarms?.[0]?.name || 'Block Farm');
+  const activeUserId = activeUser?.id || activeUser?.employeeId || '';
+  const managedFarm = (db.blockFarms || []).find(farm => farm.managerUserId === activeUserId);
+  const managerFarm = managedFarm?.name || 'Unassigned Block Farm';
 
   // Dynamic titles according to user role
   const headingEl = document.getElementById('user-mgmt-heading');
@@ -8542,21 +7572,17 @@ function renderUsers() {
       // Farm manager ONLY sees members of the block farm they are handling (+ supervising manager)
       filtered = filtered.filter(u => {
         // Exclude Super Admin and SRA Admin completely
-        if (u.role === 'Super Admin' || u.role === 'SRA (Admin)') return false;
-
-        const uFarm = u.blockFarm || '';
-        const isSameFarm = uFarm === managerFarm || 
-          (uFarm && managerFarm && (uFarm.toLowerCase().includes(managerFarm.toLowerCase()) || managerFarm.toLowerCase().includes(uFarm.toLowerCase()))) ||
-          (!uFarm && managerFarm.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")));
+        if (u.role === 'Super Admin' || u.role === 'SRA Admin') return false;
 
         // Show cooperative Members belonging to this manager's block farm
-        if (u.role === 'Member') {
-          return isSameFarm;
+        if (u.role === 'Member Farmer') {
+          const userId = u.id || u.employeeId || '';
+          return Boolean(managedFarm && (db.fields || []).some(field => field.memberUserId === userId && field.blockFarmId === managedFarm.id));
         }
 
         // Show the Farm Manager themself
         if (u.role === 'Farm Manager') {
-          return isSameFarm || (activeUser && (u.contact === activeUser.contact || u.name === activeUser.name));
+          return (u.id || u.employeeId || '') === activeUserId;
         }
 
         return false;
@@ -8578,17 +7604,17 @@ function renderUsers() {
         u.name.toLowerCase().includes(searchQuery) || 
         u.contact.toLowerCase().includes(searchQuery) || 
         u.role.toLowerCase().includes(searchQuery) ||
-        (u.blockFarm && u.blockFarm.toLowerCase().includes(searchQuery)) ||
-        (u.fieldId && u.fieldId.toLowerCase().includes(searchQuery))
+        (db.fields || []).some(field => field.memberUserId === (u.id || u.employeeId) && (
+          field.id.toLowerCase().includes(searchQuery) || resolveFieldBlockFarm(field, db).toLowerCase().includes(searchQuery)
+        ))
       );
     }
 
     function getUserLogsCount(user) {
       if (!db.logs) return 0;
       return db.logs.filter(l => 
-        (user.fieldId && l.fieldId === user.fieldId) ||
-        (user.employeeId && l.loggedById === user.employeeId) ||
-        (l.loggedBy && l.loggedBy.includes(user.name))
+        ((db.fields || []).some(field => field.memberUserId === (user.id || user.employeeId) && l.fieldId === field.id)) ||
+        (user.employeeId && l.submittedByUserId === user.employeeId)
       ).length;
     }
 
@@ -8607,9 +7633,9 @@ function renderUsers() {
     usersBody.innerHTML = paginatedUsers.map(u => {
       const roleBadges = { 
         'Super Admin': 'bg-farm-purple-bg text-farm-purple border border-farm-purple/20', 
-        'SRA (Admin)': 'bg-primary-bg text-primary border border-primary/20', 
+        'SRA Admin': 'bg-primary-bg text-primary border border-primary/20',
         'Farm Manager': 'bg-farm-blue-bg text-farm-blue border border-farm-blue/20', 
-        'Member': 'bg-bg text-hug-text2 border border-border' 
+        'Member Farmer': 'bg-bg text-hug-text2 border border-border'
       };
       const rClass = roleBadges[u.role] || roleBadges['Member'];
       
@@ -8617,30 +7643,19 @@ function renderUsers() {
       let farmPlotLabel = 'Unassigned';
       if (u.role === 'Super Admin') {
         farmPlotLabel = '<span class="text-hug-muted">All Block Farms / Central Oversight</span>';
-      } else if (u.role === 'SRA (Admin)') {
+      } else if (u.role === 'SRA Admin') {
         farmPlotLabel = '<span class="text-primary font-semibold">District 3 (SRA Regulatory)</span>';
       } else if (u.role === 'Farm Manager') {
-        const bfName = u.blockFarm || (db.blockFarms && db.blockFarms[0]?.name) || (db.blockFarms?.[0]?.name || 'Block Farm');
+        const userId = u.id || u.employeeId || '';
+        const bfName = (db.blockFarms || []).find(farm => farm.managerUserId === userId)?.name || 'Unassigned';
         farmPlotLabel = `<span class="font-bold text-farm-blue">${bfName}</span> <span class="text-[10px] text-hug-muted block font-semibold">(Supervising Manager)</span>`;
       } else {
         // Members: resolve plot and show block farm clearly
-        const bfName = u.blockFarm || managerFarm || (db.blockFarms?.[0]?.name || 'Block Farm');
-        let plotDisplay = '';
-        if (u.fieldId) {
-          const matchingF = (db.fields || []).find(f => f.id === u.fieldId);
-          const haSuffix = matchingF ? ` (${matchingF.ha || 1.5} Ha)` : '';
-          plotDisplay = ` · <span class="font-mono font-bold text-primary">${u.fieldId}${haSuffix}</span>`;
-        } else {
-          const matchingFields = (db.fields || []).filter(f => 
-            f.memberId === u.employeeId || 
-            f.memberId === u.contact || 
-            f.member === u.name || 
-            f.memberName === u.name
-          );
-          if (matchingFields.length > 0) {
-            plotDisplay = ` · ` + matchingFields.map(f => `<span class="font-mono font-bold text-primary">${f.id} (${f.ha || 1.5} Ha)</span>`).join(', ');
-          }
-        }
+        const matchingFields = (db.fields || []).filter(field => field.memberUserId === (u.id || u.employeeId));
+        const bfName = matchingFields[0] ? resolveFieldBlockFarm(matchingFields[0], db) : 'Unassigned';
+        const plotDisplay = matchingFields.length > 0
+          ? ` · ` + matchingFields.map(field => `<span class="font-mono font-bold text-primary">${field.id} (${Number(field.ha || 0)} Ha)</span>`).join(', ')
+          : '';
         farmPlotLabel = `<span class="font-bold text-hug-text">${bfName}</span>${plotDisplay}`;
       }
 
@@ -8648,12 +7663,12 @@ function renderUsers() {
       let canEdit = false;
       let canRevoke = false;
       if (currentRole === 'manager') {
-        if (u.role === 'Member') {
+        if (u.role === 'Member Farmer') {
           canEdit = true;
           canRevoke = true;
         }
       } else if (currentRole === 'admin') {
-        if (u.role === 'Farm Manager' || u.role === 'Member') {
+        if (u.role === 'Farm Manager' || u.role === 'Member Farmer') {
           canEdit = true;
           canRevoke = true;
         }
@@ -8685,7 +7700,7 @@ function renderUsers() {
               <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="opacity-70"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
               <span>${u.contact || 'No mobile linked'}</span>
               ${u.contact ? (
-                (u.phoneVerified === true || u.isPhoneVerified === true || (u.status === 'Active' && u.pendingFirstLoginVerification !== true && (u.role === 'Member' || u.roleKey === 'member')))
+                Boolean(u.phoneVerifiedAt)
                   ? '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200" title="SIM Verified & Active via Real SMS OTP"><svg width="8" height="8" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg> Verified SIM</span>'
                   : '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Pending SMS OTP verification upon first login"><svg width="8" height="8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Unverified (First Login)</span>'
               ) : ''}
@@ -8724,11 +7739,8 @@ function renderUsers() {
   if (currentRole === 'manager') {
     // Farm Manager only sees Member applicants for their managed block farm
     scopedPending = scopedPending.filter(p => {
-      if (p.role !== 'Member') return false;
-      const pFarm = p.blockFarm || '';
-      return pFarm === managerFarm ||
-        (pFarm && managerFarm && (pFarm.toLowerCase().includes(managerFarm.toLowerCase()) || managerFarm.toLowerCase().includes(pFarm.toLowerCase()))) ||
-        (!pFarm && managerFarm.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")));
+      if (p.role !== 'Member Farmer') return false;
+      return Boolean(managedFarm && p.blockFarmId === managedFarm.id);
     });
   } else if (currentRole === 'admin') {
     // SRA Admin oversees district applications across farms
@@ -8752,8 +7764,9 @@ function renderUsers() {
   }
 
   function renderPendingCard(p) {
-    const plot = p.fieldId || (db.fields?.[0]?.id || '');
-    const ha = p.area || '1.4 Ha';
+    const plot = p.fieldId || 'Not assigned';
+    const ha = p.area || 'Not specified';
+    const pendingFarm = (db.blockFarms || []).find(farm => farm.id === p.blockFarmId)?.name || 'Unassigned';
     return `
       <div class="border border-border rounded-xl p-4 bg-bg/40 flex flex-col gap-3 hover:border-primary/40 transition-colors shadow-2xs">
         <div class="flex justify-between items-start">
@@ -8762,7 +7775,7 @@ function renderUsers() {
               <h4 class="text-sm font-bold text-hug-text">${p.name}</h4>
               <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary uppercase tracking-wider">${p.role || 'Member'}</span>
             </div>
-            <p class="text-xs text-hug-muted mt-0.5">Applied for: <span class="font-semibold text-hug-text2">${p.blockFarm || managerFarm}</span></p>
+            <p class="text-xs text-hug-muted mt-0.5">Applied for: <span class="font-semibold text-hug-text2">${pendingFarm}</span></p>
           </div>
           <span class="text-[11px] text-hug-muted font-mono font-medium">${p.regDate || '2026-05-28'}</span>
         </div>
@@ -8837,18 +7850,19 @@ window.closePendingRegistrationsModal = closePendingRegistrationsModal;
 
 async function approveRegistration(contact) {
   const currentRole = getActivePortalRole();
+  const db = getDB();
   let activeUser = null;
   try { activeUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch (e) {}
-  const managerFarm = (activeUser && (activeUser.blockFarm || activeUser.farm)) || (db.blockFarms?.[0]?.name || 'Block Farm');
-
-  const db = getDB();
+  const activeUserId = activeUser?.id || activeUser?.employeeId || '';
+  const managedFarm = (db.blockFarms || []).find(farm => farm.managerUserId === activeUserId);
+  const managerFarm = managedFarm?.name || 'Unassigned Block Farm';
   const idx = db.pendingUsers.findIndex(u => u.contact === contact);
   if (idx === -1) return;
 
   const user = db.pendingUsers[idx];
 
   // Role gate:
-  if (currentRole === 'manager' && user.role !== 'Member') {
+  if (currentRole === 'manager' && user.role !== 'Member Farmer') {
     toast('Access Denied: Farm Managers can only approve Member farmers.');
     return;
   }
@@ -8856,35 +7870,42 @@ async function approveRegistration(contact) {
   const confirmFn = (typeof window !== 'undefined' && window.showConfirmDialog) || showConfirmDialog;
   const ok = await confirmFn({
     title: `Approve Registration for ${user.name}?`,
-    message: `Approve membership application for ${user.name} (${user.role} · ${contact}) under ${user.blockFarm || managerFarm}?\n\nThis will activate their member credentials and allocate field plot ${user.fieldId || (db.fields?.[0]?.id || '')} (${user.area || '1.4 Ha'}) in the cooperative registry.`,
+    message: `Approve membership application for ${user.name} (${user.role} · ${contact}) under ${(db.blockFarms || []).find(farm => farm.id === user.blockFarmId)?.name || managerFarm}?\n\nThis will activate their member credentials${user.fieldId ? ` and allocate field plot ${user.fieldId}` : ''}.`,
     confirmText: 'Approve Membership',
     cancelText: 'Cancel',
     type: 'info'
   });
   if (!ok) return;
 
-  db.pendingUsers.splice(idx, 1);
-
-  // Generate plot ID for member if applicable
-  const assignedPlot = user.fieldId || generateNextFieldId(user.blockFarm || managerFarm, db.fields, db.blockFarms);
+  // Preserve only an explicit plot assignment; approval does not invent a field.
+  const assignedPlot = user.fieldId || '';
   const cleanContact = (user.contact || '').replace(/\D/g, '');
   const empId = user.employeeId || ('04' + cleanContact.slice(-6).padStart(6, '0'));
+
+  try {
+    await authenticatedWebRequest('/api/users/approve', {
+      method: 'POST',
+      body: { id: empId, role: 'MEMBER_FARMER' }
+    });
+  } catch (error) {
+    toast(`Approval failed: ${error.message}`);
+    return;
+  }
+
+  db.pendingUsers.splice(idx, 1);
 
   const newMember = {
     employeeId: empId,
     contact: cleanContact,
     name: user.name,
     role: user.role,
-    roleKey: user.role === 'Member' ? 'member' : 'farm_manager',
-    blockFarm: user.blockFarm || managerFarm,
-    fieldId: assignedPlot,
+    roleKey: user.role === 'Member Farmer' ? 'member' : 'farm_manager',
     status: 'Active',
     phoneVerified: true,
     isPhoneVerified: true,
     pendingFirstLoginVerification: false,
     phoneVerifiedAt: new Date().toISOString(),
     regDate: new Date().toISOString().split('T')[0],
-    passwordHash: hashPassword('hugpong2026'),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -8894,27 +7915,17 @@ async function approveRegistration(contact) {
   // If a field with this ID exists, assign member to it, otherwise add field
   const existingField = (db.fields || []).find(f => f.id === assignedPlot);
   if (existingField) {
-    existingField.member = user.name;
-    existingField.memberName = user.name;
-    existingField.memberId = empId;
-    existingField.memberContact = cleanContact;
+    existingField.memberUserId = empId;
+    existingField.updatedAt = new Date().toISOString();
   }
 
   saveDB(db);
-
-  // Write to Firestore if online
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    setDoc(doc(window.firebaseDB, 'users', empId || cleanContact), newMember, { merge: true }).catch(err => {
-      console.warn('[HUGPONG] Firestore write user notice:', err);
-    });
-  }
 
   logSystemEvent(
     'user',
     'Member Registration Approved',
     `${user.name} (${contact})`,
-    `Approved membership for ${user.blockFarm || managerFarm} and allocated field ${assignedPlot} (${user.area || '1.4 Ha'}).`,
+    `Approved membership for ${(db.blockFarms || []).find(farm => farm.id === user.blockFarmId)?.name || managerFarm}${assignedPlot ? ` and assigned existing field ${assignedPlot}` : ' without a field assignment'}.`,
     currentRole === 'manager' ? `Farm Manager (${managerFarm})` : 'SRA District Administrator',
     'Approved'
   );
@@ -8971,7 +7982,7 @@ async function removeDirectoryUser(contact) {
     return;
   }
 
-  if (currentRole === 'manager' && target.role !== 'Member') {
+  if (currentRole === 'manager' && target.role !== 'Member Farmer') {
     toast('Access Denied: Farm Managers can only revoke member farmers in their block farm.');
     return;
   }
@@ -9055,6 +8066,7 @@ function renderFields() {
   const isManager = currentRole === 'manager';
   const isSuper = currentRole === 'superadmin';
   const db = getDB();
+  const managedFarm = resolveManagedBlockFarm(db);
   const gridContainer = document.getElementById('fields-grid-container');
   if (!gridContainer) return;
 
@@ -9097,8 +8109,7 @@ function renderFields() {
 
   if (isManager) {
     if (viewModeToggle) viewModeToggle.classList.add('hidden');
-    const managerUser = (db.users || []).find(u => u.role === 'Farm Manager');
-    const userBlockFarm = managerUser?.blockFarm || 'Assigned Block Farm';
+    const userBlockFarm = managedFarm?.name || 'Unassigned Block Farm';
     if (blockFilterEl) {
       blockFilterEl.innerHTML = `<option value="${userBlockFarm}">${userBlockFarm}</option>`;
       blockFilterEl.value = userBlockFarm;
@@ -9157,7 +8168,7 @@ function renderFields() {
 
     // Filter by block farm
     if (isManager) {
-      plots = plots.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === (db.blockFarms?.[0]?.name || 'Block Farm') || f.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm'));
+      plots = plots.filter(field => field.blockFarmId === managedFarm?.id);
     } else if (selectedBlock !== 'all') {
       plots = plots.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === selectedBlock);
     }
@@ -9435,245 +8446,52 @@ function renderFields() {
 
 // ── ARCHIVE FIELD CROP CYCLE (WEB) ───────────────────────────
 async function archiveFieldCropCycle(fieldId, options = {}) {
-  if (!fieldId) return;
+  if (!fieldId) return { success: false, message: 'Field ID is required.' };
   const db = getDB();
   const nowIso = new Date().toISOString();
   const targetField = (db.fields || []).find(f => f.id === fieldId);
-  const pastCycleNum = (targetField && Number(targetField.cycleNumber)) || 1;
-
-  const targetLogs = (db.logs || []).filter(l => l.fieldId === fieldId && !l.isPastCycle && !l.isArchived);
+  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle.' };
+  const oldCycleId = targetField.currentCycleId;
+  const oldCycle = (db.cropCycles || []).find(cycle => cycle.id === oldCycleId);
+  const nextSequence = Number(oldCycle?.sequenceNumber || targetField.cycleNumber || 1) + 1;
+  const nextCycleId = window.HugpongSchema.cycleId(fieldId, nextSequence);
+  const actor = getActiveWebUser() || sessionUser || {};
+  const actorUserId = actor.id || actor.employeeId || '';
+  const targetLogs = (db.logs || []).filter(log => log.cycleId === oldCycleId && log.status === 'ACTIVE');
   targetLogs.forEach(l => {
-    l.isPastCycle = true;
-    l.isArchived = true;
-    l.isOffline = false;
-    l.synced = true;
-    l.cycleNumber = l.cycleNumber || pastCycleNum;
-    l.status = (l.certified === true || (l.status === 'Certified' && Boolean(l.certifiedBy || l.verifiedBy || l.sraAuditReportId))) ? 'Certified' : 'Archived';
-    l.archivedAt = l.archivedAt || nowIso;
+    l.status = 'ARCHIVED';
+    l.archivedAt = nowIso;
+    l.archivedByUserId = actorUserId;
   });
-  
-  if (targetField) {
-    const cycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-    const cropYear = options.cropYear || targetField.cropYear || 'CY 2026–2027';
-    targetField.stage = options.stage || 'Pre-Planting & Land Preparation';
-    targetField.stageNumber = 1;
-    targetField.isCompleted = false;
-    targetField.cycleType = cycleType;
-    targetField.cropYear = cropYear;
-    targetField.customStages = SRA_STANDARD_STAGES.map((s, idx) => ({ 
-      ...s, 
-      stageNumber: s.stageNum || (idx + 1),
-      done: false, 
-      active: idx === 0 
-    }));
-    targetField.cycleNumber = (Number(targetField.cycleNumber) || 1) + 1;
-    targetField.lastUpdated = nowIso;
-    targetField.lastSync = 'Just now';
-    targetField.synced = true;
-  }
-  
-  saveDB(db);
-  
+  const nextCycle = {
+    id: nextCycleId, fieldId, sequenceNumber: nextSequence,
+    cropType: options.cycleType || oldCycle?.cropType || targetField.cycleType || '',
+    cropYear: options.cropYear || oldCycle?.cropYear || targetField.cropYear || '',
+    currentStageNumber: 1, elapsedMonths: 0, batchNumber: 1, status: 'ACTIVE', startedAt: nowIso, updatedAt: nowIso
+  };
+  if (!db.cropCycles) db.cropCycles = [];
+  if (oldCycle) Object.assign(oldCycle, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso });
+  db.cropCycles.push(nextCycle);
+  Object.assign(targetField, { currentCycleId: nextCycleId, stageNumber: 1, cycleNumber: nextSequence,
+    cycleType: nextCycle.cropType, cropYear: nextCycle.cropYear, updatedAt: nowIso });
+  saveDB(db, false);
   if (window.firebaseDB && window.firestore) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      const promises = targetLogs.map(l => 
-        setDoc(doc(window.firebaseDB, 'operation_logs', l.id), { 
-          isPastCycle: true, 
-          isArchived: true, 
-          status: l.status, 
-          archivedAt: l.archivedAt 
-        }, { merge: true })
-      );
-      if (targetField) {
-        promises.push(
-          setDoc(doc(window.firebaseDB, 'fields', fieldId), {
-            stage: targetField.stage,
-            stageNumber: 1,
-            isCompleted: false,
-            customStages: targetField.customStages,
-            cycleType: targetField.cycleType,
-            cropYear: targetField.cropYear,
-            cycleNumber: targetField.cycleNumber,
-            lastUpdated: nowIso,
-            lastSync: targetField.lastSync,
-            synced: true,
-            updatedAt: nowIso
-          }, { merge: true })
-        );
-      }
-      await Promise.all(promises);
-    } catch (err) {
-      console.warn('[Firestore archiveFieldCropCycle]', err);
-    }
+    const { doc, setDoc } = window.firestore;
+    const writes = targetLogs.map(log => setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id), window.HugpongSchema.toOperation(log)));
+    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, oldCycleId), {
+      status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
+    }, { merge: true }));
+    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, nextCycleId), window.HugpongSchema.toCycle(targetField, nextCycle)));
+    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, fieldId), { currentCycleId: nextCycleId, updatedAt: nowIso }, { merge: true }));
+    await Promise.all(writes);
   }
-  
   if (typeof renderOperations === 'function') renderOperations();
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof renderLogs === 'function') renderLogs();
   if (typeof renderEfficiency === 'function') renderEfficiency();
+  return { success: true, archivedCount: targetLogs.length, cycleId: nextCycleId };
 }
 window.archiveFieldCropCycle = archiveFieldCropCycle;
-
-// ── DELETE OPERATION LOG (WEB) ──────────────────────────────
-async function deleteOperationLog(logId, reason = 'Deleted from Operations Ledger') {
-  if (!logId) return { success: false, message: 'Log ID is required' };
-  const db = getDB();
-  db.deletedLogIds = db.deletedLogIds || [];
-  if (!db.deletedLogIds.includes(logId)) {
-    db.deletedLogIds.push(logId);
-  }
-  
-  const targetLog = (db.logs || []).find(l => l.id === logId);
-  db.logs = (db.logs || []).filter(l => l.id !== logId);
-  db.archivedLogs = (db.archivedLogs || []).filter(l => l.id !== logId);
-  saveDB(db, false);
-
-  if (window.firebaseDB && window.firestore) {
-    try {
-      const { doc, deleteDoc, setDoc } = window.firestore;
-      await deleteDoc(doc(window.firebaseDB, 'operation_logs', logId)).catch(async () => {
-        await setDoc(doc(window.firebaseDB, 'operation_logs', logId), { isDeleted: true, isArchived: true }, { merge: true });
-      });
-    } catch (err) {
-      console.warn('[Firestore deleteOperationLog]', err);
-    }
-  }
-
-  // Also call Server API route if running
-  try {
-    fetch(`/api/logs/${logId}`, { method: 'DELETE' }).catch(() => {});
-  } catch (e) {}
-
-  if (targetLog) {
-    let activeUser = null;
-    try { activeUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch (e) {}
-    const actorName = `${activeUser?.name || 'User'} (${activeUser?.role || 'Farm Manager'})`;
-    logSystemEvent(
-      'operation',
-      'Operation Log Deleted',
-      targetLog.fieldId || 'Field Plot',
-      `Deleted operation record ${logId} (${targetLog.activity || targetLog.task || 'Operation'}). Reason: ${reason}`,
-      actorName,
-      'Deleted'
-    );
-  }
-
-  if (typeof renderLogs === 'function') renderLogs();
-  if (typeof renderOperations === 'function') renderOperations();
-  if (typeof renderDashboard === 'function') renderDashboard();
-  if (typeof renderEfficiency === 'function') renderEfficiency();
-  if (typeof renderHistory === 'function') renderHistory();
-
-  return { success: true, logId };
-}
-window.deleteOperationLog = deleteOperationLog;
-
-async function deletePastLogs(fieldId = null) {
-  const isAll = !fieldId || fieldId === 'ALL' || fieldId === 'all';
-  const fId = fieldId ? fieldId.trim().toUpperCase() : null;
-  const db = getDB();
-  db.deletedLogIds = db.deletedLogIds || [];
-
-  const isPastRecord = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
-
-  const toDelete = (db.logs || []).filter(l => {
-    const logFId = (l.fieldId || '').trim().toUpperCase();
-    const matchesField = isAll || logFId === fId;
-    return matchesField && isPastRecord(l);
-  });
-
-  toDelete.forEach(l => {
-    if (l && l.id && !db.deletedLogIds.includes(l.id)) {
-      db.deletedLogIds.push(l.id);
-    }
-  });
-
-  db.logs = (db.logs || []).filter(l => {
-    const logFId = (l.fieldId || '').trim().toUpperCase();
-    const matchesField = isAll || logFId === fId;
-    return !(matchesField && isPastRecord(l));
-  });
-  if (isAll) {
-    db.archivedLogs = [];
-  } else {
-    db.archivedLogs = (db.archivedLogs || []).filter(l => (l.fieldId || '').trim().toUpperCase() !== fId);
-  }
-
-  saveDB(db, false);
-
-  if (window.firebaseDB && window.firestore && toDelete.length > 0) {
-    try {
-      const { doc, deleteDoc, setDoc } = window.firestore;
-      const deletePromises = toDelete.map(l =>
-        deleteDoc(doc(window.firebaseDB, 'operation_logs', l.id)).catch(() =>
-          setDoc(doc(window.firebaseDB, 'operation_logs', l.id), { isArchived: true, isDeleted: true }, { merge: true })
-        )
-      );
-      await Promise.all(deletePromises);
-    } catch (err) {
-      console.warn('[Firestore deletePastLogs]', err);
-    }
-  }
-
-  try {
-    fetch('/api/logs/purge-past', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fieldId: isAll ? 'ALL' : fId })
-    }).catch(() => {});
-  } catch (e) {}
-
-  if (typeof renderLogs === 'function') renderLogs();
-  if (typeof renderOperations === 'function') renderOperations();
-  if (typeof renderDashboard === 'function') renderDashboard();
-  if (typeof renderEfficiency === 'function') renderEfficiency();
-  if (typeof renderHistory === 'function') renderHistory();
-
-  return { success: true, count: toDelete.length };
-}
-window.deletePastLogs = deletePastLogs;
-
-async function promptDeleteOperationLog(logId) {
-  const db = getDB();
-  const log = (db.logs || []).find(l => l.id === logId);
-  const ok = await showConfirmDialog({
-    title: 'Delete Operation Log?',
-    message: `Are you sure you want to permanently delete this operation record?\n\nOperation: ${log ? (log.activity || log.task || log.id) : logId}\nCost: ₱${Number(log?.totalCost || log?.cost || 0).toLocaleString()}\n\nThis will remove the operation from the ledger and cloud synchronizer.`,
-    confirmText: 'Delete Record',
-    cancelText: 'Cancel',
-    type: 'danger'
-  });
-  if (!ok) return;
-  await deleteOperationLog(logId, 'Deleted via web ledger action');
-  toast('Operation log deleted successfully.');
-}
-window.promptDeleteOperationLog = promptDeleteOperationLog;
-
-async function promptDeletePastLogs(fieldId = null) {
-  const isAll = !fieldId || fieldId === 'ALL' || fieldId === 'all';
-  const targetLabel = isAll ? 'ALL fields in the block farm' : `field plot ${fieldId}`;
-  const ok = await showConfirmDialog({
-    title: `Clear Past Cycles History?`,
-    message: `Are you sure you want to delete all historical past cycle records for ${targetLabel}?\n\nActive crop cycle operations will NOT be affected.`,
-    confirmText: 'Delete Past Cycles',
-    cancelText: 'Cancel',
-    type: 'danger'
-  });
-  if (!ok) return;
-  const res = await deletePastLogs(fieldId);
-  toast(`Cleared ${res.count || 0} past cycle record(s).`);
-}
-window.promptDeletePastLogs = promptDeletePastLogs;
 
 async function archiveFieldPlot(fieldId) {
   const ok = await showConfirmDialog({
@@ -9689,8 +8507,7 @@ async function archiveFieldPlot(fieldId) {
   const nowIso = new Date().toISOString();
   db.archivedFields = db.archivedFields || [];
   const targetField = db.fields.find(f => f.id === fieldId) || { id: fieldId };
-  targetField.isArchived = true;
-  targetField.status = 'Archived';
+  targetField.status = 'ARCHIVED';
   targetField.archivedAt = nowIso;
 
   if (!db.archivedFields.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === fieldId.toUpperCase())) {
@@ -9699,15 +8516,10 @@ async function archiveFieldPlot(fieldId) {
 
   db.fields = db.fields.filter(f => f.id !== fieldId);
 
-  // Preserve historical operational logs with archived flag
-  if (Array.isArray(db.logs)) {
-    db.logs.forEach(l => {
-      if (l.fieldId === fieldId) {
-        l.isArchived = true;
-        l.archivedAt = l.archivedAt || nowIso;
-      }
-    });
-  }
+  const actor = getActiveWebUser() || sessionUser || {};
+  const actorUserId = actor.id || actor.employeeId || '';
+  const archivedLogs = (db.logs || []).filter(log => log.fieldId === fieldId && log.status === 'ACTIVE');
+  archivedLogs.forEach(log => Object.assign(log, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId }));
 
   saveDB(db);
 
@@ -9716,12 +8528,15 @@ async function archiveFieldPlot(fieldId) {
     try {
       const { doc, setDoc } = window.firestore;
       const cleanId = String(fieldId).trim();
-      await setDoc(doc(window.firebaseDB, 'fields', cleanId), {
-        isArchived: true,
-        status: 'Archived',
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, cleanId), {
+        status: 'ARCHIVED',
         archivedAt: nowIso,
         updatedAt: nowIso
       }, { merge: true });
+      await Promise.all(archivedLogs.map(log => setDoc(
+        doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id),
+        window.HugpongSchema.toOperation(log)
+      )));
     } catch (err) {
       console.warn('[Firestore archiveFieldPlot]', err);
     }
@@ -9814,7 +8629,7 @@ function renderPlotHistTable() {
           <td class="px-3 py-2.5 font-bold text-hug-text">₱${Number(l.cost || l.totalCost || 0).toLocaleString()}</td>
           <td class="px-3 py-2.5 text-hug-muted">${l.date || 'Recent'}</td>
           <td class="px-3 py-2.5 text-right">
-            ${(l.isPastCycle || l.isArchived || l.status === 'Archived') 
+            ${(l.status === 'ARCHIVED')
               ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">Past Cycle</span>'
               : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary">Recorded</span>'}
           </td>
@@ -10002,8 +8817,9 @@ function openBlockFarmHistoryModal(farmName = null) {
   const db = getDB();
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
   const isManager = currentRole === 'manager';
+  const managedFarm = resolveManagedBlockFarm(db);
 
-  const targetFarm = farmName || (isManager ? (db.blockFarms?.[0]?.name || 'Block Farm') : null);
+  const targetFarm = farmName || (isManager ? managedFarm?.name : null);
 
   const codeEl = document.getElementById('block-hist-code');
   const areaEl = document.getElementById('block-hist-area');
@@ -10020,30 +8836,14 @@ function openBlockFarmHistoryModal(farmName = null) {
   let sub = 'Regulatory overview across all cooperative clusters under Silay Sugar Regulatory Administration';
 
   if (targetFarm) {
-    filteredFields = (db.fields || []).filter(f => {
-      const bf = f.blockFarm || getBlockFarmName(f.id);
-      return bf === targetFarm || 
-             (targetFarm.includes((db.blockFarms?.[0]?.name || 'Block Farm')) && (bf.includes((db.blockFarms?.[0]?.name || 'Block Farm')) || bf.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")))) ||
-             (targetFarm.includes('Block Farm B') && (bf.includes('Block Farm B') || bf.includes('Victorias'))) ||
-             (targetFarm.includes('Block Farm C') && (bf.includes('Block Farm C') || bf.includes('Talisay'))) ||
-             (targetFarm.includes('Block Farm D') && (bf.includes('Block Farm D') || bf.includes('Manapla')));
-    });
-
-    if (filteredFields.length === 0) {
-      filteredFields = (db.fields || []).filter(f => getBlockFarmName(f.id) === targetFarm);
-    }
+    const selectedFarm = (db.blockFarms || []).find(farm => farm.name === targetFarm || farm.id === targetFarm);
+    filteredFields = selectedFarm ? (db.fields || []).filter(field => field.blockFarmId === selectedFarm.id) : [];
 
     const fieldIds = new Set(filteredFields.map(f => f.id));
-    filteredLogs = (db.logs || []).filter(l => fieldIds.has(l.fieldId) || (l.blockFarm && (l.blockFarm === targetFarm || targetFarm.includes(l.blockFarm))));
+    filteredLogs = (db.logs || []).filter(log => fieldIds.has(log.fieldId));
     blockCode = getBlockId(targetFarm);
     
-    const manager = (db.users || []).find(u => u.role === 'Farm Manager' && (
-      u.blockFarm === targetFarm ||
-      (targetFarm.includes((db.blockFarms?.[0]?.name || 'Block Farm')) && (u.blockFarm?.includes((db.blockFarms?.[0]?.name || 'Block Farm')) || u.blockFarm?.includes((db.blockFarms?.[0]?.name?.split(" ")[0] || "ZZMATCH")))) ||
-      (targetFarm.includes('Block Farm B') && (u.blockFarm?.includes('Block Farm B') || u.blockFarm?.includes('Victorias'))) ||
-      (targetFarm.includes('Block Farm C') && (u.blockFarm?.includes('Block Farm C') || u.blockFarm?.includes('Talisay'))) ||
-      (targetFarm.includes('Block Farm D') && (u.blockFarm?.includes('Block Farm D') || u.blockFarm?.includes('Manapla')))
-    ));
+    const manager = (db.users || []).find(user => (user.id || user.employeeId) === selectedFarm?.managerUserId);
 
     title = `${targetFarm} · Cooperative History & Audit`;
     sub = `Supervised by ${manager ? manager.name : (activeUser?.name || 'Farm Manager')} · ${filteredFields.length} Enrolled Member Plots`;
@@ -10091,15 +8891,17 @@ function openPlotRegistryAuditModal() {
   const countEl = document.getElementById('plot-reg-hist-log-count');
   const eventsListEl = document.getElementById('plot-reg-hist-events-list');
 
-  const bPlots = db.fields.filter(f => (f.blockFarm || getBlockFarmName(f.id)) === (db.blockFarms?.[0]?.name || 'Block Farm'));
-  const bMembers = db.users.filter(u => u.blockFarm === (db.blockFarms?.[0]?.name || 'Block Farm') && u.role === 'Member');
+  const managedFarm = resolveManagedBlockFarm(db);
+  const bPlots = db.fields.filter(field => field.blockFarmId === managedFarm?.id);
+  const memberIds = new Set(bPlots.map(field => field.memberUserId).filter(Boolean));
+  const bMembers = db.users.filter(user => memberIds.has(user.id || user.employeeId));
   const totalHa = bPlots.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
 
   // Filter audit events related to this block farm or plot allocations
   const historyEvents = (db.systemHistory || []).filter(h => 
     h.category === 'plot' || 
     h.category === 'user' || 
-    (h.details && (h.details.includes((db.blockFarms?.[0]?.name || 'Block Farm')) || h.details.includes('FLD-KTR'))) ||
+    (h.details && managedFarm?.name && h.details.includes(managedFarm.name)) ||
     (h.actor && h.actor.includes((activeUser?.name || 'Farm Manager')))
   );
 
@@ -10238,7 +9040,7 @@ async function handleSendEditUserOtp() {
   showGlobalProgress();
 
   try {
-    const res = sendPersonnelVerificationCode(rawContact, { excludeEmployeeId: origEmpId, checkUnique: true });
+    const res = await sendPersonnelVerificationCode(rawContact, { excludeEmployeeId: origEmpId, checkUnique: true });
     if (!res.success) {
       if (typeof toast === 'function') toast(`Error: ${res.error}`);
       return;
@@ -10246,7 +9048,6 @@ async function handleSendEditUserOtp() {
 
     activeEditUserOtpSession = {
       phone: res.phone,
-      otp: res.otp,
       expiresAt: res.expiresAt,
       verified: false
     };
@@ -10289,7 +9090,7 @@ async function handleSendEditUserOtp() {
   }
 }
 
-function handleVerifyEditUserOtp() {
+async function handleVerifyEditUserOtp() {
   const otpInput = document.getElementById('edit-user-otp');
   const enteredCode = otpInput?.value?.trim();
   if (!enteredCode || enteredCode.length < 6) {
@@ -10308,8 +9109,13 @@ function handleVerifyEditUserOtp() {
     return;
   }
 
-  if (enteredCode !== activeEditUserOtpSession.otp) {
-    if (typeof toast === 'function') toast('Security Alert: Invalid 6-digit code. Please check your SMS.');
+  try {
+    await authenticatedWebRequest('/api/users/phone-verification/verify', {
+      method: 'POST',
+      body: { phone: activeEditUserOtpSession.phone, code: enteredCode }
+    });
+  } catch (error) {
+    if (typeof toast === 'function') toast(`Security Alert: ${error.message || 'Invalid verification code.'}`);
     if (otpInput) {
       otpInput.classList.add('border-danger');
       if (typeof otpInput.focus === 'function') otpInput.focus();
@@ -10343,12 +9149,12 @@ function handleVerifyEditUserOtp() {
 
 function handleEditUserRoleChange() {
   const roleEl = document.getElementById('edit-user-role');
-  const role = roleEl ? roleEl.value : 'Member';
+  const role = roleEl ? roleEl.value : 'Member Farmer';
   const blockWrap = document.getElementById('edit-user-blockfarm-wrap');
   const scopeWrap = document.getElementById('edit-user-scope-wrap');
   const fieldWrap = document.getElementById('edit-user-field-wrap');
 
-  if (role === 'Super Admin' || role === 'SRA (Admin)') {
+  if (role === 'Super Admin' || role === 'SRA Admin') {
     if (blockWrap) blockWrap.classList.add('hidden');
     if (scopeWrap) scopeWrap.classList.remove('hidden');
     if (fieldWrap) fieldWrap.classList.add('hidden');
@@ -10445,23 +9251,23 @@ function openEditUserModal(userIdentifier) {
   const currentRole = getActivePortalRole();
   if (roleEl) {
     if (currentRole === 'manager') {
-      roleEl.innerHTML = '<option value="Member">Member</option>';
-      roleEl.value = 'Member';
+      roleEl.innerHTML = '<option value="Member Farmer">Member Farmer</option>';
+      roleEl.value = 'Member Farmer';
     } else if (currentRole === 'admin') {
       roleEl.innerHTML = `
-        <option value="Member">Member</option>
+        <option value="Member Farmer">Member Farmer</option>
         <option value="Farm Manager">Farm Manager</option>
-        <option value="SRA (Admin)">SRA (Admin)</option>
+        <option value="SRA Admin">SRA Admin</option>
       `;
-      roleEl.value = user.role === 'Super Admin' ? 'SRA (Admin)' : (user.role || 'Member');
+      roleEl.value = user.role === 'Super Admin' ? 'SRA Admin' : (user.role || 'Member Farmer');
     } else {
       roleEl.innerHTML = `
         <option value="Super Admin">Super Admin</option>
-        <option value="SRA (Admin)">SRA (Admin)</option>
+        <option value="SRA Admin">SRA Admin</option>
         <option value="Farm Manager">Farm Manager</option>
-        <option value="Member">Member</option>
+        <option value="Member Farmer">Member Farmer</option>
       `;
-      roleEl.value = user.role || 'Member';
+      roleEl.value = user.role || 'Member Farmer';
     }
   }
 
@@ -10607,11 +9413,11 @@ async function saveEditUserModal() {
 
   // 4. Role permissions check
   if (currentRole === 'manager') {
-    if (user.role !== 'Member') {
+    if (user.role !== 'Member Farmer') {
       toast('Access Denied: Farm Managers can only modify cooperative Member accounts.');
       return;
     }
-    role = 'Member';
+    role = 'Member Farmer';
     blockFarm = managerFarm;
   } else if (currentRole === 'admin') {
     if (user.role === 'Super Admin' || role === 'Super Admin') {
@@ -10635,8 +9441,8 @@ async function saveEditUserModal() {
     user.middleName = mName || parsed.middleName || '';
     user.lastName = lName || parsed.lastName || '';
     user.role = role;
-    user.blockFarm = (role === 'Super Admin' || role === 'SRA (Admin)') ? 'District Central' : (blockFarm || null);
-    user.fieldId = (role === 'Member') ? (fieldId || null) : null;
+    user.blockFarm = (role === 'Super Admin' || role === 'SRA Admin') ? 'District Central' : (blockFarm || null);
+    user.fieldId = (role === 'Member Farmer') ? (fieldId || null) : null;
     user.updatedAt = new Date().toISOString();
 
     // Apply verified phone number changes safely
@@ -10665,22 +9471,24 @@ async function saveEditUserModal() {
     if (role === 'Farm Manager' && blockFarm) {
       db.users.forEach(u => {
         if (u.contact !== user.contact && u.employeeId !== user.employeeId && u.role === 'Farm Manager' && u.blockFarm === blockFarm) {
-          u.role = 'Member';
+          u.role = 'Member Farmer';
         }
       });
     }
 
     saveDB(db);
 
-    // Direct write to Firestore
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, 'users', user.employeeId || cleanContact), user, { merge: true });
-      } catch(err) {
-        console.warn('[HUGPONG] Edit user Firestore note:', err);
+    const updatedUser = await authenticatedWebRequest(`/api/users/${encodeURIComponent(user.employeeId || cleanContact)}`, {
+      method: 'PATCH',
+      body: {
+        displayName: cleanName,
+        phone: user.contact,
+        role,
+        status: String(user.status || 'ACTIVE').toUpperCase(),
+        phoneVerified: isPhoneChanged && isVerifiedOnSpot
       }
-    }
+    });
+    Object.assign(user, updatedUser.data || {});
 
     await new Promise(res => setTimeout(res, 350));
 
@@ -10715,7 +9523,7 @@ function handleCreateUserBlockFarmChange() {
   if (!roleEl || !blockEl || !plotContainer || !plotSelect) return;
 
   const selectedRole = roleEl.value;
-  if (selectedRole !== 'Member') {
+  if (selectedRole !== 'Member Farmer') {
     plotContainer.classList.add('hidden');
     return;
   }
@@ -10749,7 +9557,7 @@ function handleCreateUserRoleChange() {
   const rawFarms = db.blockFarms || [];
 
   // 1. Role-based Block Farm handling
-  const isDistrictWide = (selectedRole === 'Super Admin' || selectedRole === 'SRA (Admin)');
+  const isDistrictWide = (selectedRole === 'Super Admin' || selectedRole === 'SRA Admin');
   if (blockEl) {
     if (isDistrictWide) {
       blockEl.value = '';
@@ -10767,7 +9575,7 @@ function handleCreateUserRoleChange() {
       let farmOptions = [];
       if (selectedRole === 'Farm Manager') {
         farmOptions.push('<option value="">-- Unassigned (Assign to Block Farm Later) --</option>');
-      } else if (selectedRole === 'Member') {
+      } else if (selectedRole === 'Member Farmer') {
         farmOptions.push('<option value="" disabled selected>Select registered block farm...</option>');
       }
       
@@ -10775,7 +9583,7 @@ function handleCreateUserRoleChange() {
         rawFarms.forEach(bf => {
           farmOptions.push(`<option value="${bf.name}">${bf.name} (${bf.code || bf.id})</option>`);
         });
-      } else if (selectedRole === 'Member') {
+      } else if (selectedRole === 'Member Farmer') {
         farmOptions.push('<option value="">-- Pending Block Farm Registration --</option>');
       }
 
@@ -10811,24 +9619,24 @@ function openCreateUserModal() {
   if (lNameEl) lNameEl.value = '';
   if (legacyNameEl) legacyNameEl.value = '';
   if (contactEl) contactEl.value = '';
-  if (pwdEl) pwdEl.value = 'hugpong2026';
+  if (pwdEl) pwdEl.value = '';
 
   if (roleEl) {
     if (currentRole === 'admin') {
-      // SRA Admin: can create Farm Manager, Member, SRA (Admin). NEVER Super Admin!
+      // SRA Admin: can create Farm Manager, Member Farmer, and SRA Admin accounts. Never Super Admin.
       roleEl.innerHTML = `
         <option value="Farm Manager">Farm Manager</option>
-        <option value="Member">Member</option>
-        <option value="SRA (Admin)">SRA (Admin)</option>
+        <option value="Member Farmer">Member Farmer</option>
+        <option value="SRA Admin">SRA Admin</option>
       `;
       roleEl.value = 'Farm Manager';
     } else {
       // Super Admin: full authority across all 4 roles
       roleEl.innerHTML = `
-        <option value="SRA (Admin)">SRA (Admin)</option>
+        <option value="SRA Admin">SRA Admin</option>
         <option value="Super Admin">Super Admin</option>
         <option value="Farm Manager">Farm Manager</option>
-        <option value="Member">Member</option>
+        <option value="Member Farmer">Member Farmer</option>
       `;
       roleEl.value = 'Farm Manager';
     }
@@ -11110,74 +9918,48 @@ function handlePersonnelNameInput(inputEl) {
 let activePersonnelOtpSession = null;
 let personnelOtpTimerInterval = null;
 
-function sendPersonnelVerificationCode(rawPhone, options = {}) {
+async function sendPersonnelVerificationCode(rawPhone, options = {}) {
   const check = validatePhilippineMobile(rawPhone, { checkUnique: options.checkUnique === true });
   if (!check.valid) {
     return { success: false, error: check.error };
   }
   const cleanPhone = check.clean; // 09XXXXXXXXX
   const e164 = '+63' + cleanPhone.slice(1);
-  const otpCode = String(Math.floor(100000 + Math.random() * 900000));
-  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
 
-  activePersonnelOtpSession = {
-    phone: cleanPhone,
-    e164: e164,
-    otp: otpCode,
-    expiresAt: expiresAt,
-    verified: false
-  };
-
-  // Dispatch real SMS via Semaphore Philippine SMS Gateway
-  if (typeof fetch !== 'undefined') {
-    fetch('/api/sms/send-otp', {
+  try {
+    const data = await authenticatedWebRequest('/api/users/phone-verification/request', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: {
         phone: cleanPhone,
-        otp: otpCode,
-        name: options.name || ''
-      })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.success) {
-        if (typeof toast === 'function') {
-          toast(`📱 SMS Dispatched to ${cleanPhone} via Semaphore`);
-        }
-      } else {
-        console.warn('[HUGPONG SMS Gateway Notice]', data.notice || data.error);
+        displayName: options.name || ''
       }
-    })
-    .catch(err => {
-      console.warn('[HUGPONG SMS Gateway Local]', err.message);
     });
+    activePersonnelOtpSession = {
+      phone: cleanPhone,
+      e164,
+      expiresAt: data.expiresAt,
+      verified: false
+    };
+    return { success: true, phone: cleanPhone, expiresAt: data.expiresAt };
+  } catch (error) {
+    return { success: false, error: error.message || 'SMS service is unavailable.' };
   }
-
-  // Visual notification & console output for zero-friction testing & demo
-  if (typeof toast === 'function') {
-    toast(`🔥 Security Code for ${cleanPhone}: ${otpCode}`);
-  }
-  console.log(`[HUGPONG SMS Gateway] Verification code for ${cleanPhone} (${e164}): ${otpCode}`);
-
-  return {
-    success: true,
-    phone: cleanPhone,
-    otp: otpCode,
-    expiresAt: expiresAt
-  };
 }
 
-function verifyPersonnelOtp(enteredCode) {
+async function verifyPersonnelOtp(enteredCode) {
   if (!activePersonnelOtpSession) {
     return { success: false, error: 'No active SMS verification request found. Click "Send Code" first.' };
   }
   if (Date.now() > activePersonnelOtpSession.expiresAt) {
     return { success: false, error: 'Verification code has expired. Please click "Resend Code".' };
   }
-  const clean = String(enteredCode || '').trim();
-  if (clean !== activePersonnelOtpSession.otp) {
-    return { success: false, error: 'Invalid 6-digit code. Please verify the code received on the mobile phone.' };
+  try {
+    await authenticatedWebRequest('/api/users/phone-verification/verify', {
+      method: 'POST',
+      body: { phone: activePersonnelOtpSession.phone, code: String(enteredCode || '').trim() }
+    });
+  } catch (error) {
+    return { success: false, error: error.message || 'Invalid or expired verification code.' };
   }
 
   activePersonnelOtpSession.verified = true;
@@ -11206,7 +9988,7 @@ async function handleSendPersonnelOtp() {
   showGlobalProgress();
 
   try {
-    const res = sendPersonnelVerificationCode(rawContact, { checkUnique: true });
+    const res = await sendPersonnelVerificationCode(rawContact, { checkUnique: true });
     if (!res.success) {
       if (typeof toast === 'function') toast(`Error: ${res.error}`);
       return;
@@ -11265,7 +10047,7 @@ async function handleVerifyPersonnelOtp() {
 
   try {
     await new Promise(res => setTimeout(res, 300));
-    const res = verifyPersonnelOtp(enteredCode);
+    const res = await verifyPersonnelOtp(enteredCode);
     if (!res.success) {
       if (typeof toast === 'function') toast(`Error: ${res.error}`);
       if (otpInput && typeof otpInput.focus === 'function') otpInput.focus();
@@ -11291,11 +10073,13 @@ async function handleVerifyPersonnelOtp() {
 // ── FIRST-LOGIN PHONE VERIFICATION HANDLERS ───────────────────
 let firstLoginPendingUser = null;
 let firstLoginRedirectUrl = null;
+let firstLoginPendingToken = null;
 let firstLoginTimerInterval = null;
 
-function openFirstLoginVerificationModal(user, redirectUrl) {
+function openFirstLoginVerificationModal(user, redirectUrl, serverToken = null) {
   firstLoginPendingUser = user;
   firstLoginRedirectUrl = redirectUrl || (typeof window !== 'undefined' ? window.location.href : '');
+  firstLoginPendingToken = serverToken;
   const modal = document.getElementById('modal-first-login-verify');
   const phoneEl = document.getElementById('first-login-verify-phone');
   const otpInput = document.getElementById('first-login-verify-otp');
@@ -11333,9 +10117,15 @@ function openFirstLoginVerificationModal(user, redirectUrl) {
     if (typeof otpInput.focus === 'function') otpInput.focus();
   }
 
-  // Dispatch SMS verification code
+  // The server creates, stores, expires, and validates the code.
   if (clean && clean.startsWith('09')) {
-    sendPersonnelVerificationCode(clean);
+    authenticatedWebRequest('/auth/request-phone-verification', {
+      method: 'POST',
+      body: {},
+      token: firstLoginPendingToken
+    }).catch(error => {
+      if (typeof toast === 'function') toast(`SMS verification unavailable: ${error.message}`);
+    });
   }
 
   if (modal) modal.classList.remove('hidden');
@@ -11361,7 +10151,15 @@ function openFirstLoginVerificationModal(user, redirectUrl) {
 
 function resendFirstLoginOtp() {
   if (!firstLoginPendingUser) return;
-  sendPersonnelVerificationCode(firstLoginPendingUser.contact);
+  authenticatedWebRequest('/auth/request-phone-verification', {
+    method: 'POST',
+    body: {},
+    token: firstLoginPendingToken
+  }).then(() => {
+    if (typeof toast === 'function') toast('A new verification code was sent.');
+  }).catch(error => {
+    if (typeof toast === 'function') toast(`SMS verification unavailable: ${error.message}`);
+  });
 }
 
 function cancelFirstLoginVerify() {
@@ -11380,7 +10178,7 @@ function cancelFirstLoginVerify() {
   if (typeof window !== 'undefined') window.location.reload();
 }
 
-function submitFirstLoginVerify() {
+async function submitFirstLoginVerify() {
   const otpInput = document.getElementById('first-login-verify-otp');
   const enteredCode = otpInput?.value?.trim();
   if (!enteredCode) {
@@ -11389,15 +10187,20 @@ function submitFirstLoginVerify() {
     return;
   }
 
-  const res = verifyPersonnelOtp(enteredCode);
-  if (!res.success) {
-    if (typeof toast === 'function') toast(`Error: ${res.error}`);
-    if (otpInput && typeof otpInput.focus === 'function') otpInput.focus();
-    return;
-  }
-
-  // Update user in db
   if (firstLoginPendingUser) {
+    let apiResult;
+    try {
+      apiResult = await authenticatedWebRequest('/auth/verify-phone', {
+        method: 'POST',
+        body: { code: enteredCode },
+        token: firstLoginPendingToken
+      });
+    } catch (error) {
+      if (typeof toast === 'function') toast(`Verification could not be saved: ${error.message}`);
+      return;
+    }
+    firstLoginPendingToken = apiResult.token || firstLoginPendingToken;
+
     const db = typeof getDB === 'function' ? getDB() : null;
     if (db && db.users) {
       const u = db.users.find(usr => usr.employeeId === firstLoginPendingUser.employeeId || usr.contact === firstLoginPendingUser.contact);
@@ -11405,44 +10208,17 @@ function submitFirstLoginVerify() {
         u.phoneVerified = true;
         u.pendingFirstLoginVerification = false;
         u.phoneVerifiedAt = new Date().toISOString();
-        if (typeof saveDB === 'function') saveDB(db);
+        if (typeof saveDB === 'function') saveDB(db, false);
       }
     }
     firstLoginPendingUser.phoneVerified = true;
     firstLoginPendingUser.pendingFirstLoginVerification = false;
     firstLoginPendingUser.phoneVerifiedAt = new Date().toISOString();
 
-    // Direct write to Firestore
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, 'users', firstLoginPendingUser.employeeId || firstLoginPendingUser.contact), {
-          phoneVerified: true,
-          pendingFirstLoginVerification: false,
-          phoneVerifiedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (dbErr) {
-        console.warn('[HUGPONG] First login verification Firestore write note:', dbErr);
-      }
-    }
-
-    // Notify backend Express server of phone verification
-    try {
-      fetch('http://localhost:3000/auth/verify-phone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employeeId: firstLoginPendingUser.employeeId,
-          contact: firstLoginPendingUser.contact
-        }),
-        credentials: 'include'
-      }).catch(() => {});
-    } catch(e) {}
-
     const rKey = (firstLoginPendingUser.roleKey || firstLoginPendingUser.role || '').toLowerCase();
     const roleKey = rKey.includes('super') ? 'superadmin' : (rKey.includes('manager') ? 'manager' : 'admin');
     if (typeof saveWebAuthSession === 'function') {
-      saveWebAuthSession(firstLoginPendingUser, roleKey);
+      saveWebAuthSession(firstLoginPendingUser, roleKey, firstLoginPendingToken);
     } else {
       localStorage.setItem('hugpong_role', roleKey);
       localStorage.setItem('hugpong_user', JSON.stringify(firstLoginPendingUser));
@@ -11458,7 +10234,7 @@ function submitFirstLoginVerify() {
 
   if (needsPasswordChange) {
     if (typeof toast === 'function') toast('✓ Phone verified! Please set your new password before starting.');
-    openFirstLoginChangePasswordModal(firstLoginPendingUser, firstLoginRedirectUrl);
+    openFirstLoginChangePasswordModal(firstLoginPendingUser, firstLoginRedirectUrl, firstLoginPendingToken);
     return;
   }
 
@@ -11472,6 +10248,7 @@ function submitFirstLoginVerify() {
 
 let firstLoginPwdUser = null;
 let firstLoginPwdRedirectUrl = null;
+let firstLoginPwdToken = null;
 
 function toggleFirstLoginPwdVisibility(inputId, btnEl) {
   const input = document.getElementById(inputId);
@@ -11524,9 +10301,10 @@ function handleFirstLoginPwdInput(inputEl) {
   updateReq(reqDiff, isDiff);
 }
 
-function openFirstLoginChangePasswordModal(user, redirectUrl) {
+function openFirstLoginChangePasswordModal(user, redirectUrl, serverToken = null) {
   firstLoginPwdUser = user;
   firstLoginPwdRedirectUrl = redirectUrl || (typeof window !== 'undefined' ? window.location.href : '');
+  firstLoginPwdToken = serverToken;
 
   const modal = document.getElementById('modal-first-login-change-password');
   const nameEl = document.getElementById('first-login-pwd-name');
@@ -11630,64 +10408,30 @@ async function submitFirstLoginChangePassword() {
   showGlobalProgress();
 
   try {
-    const newHash = hashPassword(newPwd);
     const user = firstLoginPwdUser;
 
     if (user) {
-      user.passwordHash = newHash;
-      user.password = '';
-      user.requiresPasswordChange = false;
-      user.passwordChanged = true;
-      user.passwordChangedAt = new Date().toISOString();
+      const apiResult = await authenticatedWebRequest('/auth/change-password', {
+        method: 'POST',
+        body: { newPassword: newPwd }
+      });
+      Object.assign(user, apiResult.user || {}, { requiresPasswordChange: false, passwordChanged: true });
 
       // Update in Local DB
       const db = typeof getDB === 'function' ? getDB() : null;
       if (db && Array.isArray(db.users)) {
         const u = db.users.find(usr => usr.employeeId === user.employeeId || usr.contact === user.contact);
         if (u) {
-          u.passwordHash = newHash;
-          u.password = '';
-          u.requiresPasswordChange = false;
-          u.passwordChanged = true;
-          u.passwordChangedAt = new Date().toISOString();
-          if (typeof saveDB === 'function') saveDB(db);
+          Object.assign(u, apiResult.user || {}, { requiresPasswordChange: false, passwordChanged: true });
+          if (typeof saveDB === 'function') saveDB(db, false);
         }
       }
-
-      // Update in Firestore
-      if (window.firebaseDB && window.firestore) {
-        try {
-          const { doc, setDoc } = window.firestore;
-          await setDoc(doc(window.firebaseDB, 'users', user.employeeId || user.contact), {
-            passwordHash: newHash,
-            password: '',
-            requiresPasswordChange: false,
-            passwordChanged: true,
-            passwordChangedAt: new Date().toISOString()
-          }, { merge: true });
-        } catch (dbErr) {
-          console.warn('[HUGPONG] First login password change Firestore write error:', dbErr);
-        }
-      }
-
-      // Notify backend Express server
-      try {
-        await fetch('http://localhost:3000/auth/change-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            employeeId: user.employeeId,
-            newPasswordHash: newHash
-          }),
-          credentials: 'include'
-        });
-      } catch (e) {}
 
       // Save authorized session
       const rKey = (user.roleKey || user.role || '').toLowerCase();
       const roleKey = rKey.includes('super') ? 'superadmin' : (rKey.includes('manager') ? 'manager' : 'admin');
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(user, roleKey);
+        saveWebAuthSession(user, roleKey, apiResult.token || firstLoginPwdToken);
       } else {
         localStorage.setItem('hugpong_role', roleKey);
         localStorage.setItem('hugpong_user', JSON.stringify(user));
@@ -11798,7 +10542,7 @@ async function submitCreateUser() {
   const db = getDB();
 
   // 4. Block Farm validation for Member
-  if (role === 'Member') {
+  if (role === 'Member Farmer') {
     if ((!blockFarm || blockFarm.trim() === '') && (db.blockFarms && db.blockFarms.length > 0)) {
       toast('Error: Please select a registered Block Farm for this member.');
       return;
@@ -11842,24 +10586,27 @@ async function submitCreateUser() {
     // 7. Generate Employee ID & User Object
     const roleKeyMap = {
       'Super Admin': 'super_admin',
-      'SRA (Admin)': 'sra_admin',
+      'SRA Admin': 'sra_admin',
       'Farm Manager': 'farm_manager',
-      'Member': 'member'
+      'Member Farmer': 'member'
     };
     const rolePrefixMap = {
       'Super Admin': '01',
-      'SRA (Admin)': '02',
+      'SRA Admin': '02',
       'Farm Manager': '03',
-      'Member': '04'
+      'Member Farmer': '04'
     };
     const prefix = rolePrefixMap[role] || '04';
     const employeeId = prefix + String(Math.floor(100000 + Math.random() * 900000));
     const roleKey = roleKeyMap[role] || 'member';
-    const rawPassword = document.getElementById('create-user-password')?.value.trim() || 'hugpong2026';
+    const rawPassword = document.getElementById('create-user-password')?.value || '';
+    if (rawPassword.length < 8) {
+      throw new Error('A temporary password of at least 8 characters is required.');
+    }
 
     // 8. Plot Allocation for Member
     let assignedPlot = '';
-    if (role === 'Member') {
+    if (role === 'Member Farmer') {
       if (plotVal && plotVal !== 'auto') {
         assignedPlot = plotVal;
         const f = (db.fields || []).find(fld => fld.id === plotVal);
@@ -11870,7 +10617,7 @@ async function submitCreateUser() {
           f.memberContact = cleanContact;
         }
       } else {
-        assignedPlot = generateNextFieldId(blockFarm, db.fields, db.blockFarms);
+        assignedPlot = '';
       }
     }
 
@@ -11886,43 +10633,45 @@ async function submitCreateUser() {
       role: role,
       roleKey: roleKey,
       blockFarmId: matchedFarm?.id || '',
-      blockFarm: (role === 'Super Admin' || role === 'SRA (Admin)') ? 'District Central' : (blockFarm || ''),
+      blockFarm: (role === 'Super Admin' || role === 'SRA Admin') ? 'District Central' : (blockFarm || ''),
       fieldId: assignedPlot,
-      status: 'Active',
+      status: 'ACTIVE',
       phoneVerified: isVerifiedOnSpot,
       pendingFirstLoginVerification: isDeferred && !isVerifiedOnSpot,
       phoneVerifiedAt: isVerifiedOnSpot ? new Date().toISOString() : null,
       requiresPasswordChange: true, // First login forced password change
       passwordChanged: false,
       regDate: new Date().toISOString().split('T')[0],
-      passwordHash: hashPassword(rawPassword),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
+    const provisioned = await authenticatedWebRequest('/api/users/approve', {
+      method: 'POST',
+      body: {
+        id: employeeId,
+        displayName: cleanName,
+        phone: cleanContact,
+        role,
+        password: rawPassword,
+        phoneVerified: isVerifiedOnSpot,
+        requiresPasswordChange: true
+      }
+    });
+    Object.assign(newUser, provisioned.data || {});
+
     db.users.push(newUser);
 
     if (role === 'Farm Manager' && matchedFarm) {
-      matchedFarm.farmManagerId = employeeId;
-      matchedFarm.farmManagerName = cleanName;
+      matchedFarm.managerUserId = employeeId;
       matchedFarm.updatedAt = new Date().toISOString();
       if (window.firebaseDB && window.firestore) {
         const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, 'block_farms', matchedFarm.id || matchedFarm.code), matchedFarm, { merge: true }).catch(e => console.warn(e));
+        setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, matchedFarm.id || matchedFarm.code), window.HugpongSchema.toBlockFarm(matchedFarm)).catch(e => console.warn(e));
       }
     }
 
     saveDB(db);
-
-    // Instant direct write to Firestore for reliability
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, 'users', employeeId || cleanContact), newUser, { merge: true });
-      } catch (err) {
-        console.warn('[HUGPONG] Instant Firestore write user notice:', err);
-      }
-    }
 
     const actorLabel = currentRole === 'superadmin' ? 'Super Admin System Authority' : 'SRA District Administrator';
     logSystemEvent(
@@ -11994,7 +10743,7 @@ function isValidUserIdentifier(inputStr, requireExisting = true) {
   return false;
 }
 
-function populateMembersDatalist(roleFilter = 'Member') {
+function populateMembersDatalist(roleFilter = 'Member Farmer') {
   const datalists = document.querySelectorAll('#registered-members-datalist');
   if (!datalists || datalists.length === 0) return;
   const db = getDB();
@@ -12164,7 +10913,7 @@ function openEditPlotModal(fieldId) {
   if (displayBlock) displayBlock.textContent = blockName;
   if (origIdInput) origIdInput.value = field.id;
 
-  populateMembersDatalist('Member');
+  populateMembersDatalist('Member Farmer');
   const currentMemberName = field.memberName || field.member || field.owner || '';
   const matchedUser = findUserByIdOrContact(field.memberId || field.userId || currentMemberName);
 
@@ -12221,18 +10970,12 @@ function saveEditPlotModal() {
   field.variety = variety;
   field.updatedAt = new Date().toISOString();
 
-  // Auto update user directory if member exists
-  if (matchedUser) {
-    matchedUser.fieldId = field.id;
-    matchedUser.blockFarm = field.blockFarm || getBlockFarmName(field.id);
-  }
-
   saveDB(db);
 
   // Write to Firestore
   if (window.firebaseDB && window.firestore) {
     const { doc, setDoc } = window.firestore;
-    setDoc(doc(window.firebaseDB, 'fields', field.id), field, { merge: true }).catch(err => {
+    setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), window.HugpongSchema.toField(field)).catch(err => {
       console.warn('[HUGPONG] Edit plot Firestore write notice:', err);
     });
   }
@@ -12281,15 +11024,23 @@ function openRegisterFieldModal(targetFarmName = null) {
     return;
   }
 
-  populateMembersDatalist('Member');
+  populateMembersDatalist('Member Farmer');
 
   const currentSession = (typeof getWebAuthSession === 'function' ? getWebAuthSession()?.user : null) || {};
-  const selectedFarmName = targetFarmName || currentSession.blockFarm || db.blockFarms[0]?.name || 'Silay Block Farm';
-  const matchedFarm = (db.blockFarms || []).find(bf => bf.name === selectedFarmName) || db.blockFarms[0];
+  const currentUserId = currentSession.id || currentSession.employeeId || activeUser?.id || activeUser?.employeeId || '';
+  const allowedFarms = window.HugpongSchema.role(currentSession.canonicalRole || currentSession.role) === 'FARM_MANAGER'
+    ? (db.blockFarms || []).filter(farm => farm.managerUserId === currentUserId)
+    : (db.blockFarms || []);
+  const matchedFarm = allowedFarms.find(farm => farm.name === targetFarmName || farm.id === targetFarmName) || allowedFarms[0];
+  if (!matchedFarm) {
+    toast('No assigned block farm is available for field enrollment.');
+    return;
+  }
+  const selectedFarmName = matchedFarm.name;
 
   const blockFarmSelect = document.getElementById('dash-field-block-farm');
   if (blockFarmSelect) {
-    blockFarmSelect.innerHTML = db.blockFarms.map(bf => `<option value="${bf.name}">${bf.name} (${bf.code || bf.id})</option>`).join('');
+    blockFarmSelect.innerHTML = allowedFarms.map(bf => `<option value="${bf.name}">${bf.name} (${bf.code || bf.id})</option>`).join('');
     blockFarmSelect.value = matchedFarm.name;
   }
 
@@ -12374,44 +11125,19 @@ async function submitRegisterFieldModal() {
   try {
     let existingUser = findUserByIdOrContact(userIdentifier);
     if (!existingUser && userIdentifier) {
-      const isPhone = userIdentifier.startsWith('09');
-      const memberIdVal = isPhone ? ('04' + userIdentifier.slice(-6).padStart(6, '0')) : userIdentifier;
-      const resolvedName = `Farmer Member ${userIdentifier.slice(-4)}`;
-      const parsed = splitFullName(resolvedName);
-      
-      existingUser = {
-        employeeId: memberIdVal,
-        contact: isPhone ? userIdentifier : `0917${Math.floor(1000000 + Math.random() * 9000000)}`,
-        name: resolvedName,
-        firstName: parsed.firstName || 'Farmer',
-        middleName: parsed.middleName || '',
-        lastName: parsed.lastName || 'Member',
-        role: 'Member',
-        roleKey: 'member',
-        blockFarm: blockFarmName,
-        fieldId: plotId,
-        status: 'Active',
-        phoneVerified: true,
-        pendingFirstLoginVerification: false,
-        regDate: new Date().toISOString().split('T')[0],
-        passwordHash: DEFAULT_SEED_PASSWORD_HASH,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      db.users.push(existingUser);
-      if (window.firebaseDB && window.firestore) {
-        const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, 'users', memberIdVal), existingUser, { merge: true }).catch(e => console.warn(e));
-      }
+      toast('Error: Assign a registered Member Farmer user ID. Field enrollment does not create placeholder accounts.');
+      return;
     }
 
     if (existingUser) {
-      existingUser.fieldId = plotId;
-      existingUser.blockFarm = blockFarmName;
+      if (window.HugpongSchema.role(existingUser.canonicalRole || existingUser.role) !== 'MEMBER_FARMER') {
+        toast('Error: The selected user is not a Member Farmer.');
+        return;
+      }
     }
 
     const resolvedMemberName = existingUser?.name || `Farmer ${userIdentifier.slice(-4)}`;
-    const memberIdVal = existingUser ? (existingUser.employeeId || existingUser.id || existingUser.contact) : (userIdentifier || '04000001');
+    const memberIdVal = existingUser.id || existingUser.employeeId;
     const memberContactVal = existingUser ? (existingUser.contact || existingUser.mobile || '') : '';
 
     const stageLabels = {
@@ -12424,37 +11150,54 @@ async function submitRegisterFieldModal() {
     };
 
     const matchedFarm = (db.blockFarms || []).find(bf => bf.name === blockFarmName);
+    if (!matchedFarm?.id) {
+      toast('Error: Select a registered block farm.');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const newCycleId = window.HugpongSchema.cycleId(plotId, 1);
 
     const newField = {
       id: plotId,
-      blockFarmId: matchedFarm?.id || '',
+      blockFarmId: matchedFarm.id,
       blockFarmName: blockFarmName,
       blockFarm: blockFarmName,
       memberId: memberIdVal,
+      memberUserId: memberIdVal,
       memberName: resolvedMemberName,
       member: resolvedMemberName,
       memberContact: memberContactVal,
       ha: ha,
       stage: stageLabels[stageNum] || 'Pre-Planting & Land Preparation',
       stageNumber: stageNum,
+      currentCycleId: newCycleId,
+      status: 'ACTIVE',
       month: 0.5 * stageNum,
       batchMonth: stageNum,
       synced: true,
       lastSync: 'Just now',
       variety: variety,
       soilType: soilType,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    const newCycle = {
+      id: newCycleId, fieldId: plotId, sequenceNumber: 1, cropType: '', cropYear: '',
+      currentStageNumber: stageNum, elapsedMonths: 0.5 * stageNum, batchNumber: stageNum,
+      status: 'ACTIVE', startedAt: nowIso, updatedAt: nowIso
     };
 
     db.fields.push(newField);
-    saveDB(db);
+    if (!db.cropCycles) db.cropCycles = [];
+    db.cropCycles.push(newCycle);
+    saveDB(db, false);
 
     if (window.firebaseDB && window.firestore) {
       const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, 'fields', newField.id), newField, { merge: true }).catch(err => {
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, newField.id), window.HugpongSchema.toField(newField)).catch(err => {
         console.warn('[HUGPONG] Instant Firestore write field notice:', err);
       });
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, newCycleId), window.HugpongSchema.toCycle(newField, newCycle));
     }
 
     // Brief visual reassurance delay
@@ -12467,7 +11210,7 @@ async function submitRegisterFieldModal() {
       'Field Plot Enrolled',
       `${plotId}`,
       `New field plot allocated to ${resolvedMemberName} (User ID: ${memberIdVal}) · ${ha} Ha in ${blockFarmName}.`,
-      currentRole === 'superadmin' ? 'Super Admin System Authority' : (currentRole === 'manager' ? (activeUser?.name ? `Farm Manager ${activeUser.name}` : 'Farm Manager') : 'SRA (Admin)'),
+      currentRole === 'superadmin' ? 'Super Admin System Authority' : (currentRole === 'manager' ? (activeUser?.name ? `Farm Manager ${activeUser.name}` : 'Farm Manager') : 'SRA Admin'),
       'Approved'
     );
     toast(`Success: Field plot ${plotId} (${ha} Ha) assigned to ${resolvedMemberName} (${memberIdVal})!`);
@@ -12593,8 +11336,9 @@ function submitRegisterBlockFarmModal() {
   }
 
   const db = getDB();
-  const farmPlots = (db.fields || []).filter(f => (f.blockFarm || f.blockFarmName || getBlockFarmName(f.id)) === farmName);
-  const ha = farmPlots.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0) || 0;
+  const farmPlots = (db.fields || []).filter(f => f.blockFarmId === blockCode);
+  const configuredHa = Number(document.getElementById('dash-farm-ha')?.value || 0);
+  const ha = configuredHa > 0 ? configuredHa : farmPlots.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
 
   let existingUser = null;
   let resolvedMgrName = 'Pending Appointment';
@@ -12603,46 +11347,12 @@ function submitRegisterBlockFarmModal() {
   if (userIdentifier) {
     existingUser = findUserByIdOrContact(userIdentifier);
     if (!existingUser) {
-      const isPhone = userIdentifier.startsWith('09');
-      const genId = isPhone ? ('03' + userIdentifier.slice(-6).padStart(6, '0')) : userIdentifier;
-      const parsed = splitFullName(`Farm Manager ${userIdentifier.slice(-4)}`);
-
-      existingUser = {
-        employeeId: genId,
-        contact: isPhone ? userIdentifier : `0918${Math.floor(1000000 + Math.random() * 9000000)}`,
-        name: `Farm Manager ${userIdentifier.slice(-4)}`,
-        firstName: parsed.firstName || 'Farm',
-        middleName: parsed.middleName || '',
-        lastName: parsed.lastName || 'Manager',
-        role: 'Farm Manager',
-        roleKey: 'farm_manager',
-        blockFarm: farmName,
-        blockFarmId: blockCode,
-        fieldId: '',
-        status: 'Active',
-        phoneVerified: true,
-        pendingFirstLoginVerification: false,
-        regDate: new Date().toISOString().split('T')[0],
-        passwordHash: DEFAULT_SEED_PASSWORD_HASH,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      db.users.push(existingUser);
-      if (window.firebaseDB && window.firestore) {
-        const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, 'users', genId), existingUser, { merge: true }).catch(e => console.warn(e));
-      }
+      toast('Error: Assign a registered Farm Manager user ID. Block-farm enrollment does not create placeholder accounts.');
+      return;
     }
-
-    if (existingUser) {
-      existingUser.role = 'Farm Manager';
-      existingUser.roleKey = 'farm_manager';
-      existingUser.blockFarm = farmName;
-      existingUser.blockFarmId = blockCode;
-      if (window.firebaseDB && window.firestore) {
-        const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, 'users', existingUser.employeeId || existingUser.id || existingUser.contact), existingUser, { merge: true }).catch(e => console.warn(e));
-      }
+    if (window.HugpongSchema.role(existingUser.canonicalRole || existingUser.role) !== 'FARM_MANAGER') {
+      toast('Error: The selected user is not a Farm Manager.');
+      return;
     }
 
     resolvedMgrName = existingUser?.name || 'Assigned Farm Manager';
@@ -12662,8 +11372,7 @@ function submitRegisterBlockFarmModal() {
     const targetBf = (db.blockFarms || []).find(b => b.name === oldFarmName || b.id === oldFarmName || b.code === blockCode);
     if (targetBf) {
       targetBf.name = farmName;
-      targetBf.farmManagerId = mgrIdVal;
-      targetBf.farmManagerName = resolvedMgrName;
+      targetBf.managerUserId = mgrIdVal || null;
       targetBf.declaredHa = ha;
       targetBf.updatedAt = new Date().toISOString();
     }
@@ -12674,7 +11383,7 @@ function submitRegisterBlockFarmModal() {
     if (window.firebaseDB && window.firestore) {
       const { doc, setDoc } = window.firestore;
       if (targetBf) {
-        setDoc(doc(window.firebaseDB, 'block_farms', targetBf.id || blockCode), targetBf, { merge: true }).catch(e => console.warn(e));
+        setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, targetBf.id || blockCode), window.HugpongSchema.toBlockFarm(targetBf)).catch(e => console.warn(e));
       }
     }
 
@@ -12698,7 +11407,7 @@ function submitRegisterBlockFarmModal() {
       name: farmName,
       location: 'Silay Sugar District',
       farmManagerId: mgrIdVal,
-      farmManagerName: resolvedMgrName,
+      managerUserId: mgrIdVal || null,
       declaredHa: ha,
       cooperative: 'Silay Planters Sugarcane Agrarian Reform Cooperative',
       createdAt: dateStr,
@@ -12711,7 +11420,7 @@ function submitRegisterBlockFarmModal() {
 
     if (window.firebaseDB && window.firestore) {
       const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, 'block_farms', blockCode), newBlockFarm, { merge: true }).catch(e => console.warn(e));
+      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, blockCode), window.HugpongSchema.toBlockFarm(newBlockFarm)).catch(e => console.warn(e));
     }
 
     logSystemEvent(
@@ -12886,7 +11595,7 @@ function renderTabHistory() {
     // Strictly Monthly Regulatory Audits, SRA Compilations & Certifications
     const auditReports = db.auditReports || [];
     const auditEvents = auditReports.map(r => {
-      const isCertified = r.status === 'Certified' && Boolean(r.certifiedBy);
+      const isCertified = r.status === 'CERTIFIED' && Boolean(r.certifiedByUserId || r.certifiedBy);
       return {
         id: r.reportId || r.id,
         category: 'operation',
@@ -13104,6 +11813,19 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
     actor: actor || defaultActor,
     status
   };
+  const entityTypes = {
+    operation: 'OPERATION_LOG', plot: 'FIELD', field: 'FIELD', block: 'BLOCK_FARM',
+    user: 'USER', price: 'SRA_PRICE', sra: 'AUDIT_REPORT', audit: 'AUDIT_REPORT'
+  };
+  const canonicalEvent = {
+    eventType: String(eventType || 'SYSTEM_EVENT').trim().replace(/\s+/g, '_').toUpperCase(),
+    actorUserId: activeUser?.id || activeUser?.employeeId || '',
+    entityType: entityTypes[category] || 'SYSTEM',
+    entityId: String(entity || 'SYSTEM'),
+    details: details || '',
+    outcome: String(status || '').toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS',
+    createdAt: newEvent.createdAt
+  };
 
   db.systemHistory.unshift(newEvent);
   historyCurrentPage = 1;
@@ -13114,7 +11836,7 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
   if (window.firebaseDB && window.firestore) {
     try {
       const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, 'audit_logs', auditId), newEvent, { merge: true }).catch(e => {
+      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_LOGS, auditId), canonicalEvent).catch(e => {
         console.warn('[HUGPONG] Audit log write notice:', e);
       });
     } catch(e) {
@@ -13254,13 +11976,13 @@ function renderHistory() {
   if (historyArchiveScope === 'archived') {
     targetLogs = db.archivedLogs || [];
   } else if (historyArchiveScope === 'active') {
-    targetLogs = (db.logs || []).filter(l => !l.isPastCycle && (!l.date || !l.date.includes('2025')));
+    targetLogs = (db.logs || []).filter(l => l.status === 'ACTIVE');
   } else if (historyArchiveScope === 'all') {
     targetLogs = [...(db.logs || []), ...(db.archivedLogs || [])];
   }
 
   const auditReportItems = (db.auditReports || []).map(r => {
-    const isCertified = r.status === 'Certified' && Boolean(r.certifiedBy);
+    const isCertified = r.status === 'CERTIFIED' && Boolean(r.certifiedByUserId || r.certifiedBy);
     return {
       id: r.reportId || r.id,
       timestamp: r.certifiedAt ? new Date(r.certifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : (r.dateGenerated || `${r.period || 'May 2026'}`),
@@ -13478,7 +12200,7 @@ function renderHistory() {
 
 async function archivePastCropCycles() {
   const db = getDB();
-  let pastLogs = (db.logs || []).filter(l => l.isPastCycle || (l.date && l.date.includes('2025')));
+  let pastLogs = (db.logs || []).filter(l => l.status === 'ARCHIVED');
   
   // If no 2025 logs exist, check for logs prior to June 2026
   if (pastLogs.length === 0) {
@@ -13638,7 +12360,7 @@ function renderSync() {
   const totalPlots = fields.length;
 
   // Active terminals (member users or terminalDiagnostics)
-  const memberUsers = users.filter(u => u.role === 'Member' || u.role === 'Farm Manager');
+  const memberUsers = users.filter(u => u.role === 'Member Farmer' || u.role === 'Farm Manager');
   const activeTerminalsCount = (db.terminalDiagnostics && db.terminalDiagnostics.length > 0)
     ? db.terminalDiagnostics.length 
     : memberUsers.length;
@@ -14161,7 +12883,7 @@ function renderMaintenance() {
   const activeCY = db.activeCropYear || 'CY 2026-2027';
 
   const pastLogs = (db.logs || []).filter(l => {
-    if (l.isPastCycle) return true;
+    if (l.status === 'ARCHIVED') return true;
     if (l.cropYear && l.cropYear < activeCY) return true;
     if (l.date && typeof l.date === 'string') {
       const year = parseInt(l.date.slice(0, 4), 10);
@@ -14171,7 +12893,7 @@ function renderMaintenance() {
   });
 
   const pastFields = (db.fields || []).filter(f => {
-    if (f.isPastCycle) return true;
+    if (f.status === 'ARCHIVED') return true;
     if (f.cropYear && f.cropYear < activeCY) return true;
     return false;
   });
@@ -14193,7 +12915,7 @@ async function archiveHistoricalLogs() {
   const db = getDB();
   const activeCY = db.activeCropYear || 'CY 2026-2027';
   const pastLogs = (db.logs || []).filter(l => {
-    if (l.isPastCycle) return true;
+    if (l.status === 'ARCHIVED') return true;
     if (l.cropYear && l.cropYear < activeCY) return true;
     if (l.date && typeof l.date === 'string') {
       const year = parseInt(l.date.slice(0, 4), 10);
@@ -14615,7 +13337,7 @@ async function submitNewWeeklyPriceFromDashboard() {
     if (window.firebaseDB && window.firestore) {
       try {
         const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, 'sra_prices', pId), newPost, { merge: true });
+        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SRA_PRICES, pId), window.HugpongSchema.toPrice(newPost, activeUser?.id || activeUser?.employeeId || ''));
         console.log('[HUGPONG] Published price committed to Firestore:', pId);
       } catch (e) {
         console.warn('[HUGPONG] Direct Firestore price publish note:', e);
@@ -14815,7 +13537,7 @@ async function submitNewTicket() {
     // Write to Firestore
     if (window.firebaseDB && window.firestore) {
       const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, 'support_tickets', newId), newTicket, { merge: true })
+      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SUPPORT_TICKETS, newId), window.HugpongSchema.toTicket(newTicket, activeUser?.id || activeUser?.employeeId || ''))
         .catch(e => console.warn('[HUGPONG] Ticket write notice:', e));
     }
 
@@ -15324,7 +14046,7 @@ function checkPasswordStrength(val) {
   }
 }
 
-function saveNewPasswordFromSettings() {
+async function saveNewPasswordFromSettings() {
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
   const currPwd = (document.getElementById('settings-curr-pwd')?.value || '').trim();
   const newPwd = (document.getElementById('settings-new-pwd')?.value || '').trim();
@@ -15348,25 +14070,29 @@ function saveNewPasswordFromSettings() {
   }
 
   const db = getDB();
-  const newHash = hashPassword(newPwd);
-  db.userPasswords = db.userPasswords || {};
-  db.userPasswords[currentRole] = newHash;
-  if (Array.isArray(db.users)) {
-    const matchedUser = db.users.find(u => u.roleKey === currentRole || (currentRole === 'superadmin' && u.role === 'Super Admin') || (currentRole === 'manager' && u.role === 'Farm Manager') || (currentRole === 'admin' && u.role === 'SRA (Admin)'));
-    if (matchedUser) {
-      matchedUser.passwordHash = newHash;
-      delete matchedUser.password;
-    }
-  }
-  saveDB(db);
-
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    const cleanId = currentRole === 'superadmin' ? '01000001' : (currentRole === 'manager' ? '03000001' : '02000001');
-    setDoc(doc(window.firebaseDB, 'users', cleanId), { passwordHash: newHash, updatedAt: new Date().toISOString() }, { merge: true }).catch(e => console.warn(e));
-  }
-
   const currentUser = getActiveWebUser();
+  const matchedUser = (db.users || []).find(u =>
+    (currentUser?.employeeId && u.employeeId === currentUser.employeeId) ||
+    (currentUser?.contact && u.contact === currentUser.contact)
+  );
+  let passwordResult;
+  try {
+    passwordResult = await authenticatedWebRequest('/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword: currPwd, newPassword: newPwd }
+    });
+  } catch (error) {
+    toast(`Error: ${error.message || 'Password was not changed.'}`);
+    return;
+  }
+  if (matchedUser) {
+    Object.assign(matchedUser, passwordResult.user || {}, { requiresPasswordChange: false, passwordChanged: true });
+  }
+  saveDB(db, false);
+  if (passwordResult.user && typeof saveWebAuthSession === 'function') {
+    saveWebAuthSession(passwordResult.user, currentRole, passwordResult.token);
+  }
+
   const userName = currentRole === 'manager' ? (currentUser?.name || 'Farm Manager') : (currentRole === 'superadmin' ? 'Super Admin' : (currentUser?.name || 'SRA Officer'));
   
   if (typeof logSecurityEvent === 'function') {
@@ -15414,7 +14140,7 @@ async function clearLocalClientCache() {
 
 function renderSettings() {
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
-  const roleName = currentRole === 'superadmin' ? 'Super Admin' : (currentRole === 'manager' ? 'Farm Manager' : 'SRA (Admin)');
+  const roleName = currentRole === 'superadmin' ? 'Super Admin' : (currentRole === 'manager' ? 'Farm Manager' : 'SRA Admin');
   const session = typeof getWebAuthSession === 'function' ? getWebAuthSession() : null;
   let sessionUser = session?.user;
   if (!sessionUser) {
@@ -15435,7 +14161,7 @@ function renderSettings() {
   if (darkToggle) darkToggle.checked = document.documentElement.classList.contains('dark');
 
   const db = getDB();
-  const hasCustomPwd = db.userPasswords && db.userPasswords[currentRole];
+  const hasCustomPwd = sessionUser?.requiresPasswordChange !== true;
   if (tempBanner) {
     if (hasCustomPwd) {
       tempBanner.classList.add('hidden');
@@ -15514,7 +14240,10 @@ async function handleLogout() {
   if (!ok) return;
 
   try {
-    fetch('http://localhost:3000/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    if (typeof window.signOutHugpongFirebase === 'function') {
+      await window.signOutHugpongFirebase().catch(() => {});
+    }
   } catch (e) {}
 
   if (typeof clearWebAuthSession === 'function') {
@@ -15584,18 +14313,18 @@ window.saveDB = saveDB;
 function inspectManagerAuditPackage(hash) {
   navigate('audit');
   const input = document.getElementById('manual-qr-input');
-  if (input) input.value = hash || 'HUG-202605-A3F9';
+  if (input) input.value = hash || '';
   if (typeof loadAuditCertificate === 'function') {
-    loadAuditCertificate(hash || 'HUG-202605-A3F9');
+    if (hash) loadAuditCertificate(hash);
   }
 }
 
 function exportManagerAuditPDF(hash) {
   navigate('audit');
   const input = document.getElementById('manual-qr-input');
-  if (input) input.value = hash || 'HUG-202605-A3F9';
+  if (input) input.value = hash || '';
   if (typeof loadAuditCertificate === 'function') {
-    loadAuditCertificate(hash || 'HUG-202605-A3F9');
+    if (hash) loadAuditCertificate(hash);
   }
   toast('Preparing official SRA certified compliance PDF...');
   setTimeout(() => {
@@ -15621,15 +14350,7 @@ function openLogEditHistoryModal(logId) {
   const body = document.getElementById('edit-modal-body');
   if (!body) return;
 
-  const editHistory = Array.isArray(log.editHistory) && log.editHistory.length > 0 ? log.editHistory : [
-    {
-      editedBy: (activeUser?.name ? `${activeUser.name} (Farm Manager)` : 'Farm Manager'),
-      editedAt: 'Recently',
-      reason: 'Supervisor adjustment via Web Console',
-      previousValues: { cost: log.cost, people: log.people },
-      newValues: { cost: log.cost, people: log.people }
-    }
-  ];
+  const editHistory = Array.isArray(log.amendments) ? log.amendments : [];
 
   body.innerHTML = `
     <div class="bg-bg/60 p-3.5 rounded-xl border border-border flex items-center justify-between">
@@ -15647,8 +14368,19 @@ function openLogEditHistoryModal(logId) {
     <div class="flex flex-col gap-3">
       <h5 class="text-xs font-bold text-hug-text uppercase tracking-wider">Revision History &amp; Correction Diff</h5>
       ${editHistory.map((rev, idx) => {
-        const prev = rev.previousValues || {};
-        const next = rev.newValues || {};
+        const changes = rev.changes || {};
+        const prev = {
+          cost: changes.totalCost?.before ?? changes.cost?.before,
+          people: changes.peopleCount?.before ?? changes.people?.before,
+          hectares: changes.areaHa?.before ?? changes.hectares?.before,
+          activity: changes.operationName?.before ?? changes.activity?.before
+        };
+        const next = {
+          cost: changes.totalCost?.after ?? changes.cost?.after,
+          people: changes.peopleCount?.after ?? changes.people?.after,
+          hectares: changes.areaHa?.after ?? changes.hectares?.after,
+          activity: changes.operationName?.after ?? changes.activity?.after
+        };
         const costChanged = prev.cost != null && next.cost != null && prev.cost !== next.cost;
         const peopleChanged = prev.people != null && next.people != null && String(prev.people) !== String(next.people);
         const haChanged = prev.hectares != null && next.hectares != null && String(prev.hectares) !== String(next.hectares);
@@ -15659,9 +14391,9 @@ function openLogEditHistoryModal(logId) {
             <div class="flex items-center justify-between border-b border-border/60 pb-2">
               <div class="flex items-center gap-2">
                 <span class="px-2 py-0.5 rounded text-[10px] font-black bg-primary text-white">REV #${idx + 1}</span>
-                <span class="font-bold text-hug-text text-xs">${rev.editedBy || 'Farm Manager'}</span>
+                <span class="font-bold text-hug-text text-xs">${rev.amendedByUserId || 'Unknown user'}</span>
               </div>
-              <span class="text-[11px] text-hug-muted">${rev.editedAt || 'Recorded'}</span>
+              <span class="text-[11px] text-hug-muted">${rev.amendedAt || 'Recorded'}</span>
             </div>
 
             ${rev.reason ? `
@@ -15831,13 +14563,17 @@ function openCompileAuditModal() {
   if (successStep) successStep.classList.add('hidden');
   // Automatically detect and bind the active audit batch period from active cycle operations
   const db = getDB();
-  const allActiveLogs = (db.logs || []).filter(l => !l.isPastCycle && !l.isArchived && !l.isDeleted && l.status !== 'Archived');
-  const uncompiledActiveLogs = allActiveLogs.filter(l => !l.compiled && !l.compiledReportId);
+  const allActiveLogs = (db.logs || []).filter(l => l.status === 'ACTIVE' && l.cycleId);
+  const reportedIds = new Set((db.auditReports || []).flatMap(report =>
+    (report.operationSnapshots || report.operations || []).map(operation => operation.operationLogId || operation.id)
+  ));
+  const uncompiledActiveLogs = allActiveLogs.filter(l => !reportedIds.has(l.id));
   
-  let autoMonth = 'September 2026';
-  const sampleLog = uncompiledActiveLogs[0] || allActiveLogs[0];
-  if (sampleLog && (sampleLog.date || sampleLog.createdAt)) {
-    const d = new Date(sampleLog.date || sampleLog.createdAt);
+  const currentDate = new Date();
+  let autoMonth = currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const referenceLog = uncompiledActiveLogs[0] || allActiveLogs[0];
+  if (referenceLog && (referenceLog.date || referenceLog.createdAt)) {
+    const d = new Date(referenceLog.date || referenceLog.createdAt);
     if (!isNaN(d.getTime())) {
       const mName = d.toLocaleString('en-US', { month: 'long' });
       const yr = d.getFullYear();
@@ -15882,371 +14618,105 @@ function isLogFromMonth(dateStr, monthStr) {
 }
 
 function updateCompileAuditPreview() {
-  const month = document.getElementById('compile-month-select')?.value || 'September 2026';
+  const month = document.getElementById('compile-month-select')?.value || '';
   const db = getDB();
-  const allLogs = db.logs || [];
-  
-  // 1. Get logs matching the selected month (Strictly Active Crop Cycle Only!)
-  const monthLogs = allLogs.filter(l => {
-    if (!l) return false;
-    if (l.isPastCycle || l.isArchived || l.isDeleted || l.status === 'Archived') return false;
-    const d = l.date || l.createdAt || '';
-    return isLogFromMonth(d, month);
-  });
-
-  // 2. Check if an audit report already exists for this month
-  const reports = db.auditReports || [];
-  const existingReport = reports.find(r => 
-    (r.period && r.period.toLowerCase() === month.toLowerCase()) || 
-    (r.month && r.month.toLowerCase() === month.toLowerCase())
-  );
-
-  // 3. Find uncompiled logs
-  const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
-  const isFullyCompiled = Boolean(existingReport && uncompiledLogs.length === 0 && (monthLogs.length > 0 || (existingReport.totalLogs && existingReport.totalLogs > 0)));
-  const hasNoLogs = monthLogs.length === 0 && !existingReport;
-
-  const count = monthLogs.length > 0 ? monthLogs.length : (existingReport ? (existingReport.totalLogs || 0) : 0);
-  const cost = monthLogs.length > 0
-    ? monthLogs.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0)
-    : (existingReport ? Number(existingReport.totalCost || 0) : 0);
-  
-  const blockFarm = (db.blockFarms && db.blockFarms[0]) || { name: 'Nacayao Block Farm', id: 'BLK-01', association: 'Silay Planters Association', declaredHa: 2.0 };
-  const totalHa = Number(existingReport?.totalHectares || db.fields?.reduce((s,f)=>s+(Number(f.ha || f.area)||0),0) || blockFarm.declaredHa || 2.0);
-  const totalPlots = (db.fields || []).filter(f => !f.blockFarm || f.blockFarm === blockFarm.name || f.blockFarm === blockFarm.id).length || (db.fields || []).length || 1;
-
-  const farmDisplayEl = document.getElementById('compile-farm-display');
-  const farmCodeEl = document.getElementById('compile-farm-code-display');
-  const haEl = document.getElementById('compile-preview-ha');
-  const plotsEl = document.getElementById('compile-preview-plots');
-  const logsEl = document.getElementById('compile-preview-logs');
-  const costEl = document.getElementById('compile-preview-cost');
-
-  if (farmDisplayEl) farmDisplayEl.textContent = blockFarm.name || 'Nacayao Block Farm';
-  if (farmCodeEl) farmCodeEl.textContent = `${blockFarm.id || 'BLK-01'} · ${blockFarm.association || 'Silay Planters Assoc'}`;
-  if (haEl) haEl.textContent = `${totalHa.toFixed(2)} Ha`;
-  if (plotsEl) plotsEl.textContent = `${totalPlots} Member Plot${totalPlots !== 1 ? 's' : ''}`;
-  if (logsEl) logsEl.textContent = `${count} Records`;
-  if (costEl) costEl.textContent = `₱${cost.toLocaleString()}`;
-
-  // Render Status Banner
-  const bannerEl = document.getElementById('compile-status-banner');
-  const actionsEl = document.getElementById('compile-audit-actions-setup');
-
-  if (bannerEl) {
-    if (isFullyCompiled) {
-      bannerEl.innerHTML = `
-        <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5">
-          <div class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">✓</div>
-          <div class="text-[11px] text-emerald-900 leading-relaxed">
-            <strong class="font-bold block text-emerald-950 text-xs">All Operations for ${month} are Already Compiled ${existingReport.status === 'Certified' ? '&amp; Certified' : '(Pending SRA Certification)'}</strong>
-            Audit Report <span class="font-mono font-bold text-emerald-800">${existingReport.reportId || existingReport.id}</span> (QR Hash: <code class="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-800">${existingReport.qrHash || existingReport.qrSignature || 'HUG-202605-A3F9'}</code>) is up-to-date with all ${count} field records. ${existingReport.status === 'Certified' ? 'Certified by SRA District Inspectorate.' : 'Transmitted to SRA Queue awaiting inspector certification.'} No new or uncompiled operations require compilation.
-          </div>
-        </div>
-      `;
-    } else if (hasNoLogs) {
-      bannerEl.innerHTML = `
-        <div class="p-3.5 bg-gray-50 border border-border rounded-xl flex items-start gap-2.5">
-          <div class="w-5 h-5 rounded-full bg-gray-200 text-hug-muted flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">!</div>
-          <div class="text-[11px] text-hug-muted leading-relaxed">
-            <strong class="font-bold block text-hug-text text-xs">No Operations Recorded for ${month}</strong>
-            There are no field operations logged for this calendar cycle yet. Members or managers must record operations before a monthly package can be compiled.
-          </div>
-        </div>
-      `;
-    } else if (uncompiledLogs.length > 0 && existingReport) {
-      bannerEl.innerHTML = `
-        <div class="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
-          <div class="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">!</div>
-          <div class="text-[11px] text-amber-900 leading-relaxed">
-            <strong class="font-bold block text-amber-950 text-xs">${uncompiledLogs.length} New Operation${uncompiledLogs.length !== 1 ? 's' : ''} Ready to Compile (Batch Revision)</strong>
-            New field operations were recorded since Report ${existingReport.reportId} was generated. Re-compiling will seal the new records into a revised SRA QR envelope.
-          </div>
-        </div>
-      `;
-    } else {
-      bannerEl.innerHTML = `
-        <div class="p-3.5 bg-primary-bg/50 border border-primary/20 rounded-xl flex items-start gap-2.5">
-          <div class="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold flex-shrink-0 text-xs mt-0.5">⚡</div>
-          <div class="text-[11px] text-hug-text leading-relaxed">
-            <strong class="font-bold block text-primary text-xs">${monthLogs.length} Operations Ready for SRA Monthly Audit Compilation</strong>
-            Compiling this batch will seal all ${monthLogs.length} field operations into an official cryptographic QR envelope and transmit it to the SRA District Cloud Queue.
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  // Update Action Buttons
-  if (actionsEl) {
-    if (isFullyCompiled) {
-      actionsEl.innerHTML = `
-        <button id="compile-submit-btn" disabled class="px-4 py-2 rounded-xl bg-gray-100 text-gray-400 border border-gray-200 font-bold text-xs cursor-not-allowed flex items-center gap-1.5 shadow-none">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
-          <span>All Operations Already Compiled</span>
-        </button>
-        <button onclick="inspectCompiledAuditReport('${existingReport.qrHash || existingReport.id}')" class="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-light transition-all flex items-center gap-1.5 cursor-pointer shadow-xs">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-          <span>${existingReport.status === 'Certified' ? 'View SRA Certificate &amp; QR' : 'View SRA Audit Dossier &amp; QR'}</span>
-        </button>
-      `;
-    } else if (hasNoLogs) {
-      actionsEl.innerHTML = `
-        <button id="compile-submit-btn" disabled class="px-5 py-2 rounded-xl bg-gray-100 text-gray-400 border border-gray-200 font-bold text-xs cursor-not-allowed">
-          No Operations to Compile
-        </button>
-      `;
-    } else {
-      actionsEl.innerHTML = `
-        <button id="compile-submit-btn" onclick="executeCompileMonthlyAudit()" class="px-5 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-light transition-all flex items-center gap-1.5 cursor-pointer shadow-xs">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          <span>${uncompiledLogs.length > 0 && existingReport ? `Compile ${uncompiledLogs.length} New Operations &amp; Update QR` : `Compile ${monthLogs.length} Operations &amp; Generate SRA QR`}</span>
-        </button>
-      `;
-    }
-  }
-
-  // Agronomic stage breakdown (100% Data-Driven from actual recorded operations)
-  const stageDefs = [
-    { stageNum: 1, key: 'prep', name: 'Stage 1: Pre-Planting & Land Prep', match: ['land prep', 'plowing', 'harrowing', 'furrowing', 'subsoiling', 'soil sampling', 'sra-01', 'sra-02'] },
-    { stageNum: 2, key: 'plant', name: 'Stage 2: Planting & Crop Establishment', match: ['planting', 'cane points', 'seedling', 'replanting', 'sra-03', 'sra-04'] },
-    { stageNum: 3, key: 'fert', name: 'Stage 3: Basal Nutrition & Soil Care', match: ['basal', 'fertilizer', 'fertilization', 'lime', 'soil amendment', 'sra-05', 'sra-06'] },
-    { stageNum: 4, key: 'weed', name: 'Stage 4: Cultivation & Weeding', match: ['weeding', 'cultivation', 'herbicide', 'off-barring', 'sra-07', 'sra-08'] },
-    { stageNum: 5, key: 'hill', name: 'Stage 5: Maintenance & Hilling-Up', match: ['hilling-up', 'hilling', 'maintenance', 'irrigation', 'drainage', 'pest control', 'sra-09', 'sra-10', 'sra-11'] },
-    { stageNum: 6, key: 'harvest', name: 'Stage 6: Harvesting & Transport', match: ['harvest', 'harvesting', 'hauling', 'loading', 'transport', 'cutting', 'sra-12', 'sra-13', 'sra-14'] }
-  ];
-
-  const getLogStageNum = (l) => {
-    if (l.stageNumber && Number(l.stageNumber) >= 1 && Number(l.stageNumber) <= 6) return Number(l.stageNumber);
-    if (l.taskId) {
-      const m = String(l.taskId).match(/(\d+)/);
-      if (m) {
-        const num = Number(m[1]);
-        if (num >= 1 && num <= 6) return num;
-      }
-    }
-    if (l.sraOperationId) {
-      const op = SRA_OPERATIONS_CATALOGUE.find(o => o.id === l.sraOperationId);
-      if (op && op.stageNumber) return Number(op.stageNumber);
-    }
-    const act = `${l.activity || ''} ${l.operationName || ''} ${l.task || ''} ${l.type || ''} ${l.notes || ''}`.toLowerCase();
-    for (const def of stageDefs) {
-      if (def.match.some(m => act.includes(m))) return def.stageNum;
-    }
-    return 1; // Default fallback to Stage 1
+  const period = window.HugpongSchema.reportPeriod(month);
+  const actor = getActiveWebUser() || sessionUser || {};
+  const actorId = actor.id || actor.employeeId || '';
+  const farm = (db.blockFarms || []).find(item => item.managerUserId === actorId) || {};
+  const farmFieldIds = new Set((db.fields || []).filter(field => field.blockFarmId === farm.id).map(field => field.id));
+  const logs = (db.logs || []).filter(log => farmFieldIds.has(log.fieldId) && log.status === 'ACTIVE' && log.cycleId && isLogFromMonth(log.performedOn || log.isoDate || log.date, month));
+  const reports = (db.auditReports || []).filter(report => report.blockFarmId === farm.id && window.HugpongSchema.reportPeriod(report.period || report.month) === period);
+  const reportedIds = new Set(reports.flatMap(report => (report.operationSnapshots || report.operations || []).map(item => item.operationLogId || item.id)));
+  const pendingLogs = logs.filter(log => !reportedIds.has(log.id));
+  const totalHa = (db.fields || []).filter(field => field.blockFarmId === farm.id && field.status === 'ACTIVE').reduce((sum, field) => sum + Number(field.ha || field.areaHa || 0), 0);
+  const totalCost = pendingLogs.reduce((sum, log) => sum + Number(log.totalCost || log.cost || 0), 0);
+  const values = {
+    'compile-farm-display': farm.name || 'No block farm selected',
+    'compile-farm-code-display': farm.code || farm.id || '—',
+    'compile-preview-ha': `${totalHa.toFixed(2)} Ha`,
+    'compile-preview-plots': `${(db.fields || []).filter(field => field.blockFarmId === farm.id && field.status === 'ACTIVE').length} Member Plots`,
+    'compile-preview-logs': `${pendingLogs.length} Records`,
+    'compile-preview-cost': `₱${totalCost.toLocaleString()}`
   };
-
-  const stages = stageDefs.map(def => {
-    const matchingLogs = monthLogs.filter(l => getLogStageNum(l) === def.stageNum);
-    const stageCost = matchingLogs.reduce((s, l) => s + Number(l.totalCost || l.cost || 0), 0);
-    return {
-      name: def.name,
-      logs: matchingLogs.length,
-      cost: stageCost
-    };
-  });
-
-  const tbody = document.getElementById('compile-preview-stages');
-  if (tbody) {
-    tbody.innerHTML = stages.map(st => `
-      <tr class="hover:bg-bg/40">
-        <td class="px-3 py-2 font-medium text-hug-text">${st.name}</td>
-        <td class="px-3 py-2 text-center text-hug-muted font-mono">${st.logs}</td>
-        <td class="px-3 py-2 text-right font-mono font-bold text-hug-text">₱${st.cost.toLocaleString()}</td>
-        <td class="px-3 py-2 text-right font-mono text-hug-muted">${cost > 0 ? Math.round((st.cost / cost) * 100) : 0}%</td>
-      </tr>
-    `).join('');
+  Object.entries(values).forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.textContent = value; });
+  const banner = document.getElementById('compile-status-banner');
+  if (banner) banner.textContent = pendingLogs.length
+    ? `${pendingLogs.length} ACTIVE operation record(s) are ready for the ${month} audit report.`
+    : (logs.length ? `All ${month} operations are already included in an audit report.` : `No ACTIVE operations are available for ${month}.`);
+  const action = document.getElementById('compile-audit-actions-setup');
+  if (action) {
+    const button = action.querySelector('button[onclick*="executeCompileMonthlyAudit"]');
+    if (button) button.disabled = pendingLogs.length === 0;
   }
 }
 
-function executeCompileMonthlyAudit() {
-  const month = document.getElementById('compile-month-select')?.value || 'September 2026';
+async function executeCompileMonthlyAudit() {
+  const month = document.getElementById('compile-month-select')?.value || '';
   const db = getDB();
-  const allLogs = db.logs || [];
-  
-  // Strictly active cycle logs only
-  const monthLogs = allLogs.filter(l => {
-    if (!l) return false;
-    if (l.isPastCycle || l.isArchived || l.isDeleted || l.status === 'Archived') return false;
-    const d = l.date || l.createdAt || '';
-    return isLogFromMonth(d, month);
-  });
-
-  const reports = db.auditReports || [];
-  const existingReportsForMonth = reports.filter(r => 
-    (r.period && r.period.toLowerCase() === month.toLowerCase()) || 
-    (r.month && r.month.toLowerCase() === month.toLowerCase())
-  );
-  const certifiedReports = existingReportsForMonth.filter(r => r.status === 'Certified');
-  const certifiedReportIds = new Set(certifiedReports.map(cr => cr.reportId || cr.id));
-
-  // Determine operations to compile: If certified reports exist, compile ONLY newly logged / uncertified operations
-  let logsToCompile = monthLogs;
-  let isRevisionBatch = false;
-
-  if (certifiedReports.length > 0) {
-    logsToCompile = monthLogs.filter(l => !l.compiled || !certifiedReportIds.has(l.compiledReportId));
-    isRevisionBatch = true;
-    if (logsToCompile.length === 0) {
-      toast(`All operations for ${month} are already certified by SRA in report ${certifiedReports[0].reportId || certifiedReports[0].id}.`);
-      updateCompileAuditPreview();
-      return;
-    }
-  } else {
-    const uncompiledLogs = monthLogs.filter(l => !l.compiled && !l.compiledReportId);
-    if (existingReportsForMonth.length > 0 && uncompiledLogs.length === 0) {
-      toast(`All operations for ${month} are already compiled into ${existingReportsForMonth[0].qrHash || existingReportsForMonth[0].reportId}!`);
-      updateCompileAuditPreview();
-      return;
-    }
-  }
-
-  if (logsToCompile.length === 0) {
-    toast(`Cannot compile: No operations found for ${month}.`);
+  const period = window.HugpongSchema.reportPeriod(month);
+  const actor = getActiveWebUser() || sessionUser || {};
+  const actorId = actor.id || actor.employeeId || '';
+  if (window.HugpongSchema.role(actor.canonicalRole || actor.role) !== 'FARM_MANAGER') {
+    toast('Cannot compile: only an assigned Farm Manager may compile an audit report.');
     return;
   }
-
-  const cleanMonthStr = month.replace(/[^a-zA-Z0-9]/g, '-').toUpperCase();
-  const farmCode = (db.blockFarms?.[0]?.id || 'BF01').replace(/[^a-zA-Z0-9]/g, '');
-  
-  let reportId = `RPT-${cleanMonthStr}-${farmCode}`;
-  let qrHash = `HUG-${cleanMonthStr}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-
-  if (isRevisionBatch) {
-    const batchNum = existingReportsForMonth.length + 1;
-    reportId = `RPT-${cleanMonthStr}-${farmCode}-B${batchNum}`;
-    qrHash = `HUG-${cleanMonthStr}-B${batchNum}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const blockFarm = (db.blockFarms || []).find(farm => farm.managerUserId === actorId);
+  if (!period || !blockFarm?.id) {
+    toast('Cannot compile: select a valid report month and registered block farm.');
+    return;
   }
-  
-  const cost = logsToCompile.reduce((sum, l) => sum + Number(l.totalCost || l.cost || 0), 0);
-  const count = logsToCompile.length;
-  const ha = Number(db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || db.blockFarms?.[0]?.declaredHa || 0);
-
-  // Mark all compiled logs for this batch
-  const nowIso = new Date().toISOString();
-  logsToCompile.forEach(l => {
-    l.compiled = true;
-    l.compiledReportId = reportId;
-    l.compiledAt = nowIso;
-  });
-
-  const currentUser = getActiveWebUser();
-  const userName = currentUser?.name || 'Farm Manager';
-
-  // Serialize operations
-  const serializedOps = logsToCompile.map(l => ({
-    id: l.id,
-    fieldId: l.fieldId,
-    activity: l.activity || l.operationName || 'Operation',
-    operationName: l.operationName || l.activity || 'Operation',
-    category: l.category || 'prep',
-    stageNumber: l.stageNumber || 1,
-    stageName: l.stageName || `Stage ${l.stageNumber || 1}`,
-    cost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
-    totalCost: Number(l.totalCost != null ? l.totalCost : (l.cost || 0)),
-    qty: l.inputQty || l.qty || '1',
-    quantity: l.inputQty || l.qty || '1',
-    unit: l.inputUnit || l.unit || 'ha',
-    unitCost: Number(l.directRate || l.unitCost || (Number(l.totalCost || l.cost || 0) / Math.max(parseFloat(l.hectares || l.inputQty || 1), 0.1))),
-    date: l.date || l.period || nowIso.split('T')[0],
-    period: l.period || l.date || nowIso.split('T')[0],
-    status: l.status || 'Recorded',
-    subItems: Array.isArray(l.subItems) ? l.subItems : [],
-    isGroup: Boolean(l.isGroup || (l.subItems && l.subItems.length > 0)),
-    hectares: l.hectares || l.ha || '1.0'
-  }));
-
-  const newReport = {
-    id: reportId,
-    reportId: reportId,
-    qrHash: qrHash,
-    qrPayload: qrHash,
-    blockFarmId: (db.blockFarms?.[0]?.id || ''),
-    blockFarmName: (db.blockFarms?.[0]?.name || 'Block Farm'),
-    period: month,
-    month: month,
-    totalHectares: ha,
-    totalLogs: count,
-    totalCost: cost,
-    compiledBy: `${userName} (Farm Manager)`,
-    compiledAt: nowIso,
-    status: 'Pending SRA',
-    certifiedBy: null,
-    certifiedRole: null,
-    certifiedAt: null,
-    logs: serializedOps,
-    operations: serializedOps,
-    notes: `Compiled by Farm Manager ${userName}. Transmitted to SRA District Cloud Queue for Official SRA Review & Certification.`
+  const farmFieldIds = new Set((db.fields || []).filter(field => field.blockFarmId === blockFarm.id).map(field => field.id));
+  const monthLogs = (db.logs || []).filter(log => farmFieldIds.has(log.fieldId) && log.status === 'ACTIVE' && log.cycleId && isLogFromMonth(log.performedOn || log.isoDate || log.date, month));
+  const periodReports = (db.auditReports || []).filter(report =>
+    report.blockFarmId === blockFarm.id && window.HugpongSchema.reportPeriod(report.period || report.month) === period
+  );
+  const reportedIds = new Set(periodReports.flatMap(report =>
+    (report.operationSnapshots || report.operations || []).map(operation => operation.operationLogId || operation.id)
+  ));
+  const logsToCompile = monthLogs.filter(log => !reportedIds.has(log.id));
+  if (logsToCompile.length === 0) {
+    toast(monthLogs.length ? `All operations for ${month} are already included in an audit report.` : `Cannot compile: No ACTIVE operations found for ${month}.`);
+    updateCompileAuditPreview();
+    return;
+  }
+  const suffix = String(periodReports.length + 1).padStart(2, '0');
+  const reportId = `RPT-${period}-${blockFarm.id}-${suffix}`.replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+  const qrHash = `HUG-${period.replace('-', '')}-${Date.now().toString(36).toUpperCase()}`;
+  const report = {
+    id: reportId, reportId, blockFarmId: blockFarm.id, period, status: 'PENDING', qrHash,
+    compiledByUserId: actorId, compiledAt: new Date().toISOString(),
+    operationSnapshots: logsToCompile.map(log => window.HugpongSchema.snapshot(log.id, log)),
+    certificationNotes: '', certifiedByUserId: null, certifiedAt: null
   };
-
   if (!db.auditReports) db.auditReports = [];
-  if (isRevisionBatch) {
-    // Distinct new audit report, preserving certified report
-    db.auditReports.unshift(newReport);
-  } else {
-    const existingIdx = db.auditReports.findIndex(r => r.reportId === reportId || r.id === reportId);
-    if (existingIdx >= 0) {
-      db.auditReports[existingIdx] = { ...db.auditReports[existingIdx], ...newReport };
-    } else {
-      db.auditReports.unshift(newReport);
-    }
-  }
-
-  if (!db.systemHistory) db.systemHistory = [];
-  db.systemHistory.unshift({
-    id: `AUD-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-    category: 'operation',
-    categoryLabel: 'Field Operation',
-    timestamp: nowIso,
-    title: `SRA Audit Package Compiled: ${reportId}`,
-    details: `${count} logs compiled for ${month} (${ha.toFixed(2)} Ha, ₱${cost.toLocaleString()}). QR Hash: ${qrHash}`,
-    user: userName,
-    role: 'Farm Manager',
-    status: 'Compiled'
-  });
-
-  saveDB(db);
-
-  // Sync to Firestore Cloud if available
+  db.auditReports.unshift(window.HugpongSchema.fromReport(reportId, window.HugpongSchema.toReport(report)));
+  saveDB(db, false);
   if (window.firebaseDB && window.firestore) {
     const { doc, setDoc } = window.firestore;
-    const docId = newReport.reportId || newReport.id;
-    setDoc(doc(window.firebaseDB, 'audit_reports', docId), newReport, { merge: true })
-      .catch(e => console.warn('[Firestore] Async audit report sync:', e));
+    await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_REPORTS, reportId), window.HugpongSchema.toReport(report));
   }
-
-  // Refresh UI Panels
   if (typeof renderFarmManagerView === 'function') renderFarmManagerView();
   if (typeof renderAuditQueue === 'function') renderAuditQueue();
-  if (typeof updateCompileAuditPreview === 'function') updateCompileAuditPreview();
-
-  // Show Success Step with real QR code
+  updateCompileAuditPreview();
   const setupStep = document.getElementById('compile-audit-step-setup');
   const successStep = document.getElementById('compile-audit-step-success');
   const setupActions = document.getElementById('compile-audit-actions-setup');
   const successActions = document.getElementById('compile-audit-actions-success');
-
   if (setupStep) setupStep.classList.add('hidden');
   if (setupActions) setupActions.classList.add('hidden');
   if (successStep) successStep.classList.remove('hidden');
   if (successActions) successActions.classList.remove('hidden');
-
-  const successReportIdEl = document.getElementById('compile-success-report-id');
-  const successHashEl = document.getElementById('compile-success-hash');
-  const successCountEl = document.getElementById('compile-success-count');
+  const reportIdEl = document.getElementById('compile-success-report-id');
+  const hashEl = document.getElementById('compile-success-hash');
+  const countEl = document.getElementById('compile-success-count');
   const qrContainer = document.getElementById('compile-success-qr-container');
-
-  if (successReportIdEl) successReportIdEl.textContent = reportId;
-  if (successHashEl) successHashEl.textContent = qrHash;
-  if (successCountEl) successCountEl.textContent = `${count} Operations Compiled`;
-  if (qrContainer) {
-    qrContainer.innerHTML = generateQRVectorHTML(qrHash, 140);
-  }
-
-  toast(`Successfully compiled ${month} operations for ${db.blockFarms?.[0]?.name || 'Block Farm'}! ☁️`);
+  if (reportIdEl) reportIdEl.textContent = reportId;
+  if (hashEl) hashEl.textContent = qrHash;
+  if (countEl) countEl.textContent = `${logsToCompile.length} Operations Compiled`;
+  if (qrContainer) qrContainer.innerHTML = generateQRVectorHTML(qrHash, 140);
+  toast(`Successfully compiled ${logsToCompile.length} operations for ${month}.`);
 }
-
-let activeCompiledAuditHash = '';
 
 function inspectCompiledAuditReport(hashOrId) {
   const db = getDB();
@@ -16260,17 +14730,11 @@ function inspectCompiledAuditReport(hashOrId) {
     r.id === targetHash ||
     (r.period && r.period === targetHash) ||
     (r.month && r.month === targetHash)
-  ) || reports[0] || {
-    period: db.activeCropYear || 'CY 2026-2027',
-    blockFarmName: (db.blockFarms?.[0]?.name || 'Block Farm'),
-    totalHectares: Number(db.blockFarms?.[0]?.declaredHa || db.fields?.reduce((s,f)=>s+(Number(f.ha)||0),0) || 0),
-    totalLogs: (db.logs || []).length,
-    totalCost: (db.logs || []).reduce((s, l) => s + Number(l.totalCost || l.cost || 0), 0),
-    qrHash: targetHash || `HUG-${(db.activeCropYear || '2026').replace(/[^0-9]/g, '')}-ACTIVE`,
-    status: 'Pending SRA',
-    compiledBy: 'Farm Manager',
-    certifiedBy: null
-  };
+  );
+  if (!report) {
+    toast('Audit report not found. No provisional report was created.');
+    return;
+  }
 
   activeCompiledAuditHash = report.qrHash || report.qrSignature || targetHash;
 
@@ -16293,15 +14757,8 @@ function inspectCompiledAuditReport(hashOrId) {
     
     // Find matching logs for this report/period (Strictly Active Crop Cycle records!)
     const targetPeriod = report.period || report.month;
-    const matchingMonthLogs = (db.logs || []).filter(l => 
-      !l.isDeleted &&
-      !l.isPastCycle &&
-      !l.isArchived &&
-      l.status !== 'Archived' &&
-      (l.compiledReportId === report.reportId || 
-       l.compiledReportId === report.id ||
-       (targetPeriod && (l.date || l.createdAt) && isLogFromMonth(l.date || l.createdAt, targetPeriod)))
-    );
+    const reportOperationIds = new Set((report.operationSnapshots || report.operations || []).map(operation => operation.operationLogId || operation.id));
+    const matchingMonthLogs = (db.logs || []).filter(l => reportOperationIds.has(l.id));
 
     const stageDefs = [
       { key: 'prep', name: 'Stage 1: Pre-Planting & Land Prep', match: ['land prep', 'plowing', 'harrowing', 'furrowing', 'subsoiling', 'soil sampling'] },
@@ -16344,7 +14801,7 @@ function inspectCompiledAuditReport(hashOrId) {
           </div>
         </div>
         <div class="flex flex-col items-start sm:items-end">
-          ${(report.status === 'Certified' && report.certifiedBy) ? `
+          ${(report.status === 'CERTIFIED' && (report.certifiedByUserId || report.certifiedBy)) ? `
             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-success-bg text-success border border-success/30">
               <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
               SRA Certified &amp; Verified
@@ -16434,9 +14891,9 @@ function inspectCompiledAuditReport(hashOrId) {
           <span class="text-[10px] text-success font-semibold mt-0.5 block">✓ Compiled &amp; Signed</span>
         </div>
         <div>
-          <div class="font-bold text-xs ${(report.status === 'Certified' && report.certifiedBy) ? 'text-hug-text' : 'text-hug-muted italic'}">${(report.status === 'Certified' && report.certifiedBy) ? report.certifiedBy : 'Pending SRA Inspector Assignment'}</div>
+          <div class="font-bold text-xs ${(report.status === 'CERTIFIED' && (report.certifiedByUserId || report.certifiedBy)) ? 'text-hug-text' : 'text-hug-muted italic'}">${(report.status === 'CERTIFIED' && (report.certifiedByUserId || report.certifiedBy)) ? (report.certifiedByUserId || report.certifiedBy) : 'Pending SRA Inspector Assignment'}</div>
           <span class="text-[10px] text-hug-muted block">SRA Agricultural Inspector · District 3 Oversight</span>
-          ${(report.status === 'Certified' && report.certifiedBy) ? `
+          ${(report.status === 'CERTIFIED' && (report.certifiedByUserId || report.certifiedBy)) ? `
             <span class="text-[10px] text-success font-semibold mt-0.5 block">✓ Certified Official SRA Record</span>
           ` : `
             <span class="text-[10px] text-amber-700 font-semibold mt-0.5 block">⏳ Transmitted to SRA Queue · Awaiting Official Certification</span>
@@ -16503,14 +14960,11 @@ async function takeOverMarkAllStagesCompleted() {
   if (window.firestore && window.firebaseDB) {
     try {
       const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, 'fields', field.id), {
-        stage: field.stage,
-        stageNumber: 6,
-        isCompleted: true,
-        customStages: field.customStages,
-        lastSync: field.lastSync,
-        synced: true,
-        updatedAt: new Date().toISOString()
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
+        customStages: field.customStages, updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
+        currentStageNumber: 6, updatedAt: new Date().toISOString()
       }, { merge: true });
     } catch (err) {
       console.warn('[takeOverMarkAllStagesCompleted] Firestore sync error:', err);

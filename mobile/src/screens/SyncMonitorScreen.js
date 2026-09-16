@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { subscribe, getCurrentSession, fields, getMemberSyncHealth, performMobileSync, updateSessionFieldId } from '../data/dataStore';
+import { subscribe, getCurrentSession, fields, users, blockFarms, getMemberSyncHealth, performMobileSync, updateSessionFieldId } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 
 export default function SyncMonitorScreen({ navigation }) {
@@ -35,47 +35,40 @@ export default function SyncMonitorScreen({ navigation }) {
   }, []);
 
   const isFarmManager = session?.role === 'Farm Manager';
-  const isSRA = session?.role === 'SRA (Admin)';
+  const isSRA = session?.role === 'SRA Admin';
+  const sessionUserId = session?.id || session?.employeeId || '';
+  const assignedField = fields.find(field => field.memberUserId === sessionUserId);
+  const assignedFarm = blockFarms.find(farm => farm.id === assignedField?.blockFarmId);
+  const assignedManager = users.find(user => (user.id || user.employeeId) === assignedFarm?.managerUserId);
+  const managedFarm = blockFarms.find(farm => farm.managerUserId === sessionUserId);
 
-  // Member terminal telemetry dynamically derived from fields
+  // Manager telemetry uses only persisted field/user sync information.
   const memberTelemetry = React.useMemo(() => {
-    const devices = [
-      'Samsung Galaxy A14 (Android 13)',
-      'Xiaomi Redmi 12 (Android 12)',
-      'Realme C55 (Android 13)',
-      'Infinix Hot 30i (Android 11)',
-      'Oppo A58 (Android 13)'
-    ];
-    const contacts = [
-      '0917-123-4567',
-      '0918-987-6543',
-      '0919-444-8888',
-      '0917-555-1234',
-      '0918-666-7890'
-    ];
-    return fields.map((f, idx) => {
+    const managedFields = managedFarm ? fields.filter(field => field.blockFarmId === managedFarm.id) : [];
+    return managedFields.map((f) => {
+      const member = users.find(user => (user.id || user.employeeId) === f.memberUserId);
       const isLagging = f.lastSync?.includes('days') || !f.synced;
-      const isCritical = f.lastSync?.includes('4 days') || f.lastSync?.includes('8 days');
-      const lagDays = isCritical ? 4 : (isLagging ? 2 : 0);
+      const lagDays = Number(f.syncLagDays || 0);
+      const isCritical = lagDays >= 7;
       const status = isCritical ? 'critical' : (isLagging ? 'warning' : 'active');
       const statusLabel = isCritical ? `Critical (${f.lastSync})` : (isLagging ? `Lagging (${f.lastSync})` : 'Active & Synced');
       return {
         id: f.id,
-        name: f.member || 'Member Farmer',
-        contact: contacts[idx % contacts.length],
-        ha: String(f.ha || '1.5'),
+        name: member?.name || member?.displayName || 'Unassigned',
+        contact: member?.phone || member?.contact || '',
+        ha: String(f.ha || 0),
         stage: f.stage ? f.stage.split(':')[0] : 'In Progress',
-        lastSync: f.lastSync || '1 hr ago',
+        lastSync: f.lastSync || 'No sync recorded',
         lagDays,
-        offlineLogsCount: f.synced ? 0 : 3,
-        battery: 85 - (idx * 15),
+        offlineLogsCount: Number(f.offlineLogsCount || 0),
+        battery: f.batteryLevel ?? null,
         status,
         statusLabel,
-        device: devices[idx % devices.length],
-        blockFarm: f.blockFarm || (session?.farm || session?.blockFarm || 'District Central')
+        device: f.deviceName || '',
+        blockFarm: managedFarm?.name || 'Unassigned'
       };
     });
-  }, []);
+  }, [managedFarm?.id, syncHealth]);
 
   const { attentionCount, activeCount, warningCount, criticalCount } = React.useMemo(() => {
     let att = 0, act = 0, warn = 0, crit = 0;
@@ -168,7 +161,7 @@ export default function SyncMonitorScreen({ navigation }) {
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={s.headerTitle}>{isFarmManager ? t('telemetry_title', 'Member Sync Monitor') : (isSRA ? 'SRA Terminal' : t('action_sync_hub', 'Sync Status'))}</Text>
-          <Text style={s.headerSub}>{isFarmManager ? `${session.farm || (session?.farm || session?.blockFarm || 'District Central')} Supervision` : (isSRA ? 'Administrative Authority' : 'Mobile Terminal Connection')}</Text>
+          <Text style={s.headerSub}>{isFarmManager ? `${managedFarm?.name || 'Unassigned'} Supervision` : (isSRA ? 'Administrative Authority' : 'Mobile Terminal Connection')}</Text>
         </View>
         <View style={{ width: 36 }} />
       </View>
@@ -426,7 +419,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <Ionicons name="shield-checkmark" size={28} color={COLORS.success} />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text, textAlign: 'center' }}>
-              {t('sync_status_synced', 'Terminal Connected to')} {session.farm || (session?.farm || session?.blockFarm || 'District Central')}
+              {t('sync_status_synced', 'Terminal Connected to')} {assignedFarm?.name || 'Unassigned'}
             </Text>
             <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4, lineHeight: 18 }}>
               {t('sync_toast_synced', 'Your offline operation logs and resource entries are automatically synchronized when online connectivity is detected.')}
@@ -435,11 +428,11 @@ export default function SyncMonitorScreen({ navigation }) {
             <View style={{ width: '100%', backgroundColor: '#F8FAF6', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#E2E8DC', marginVertical: 16, gap: 8 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('my_field', 'My Field')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{session.fieldId || (fields[0]?.id || '')} (1.5 Ha)</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{assignedField ? `${assignedField.id} (${Number(assignedField.ha || 0).toFixed(2)} Ha)` : 'No Plot Assigned'}</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_supervising_farm', 'Supervising Manager')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{session?.farmManager || session?.managerName || 'Farm Manager'} ({session.farm || session.blockFarm || 'Block Farm'})</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{assignedManager?.name || assignedManager?.displayName || 'Unassigned'} ({assignedFarm?.name || 'Unassigned'})</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('sync_info', 'Latest Sync')}:</Text>

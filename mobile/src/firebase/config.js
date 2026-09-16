@@ -5,7 +5,7 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeFirestore, getFirestore, setLogLevel } from 'firebase/firestore';
-import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import { initializeAuth, getAuth, getReactNativePersistence } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const mobileFirebaseConfig = {
@@ -43,8 +43,7 @@ try {
     persistence: getReactNativePersistence(AsyncStorage)
   });
 } catch (e) {
-  // If already initialized or in fallback context
-  auth = null;
+  auth = getAuth(app);
 }
 
 export { app, db, auth };

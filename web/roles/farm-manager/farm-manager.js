@@ -21,26 +21,33 @@ console.log('[HUGPONG] Initializing Farm Manager workspace...');
     const token = localStorage.getItem('hugpong_auth_token');
     const headers = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch('http://localhost:3000/auth/session', { headers, credentials: 'include' });
+    const res = await fetch('/auth/session', { headers, credentials: 'include' });
     const data = await res.json();
     if (data.authenticated && data.user) {
       user = data.user;
+      if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
+        await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
+      }
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(user, user.roleKey || 'manager');
+        saveWebAuthSession(user, user.roleKey || 'manager', data.token);
       } else {
         localStorage.setItem('hugpong_user', JSON.stringify(user));
         localStorage.setItem('hugpong_role', user.roleKey || 'manager');
       }
-    } else if (!user) {
+    } else {
       window.location.replace('../../login.html');
       return;
     }
   } catch (e) {
-    // Offline mode: verify local user profile exists
-    if (!user) {
+    const firebaseUser = window.hugpongFirebaseAuthReady
+      ? await window.hugpongFirebaseAuthReady
+      : window.firebaseAuth?.currentUser;
+    const token = localStorage.getItem('hugpong_auth_token');
+    if (!user || !token || !firebaseUser || firebaseUser.uid !== user.employeeId) {
       window.location.replace('../../login.html');
       return;
     }
+    console.warn('[HUGPONG] Express is unreachable; restoring the previously authenticated Firebase session offline.');
   }
 
   // Security Gate: Check for required phone verification on first login / deferred accounts
@@ -51,7 +58,7 @@ console.log('[HUGPONG] Initializing Farm Manager workspace...');
   }
 
   const roleLower = String(user?.roleKey || user?.role || currentRole || '').toLowerCase();
-  if (!roleLower.includes('manager') && !roleLower.includes('admin') && !roleLower.includes('super')) {
+  if (!roleLower.includes('manager')) {
     console.warn('[HUGPONG] Unauthorized access attempt to Farm Manager workspace.');
     alert('Access Restricted: You do not have Farm Manager permissions.');
     window.location.replace('../../login.html');

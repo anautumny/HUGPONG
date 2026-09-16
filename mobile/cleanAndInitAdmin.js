@@ -1,132 +1,52 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — Clean Firestore & Initialize Single Super Admin
-// Project: hugpong-ff
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
-const crypto = require('crypto');
-const { initializeApp } = require('./node_modules/firebase/app');
-const {
-  getFirestore,
-  collection,
-  getDocs,
-  doc,
-  writeBatch,
-  setDoc
-} = require('./node_modules/firebase/firestore');
+const { db } = require('../server/firebase-admin');
+const { hashPassword } = require('../server/security/password');
+const { COLLECTIONS } = require('../server/schema/firestoreSchema');
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyDYkv9afZa2ZlhxLzIEZfk2b5wP_s2XXpI',
-  authDomain: 'hugpong-ff.firebaseapp.com',
-  projectId: 'hugpong-ff'
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-const COLLECTIONS_TO_CLEAR = [
-  'fields',
-  'operation_logs',
-  'sra_prices',
-  'users',
-  'block_farms',
-  'support_tickets',
-  'audit_reports',
-  'audit_logs',
-  'sync_operations',
-  'terminal_diagnostics',
-  'system_history',
-  'assignment_requests',
-  'draft_logs'
-];
-
-function hashPassword(password) {
-  const SALT = 'hugpong_salt_2026:';
-  return crypto.createHash('sha256').update(SALT + password).digest('hex');
+function requiredEnvironment(name) {
+  const value = String(process.env[name] || '').trim();
+  if (!value) throw new Error(`${name} is required.`);
+  return value;
 }
 
-async function runCleanAndInit() {
-  console.log('════════════════════════════════════════════════════════════');
-  console.log('🧹 [1/2] PURGING ALL EXISTING CLOUD FIRESTORE COLLECTIONS...');
-  console.log('════════════════════════════════════════════════════════════');
+async function initializeAdmin() {
+  const userId = requiredEnvironment('HUGPONG_BOOTSTRAP_USER_ID');
+  const displayName = requiredEnvironment('HUGPONG_BOOTSTRAP_DISPLAY_NAME');
+  const phone = requiredEnvironment('HUGPONG_BOOTSTRAP_PHONE').replace(/\D/g, '');
+  const password = requiredEnvironment('HUGPONG_BOOTSTRAP_PASSWORD');
+  if (!/^01\d{6}$/.test(userId)) throw new Error('HUGPONG_BOOTSTRAP_USER_ID must be an eight-digit Super Admin ID beginning with 01.');
+  if (!/^09\d{9}$/.test(phone)) throw new Error('HUGPONG_BOOTSTRAP_PHONE must be an 11-digit Philippine mobile number.');
+  if (password.length < 12) throw new Error('HUGPONG_BOOTSTRAP_PASSWORD must contain at least 12 characters.');
 
-  for (const colName of COLLECTIONS_TO_CLEAR) {
-    try {
-      const snap = await getDocs(collection(db, colName));
-      if (!snap.empty) {
-        console.log(`  - Deleting ${snap.size} document(s) from collection: '${colName}'...`);
-        let batch = writeBatch(db);
-        let count = 0;
-        for (const docSnap of snap.docs) {
-          batch.delete(docSnap.ref);
-          count++;
-          if (count >= 400) {
-            await batch.commit();
-            batch = writeBatch(db);
-            count = 0;
-          }
-        }
-        if (count > 0) {
-          await batch.commit();
-        }
-      } else {
-        console.log(`  - Collection '${colName}' is already empty.`);
-      }
-    } catch (err) {
-      console.warn(`  - Note on '${colName}':`, err.message);
-    }
-  }
-
-  console.log('\n════════════════════════════════════════════════════════════');
-  console.log('👑 [2/2] INITIALIZING SINGLE SUPER ADMIN ACCOUNT...');
-  console.log('════════════════════════════════════════════════════════════');
-
-  const fullName = 'Matt Daniel Delotavo';
-  const mobile = '09451774699';
-  const employeeId = '01000001';
-  const password = 'Admin@HUGPONG';
-  const passwordHash = hashPassword(password);
-  const nowISO = new Date().toISOString();
-  const dateStr = nowISO.split('T')[0];
-
-  const adminPayload = {
-    employeeId: employeeId,
-    contact: mobile,
-    name: fullName,
-    role: 'Super Admin',
-    roleKey: 'super_admin',
-    blockFarmId: '',
-    blockFarm: '',
-    fieldId: '',
-    regDate: dateStr,
-    passwordHash: passwordHash,
-    password: password, // For compatibility
-    status: 'Active',
-    phoneVerified: true,
-    isPhoneVerified: true,
-    phoneVerifiedAt: nowISO,
-    createdAt: nowISO,
-    updatedAt: nowISO
+  const now = new Date().toISOString();
+  if (!db) throw new Error('Firebase Admin is not configured.');
+  const passwordHash = await hashPassword(password);
+  const user = {
+    displayName,
+    phone,
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    phoneVerifiedAt: now,
+    requiresPasswordChange: true,
+    passwordChangedAt: null,
+    approvedByUserId: null,
+    approvedAt: null,
+    createdAt: now,
+    updatedAt: now
   };
-
-  // Write single canonical document by permanent User ID (01000001)
-  // Mobile number (09451774699) is stored inside the document fields
-  await setDoc(doc(db, 'users', employeeId), adminPayload, { merge: true });
-  console.log(`  ✅ Registered Single Canonical Document: users/${employeeId} (${fullName})`);
-
-  console.log('\n✨ FIRESTORE CLEANUP & SUPER ADMIN INITIALIZATION COMPLETE!');
-  console.log('------------------------------------------------------------');
-  console.log(`👤 Name:         ${fullName}`);
-  console.log(`📱 Mobile:       ${mobile}`);
-  console.log(`🆔 User ID:      ${employeeId}`);
-  console.log(`🔑 Role:         Super Admin`);
-  console.log(`🔒 Password:     ${password}`);
-  console.log(`🛡️ Hash:         ${passwordHash}`);
-  console.log('------------------------------------------------------------\n');
-
-  process.exit(0);
+  const batch = db.batch();
+  batch.set(db.collection(COLLECTIONS.USERS).doc(userId), user);
+  batch.set(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), {
+    passwordHash,
+    createdAt: now,
+    updatedAt: now
+  });
+  await batch.commit();
+  console.info(`[HUGPONG] Super Admin profile and server-only credentials created for ${userId}.`);
 }
 
-runCleanAndInit().catch(err => {
-  console.error('❌ Error during cleanup/init:', err);
-  process.exit(1);
+initializeAdmin().catch(error => {
+  console.error(`[HUGPONG] Bootstrap failed: ${error.message}`);
+  process.exitCode = 1;
 });

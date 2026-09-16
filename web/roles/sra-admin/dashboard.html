@@ -1998,7 +1998,7 @@
 
           <div class="flex items-center gap-2">
             <span class="text-xs font-bold text-hug-muted">Clearance:</span>
-            <span class="text-xs font-black text-primary bg-primary-bg px-3 py-1 rounded-full" id="settings-page-role-badge">SRA (Admin)</span>
+            <span class="text-xs font-black text-primary bg-primary-bg px-3 py-1 rounded-full" id="settings-page-role-badge">SRA Admin</span>
           </div>
         </div>
 
@@ -2175,7 +2175,7 @@
               </div>
               <div class="flex justify-between items-center pb-2 border-b border-border">
                 <span class="text-hug-muted">Active Clearance</span>
-                <span class="font-bold text-primary" id="settings-diag-role">SRA (Admin)</span>
+                <span class="font-bold text-primary" id="settings-diag-role">SRA Admin</span>
               </div>
               <div class="flex justify-between items-center pb-2 border-b border-border">
                 <span class="text-hug-muted">Assigned Regulatory Hub</span>
@@ -3394,9 +3394,9 @@
         <div>
           <label class="block text-xs font-semibold text-hug-text2 mb-1">Core Role <span class="text-danger">*</span></label>
           <select id="edit-user-role" onchange="handleEditUserRoleChange()" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
-            <option value="Member">Member</option>
+            <option value="Member Farmer">Member Farmer</option>
             <option value="Farm Manager">Farm Manager</option>
-            <option value="SRA (Admin)">SRA (Admin)</option>
+            <option value="SRA Admin">SRA Admin</option>
           </select>
         </div>
         <div id="edit-user-blockfarm-wrap">
@@ -3520,8 +3520,8 @@
           <label class="block text-xs font-semibold text-hug-text2 mb-1">Assigned Role <span class="text-danger">*</span></label>
           <select id="create-user-role" onchange="handleCreateUserRoleChange()" class="w-full text-xs font-semibold px-3 py-2 border border-border rounded-xl bg-white focus:border-primary outline-none">
             <option value="Farm Manager">Farm Manager</option>
-            <option value="Member">Member</option>
-            <option value="SRA (Admin)">SRA (Admin)</option>
+            <option value="Member Farmer">Member Farmer</option>
+            <option value="SRA Admin">SRA Admin</option>
           </select>
         </div>
         <div id="create-user-blockfarm-wrap">
@@ -3547,7 +3547,7 @@
 
       <div>
         <label class="block text-xs font-semibold text-hug-text2 mb-1">Initial Temporary Password</label>
-        <input type="text" id="create-user-password" value="hugpong2026" class="w-full text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-bg text-hug-text2 outline-none" />
+        <input type="password" id="create-user-password" autocomplete="new-password" placeholder="Set a temporary password" class="w-full text-xs font-mono font-semibold px-3 py-2 border border-border rounded-xl bg-bg text-hug-text2 outline-none" />
       </div>
     </div>
 
@@ -4214,6 +4214,7 @@
 <script src="../../shared/firebase-config.js?v=2.2"></script>
 <script type="module" src="../../shared/firebase-init.js?v=2.2"></script>
 <script src="../../shared/webDataStore.js?v=2.2"></script>
+<script src="../../shared/firestore-schema.js?v=3.0"></script>
 <script src="../../shared/core.js?v=2.2"></script>
 <script src="./sra-admin.js?v=2.2"></script>
 <!-- FOCUSED OPERATION EDIT MODAL (ALIGNED WITH MOBILE) -->

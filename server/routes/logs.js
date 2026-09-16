@@ -1,143 +1,152 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — Operation Logs & Certification API
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
 const express = require('express');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
+const {
+  COLLECTIONS,
+  ROLES,
+  canonicalRole,
+  buildOperationLog,
+  createOperationLogId,
+  nowIso
+} = require('../schema/firestoreSchema');
 
-// ── GET /api/logs ────────────────────────────────────────────
-router.get('/', async (req, res) => {
-  try {
-    let logs = [];
-    if (db) {
-      const snap = await db.collection('operation_logs').get();
-      if (!snap.empty) {
-        snap.forEach(docSnap => logs.push({ id: docSnap.id, ...docSnap.data() }));
-      }
+async function getActorScope(user) {
+  const userId = String(user.employeeId || user.userId || '').trim();
+  const role = canonicalRole(user.role || user.roleKey);
+  if (role === ROLES.SRA_ADMIN || role === ROLES.SUPER_ADMIN) return { role, userId, all: true };
+
+  if (role === ROLES.FARM_MANAGER) {
+    const farmSnapshot = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', userId).get();
+    const farmIds = farmSnapshot.docs.map(doc => doc.id);
+    if (!farmIds.length) return { role, userId, fieldIds: [] };
+    const fieldSnapshot = await db.collection(COLLECTIONS.FIELDS).get();
+    return {
+      role,
+      userId,
+      fieldIds: fieldSnapshot.docs.filter(doc => farmIds.includes(doc.data().blockFarmId)).map(doc => doc.id)
+    };
+  }
+
+  const fieldSnapshot = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).get();
+  return { role, userId, fieldIds: fieldSnapshot.docs.map(doc => doc.id) };
+}
+
+async function assertCanRecord(fieldId, cycleId, user) {
+  if (!db) throw new Error('Database is unavailable.');
+  const [fieldDoc, cycleDoc] = await Promise.all([
+    db.collection(COLLECTIONS.FIELDS).doc(fieldId).get(),
+    db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId).get()
+  ]);
+  if (!fieldDoc.exists) throw new Error('The referenced field does not exist.');
+  if (!cycleDoc.exists) throw new Error('The referenced crop cycle does not exist.');
+
+  const field = fieldDoc.data();
+  const cycle = cycleDoc.data();
+  if (field.status !== 'ACTIVE') throw new Error('Operations can only be recorded for an ACTIVE field.');
+  if (field.currentCycleId !== cycleId || cycle.fieldId !== fieldId || cycle.status !== 'ACTIVE') {
+    throw new Error('cycleId must be the field\'s explicit ACTIVE crop cycle.');
+  }
+
+  const actorId = String(user.employeeId || user.userId || '').trim();
+  const actorRole = canonicalRole(user.role || user.roleKey);
+  if (actorRole === ROLES.MEMBER_FARMER && field.memberUserId !== actorId) {
+    throw new Error('Member Farmers may record only for an assigned field.');
+  }
+  if (actorRole === ROLES.FARM_MANAGER) {
+    const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId).get();
+    if (!farm.exists || farm.data().managerUserId !== actorId) {
+      throw new Error('Farm Managers may record only within their assigned block farm.');
     }
-    return res.json({ success: true, count: logs.length, data: logs });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+  }
+  return { field, cycle, actorId, actorRole };
+}
+
+router.get('/', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const scope = await getActorScope(req.session.user);
+    const snapshot = await db.collection(COLLECTIONS.OPERATION_LOGS).get();
+    const data = snapshot.docs
+      .filter(doc => scope.all || scope.fieldIds.includes(doc.data().fieldId))
+      .map(doc => ({ id: doc.id, ...doc.data() }));
+    return res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ── POST /api/logs (Create/Submit Operation Log) ───────────
-router.post('/', async (req, res) => {
-  const logData = req.body;
-  if (!logData || !logData.fieldId) {
-    return res.status(400).json({ success: false, error: 'Field ID and log details are required.' });
-  }
-
-  const cleanFieldId = String(logData.fieldId).trim().toUpperCase();
-  const logId = logData.id || `LOG-${cleanFieldId.replace(/[^A-Z0-9]/g, '')}-${Date.now().toString(36).toUpperCase()}`;
-  const totalCostVal = Number(logData.totalCost !== undefined ? logData.totalCost : (logData.cost !== undefined ? logData.cost : 0));
-  
-  const logPayload = {
-    ...logData,
-    id: logId,
-    fieldId: cleanFieldId,
-    cost: totalCostVal,
-    totalCost: totalCostVal,
-    hectares: logData.hectares !== undefined ? Number(logData.hectares) : 1.5,
-    people: String(logData.people || '2'),
-    activity: String(logData.activity || logData.operationName || 'Operation Log').trim(),
-    operationName: String(logData.operationName || logData.activity || 'Operation Log').trim(),
-    sraOperationId: logData.sraOperationId || 'CUSTOM',
-    category: logData.category || 'prep',
-    isCustom: Boolean(logData.isCustom || String(logData.sraOperationId || '').includes('COP') || logData.sraOperationId === 'CUSTOM'),
-    isGroup: Boolean(logData.isGroup),
-    subItems: Array.isArray(logData.subItems) ? logData.subItems : [],
-    loggedById: logData.loggedById || (req.session?.user ? req.session.user.employeeId : ''),
-    status: logData.status || 'Recorded',
-    synced: true,
-    syncedAt: new Date().toISOString(),
-    createdAt: logData.createdAt || new Date().toISOString()
-  };
-
+router.post('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
   try {
-    if (db) {
-      await db.collection('operation_logs').doc(logId).set(logPayload, { merge: true });
-    }
-    console.log(`[HUGPONG Logs] Log Recorded in Database: ${logId} (${logPayload.activity}) for Field ${cleanFieldId}`);
-    return res.json({ success: true, data: logPayload });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    const fieldId = String(req.body.fieldId || '').trim().toUpperCase();
+    const cycleId = String(req.body.cycleId || '').trim().toUpperCase();
+    const access = await assertCanRecord(fieldId, cycleId, req.session.user);
+    const logId = req.body.id || createOperationLogId(fieldId);
+    const now = nowIso();
+    const payload = buildOperationLog({
+      ...req.body,
+      fieldId,
+      cycleId,
+      status: 'ACTIVE',
+      archivedAt: null,
+      archivedByUserId: null,
+      createdAt: req.body.createdAt || now,
+      updatedAt: now,
+      submissionSource: access.actorRole === ROLES.FARM_MANAGER ? 'MANAGER_TAKEOVER' : 'MEMBER'
+    }, { submittedByUserId: access.actorId, now });
+
+    await db.collection(COLLECTIONS.OPERATION_LOGS).doc(logId).create(payload);
+    return res.status(201).json({ success: true, data: { id: logId, ...payload } });
+  } catch (error) {
+    const status = /already exists/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ success: false, error: error.message });
   }
 });
 
-// ── POST /api/logs/certify (Managers & SRA Admins) ───────────
-router.post('/certify', requireAuth, requireRole(['farm manager', 'sra (admin)', 'super admin']), async (req, res) => {
-  const { logId, status, notes } = req.body;
-
-  if (!logId) {
-    return res.status(400).json({ success: false, error: 'Log ID is required.' });
-  }
-
-  const certificationPayload = {
-    status: status || 'Certified',
-    certifiedBy: req.session.user ? req.session.user.name : 'Authorized Officer',
-    certifiedAt: new Date().toISOString(),
-    notes: notes || 'Verified and approved in operations review'
-  };
-
+router.patch('/:id', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
   try {
-    if (db) {
-      await db.collection('operation_logs').doc(logId).set(certificationPayload, { merge: true });
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const ref = db.collection(COLLECTIONS.OPERATION_LOGS).doc(req.params.id);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Operation log not found.' });
+    const existing = snapshot.data();
+    if (existing.status !== 'ACTIVE') {
+      return res.status(409).json({ success: false, error: 'ARCHIVED operation logs cannot be amended.' });
     }
-    console.log(`[HUGPONG Logs] Log Certified: ${logId} as ${certificationPayload.status}`);
-    return res.json({ success: true, data: certificationPayload });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── DELETE /api/logs/:id (Delete/Void Operation Log) ───────
-router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-  if (!id) {
-    return res.status(400).json({ success: false, error: 'Log ID is required.' });
-  }
-
-  try {
-    if (db) {
-      await db.collection('operation_logs').doc(id).delete();
+    const access = await assertCanRecord(existing.fieldId, existing.cycleId, req.session.user);
+    const now = nowIso();
+    const amendment = req.body.amendment;
+    if (!amendment || !String(amendment.reason || '').trim()) {
+      return res.status(400).json({ success: false, error: 'An amendment reason is required.' });
     }
-    console.log(`[HUGPONG Logs] Log Deleted from Database: ${id}`);
-    return res.json({ success: true, message: `Log ${id} deleted successfully.`, id });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── DELETE /api/logs/past/purge (Purge Past Cycles) ─────────
-router.post('/purge-past', async (req, res) => {
-  const { fieldId } = req.body || {};
-  try {
-    if (db) {
-      const snap = await db.collection('operation_logs').get();
-      const batch = db.batch();
-      let count = 0;
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-        const matchesField = !fieldId || fieldId === 'ALL' || (data.fieldId || '').trim().toUpperCase() === fieldId.trim().toUpperCase();
-        const isPast = data.isPastCycle === true || data.isArchived === true || data.status === 'Archived' || docSnap.id.startsWith('PAST-');
-        if (matchesField && isPast) {
-          batch.delete(docSnap.ref);
-          count++;
+    const merged = {
+      ...existing,
+      ...req.body.changes,
+      status: 'ACTIVE',
+      fieldId: existing.fieldId,
+      cycleId: existing.cycleId,
+      submittedByUserId: existing.submittedByUserId,
+      createdAt: existing.createdAt,
+      updatedAt: now,
+      amendments: [
+        ...(existing.amendments || []),
+        {
+          amendmentId: amendment.amendmentId || `AMD-${Date.now().toString(36).toUpperCase()}`,
+          amendedByUserId: access.actorId,
+          reason: amendment.reason,
+          amendedAt: now,
+          changes: amendment.changes || {}
         }
-      });
-      if (count > 0) {
-        await batch.commit();
-      }
-      console.log(`[HUGPONG Logs] Purged ${count} past cycle logs from Database.`);
-      return res.json({ success: true, count, message: `Successfully purged ${count} past cycle logs.` });
-    }
-    return res.json({ success: true, count: 0 });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+      ]
+    };
+    const payload = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now });
+    await ref.set(payload);
+    return res.json({ success: true, data: { id: snapshot.id, ...payload } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 

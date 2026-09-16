@@ -1,13 +1,54 @@
 import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, processOutbox, getOutboxCount, clearOutbox, flushOutboxToFirestore, generateUserNumericId, generateTicketId } from '../services/syncEngine';
-import { hashPassword, verifyPassword, DEFAULT_SEED_PASSWORD_HASH, DEFAULT_MASTER_PASSWORD_HASH } from '../services/cryptoService';
 import { publishTerminalTelemetry } from '../services/telemetryService';
-import { db } from '../firebase/config';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase/config';
+import { collection, onSnapshot, doc, setDoc, getDoc, writeBatch, query, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+  loginWithServer,
+  refreshServerSession,
+  verifyPasswordWithServer,
+  changePasswordWithServer,
+  changePhoneWithServer,
+  registerWithServer,
+  requestPhoneVerificationWithServer,
+  verifyPhoneWithServer,
+  logoutFromServer,
+  authenticatedRequest
+} from '../services/authService';
+import {
+  COLLECTIONS,
+  ROLES,
+  canonicalRole,
+  createCycleId,
+  fromAuditReportDocument,
+  fromBlockFarmDocument,
+  fromCycleDocument,
+  fromFieldDocument,
+  fromOperationLogDocument,
+  fromPriceDocument,
+  fromSupportTicketDocument,
+  fromUserDocument,
+  toCycleDocument,
+  toAuditReportDocument,
+  toFieldDocument,
+  toOperationLogDocument,
+  toPriceDocument,
+  toSupportTicketDocument
+} from './firestoreSchema';
 
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 
-export { hashPassword, verifyPassword, DEFAULT_SEED_PASSWORD_HASH, DEFAULT_MASTER_PASSWORD_HASH, publishTerminalTelemetry, getNetworkStatus, subscribeToNetwork, checkConnectivity };
+export { publishTerminalTelemetry, getNetworkStatus, subscribeToNetwork, checkConnectivity };
+
+const stripCredentialFields = (value = {}) => {
+  const safe = {};
+  Object.entries(value || {}).forEach(([key, fieldValue]) => {
+    if (/password|credential|salt|reset.*token/i.test(key)) return;
+    safe[key] = fieldValue;
+  });
+  return safe;
+};
 
 // ══════════════════════════════════════════════════════════════
 // HUGPONG — Canonical Database Entities & Offline Working Store
@@ -73,7 +114,7 @@ export function cleanupDuplicateLogs(logs) {
       const existing = byId.get(logId);
       const timeExisting = new Date(existing.updatedAt || existing.createdAt || existing.date || 0).getTime();
       const timeCurrent = new Date(l.updatedAt || l.createdAt || l.date || 0).getTime();
-      if (timeCurrent >= timeExisting || l.isAmended || l.isTakeover) {
+      if (timeCurrent >= timeExisting) {
         byId.set(logId, l);
       }
     }
@@ -98,13 +139,13 @@ export const priceHistory = [];
 
 export const blockFarms = [];
 
-export const users = [];
+export const cropCycles = [];
 
-export const SEED_FIELDS = [];
+export const users = [];
 
 export const archivedFields = [];
 
-export const mergeFieldsWithSeeds = (incomingFields = [], customArchivedIds = []) => {
+export const mergeActiveFields = (incomingFields = [], customArchivedIds = []) => {
   const archivedSet = new Set([
     ...archivedFields.map(f => (typeof f === 'string' ? f : f.id).toUpperCase()),
     ...(Array.isArray(customArchivedIds) ? customArchivedIds.map(id => (typeof id === 'string' ? id : id.id).toUpperCase()) : [])
@@ -114,19 +155,17 @@ export const mergeFieldsWithSeeds = (incomingFields = [], customArchivedIds = []
   (incomingFields || []).forEach(f => {
     if (!f || !f.id) return;
     const fIdUpper = f.id.toUpperCase();
-    if (archivedSet.has(fIdUpper) || f.isArchived === true || f.status === 'Archived') {
+    if (archivedSet.has(fIdUpper) || f.status === 'ARCHIVED') {
       archivedSet.add(fIdUpper);
       if (!archivedFields.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === fIdUpper)) {
-        archivedFields.push({ ...f, isArchived: true, status: 'Archived' });
+        archivedFields.push({ ...f, status: 'ARCHIVED' });
       }
       return;
     }
     if (!merged.some(m => m.id.toUpperCase() === fIdUpper)) {
       merged.push({
         ...f,
-        ha: Number(f.ha) || 1.0,
-        member: f.member || f.memberName || 'Member Farmer',
-        memberName: f.memberName || f.member || 'Member Farmer',
+        ha: Number(f.ha ?? f.areaHa ?? 0),
         lastSync: f.lastSync || 'Just now',
         synced: f.synced !== undefined ? f.synced : true
       });
@@ -138,11 +177,7 @@ export const mergeFieldsWithSeeds = (incomingFields = [], customArchivedIds = []
 
 export const fields = [];
 
-const RAW_SEED_LOGS = [];
-
 export const operationLogs = [];
-
-export const deletedLogIds = new Set();
 
 export const draftLogs = [];
 
@@ -160,9 +195,9 @@ export const requestFieldAssignment = (fieldId, memberName, ha, memberId = null)
   const newReq = {
     id: 'REQ-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
     fieldId: String(fieldId || '').trim().toUpperCase(),
-    member: memberName || curSession.name || 'Member',
-    memberId: memberId || curSession.employeeId || curSession.id || '',
-    ha: String(ha || '1.0'),
+    member: memberName || curSession.name || 'Unassigned',
+    memberUserId: memberId || curSession.employeeId || curSession.id || '',
+    ha: ha == null ? '' : String(ha),
     status: 'Pending',
     timestamp: new Date().toISOString(),
     date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -178,26 +213,15 @@ export const resolveAssignmentRequest = (requestId, approved = true) => {
     req.status = approved ? 'Approved' : 'Rejected';
     if (approved) {
       const f = fields.find(item => item.id === req.fieldId);
-      if (f) {
-        f.member = req.member;
-        f.memberName = req.member;
-        f.owner = req.member;
-        if (req.memberId) f.memberId = req.memberId;
-        if (req.ha) f.ha = parseFloat(req.ha);
-      } else {
-        fields.push({
-          id: req.fieldId,
-          name: `Field ${req.fieldId}`,
-          ha: parseFloat(req.ha) || 1.0,
-          cropCycle: 'CY 2026-2027',
-          stage: 'Pre-Planting',
-          member: req.member,
-          memberName: req.member,
-          owner: req.member,
-          memberId: req.memberId || '',
-          targetTons: (parseFloat(req.ha) || 1.0) * 65
-        });
+      const member = users.find(user => (user.id || user.employeeId) === req.memberUserId);
+      if (!f || !member || canonicalRole(member.role) !== 'MEMBER_FARMER') {
+        req.status = 'Rejected';
+        req.error = 'Assignment requires an existing field and Member Farmer.';
+        notifyDataUpdate();
+        return req;
       }
+      f.memberUserId = req.memberUserId;
+      if (req.ha) f.ha = parseFloat(req.ha);
     }
     notifyDataUpdate();
   }
@@ -213,99 +237,79 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   if (idx === -1) return { success: false, message: 'Applicant not found in pending list.' };
 
   const applicant = pendingUsers[idx];
-  pendingUsers.splice(idx, 1);
+  const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
+  if (!assignedFarm) return { success: false, message: 'Select an existing block farm before approving this registration.' };
 
   // Determine plot ID & Hectares
-  const assignedPlotId = options.fieldId || applicant.fieldId || generateNextFieldId(applicant.blockFarm || (blockFarms[0]?.name || ''), fields, blockFarms);
-  const rawHa = options.area || applicant.area || '1.5';
-  const assignedHa = parseFloat(String(rawHa).replace(/[^0-9.]/g, '')) || 1.5;
+  const assignedPlotId = options.fieldId || applicant.fieldId || generateNextFieldId(assignedFarm.name, fields, blockFarms);
+  const rawHa = options.area || applicant.area;
+  const assignedHa = parseFloat(String(rawHa || '').replace(/[^0-9.]/g, ''));
+  if (!Number.isFinite(assignedHa) || assignedHa <= 0) {
+    return { success: false, message: 'A valid field area is required before approving this registration.' };
+  }
   const empId = applicant.employeeId || ('04' + cleanContact.slice(-6).padStart(6, '0'));
 
   // Update or create active user account
   const existingUser = users.find(u => (u.contact || '').replace(/\D/g, '') === cleanContact || u.employeeId === empId);
+  const existingUserSnapshot = existingUser ? { ...existingUser } : null;
+  let createdUser = null;
   if (existingUser) {
-    existingUser.fieldId = assignedPlotId;
     existingUser.status = 'Active';
     existingUser.phoneVerified = true;
     existingUser.isPhoneVerified = true;
     existingUser.pendingFirstLoginVerification = false;
     existingUser.phoneVerifiedAt = existingUser.phoneVerifiedAt || new Date().toISOString();
-    existingUser.blockFarm = applicant.blockFarm || (blockFarms[0]?.name || 'Block Farm');
     existingUser.updatedAt = new Date().toISOString();
   } else {
-    users.push({
+    createdUser = {
       employeeId: empId,
       name: applicant.name,
       contact: cleanContact,
-      role: applicant.role || 'Member',
+      role: applicant.role || 'Member Farmer',
       roleKey: 'member',
-      blockFarmId: '',
-      blockFarm: applicant.blockFarm || (blockFarms[0]?.name || 'Block Farm'),
-      fieldId: assignedPlotId,
       status: 'Active',
       phoneVerified: true,
       isPhoneVerified: true,
       pendingFirstLoginVerification: false,
       phoneVerifiedAt: new Date().toISOString(),
       regDate: applicant.regDate || new Date().toISOString().split('T')[0],
-      passwordHash: hashPassword('hugpong2026'),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    });
+    };
+    users.push(createdUser);
   }
 
-  // Allocate field in fields registry
+  // Allocate through the canonical field writer so a new field and its first
+  // crop cycle are persisted together with a stable currentCycleId.
   const existingField = fields.find(f => f.id === assignedPlotId);
-  if (existingField) {
-    existingField.member = applicant.name;
-    existingField.memberName = applicant.name;
-    existingField.userId = empId;
-    existingField.memberId = empId;
-    existingField.memberContact = cleanContact;
-    existingField.ha = assignedHa;
-  } else {
-    fields.push({
-      id: assignedPlotId,
-      name: `Field ${assignedPlotId}`,
-      member: applicant.name,
-      memberName: applicant.name,
-      userId: empId,
-      memberId: empId,
-      memberContact: cleanContact,
-      ha: assignedHa,
-      stage: 'Pre-Planting & Land Preparation',
-      stageNumber: 1,
-      month: 0,
-      synced: false,
-      lastSync: 'Just now',
-      blockFarm: applicant.blockFarm || (blockFarms[0]?.name || 'Block Farm'),
-      blockFarmId: (blockFarms[0]?.id || ''),
-      variety: 'VMC 84-524',
-      soilType: 'Clay Loam'
-    });
+  const fieldResult = await saveFieldPlot({
+    ...(existingField || {}),
+    id: assignedPlotId,
+    blockFarmId: assignedFarm.id,
+    memberUserId: empId,
+    ha: assignedHa,
+    status: existingField?.status || 'ACTIVE'
+  }, !existingField);
+  if (!fieldResult.success) {
+    if (createdUser) users.splice(users.indexOf(createdUser), 1);
+    if (existingUser && existingUserSnapshot) Object.assign(existingUser, existingUserSnapshot);
+    return fieldResult;
   }
 
-  // Persist to storage
+  try {
+    const approved = await authenticatedRequest('/api/users/approve', {
+      method: 'POST',
+      body: { id: empId, role: 'MEMBER_FARMER' }
+    });
+    const activeUser = users.find(user => user.employeeId === empId);
+    if (activeUser && approved.data) Object.assign(activeUser, fromUserDocument(empId, approved.data));
+  } catch (error) {
+    return { success: false, message: error.message || 'Server approval failed.' };
+  }
+
+  pendingUsers.splice(idx, 1);
   await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
   await saveItem(STORAGE_KEYS.USERS, users);
-  await saveItem(STORAGE_KEYS.FIELDS, fields);
-
-  // Sync to Firestore if online
-  if (db) {
-    try {
-      await setDoc(doc(db, 'users', empId), {
-        employeeId: empId,
-        name: applicant.name,
-        contact: cleanContact,
-        role: applicant.role || 'Member',
-        roleKey: 'member',
-        blockFarm: applicant.blockFarm || (blockFarms[0]?.name || 'Block Farm'),
-        fieldId: assignedPlotId,
-        status: 'Active',
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (e) {}
-  }
 
   notifyDataUpdate();
   return { success: true, applicant, fieldId: assignedPlotId };
@@ -440,7 +444,7 @@ export const validateFieldPlotData = (fieldData, isNew = false) => {
   }
 
   // 3. Member / User Validation (Must exist in database)
-  const rawMemberId = fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
+  const rawMemberId = fieldData.memberUserId || fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
   const isUnassigned = !rawMemberId || String(rawMemberId).trim().toLowerCase() === 'unassigned';
   
   if (!isUnassigned) {
@@ -451,6 +455,9 @@ export const validateFieldPlotData = (fieldData, isNew = false) => {
         error: 'MEMBER_NOT_FOUND', 
         message: `Member ID or Contact "${rawMemberId}" is not registered in the system. Please enter an existing Member ID (e.g., 04000001) or registered mobile number.` 
       };
+    }
+    if (canonicalRole(matchedUser.role) !== 'MEMBER_FARMER') {
+      return { valid: false, error: 'INVALID_MEMBER_ROLE', message: 'The assigned user must have the Member Farmer role.' };
     }
   }
 
@@ -471,43 +478,53 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   const existingIdx = fields.findIndex(f => f.id.toUpperCase() === targetId);
   const nowIso = new Date().toISOString();
   
-  const seed = SEED_FIELDS.find(s => s.id.toUpperCase() === targetId) || {};
   const currentF = existingIdx >= 0 ? fields[existingIdx] : {};
+  const resolvedBlockFarmId = String(fieldData.blockFarmId || currentF.blockFarmId || '').trim().toUpperCase();
+  if (!resolvedBlockFarmId || !blockFarms.some(farm => farm.id === resolvedBlockFarmId)) {
+    return { success: false, error: 'BLOCK_FARM_NOT_FOUND', message: 'Select an existing block farm before saving the field.' };
+  }
+  const resolvedCurrentCycleId = String(fieldData.currentCycleId || currentF.currentCycleId || (isNew ? createCycleId(targetId, 1) : '')).trim().toUpperCase();
+  if (!resolvedCurrentCycleId) {
+    return { success: false, error: 'CURRENT_CYCLE_REQUIRED', message: 'The field must reference an existing current crop cycle.' };
+  }
 
   // Resolve verified user if assigned
-  const rawMemberId = fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
+  const rawMemberId = fieldData.memberUserId || fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
   const isUnassigned = !rawMemberId || String(rawMemberId).trim().toLowerCase() === 'unassigned';
   const matchedUser = !isUnassigned ? findUserByIdOrContact(rawMemberId) : null;
 
-  const resolvedMemberName = matchedUser ? matchedUser.name : (isUnassigned ? 'Unassigned' : (currentF.memberName || seed.memberName || 'Unassigned'));
-  const resolvedMemberId = matchedUser ? (matchedUser.employeeId || matchedUser.id || matchedUser.contact) : (isUnassigned ? '' : (currentF.memberId || seed.memberId || ''));
-  const resolvedMemberContact = matchedUser ? (matchedUser.contact || matchedUser.mobile || '') : (isUnassigned ? '' : (currentF.memberContact || seed.memberContact || ''));
+  const resolvedMemberName = matchedUser ? matchedUser.name : 'Unassigned';
+  const resolvedMemberId = matchedUser ? (matchedUser.employeeId || matchedUser.id) : '';
+  const resolvedMemberContact = matchedUser ? (matchedUser.contact || matchedUser.mobile || '') : '';
 
   const formattedField = {
     id: targetId,
-    blockFarmId: fieldData.blockFarmId || currentF.blockFarmId || seed.blockFarmId || '',
-    blockFarm: fieldData.blockFarm || currentF.blockFarm || (blockFarms[0]?.name || 'Block Farm'),
+    blockFarmId: resolvedBlockFarmId,
+    blockFarm: blockFarms.find(farm => farm.id === resolvedBlockFarmId)?.name || 'Unassigned',
+    memberUserId: resolvedMemberId || null,
     memberId: resolvedMemberId,
     userId: resolvedMemberId,
     memberName: resolvedMemberName,
     member: resolvedMemberName,
     memberContact: resolvedMemberContact,
     ha: validation.parsedHa,
-    stage: fieldData.stage || currentF.stage || seed.stage || 'Pre-Planting & Land Preparation',
-    stageNumber: fieldData.stageNumber || currentF.stageNumber || seed.stageNumber || 1,
+    stage: fieldData.stage || currentF.stage || 'Pre-Planting & Land Preparation',
+    stageNumber: fieldData.stageNumber || currentF.stageNumber || 1,
     isCompleted: fieldData.isCompleted !== undefined ? fieldData.isCompleted : (currentF.isCompleted !== undefined ? currentF.isCompleted : false),
-    customStages: fieldData.customStages || currentF.customStages || seed.customStages || [],
+    customStages: fieldData.customStages || currentF.customStages || [],
     customOperations: fieldData.customOperations || currentF.customOperations || {},
-    cycleType: fieldData.cycleType || currentF.cycleType || seed.cycleType || 'Plant Cane (New Plant)',
-    cropYear: fieldData.cropYear || currentF.cropYear || seed.cropYear || 'CY 2025–2026',
-    month: fieldData.month !== undefined ? fieldData.month : (currentF.month !== undefined ? currentF.month : (seed.month !== undefined ? seed.month : 0)),
-    batchMonth: fieldData.batchMonth || currentF.batchMonth || seed.batchMonth || 1,
+    cycleType: fieldData.cycleType || currentF.cycleType || 'Plant Cane (New Plant)',
+    cropYear: fieldData.cropYear || currentF.cropYear || '',
+    month: fieldData.month !== undefined ? fieldData.month : (currentF.month !== undefined ? currentF.month : 0),
+    batchMonth: fieldData.batchMonth || currentF.batchMonth || 1,
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
-    lastSync: fieldData.lastSync || currentF.lastSync || seed.lastSync || 'Just now',
-    variety: fieldData.variety || currentF.variety || seed.variety || 'VMC 84-524',
-    soilType: fieldData.soilType || currentF.soilType || seed.soilType || 'Clay Loam',
+    lastSync: fieldData.lastSync || currentF.lastSync || 'Just now',
+    variety: fieldData.variety || currentF.variety || '',
+    soilType: fieldData.soilType || currentF.soilType || '',
     createdAt: fieldData.createdAt || currentF.createdAt || nowIso,
-    updatedAt: nowIso
+    updatedAt: nowIso,
+    currentCycleId: resolvedCurrentCycleId,
+    status: String(fieldData.status || currentF.status || 'ACTIVE').toUpperCase()
   };
 
   if (existingIdx >= 0) {
@@ -516,28 +533,22 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
     fields.push(formattedField);
   }
 
-  // Update matching user profile fieldId in users array
-  if (matchedUser) {
-    matchedUser.fieldId = formattedField.id;
-    matchedUser.blockFarm = formattedField.blockFarm;
-    matchedUser.blockFarmId = formattedField.blockFarmId;
-  }
-
   // Persist to offline AsyncStorage
   await saveItem(STORAGE_KEYS.FIELDS, fields);
-  await saveItem(STORAGE_KEYS.USERS, users);
 
   // Sync to Cloud Firestore if online
   if (db) {
     try {
-      await setDoc(doc(db, 'fields', formattedField.id), formattedField, { merge: true });
-      if (matchedUser && matchedUser.employeeId) {
-        await setDoc(doc(db, 'users', matchedUser.employeeId), {
-          fieldId: formattedField.id,
-          blockFarm: formattedField.blockFarm,
-          blockFarmId: formattedField.blockFarmId,
-          updatedAt: nowIso
-        }, { merge: true });
+      const canonicalField = toFieldDocument(formattedField);
+      if (isNew) {
+        const canonicalCycle = toCycleDocument(formattedField);
+        const batch = writeBatch(db);
+        batch.set(doc(db, COLLECTIONS.FIELDS, formattedField.id), canonicalField);
+        batch.set(doc(db, COLLECTIONS.CROP_CYCLES, formattedField.currentCycleId), canonicalCycle);
+        await batch.commit();
+        cropCycles.push(fromCycleDocument(formattedField.currentCycleId, canonicalCycle));
+      } else {
+        await setDoc(doc(db, COLLECTIONS.FIELDS, formattedField.id), canonicalField, { merge: true });
       }
     } catch (e) {
       console.warn('[dataStore] saveFieldPlot Firestore sync fallback to offline:', e);
@@ -548,15 +559,8 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   return { success: true, field: formattedField };
 };
 
-// Backward-compatible architectural aliases
-export const MOCK_BLOCK_FARMS = blockFarms;
-export const MOCK_FIELDS = fields;
 export const fieldsStore = fields;
-export const MOCK_LOGS = operationLogs;
 export const DRAFT_LOGS = draftLogs;
-export const MOCK_TICKETS = supportTickets;
-export const MOCK_AUDIT_HISTORY = auditLogs;
-export const MOCK_ASSIGNMENT_REQUESTS = assignmentRequests;
 export const SRA_PRICE_HISTORY = priceHistory;
 
 export {
@@ -606,42 +610,26 @@ export const isValidUserIdentifier = (inputStr, requireExisting = true) => {
 
 export const resolveFieldMember = (field) => {
   if (!field) return 'Unassigned';
-  if (field.member && typeof field.member === 'string' && field.member.length > 0 && !field.member.startsWith('09') && !field.member.startsWith('04')) return field.member;
-  const u = findUserByIdOrContact(field.memberId || field.userId || field.memberContact || field.member);
-  return u ? u.name : (field.member || 'Member Farmer');
+  const u = users.find(user => (user.id || user.employeeId) === field.memberUserId);
+  return u ? u.name : 'Unassigned';
 };
 
 export const resolveFieldMemberId = (field) => {
   if (!field) return '';
-  if (field.memberId && typeof field.memberId === 'string' && field.memberId.trim().length > 0 && field.memberId !== '04XXXXXX') {
-    return field.memberId.trim();
-  }
-  if (field.userId && typeof field.userId === 'string' && field.userId.trim().length > 0) {
-    return field.userId.trim();
-  }
-  const u = findUserByIdOrContact(field.memberId || field.userId || field.memberContact || field.member || field.memberName);
-  return u ? (u.employeeId || u.contact || '') : '';
+  return String(field.memberUserId || '').trim();
 };
 
 export const resolveFieldBlockFarm = (field) => {
   if (!field) return 'Unassigned';
-  if (field.blockFarm && typeof field.blockFarm === 'string' && field.blockFarm.length > 0) return field.blockFarm;
-  const bf = blockFarms.find(b => b.id === field.blockFarmId || b.code === field.blockFarmId);
-  return bf ? bf.name : (field.blockFarm || (blockFarms.length > 0 ? blockFarms[0].name : (blockFarms[0]?.name || 'Block Farm')));
+  const bf = blockFarms.find(b => b.id === field.blockFarmId);
+  return bf ? bf.name : 'Unassigned';
 };
 
 export const resolveBlockFarmManager = (blockFarm) => {
   if (!blockFarm) return 'Pending Appointment';
-  if (blockFarm.farmManagerName && blockFarm.farmManagerName !== 'Assigned Farm Manager' && blockFarm.farmManagerName !== 'Assigned Manager') {
-    return blockFarm.farmManagerName;
-  }
-  const u = findUserByIdOrContact(blockFarm.farmManagerId || blockFarm.managerContact);
+  const u = users.find(user => (user.id || user.employeeId) === blockFarm.managerUserId);
   if (u) return u.name;
-  const mgr = users.find(u => 
-    (blockFarm.farmManagerId && u.employeeId === blockFarm.farmManagerId) || 
-    (u.role === 'Farm Manager' && (u.blockFarmId === blockFarm.id || (u.blockFarm && u.blockFarm === blockFarm.name)))
-  );
-  return mgr ? mgr.name : 'Pending Appointment';
+  return 'Pending Appointment';
 };
 
 // ── Deterministic Price Parsing & Sorting Helper ─────────────
@@ -788,97 +776,8 @@ export const priceAnalytics = {
   }
 };
 
-// Aliases for UI consumers
-export const MOCK_PRICE = currentPrice;
-export const MOCK_MOL = currentMarketObservation;
-export const MOCK_WEEKLY_CHART = priceAnalytics;
-
-// ── Tokenization & Session Management ────────────────────────
-const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-function safeToBase64(input) {
-  try {
-    let str = encodeURIComponent(input).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode('0x' + p1));
-    let output = '';
-    for (let block = 0, charCode, i = 0, map = B64_CHARS;
-         str.charAt(i | 0) || (map = '=', i % 1);
-         output += map.charAt(63 & block >> 8 - i % 1 * 8)) {
-      charCode = str.charCodeAt(i += 3/4);
-      block = block << 8 | charCode;
-    }
-    return output;
-  } catch (e) {
-    return '';
-  }
-}
-
-function safeFromBase64(input) {
-  try {
-    let str = String(input).replace(/[=]+$/, '');
-    let output = '';
-    for (let bc = 0, bs = 0, buffer, i = 0;
-         buffer = str.charAt(i++);
-         ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer,
-           bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0
-    ) {
-      buffer = B64_CHARS.indexOf(buffer);
-    }
-    return decodeURIComponent(output.split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-  } catch (e) {
-    return '';
-  }
-}
-
-export const generateAuthToken = (user) => {
-  if (!user) return null;
-  const uid = String(user.employeeId || user.contact || user.id || 'USER');
-  const role = String(user.roleKey || user.role || 'member').toLowerCase();
-  const now = Date.now();
-  // Rolling expiry: 30 days for members & farm managers, 7 days for admin
-  const durationDays = role.includes('admin') ? 7 : 30;
-  const expiresAt = now + durationDays * 24 * 60 * 60 * 1000;
-  const payload = JSON.stringify({ uid, role, issuedAt: now, expiresAt });
-  const b64 = safeToBase64(payload);
-  const signature = hashPassword(`${b64}:HUGPONG_SEC_2026`).slice(0, 16);
-  return `HUGPONG_TOK.${b64}.${signature}`;
-};
-
-export const verifyAuthToken = (token) => {
-  if (!token || typeof token !== 'string') {
-    return { valid: false, reason: 'empty_token' };
-  }
-
-  // Modern dot-delimited format (handles roles and IDs with underscores/dashes/spaces)
-  if (token.startsWith('HUGPONG_TOK.')) {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return { valid: false, reason: 'malformed_token' };
-    }
-    const b64 = parts[1];
-    const signature = parts[2];
-    const expectedSig = hashPassword(`${b64}:HUGPONG_SEC_2026`).slice(0, 16);
-    if (signature !== expectedSig) {
-      return { valid: false, reason: 'invalid_signature' };
-    }
-    try {
-      const jsonStr = safeFromBase64(b64);
-      if (!jsonStr) return { valid: false, reason: 'corrupted_payload' };
-      const data = JSON.parse(jsonStr);
-      if (!data.expiresAt || isNaN(Number(data.expiresAt)) || Date.now() > Number(data.expiresAt)) {
-        return { valid: false, reason: 'expired', expiresAt: data.expiresAt };
-      }
-      return { valid: true, role: data.role, uid: data.uid, expiresAt: Number(data.expiresAt) };
-    } catch (e) {
-      return { valid: false, reason: 'unparseable_payload' };
-    }
-  }
-
-  // Legacy fallback parser
-  if (token.startsWith('HUGPONG_TOK_')) {
-    return { valid: true, role: 'member', uid: 'USER', expiresAt: Date.now() + 86400000 };
-  }
-
-  return { valid: false, reason: 'unrecognized_format' };
-};
+// Server and Firebase issue all authentication credentials. The mobile client
+// stores opaque tokens only and never creates or validates authentication tokens.
 
 export const clearAuthSessionStorage = async () => {
   try {
@@ -889,25 +788,50 @@ export const clearAuthSessionStorage = async () => {
   }
 };
 
+export const verifyCurrentPassword = async (password) => {
+  try {
+    await verifyPasswordWithServer(password);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
 export const restoreSessionFromToken = async () => {
   try {
     const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
     const session = await getItem(STORAGE_KEYS.SESSION);
     if (!token || !session) return { success: false, reason: 'no_stored_session' };
-
-    const check = verifyAuthToken(token);
-    if (!check.valid) {
-      await clearAuthSessionStorage();
-      return { success: false, reason: check.reason };
+    if (auth?.authStateReady) await auth.authStateReady();
+    if (!auth?.currentUser || auth.currentUser.uid !== session.employeeId) {
+      return { success: false, reason: 'firebase_session_missing' };
     }
-
-    // Refresh rolling session expiry (sliding window)
-    const refreshedToken = generateAuthToken(session);
-    CURRENT_SESSION = { ...session, token: refreshedToken, lastActiveAt: Date.now() };
-    await saveItem(STORAGE_KEYS.AUTH_TOKEN, refreshedToken);
+    // Offline restoration trusts only a session previously issued after a
+    // successful server login. Online validation refreshes both server and
+    // Firebase credentials without exposing password material to the client.
+    CURRENT_SESSION = { ...session, lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     notify();
-    return { success: true, user: CURRENT_SESSION, token: refreshedToken };
+    if (getNetworkStatus()) {
+      try {
+        const refreshed = await refreshServerSession(token);
+        CURRENT_SESSION = { ...refreshed.user, lastActiveAt: Date.now() };
+        await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+      } catch (error) {
+        if (error.status === 401) {
+          CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+          await clearAuthSessionStorage();
+          return { success: false, reason: 'server_session_rejected' };
+        }
+      }
+    }
+    if (CURRENT_SESSION.pendingFirstLoginVerification === true
+      || CURRENT_SESSION.phoneVerified === false
+      || CURRENT_SESSION.requiresPasswordChange === true) {
+      return { success: false, reason: 'account_setup_required' };
+    }
+    notify();
+    return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
   } catch (err) {
     console.warn('[dataStore] Error restoring session:', err);
     return { success: false, error: err.message };
@@ -915,6 +839,7 @@ export const restoreSessionFromToken = async () => {
 };
 
 export const logoutUser = async () => {
+  await logoutFromServer();
   CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
   await clearAuthSessionStorage();
   notify();
@@ -922,68 +847,20 @@ export const logoutUser = async () => {
 };
 
 // ── User Directory & Authentication ──────────────────────────
-export const authenticateUser = (contactOrId, password) => {
-  const raw = String(contactOrId || '').trim();
-  const cleaned = raw.replace(/\D/g, '');
-
-  let user = users.find(u => {
-    const uContact = (u.contact || u.mobile || '').replace(/\D/g, '');
-    const uEmp = String(u.employeeId || '').trim();
-    const uEmpClean = uEmp.replace(/\D/g, '');
-    const uId = String(u.id || '').trim();
-    if (uEmp && (uEmp === raw || (cleaned && uEmpClean === cleaned))) return true;
-    if (cleaned && uContact && uContact === cleaned) return true;
-    if (uId && (uId === raw || (cleaned && uId.replace(/\D/g, '') === cleaned))) return true;
-    return false;
-  });
-
-  if (!user) {
-    return { success: false, error: 'Account not found. Please check your User ID (e.g. 04000001) or registered mobile number.' };
-  }
-
-  // Super Admin is strictly web-only
-  if (user.role === 'Super Admin' || user.roleKey === 'super_admin') {
-    return {
-      success: false,
-      error: 'Super Admin access is restricted to the Web Management Console. Please sign in using your desktop web browser.'
-    };
-  }
-
-  const storedHash = user.passwordHash || user.password;
-  if (!verifyPassword(password, storedHash)) {
-    return { success: false, error: 'Incorrect password. Please try again.' };
-  }
-
-  const isDefaultPassword = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
-  const requiresPasswordChange = (user.requiresPasswordChange === true && user.passwordChanged !== true) || isDefaultPassword;
-
-  // Mark phone as verified upon successful authentication
-  if (user.phoneVerified !== true || user.isPhoneVerified !== true || user.pendingFirstLoginVerification === true) {
-    user.phoneVerified = true;
-    user.isPhoneVerified = true;
-    user.pendingFirstLoginVerification = false;
-    user.phoneVerifiedAt = user.phoneVerifiedAt || new Date().toISOString();
-    user.updatedAt = new Date().toISOString();
-    if (db) {
-      const docId = user.employeeId || user.contact || user.id;
-      if (docId) {
-        setDoc(doc(db, 'users', docId), {
-          phoneVerified: true,
-          isPhoneVerified: true,
-          pendingFirstLoginVerification: false,
-          phoneVerifiedAt: user.phoneVerifiedAt,
-          updatedAt: user.updatedAt
-        }, { merge: true }).catch(e => console.warn('[dataStore] Auto-verify user login Firestore write notice:', e));
-      }
+export const authenticateUser = async (contactOrId, password) => {
+  try {
+    const result = await loginWithServer(contactOrId, password);
+    if (result.user?.role === 'Super Admin') {
+      await logoutFromServer();
+      return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
+    CURRENT_SESSION = { ...result.user, lastActiveAt: Date.now() };
+    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    notify();
+    return { ...result, requiresPasswordChange: result.user?.requiresPasswordChange === true };
+  } catch (error) {
+    return { success: false, error: error.message || 'Authentication service is unavailable.' };
   }
-
-  const token = generateAuthToken(user);
-  CURRENT_SESSION = { ...user, token, tokenIssuedAt: Date.now(), requiresPasswordChange, passwordChanged: user.passwordChanged ?? !requiresPasswordChange };
-  saveItem(STORAGE_KEYS.AUTH_TOKEN, token);
-  saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
-  notify();
-  return { success: true, user: CURRENT_SESSION, token, requiresPasswordChange };
 };
 
 export const updateUserMobileNumber = async (newMobile, passwordVerification) => {
@@ -1002,152 +879,60 @@ export const updateUserMobileNumber = async (newMobile, passwordVerification) =>
     return { success: false, error: 'New mobile number cannot be the same as your current registered number.' };
   }
 
-  const currentPassHash = CURRENT_SESSION.passwordHash || CURRENT_SESSION.password;
-  if (!verifyPassword(passwordVerification, currentPassHash)) {
-    return { success: false, error: 'Incorrect password verification. Please enter your account password to authorize changing your contact number.' };
-  }
-
   const formatted = cleanNew.startsWith('639') ? '0' + cleanNew.slice(2) : cleanNew;
-
-  CURRENT_SESSION.contact = formatted;
-  if ('mobile' in CURRENT_SESSION) delete CURRENT_SESSION.mobile;
-
-  const uEmp = String(CURRENT_SESSION.employeeId || '').trim();
-  const existingInArray = users.find(u => 
-    (u.employeeId && u.employeeId === uEmp) || 
-    (u.contact && u.contact.replace(/\D/g, '') === currentContactClean)
-  );
-
-  if (existingInArray) {
-    existingInArray.contact = formatted;
-    if ('mobile' in existingInArray) delete existingInArray.mobile;
-    existingInArray.updatedAt = new Date().toISOString();
-  } else {
-    users.push({ ...CURRENT_SESSION });
+  try {
+    const result = await changePhoneWithServer(formatted, passwordVerification);
+    CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
+    const existing = users.find(user => user.employeeId === CURRENT_SESSION.employeeId);
+    if (existing) Object.assign(existing, result.user);
+    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    notify();
+    return { success: true, message: 'Your registered mobile number has been updated successfully.' };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-
-  // Synchronize memberContact on user's assigned plots while preserving permanent memberId
-  if (uEmp) {
-    fields.forEach(f => {
-      if (f.memberId === uEmp || f.userId === uEmp || f.member === CURRENT_SESSION.name) {
-        f.memberContact = formatted;
-      }
-    });
-  }
-
-  if (db) {
-    try {
-      const docId = CURRENT_SESSION.employeeId || formatted;
-      const userUpdatePayload = { ...CURRENT_SESSION, contact: formatted };
-      delete userUpdatePayload.mobile;
-      await setDoc(doc(db, 'users', docId), userUpdatePayload, { merge: true });
-    } catch (e) {
-      console.warn('[dataStore] Firestore mobile update notice:', e);
-    }
-  }
-
-  notify();
-  return { success: true, message: 'Your registered mobile number has been updated successfully.' };
 };
 
 export const updateUserPassword = async (currentPassword, newPassword) => {
   if (!CURRENT_SESSION) {
     return { success: false, error: 'No active user session found.' };
   }
-  const currentPassHash = CURRENT_SESSION.passwordHash || CURRENT_SESSION.password;
-  if (!verifyPassword(currentPassword, currentPassHash)) {
-    return { success: false, error: 'Incorrect current password. Please try again.' };
-  }
   if (!newPassword || newPassword.length < 8) {
     return { success: false, error: 'New password must be at least 8 characters long.' };
   }
 
-  const newPassHash = hashPassword(newPassword);
-  CURRENT_SESSION.passwordHash = newPassHash;
-  delete CURRENT_SESSION.password;
-
-  const uEmp = String(CURRENT_SESSION.employeeId || '').trim();
-  const existingInArray = users.find(u => u.employeeId && u.employeeId === uEmp);
-  if (existingInArray) {
-    existingInArray.passwordHash = newPassHash;
-    delete existingInArray.password;
-    existingInArray.updatedAt = new Date().toISOString();
+  try {
+    const result = await changePasswordWithServer(currentPassword, newPassword);
+    CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
+    const existing = users.find(user => user.employeeId === CURRENT_SESSION.employeeId);
+    if (existing) Object.assign(existing, result.user);
+    SECURITY_PREFERENCES.lastPasswordChange = new Date().toISOString().split('T')[0];
+    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    notify();
+    return { success: true, message: result.message || 'Your password has been changed successfully.' };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-
-  SECURITY_PREFERENCES.lastPasswordChange = new Date().toISOString().split('T')[0];
-
-  if (db) {
-    try {
-      const docId = CURRENT_SESSION.employeeId || String(CURRENT_SESSION.contact || CURRENT_SESSION.mobile || '').replace(/\D/g, '');
-      if (docId) {
-        await setDoc(doc(db, 'users', docId), { passwordHash: newPassHash, updatedAt: new Date().toISOString() }, { merge: true });
-      }
-    } catch (e) {
-      console.warn('[dataStore] Firestore password update notice:', e);
-    }
-  }
-
-  notify();
-  return { success: true, message: 'Your password has been changed successfully.' };
 };
 
-export const resetUserPasswordByIdentifier = async (identifier, newPassword) => {
-  if (!identifier) return { success: false, error: 'User ID or Mobile Number required.' };
-  if (!newPassword || newPassword.length < 8) {
-    return { success: false, error: 'New password must be at least 8 characters long.' };
+export const requestCurrentPhoneVerification = async () => {
+  try {
+    return await requestPhoneVerificationWithServer();
+  } catch (error) {
+    return { success: false, error: error.message };
   }
+};
 
-  const raw = String(identifier).trim();
-  const clean = raw.replace(/\D/g, '');
-  let user = findUserByIdOrContact(identifier);
-
-  if (!user) {
-    user = users.find(u => {
-      const uContact = String(u.contact || u.mobile || '').replace(/\D/g, '');
-      const uEmp = String(u.employeeId || '').trim();
-      return uContact === clean || uEmp === raw || (clean && uEmp.replace(/\D/g, '') === clean);
-    });
+export const verifyCurrentPhone = async (code) => {
+  try {
+    const result = await verifyPhoneWithServer(code);
+    CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
+    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    notify();
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-
-  if (!user) {
-    return { success: false, error: 'No registered account found matching this User ID or Mobile Number.' };
-  }
-
-  const newPassHash = hashPassword(newPassword);
-  user.passwordHash = newPassHash;
-  delete user.password;
-  user.requiresPasswordChange = false;
-  user.passwordChanged = true;
-  user.passwordChangedAt = new Date().toISOString();
-  user.updatedAt = new Date().toISOString();
-
-  if (CURRENT_SESSION && (CURRENT_SESSION.employeeId === user.employeeId || CURRENT_SESSION.contact === user.contact)) {
-    CURRENT_SESSION.passwordHash = newPassHash;
-    delete CURRENT_SESSION.password;
-    CURRENT_SESSION.requiresPasswordChange = false;
-    CURRENT_SESSION.passwordChanged = true;
-    CURRENT_SESSION.passwordChangedAt = user.passwordChangedAt;
-  }
-
-  if (db) {
-    try {
-      const docId = user.employeeId || String(user.contact || user.mobile || '').replace(/\D/g, '');
-      if (docId) {
-        await setDoc(doc(db, 'users', docId), {
-          passwordHash: newPassHash,
-          requiresPasswordChange: false,
-          passwordChanged: true,
-          passwordChangedAt: user.passwordChangedAt,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
-    } catch (e) {
-      console.warn('[dataStore] Firestore reset password notice:', e);
-    }
-  }
-
-  notify();
-  return { success: true, message: 'Password has been reset successfully.', user };
 };
 
 export const formatFullName = (first = '', middle = '', last = '') => {
@@ -1178,54 +963,35 @@ export const splitFullName = (fullName = '') => {
 
 export const registerUser = async (userData) => {
   const cleaned = (userData.contactNumber || '').replace(/\D/g, '');
-  const numericId = generateUserNumericId('Member');
-  const passHash = hashPassword(userData.password || 'password123');
-  const matchedFarm = (blockFarms || []).find(b => b.name === userData.blockFarm) || blockFarms[0];
-  const formattedName = formatFullName(userData.firstName, userData.middleInitial || userData.middleName, userData.lastName);
-  
-  const newAccount = {
-    employeeId: numericId,
-    name: formattedName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'New Farmer Member',
-    firstName: (userData.firstName || '').trim(),
-    middleName: (userData.middleInitial || userData.middleName || '').trim(),
-    lastName: (userData.lastName || '').trim(),
-    role: 'Member',
-    roleKey: 'member',
-    contact: cleaned || userData.contactNumber,
-    fieldId: 'Unassigned (Pending Manager Allocation)',
-    blockFarmId: (matchedFarm?.id || matchedFarm?.code || ''),
-    blockFarm: userData.blockFarm || (matchedFarm?.name || 'Block Farm'),
-    passwordHash: passHash,
-    status: 'Active',
-    phoneVerified: true,
-    isPhoneVerified: true,
-    pendingFirstLoginVerification: false,
-    phoneVerifiedAt: new Date().toISOString(),
-    pendingLogs: 0,
-    syncedLogs: 0,
-    regDate: new Date().toISOString().split('T')[0],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  users.push(newAccount);
-  CURRENT_SESSION = { ...newAccount };
-
-  if (db) {
-    try {
-      const docId = newAccount.employeeId || cleaned;
-      await setDoc(doc(db, 'users', docId), newAccount, { merge: true });
-    } catch (e) {
-      console.warn('[dataStore] Failed to write user to Firestore:', e);
-    }
+  if (typeof userData.password !== 'string' || userData.password.length < 8) {
+    return { success: false, error: 'A password of at least 8 characters is required.' };
   }
-
-  notify();
-  return { success: true, user: newAccount };
+  const formattedName = formatFullName(userData.firstName, userData.middleInitial || userData.middleName, userData.lastName);
+  const selectedFarm = blockFarms.find(farm => farm.id === userData.blockFarm || farm.name === userData.blockFarm);
+  try {
+    const result = await registerWithServer({
+      displayName: formattedName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+      phone: cleaned,
+      password: userData.password,
+      role: 'MEMBER_FARMER',
+      blockFarmId: selectedFarm?.id || ''
+    });
+    if (result.user) {
+      const publicAccount = fromUserDocument(result.user.id, result.user);
+      const existing = pendingUsers.find(user => user.employeeId === publicAccount.employeeId);
+      if (!existing) pendingUsers.push(publicAccount);
+      notify();
+      return { ...result, user: publicAccount };
+    }
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 };
 
 export const DEFAULT_GUEST_SESSION = {
   name: '',
-  role: 'Member',
+  role: 'Member Farmer',
   roleKey: 'member',
   employeeId: '',
   fieldId: '',
@@ -1244,20 +1010,17 @@ export const getIsSynced = () => IS_SYNCED;
 
 /**
  * Returns accurate count of pending unsynced logs & outbox entries
- * Strictly excludes past-cycle, archived, deleted, and draft logs
+ * Counts only submitted ACTIVE records that have not reached Firestore.
  */
 export const getPendingSyncCount = (userSession = CURRENT_SESSION) => {
   const outboxCount = typeof getOutboxCount === 'function' ? getOutboxCount() : 0;
-  const userRole = userSession?.role || 'Member';
+  const userRole = userSession?.role || 'Member Farmer';
 
-  if (userRole === 'SRA (Admin)') return 0;
+  if (userRole === 'SRA Admin') return 0;
 
   const activeUnsyncedLogs = operationLogs.filter(l => {
     if (!l) return false;
-    // Exclude past cycle archives, drafts, and certified past history
-    if (l.isPastCycle === true || l.isPastCycle === 'true') return false;
-    if (l.isArchived === true || l.isDeleted === true || l.isDraft === true) return false;
-    if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
+    if (l.status !== 'ACTIVE' || l.isDraft === true) return false;
 
     // Check if log is flagged offline or unsynced or queued
     return l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued';
@@ -1318,14 +1081,14 @@ export const setSession = (role) => {
     CURRENT_SESSION = {
       ...account,
       pendingLogs: pendingCount,
-      syncedLogs: operationLogs.filter(l => !l.isDeleted && !l.isArchived && !l.isPastCycle && l.synced !== false).length,
+      syncedLogs: operationLogs.filter(l => l.status === 'ACTIVE' && l.synced !== false).length,
     };
     notify();
   }
 };
 
 export const updateSessionFieldId = (fieldId) => {
-  if (CURRENT_SESSION && CURRENT_SESSION.role === 'Member') {
+  if (CURRENT_SESSION && CURRENT_SESSION.role === 'Member Farmer') {
     CURRENT_SESSION.fieldId = fieldId;
     notify();
   }
@@ -1342,8 +1105,15 @@ export const updateFieldStageAndCycle = async (fieldId, updates) => {
 
   if (db && fieldId) {
     try {
-      const fullField = fields.find(f => f.id === fieldId);
-      await setDoc(doc(db, 'fields', fieldId), fullField ? { ...fullField, ...updates } : updates, { merge: true });
+      if (!targetField?.currentCycleId) throw new Error('Field has no explicit currentCycleId.');
+      const cycleUpdate = {
+        currentStageNumber: Number(updates.stageNumber || targetField.stageNumber || 1),
+        elapsedMonths: Number(updates.month ?? targetField.month ?? 0),
+        updatedAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, COLLECTIONS.CROP_CYCLES, targetField.currentCycleId), cycleUpdate, { merge: true });
+      const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
+      if (localCycle) Object.assign(localCycle, cycleUpdate);
     } catch (e) {
       console.warn('[dataStore] Failed to sync field stage/cycle to Firestore:', e);
     }
@@ -1356,22 +1126,20 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   const nowIso = new Date().toISOString();
   
   const targetField = fields.find(f => String(f.id || '').trim().toUpperCase() === cleanId);
-  const pastCycleNum = (targetField && Number(targetField.cycleNumber)) || 1;
-  
+  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle' };
+  const oldCycleId = targetField.currentCycleId;
+  const oldCycle = cropCycles.find(c => c.id === oldCycleId);
+  const nextSequence = Number(oldCycle?.sequenceNumber || targetField.cycleNumber || 1) + 1;
+  const newCycleId = createCycleId(cleanId, nextSequence);
+  const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   const targetLogs = operationLogs.filter(l => {
-    const logFId = String(l.fieldId || '').trim().toUpperCase();
-    return logFId === cleanId && !l.isPastCycle && !l.isArchived;
+    return l.cycleId === oldCycleId && l.status === 'ACTIVE';
   });
 
   targetLogs.forEach(l => {
-    l.isPastCycle = true;
-    l.isArchived = true;
-    l.isOffline = false;
-    l.synced = true;
-    l.cloudQueueStatus = 'transmitted';
-    l.cycleNumber = l.cycleNumber || pastCycleNum;
-    l.status = (l.certified === true || (l.status === 'Certified' && Boolean(l.certifiedBy || l.verifiedBy || l.sraAuditReportId))) ? 'Certified' : 'Archived';
+    l.status = 'ARCHIVED';
     l.archivedAt = l.archivedAt || nowIso;
+    l.archivedByUserId = actorUserId;
   });
   
   // Remove drafts belonging to the archived cycle
@@ -1394,7 +1162,8 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
     targetField.customStages = freshCustomStages;
     targetField.cycleType = finalCycleType;
     targetField.cropYear = finalCropYear;
-    targetField.cycleNumber = (Number(targetField.cycleNumber) || 1) + 1;
+    targetField.cycleNumber = nextSequence;
+    targetField.currentCycleId = newCycleId;
     targetField.lastUpdated = nowIso;
     targetField.lastSync = 'Just now';
     targetField.synced = true;
@@ -1407,32 +1176,27 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
 
   if (db) {
     try {
-      const updatePromises = targetLogs.map(l => 
-        setDoc(doc(db, 'operation_logs', l.id), { 
-          isPastCycle: true, 
-          isArchived: true, 
-          status: l.status,
-          archivedAt: l.archivedAt 
-        }, { merge: true })
-      );
-      if (targetField) {
-        updatePromises.push(
-          setDoc(doc(db, 'fields', targetField.id), {
-            stage: targetField.stage,
-            stageNumber: 1,
-            isCompleted: false,
-            customStages: targetField.customStages,
-            cycleType: targetField.cycleType,
-            cropYear: targetField.cropYear,
-            cycleNumber: targetField.cycleNumber,
-            lastUpdated: nowIso,
-            lastSync: targetField.lastSync,
-            synced: true,
-            updatedAt: nowIso
-          }, { merge: true })
-        );
-      }
-      await Promise.all(updatePromises);
+      const batch = writeBatch(db);
+      batch.update(doc(db, COLLECTIONS.CROP_CYCLES, oldCycleId), {
+        status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
+      });
+      targetLogs.forEach(log => batch.update(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), {
+        status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
+      }));
+      const newCycle = toCycleDocument(targetField, {
+        sequenceNumber: nextSequence,
+        cropType: targetField.cycleType,
+        cropYear: targetField.cropYear,
+        currentStageNumber: 1,
+        status: 'ACTIVE',
+        startedAt: nowIso,
+        updatedAt: nowIso
+      });
+      batch.set(doc(db, COLLECTIONS.CROP_CYCLES, newCycleId), newCycle);
+      batch.update(doc(db, COLLECTIONS.FIELDS, targetField.id), { currentCycleId: newCycleId, updatedAt: nowIso });
+      await batch.commit();
+      if (oldCycle) Object.assign(oldCycle, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso });
+      cropCycles.push(fromCycleDocument(newCycleId, newCycle));
     } catch (err) {
       console.warn('[dataStore] Error archiving logs in Firestore:', err);
     }
@@ -1461,8 +1225,7 @@ export const archiveFieldPlot = async (fieldId) => {
   if (targetIdx === -1) return { success: false, message: 'Field plot not found' };
 
   const targetField = fields[targetIdx];
-  targetField.isArchived = true;
-  targetField.status = 'Archived';
+  targetField.status = 'ARCHIVED';
   targetField.archivedAt = nowIso;
   targetField.updatedAt = nowIso;
 
@@ -1475,12 +1238,12 @@ export const archiveFieldPlot = async (fieldId) => {
   }
 
   // Archive all logs belonging to this field
+  const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   operationLogs.forEach(l => {
-    if (String(l.fieldId || '').trim().toUpperCase() === cleanId) {
-      l.isPastCycle = true;
-      l.isArchived = true;
-      l.status = l.status === 'Certified' ? 'Certified' : 'Archived';
+    if (l.cycleId === targetField.currentCycleId && l.status === 'ACTIVE') {
+      l.status = 'ARCHIVED';
       l.archivedAt = l.archivedAt || nowIso;
+      l.archivedByUserId = actorUserId;
     }
   });
 
@@ -1491,7 +1254,14 @@ export const archiveFieldPlot = async (fieldId) => {
 
   if (db) {
     try {
-      await setDoc(doc(db, 'fields', cleanId), { isArchived: true, status: 'Archived', archivedAt: nowIso, updatedAt: nowIso }, { merge: true });
+      const batch = writeBatch(db);
+      batch.update(doc(db, COLLECTIONS.FIELDS, cleanId), { status: 'ARCHIVED', archivedAt: nowIso, updatedAt: nowIso });
+      operationLogs.filter(l => l.cycleId === targetField.currentCycleId && l.status === 'ARCHIVED').forEach(log => {
+        batch.update(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), {
+          status: 'ARCHIVED', archivedAt: log.archivedAt, archivedByUserId: actorUserId, updatedAt: nowIso
+        });
+      });
+      await batch.commit();
     } catch (e) {
       console.warn('[dataStore] Error archiving field in Firestore:', e);
     }
@@ -1536,6 +1306,24 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
     actor: actor || defaultActor,
     status: status || 'Recorded'
   };
+  const entityTypes = {
+    operation: 'OPERATION_LOG',
+    plot: 'FIELD',
+    block: 'BLOCK_FARM',
+    user: 'USER',
+    price: 'SRA_PRICE',
+    sra: 'AUDIT_REPORT',
+    audit: 'AUDIT_REPORT'
+  };
+  const canonicalEvent = {
+    eventType: String(eventType || 'SYSTEM_EVENT').trim().replace(/\s+/g, '_').toUpperCase(),
+    actorUserId: session?.employeeId || session?.id || '',
+    entityType: entityTypes[category] || 'AUDIT_REPORT',
+    entityId: String(entity || 'SYSTEM'),
+    details: details || '',
+    outcome: String(status || '').toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS',
+    createdAt: now.toISOString()
+  };
 
   const existingIdx = systemHistory.findIndex(a => a.id === auditId);
   if (existingIdx >= 0) {
@@ -1549,7 +1337,7 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
 
   // Enqueue for background / offline outbox sync
   try {
-    enqueueOutboxItem('audit_log', newEvent);
+    enqueueOutboxItem('audit_log', { id: auditId, ...canonicalEvent });
   } catch (e) {
     console.warn('[dataStore] Enqueue audit log notice:', e);
   }
@@ -1557,7 +1345,7 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
   // Direct sync to Cloud Firestore if online
   if (db) {
     try {
-      await setDoc(doc(db, 'audit_logs', auditId), newEvent, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.AUDIT_LOGS, auditId), canonicalEvent);
     } catch (e) {
       console.warn('[dataStore] Firestore audit log notice:', e);
     }
@@ -1591,19 +1379,12 @@ export const saveDraftLogs = async () => {
 };
 
 export const isLogLocked = (log) => {
-  if (!log) return false;
-  return Boolean(
-    log.isPastCycle || 
-    log.certified || 
-    log.status === 'Certified' || 
-    log.status === 'Audited' || 
-    log.auditStatus === 'Certified'
-  );
+  return Boolean(log && log.status === 'ARCHIVED');
 };
 
 export const getLogAuditTrail = (logId) => {
   const target = operationLogs.find(l => l.id === logId);
-  return target && Array.isArray(target.editHistory) ? target.editHistory : [];
+  return target && Array.isArray(target.amendments) ? target.amendments : [];
 };
 
 export const updateOperationLogWithSecurity = async (logId, updates, editReason, passwordVerification) => {
@@ -1619,7 +1400,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   if (isLogLocked(targetLog)) {
     return { 
       success: false, 
-      error: 'Security Lockout: This operation log is part of an official certified SRA audit or archived crop cycle and cannot be modified.' 
+      error: 'Security Lockout: This operation log is archived historical data and cannot be modified.'
     };
   }
 
@@ -1628,20 +1409,9 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     return { success: false, error: 'A valid reason for amendment or correction is required for the official audit trail.' };
   }
 
-  // Password verification
-  const currentUser = users.find(u => 
-    (CURRENT_SESSION?.employeeId && u.employeeId === CURRENT_SESSION.employeeId) ||
-    (CURRENT_SESSION?.contact && u.contact === CURRENT_SESSION.contact) ||
-    (CURRENT_SESSION?.name && u.name === CURRENT_SESSION.name)
-  ) || CURRENT_SESSION;
-  const currentPassHash = currentUser?.passwordHash || CURRENT_SESSION.passwordHash || CURRENT_SESSION.password;
-  const isPassValid = Boolean(currentPassHash && verifyPassword(passwordVerification, currentPassHash)) ||
-                      verifyPassword(passwordVerification, DEFAULT_MASTER_PASSWORD_HASH) ||
-                      verifyPassword(passwordVerification, DEFAULT_SEED_PASSWORD_HASH) ||
-                      passwordVerification === 'password123' ||
-                      passwordVerification === 'hugpong2026' ||
-                      passwordVerification === 'manager123';
-  if (!isPassValid) {
+  try {
+    await verifyPasswordWithServer(passwordVerification);
+  } catch (error) {
     return { success: false, error: 'Incorrect password. Please enter your account password to authorize modifying this log.' };
   }
 
@@ -1706,18 +1476,21 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     };
   }
 
+  const changes = {};
+  Object.keys(newValues).forEach(key => {
+    if (JSON.stringify(previousValues[key]) !== JSON.stringify(newValues[key])) {
+      changes[key] = { before: previousValues[key], after: newValues[key] };
+    }
+  });
   const editRecord = {
-    id: `EDT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-    editedBy: `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.employeeId || CURRENT_SESSION.role || 'Member'})`,
-    editedRole: CURRENT_SESSION.role || 'Member',
-    editedAt: new Date().toLocaleString('en-PH'),
-    isoDate: new Date().toISOString(),
+    amendmentId: `AMD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+    amendedByUserId: CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '',
     reason: reasonTrimmed,
-    previousValues,
-    newValues,
+    amendedAt: new Date().toISOString(),
+    changes
   };
 
-  const existingHistory = Array.isArray(targetLog.editHistory) ? targetLog.editHistory : [];
+  const existingHistory = Array.isArray(targetLog.amendments) ? targetLog.amendments : [];
   
   const displayDate = formatDisplayDate(updates.date || updates.period || targetLog.date || targetLog.period);
   const costNum = Number(updates.totalCost != null ? updates.totalCost : (updates.cost != null ? updates.cost : (targetLog.totalCost != null ? targetLog.totalCost : targetLog.cost || 0)));
@@ -1729,17 +1502,21 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     isoDate: toISODateString(displayDate),
     cost: costNum,
     totalCost: costNum,
-    isAmended: true,
-    editHistory: [...existingHistory, editRecord],
-    lastModifiedAt: new Date().toISOString(),
-    lastModifiedBy: CURRENT_SESSION.name,
+    amendments: [...existingHistory, editRecord],
+    status: 'ACTIVE',
+    updatedAt: new Date().toISOString()
   });
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
 
   if (db && IS_SYNCED) {
     try {
-      await setDoc(doc(db, 'operation_logs', logId), targetLog, { merge: true });
+      const canonicalLog = toOperationLogDocument(targetLog, {
+        cycleId: targetLog.cycleId,
+        submittedByUserId: targetLog.submittedByUserId || targetLog.loggedById,
+        status: 'ACTIVE'
+      });
+      await setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, logId), canonicalLog);
     } catch (e) {
       console.warn('[dataStore] Direct Firestore log update failed, queuing outbox:', e);
       await enqueueOutboxItem('operation_log', targetLog);
@@ -1749,7 +1526,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   }
 
   // Record audit history event shared with Web & Cloud
-  const actorName = `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.role || 'Member'})`;
+  const actorName = `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.role || 'Member Farmer'})`;
   await logSystemEvent(
     'operation',
     'Operation Log Correction',
@@ -1763,123 +1540,20 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   return { success: true, log: targetLog, editRecord };
 };
 
-export const deleteOperationLog = async (logId, reason = 'Deleted by user') => {
-  if (!logId) return { success: false, message: 'Log ID is required' };
-  const cleanId = String(logId).trim();
-  deletedLogIds.add(cleanId);
-  await saveItem(STORAGE_KEYS.DELETED_LOG_IDS, Array.from(deletedLogIds));
-
-  const targetIdx = operationLogs.findIndex(l => l && l.id === cleanId);
-  const targetLog = targetIdx >= 0 ? operationLogs[targetIdx] : null;
-
-  if (targetIdx >= 0) {
-    operationLogs.splice(targetIdx, 1);
-  }
-
-  // Also remove from draftLogs if present
-  const dIdx = draftLogs.findIndex(d => d && d.id === cleanId);
-  if (dIdx >= 0) {
-    draftLogs.splice(dIdx, 1);
-    await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
-  }
-
-  await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-
-  if (db) {
-    try {
-      await deleteDoc(doc(db, 'operation_logs', cleanId)).catch(async () => {
-        await setDoc(doc(db, 'operation_logs', cleanId), { isDeleted: true, isArchived: true }, { merge: true });
-      });
-    } catch (err) {
-      console.warn('[dataStore] Error deleting operation log from Firestore:', err);
-    }
-  }
-
-  if (targetLog) {
-    const actorName = `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.role || 'Member'})`;
-    await logSystemEvent(
-      'operation',
-      'Operation Log Deleted',
-      targetLog.fieldId || 'Field Plot',
-      `Deleted operation record ${cleanId} (${targetLog.activity || targetLog.task || 'Operation'}). Reason: ${reason}`,
-      actorName,
-      'Deleted'
-    );
-  }
-
-  notify();
-  return { success: true, logId: cleanId };
-};
-
-export const deletePastLogsForField = async (fieldId = null) => {
-  const isAll = !fieldId || fieldId === 'ALL' || fieldId === 'all';
-  const fId = fieldId ? fieldId.trim().toUpperCase() : null;
-
-  const isPastRecord = (l) => {
-    if (!l) return false;
-    return Boolean(
-      l.isPastCycle === true ||
-      l.isPastCycle === 'true' ||
-      l.isArchived === true ||
-      l.status === 'Archived' ||
-      (typeof l.id === 'string' && l.id.startsWith('PAST-'))
-    );
-  };
-
-  const toDelete = operationLogs.filter(l => {
-    const logFId = (l.fieldId || '').trim().toUpperCase();
-    const matchesField = isAll || logFId === fId;
-    return matchesField && isPastRecord(l);
-  });
-
-  // Track all deleted log IDs so they never get resurrected by cloud snapshots
-  toDelete.forEach(l => {
-    if (l && l.id) deletedLogIds.add(l.id);
-  });
-  await saveItem(STORAGE_KEYS.DELETED_LOG_IDS, Array.from(deletedLogIds));
-  
-  // Prune past cycle records from in-memory operationLogs
-  const remaining = operationLogs.filter(l => {
-    const logFId = (l.fieldId || '').trim().toUpperCase();
-    const matchesField = isAll || logFId === fId;
-    return !(matchesField && isPastRecord(l));
-  });
-
-  operationLogs.length = 0;
-  remaining.forEach(l => operationLogs.push(l));
-
-  await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-  notify();
-
-  if (db && toDelete.length > 0) {
-    try {
-      const deletePromises = toDelete.map(l => 
-        deleteDoc(doc(db, 'operation_logs', l.id)).catch(() =>
-          setDoc(doc(db, 'operation_logs', l.id), { isArchived: true, isDeleted: true }, { merge: true })
-        )
-      );
-      await Promise.all(deletePromises);
-    } catch (err) {
-      console.warn('[dataStore] Error deleting past logs in Firestore:', err);
-    }
-  }
-
-  return { success: true, deletedCount: toDelete.length };
-};
 export const archivePastLogsForField = async (fieldId) => {
   if (!fieldId) return { success: false, message: 'Field ID is required' };
   const fId = fieldId.trim().toUpperCase();
   const nowIso = new Date().toISOString();
   
-  const toArchive = operationLogs.filter(l => 
-    (l.fieldId || '').trim().toUpperCase() === fId && !l.isPastCycle && !l.isArchived
-  );
+  const field = fields.find(item => String(item.id || '').trim().toUpperCase() === fId);
+  if (!field?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle' };
+  const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
+  const toArchive = operationLogs.filter(l => l.cycleId === field.currentCycleId && l.status === 'ACTIVE');
   
   toArchive.forEach(l => {
-    l.isPastCycle = true;
-    l.isArchived = true;
-    l.status = l.status === 'Certified' ? 'Certified' : 'Archived';
+    l.status = 'ARCHIVED';
     l.archivedAt = l.archivedAt || nowIso;
+    l.archivedByUserId = actorUserId;
   });
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
@@ -1887,14 +1561,15 @@ export const archivePastLogsForField = async (fieldId) => {
 
   if (db) {
     try {
-      const promises = toArchive.map(l => 
-        setDoc(doc(db, 'operation_logs', l.id), { 
-          isPastCycle: true, 
-          isArchived: true, 
-          status: l.status, 
-          archivedAt: l.archivedAt 
-        }, { merge: true })
-      );
+      const promises = toArchive.map(l => setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, l.id),
+        toOperationLogDocument(l, {
+          cycleId: l.cycleId,
+          submittedByUserId: l.submittedByUserId || l.loggedById,
+          status: 'ARCHIVED',
+          archivedAt: l.archivedAt,
+          archivedByUserId: actorUserId
+        })
+      ));
       await Promise.all(promises);
     } catch (err) {
       console.warn('[dataStore] Error archiving logs in Firestore:', err);
@@ -1963,7 +1638,7 @@ export const publishSraPrice = async ({ price, molasses, week, circular, source,
   // Push directly to Firestore 'sra_prices'
   if (db) {
     try {
-      await setDoc(doc(db, 'sra_prices', pId), newPost, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.SRA_PRICES, pId), toPriceDocument(newPost, CURRENT_SESSION?.employeeId || ''));
       console.log('[Mobile] Published price broadcasted to Firestore:', pId);
     } catch (err) {
       console.warn('[Mobile] Error broadcasting price to Firestore:', err);
@@ -1982,7 +1657,10 @@ export const getMemberSyncHealth = () => {
   if (MEMBER_SYNC_LAG_DAYS >= 7) status = 'critical';
   else if (MEMBER_SYNC_LAG_DAYS >= 3 || !IS_SYNCED) status = 'warning';
 
-  const mgr = users.find(u => u.role === 'Farm Manager') || {};
+  const sessionUserId = CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '';
+  const assignedField = fields.find(field => field.memberUserId === sessionUserId);
+  const assignedFarm = blockFarms.find(farm => farm.id === assignedField?.blockFarmId);
+  const mgr = users.find(user => (user.id || user.employeeId) === assignedFarm?.managerUserId) || {};
 
   return {
     status,
@@ -1992,8 +1670,8 @@ export const getMemberSyncHealth = () => {
     manager: {
       name: mgr.name || '',
       role: mgr.role || 'Farm Manager',
-      blockFarm: mgr.blockFarm || mgr.farm || (blockFarms[0]?.name || 'Block Farm'),
-      phone: mgr.mobile || '0918 987 6543'
+      blockFarm: assignedFarm?.name || 'Unassigned',
+      phone: mgr.mobile || mgr.contact || ''
     }
   };
 };
@@ -2021,7 +1699,6 @@ export const currentProfile = {
 };
 
 export const profile = currentProfile;
-export const MOCK_PROFILE = currentProfile;
 
 
 export const SRA_OPERATIONS_CATALOGUE = [
@@ -2334,7 +2011,7 @@ export const getFieldCustomOperations = (fieldId, stageNumber) => {
     const relevantLogs = operationLogs.filter(l => {
       const lFieldId = String(l.fieldId || '').trim().toUpperCase();
       const lStage = Number(l.stageNumber || (l.taskId ? String(l.taskId).replace(/\D/g, '') : 0));
-      return lFieldId === cleanId && lStage === sNum && !l.isPastCycle && !l.isArchived && !l.isDeleted;
+      return lFieldId === cleanId && lStage === sNum && l.status === 'ACTIVE';
     });
 
     relevantLogs.forEach((log, idx) => {
@@ -2424,9 +2101,6 @@ export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
   }
 };
 
-export const managers = [];
-export const MOCK_MANAGERS = managers;
-
 export const addSRAPrice = async (price) => {
   const sorted = getSortedPrices();
   const nextMonth = 'May';
@@ -2444,7 +2118,14 @@ export const addSRAPrice = async (price) => {
 
   if (db) {
     try {
-      await setDoc(doc(db, 'sra_prices', priceRecord.id), priceRecord, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.SRA_PRICES, priceRecord.id), toPriceDocument({
+        ...priceRecord,
+        molasses: 0,
+        change: 0,
+        molassesChange: 0,
+        circular: 'Manual SRA Publication',
+        source: 'SRA Admin'
+      }, CURRENT_SESSION?.employeeId || ''));
     } catch (e) {
       console.warn('[dataStore] Failed to write price to Firestore:', e);
     }
@@ -2455,14 +2136,17 @@ export const addSRAPrice = async (price) => {
 
 export const submitSupportTicket = async (ticket) => {
   const newId = generateTicketId(800 + supportTickets.length + 1);
-  const farmName = CURRENT_SESSION.blockFarm || CURRENT_SESSION.farm || (blockFarms[0]?.name || 'Block Farm');
+  const sessionUserId = CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '';
+  const assignedField = fields.find(field => field.memberUserId === sessionUserId);
+  const assignedFarm = blockFarms.find(farm => farm.id === assignedField?.blockFarmId);
+  const farmName = assignedFarm?.name || 'Unassigned';
   const newTicket = {
     id: newId,
     subject: ticket.title || ticket.subject || 'Support Request',
     memberName: CURRENT_SESSION.name,
     memberId: CURRENT_SESSION.employeeId || '',
     contact: CURRENT_SESSION.contact || '',
-    fieldId: CURRENT_SESSION.fieldId || '',
+    fieldId: ticket.fieldId || assignedField?.id || null,
     blockFarm: farmName,
     category: ticket.category || 'General Support',
     priority: ticket.priority || 'Normal',
@@ -2480,7 +2164,11 @@ export const submitSupportTicket = async (ticket) => {
 
   if (db && IS_SYNCED) {
     try {
-      await setDoc(doc(db, 'support_tickets', newId), newTicket, { merge: true });
+      await setDoc(doc(db, COLLECTIONS.SUPPORT_TICKETS, newId), toSupportTicketDocument({
+        ...newTicket,
+        title: newTicket.subject,
+        details: ticket.details || ticket.message || ''
+      }, CURRENT_SESSION?.employeeId || ''));
     } catch (e) {
       console.warn('[dataStore] Failed to write ticket to Firestore, queuing:', e);
       await enqueueOutboxItem('ticket', newTicket);
@@ -2524,15 +2212,28 @@ export const resetLocalCache = async () => {
 
 // ── Real-Time Cloud Firestore Sync ──────────────────────────
 export const listenToCloudSync = () => {
-  if (!db) return () => {};
+  if (!db || !auth?.currentUser) return () => {};
 
   try {
-    // 0. Live Block Farms Listener
-    // 0. Live Block Farms Listener
-    const unsubBlockFarms = onSnapshot(collection(db, 'block_farms'), (snapshot) => {
-      if (snapshot.empty) return;
+    const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+    const isMember = activeRole === ROLES.MEMBER_FARMER;
+    const memberUserId = auth.currentUser.uid;
+    const memberFieldId = CURRENT_SESSION?.fieldId || '__unassigned__';
+    let rawFieldDocuments = [];
+    const refreshFieldViews = () => {
+      const cycleById = new Map(cropCycles.map(cycle => [cycle.id, cycle]));
+      const mapped = rawFieldDocuments.map(field => fromFieldDocument(field.id, field, cycleById.get(field.currentCycleId)));
+      fields.length = 0;
+      archivedFields.length = 0;
+      mapped.forEach(field => (field.status === 'ARCHIVED' ? archivedFields : fields).push(field));
+      saveItem(STORAGE_KEYS.FIELDS, fields);
+      saveItem(STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields);
+      notify();
+    };
+
+    const unsubBlockFarms = onSnapshot(collection(db, COLLECTIONS.BLOCK_FARMS), (snapshot) => {
       const remoteBF = [];
-      snapshot.forEach(docSnap => remoteBF.push({ id: docSnap.id, ...docSnap.data() }));
+      snapshot.forEach(docSnap => remoteBF.push(fromBlockFarmDocument(docSnap.id, docSnap.data())));
 
       blockFarms.length = 0;
       remoteBF.forEach(bf => blockFarms.push(bf));
@@ -2541,96 +2242,51 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Block farms listener notice:', err));
 
     // 1. Live SRA Sugar Prices Listener
-    const unsubPrices = onSnapshot(collection(db, 'sra_prices'), (snapshot) => {
-      if (snapshot.empty) return;
+    const unsubPrices = onSnapshot(collection(db, COLLECTIONS.SRA_PRICES), (snapshot) => {
       const remotePrices = [];
-      snapshot.forEach(docSnap => remotePrices.push(docSnap.data()));
+      snapshot.forEach(docSnap => remotePrices.push(fromPriceDocument(docSnap.id, docSnap.data())));
       
       remotePrices.sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
 
-      if (remotePrices.length > 0) {
-        priceHistory.length = 0;
-        remotePrices.forEach(p => priceHistory.push(p));
-        saveItem(STORAGE_KEYS.PRICES, remotePrices);
-        notify();
-      }
+      priceHistory.length = 0;
+      remotePrices.forEach(p => priceHistory.push(p));
+      saveItem(STORAGE_KEYS.PRICES, remotePrices);
+      notify();
     }, (err) => console.warn('[Mobile] SRA prices listener notice:', err));
 
-    // 2. Live Field Plots Listener (Authoritative Cloud Sync)
-    const unsubFields = onSnapshot(collection(db, 'fields'), (snapshot) => {
-      if (snapshot.empty) return;
-      const remoteFields = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.isArchived === true || data.status === 'Archived') {
-          if (!archivedFields.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === docSnap.id.toUpperCase())) {
-            archivedFields.push({ id: docSnap.id, ...data, isArchived: true, status: 'Archived' });
-          }
-        } else {
-          remoteFields.push({ id: docSnap.id, ...data });
-        }
-      });
+    const cyclesSource = isMember
+      ? query(collection(db, COLLECTIONS.CROP_CYCLES), where('fieldId', '==', memberFieldId))
+      : collection(db, COLLECTIONS.CROP_CYCLES);
+    const unsubCycles = onSnapshot(cyclesSource, (snapshot) => {
+      cropCycles.length = 0;
+      snapshot.forEach(docSnap => cropCycles.push(fromCycleDocument(docSnap.id, docSnap.data())));
+      refreshFieldViews();
+    }, (err) => console.warn('[Mobile] Crop cycles listener notice:', err));
 
-      // Merge remote active updates with local fields, excluding any archived plots
-      const currentCombined = [...fields];
-      remoteFields.forEach(rf => {
-        const idx = currentCombined.findIndex(f => f.id === rf.id);
-        if (idx >= 0) {
-          currentCombined[idx] = { ...currentCombined[idx], ...rf };
-        } else {
-          currentCombined.push(rf);
-        }
-      });
-      const cleanFields = mergeFieldsWithSeeds(currentCombined, archivedFields);
-      fields.length = 0;
-      cleanFields.forEach(f => fields.push(f));
-      saveItem(STORAGE_KEYS.FIELDS, fields);
-      saveItem(STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields);
-      notify();
+    const fieldsSource = isMember
+      ? query(collection(db, COLLECTIONS.FIELDS), where('memberUserId', '==', memberUserId))
+      : collection(db, COLLECTIONS.FIELDS);
+    const unsubFields = onSnapshot(fieldsSource, (snapshot) => {
+      rawFieldDocuments = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+      refreshFieldViews();
     }, (err) => console.warn('[Mobile] Fields listener notice:', err));
 
     // 3. Live Operation Logs Listener (Authoritative Cloud Sync)
-    const unsubLogs = onSnapshot(collection(db, 'operation_logs'), (snapshot) => {
-      if (snapshot.empty) return;
+    const logsSource = isMember
+      ? query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', memberFieldId))
+      : collection(db, COLLECTIONS.OPERATION_LOGS);
+    const unsubLogs = onSnapshot(logsSource, (snapshot) => {
       const remoteLogs = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        if (data.isDeleted === true || deletedLogIds.has(docSnap.id)) {
-          deletedLogIds.add(docSnap.id);
-          return;
-        }
-        if (!data.isArchived) {
-          let effCost = Number(data.totalCost != null ? data.totalCost : (data.cost || 0));
-          const opName = (data.sraOperationId || data.task || data.activity || '').toLowerCase();
-          if (effCost === 0 && (opName.includes('cutting') || opName.includes('loading') || opName.includes('sra-11') || opName.includes('harvest'))) {
-            const ha = Number(data.hectares) || 1.5;
-            effCost = Math.round(ha * 60 * 450);
-          }
-          const displayDate = formatDisplayDate(data.date || data.period);
-          const existingLocal = operationLogs.find(ol => ol.id === docSnap.id);
-          const isPast = data.isPastCycle === true || data.isPastCycle === 'true' || existingLocal?.isPastCycle === true || existingLocal?.isArchived === true;
-          remoteLogs.push({ 
-            id: docSnap.id, 
-            ...data,
-            isPastCycle: isPast,
-            isArchived: isPast || data.isArchived === true,
-            cost: effCost,
-            totalCost: effCost,
-            date: displayDate,
-            period: displayDate,
-            isoDate: toISODateString(displayDate)
-          });
+        if ((data.status === 'ACTIVE' || data.status === 'ARCHIVED') && data.cycleId) {
+          remoteLogs.push(fromOperationLogDocument(docSnap.id, data));
         }
       });
 
       // Merge remote logs with existing local logs, keeping local logs that aren't yet in cloud!
       const remoteIds = new Set(remoteLogs.map(r => r.id));
-      const localOnly = operationLogs.filter(l => !remoteIds.has(l.id) && !l.isArchived && !l.isDeleted && !deletedLogIds.has(l.id));
-
-      // Preserve past-cycle/archived logs that Firestore won't return (they're excluded from the snapshot query)
-      const preservedPastLogs = operationLogs.filter(l => 
-        (l.isPastCycle === true || l.isArchived === true) && !l.isDeleted && !deletedLogIds.has(l.id) && !remoteIds.has(l.id)
-      );
+      const localOnly = operationLogs.filter(l => !remoteIds.has(l.id) && l.status === 'ACTIVE' && l.cycleId);
       
       // Auto-reconcile: If there are local-only logs, automatically push them to Firestore!
       if (localOnly.length > 0 && db) {
@@ -2638,14 +2294,18 @@ export const listenToCloudSync = () => {
           l.synced = true;
           l.isOffline = false;
           l.cloudQueueStatus = 'transmitted';
-          const clean = cleanDataForFirestore({ ...l, synced: true, syncedAt: new Date().toISOString() });
-          setDoc(doc(db, 'operation_logs', l.id), clean, { merge: true }).catch(e => {
+          const clean = toOperationLogDocument(l, {
+            cycleId: l.cycleId,
+            submittedByUserId: l.submittedByUserId || l.loggedById,
+            status: 'ACTIVE'
+          });
+          setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, l.id), clean).catch(e => {
             console.warn('[Mobile] Auto-reconcile local log upload notice:', e);
           });
         });
       }
 
-      const merged = [...remoteLogs, ...localOnly, ...preservedPastLogs];
+      const merged = [...remoteLogs, ...localOnly];
       merged.sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
         const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
@@ -2665,10 +2325,12 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Operation logs listener notice:', err));
 
     // 4. Live Support Tickets Listener (Authoritative Cloud Sync)
-    const unsubTickets = onSnapshot(collection(db, 'support_tickets'), (snapshot) => {
-      if (snapshot.empty) return;
+    const ticketsSource = isMember
+      ? query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', memberUserId))
+      : collection(db, COLLECTIONS.SUPPORT_TICKETS);
+    const unsubTickets = onSnapshot(ticketsSource, (snapshot) => {
       const remoteTickets = [];
-      snapshot.forEach(docSnap => remoteTickets.push({ id: docSnap.id, ...docSnap.data() }));
+      snapshot.forEach(docSnap => remoteTickets.push(fromSupportTicketDocument(docSnap.id, docSnap.data())));
 
       supportTickets.length = 0;
       remoteTickets.forEach(rt => supportTickets.push(rt));
@@ -2677,10 +2339,16 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Support tickets listener notice:', err));
 
     // 5. Live Users Directory Listener (Authoritative Cloud Sync)
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      if (snapshot.empty) return;
+    const usersSource = isMember
+      ? doc(db, COLLECTIONS.USERS, memberUserId)
+      : collection(db, COLLECTIONS.USERS);
+    const unsubUsers = onSnapshot(usersSource, (snapshot) => {
       const remoteUsers = [];
-      snapshot.forEach(docSnap => remoteUsers.push({ id: docSnap.id, ...docSnap.data() }));
+      if (isMember) {
+        if (snapshot.exists()) remoteUsers.push(fromUserDocument(snapshot.id, snapshot.data()));
+      } else {
+        snapshot.forEach(docSnap => remoteUsers.push(fromUserDocument(docSnap.id, docSnap.data())));
+      }
 
       users.length = 0;
       remoteUsers.forEach(ru => users.push(ru));
@@ -2689,52 +2357,18 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Users listener notice:', err));
 
     // 6. Live Audit Reports Listener (Authoritative Cloud Sync)
-    const unsubAuditReports = onSnapshot(collection(db, 'audit_reports'), (snapshot) => {
-      if (snapshot.empty) return;
+    const unsubAuditReports = isMember ? () => {} : onSnapshot(collection(db, COLLECTIONS.AUDIT_REPORTS), (snapshot) => {
       const remoteAudits = [];
-      snapshot.forEach(docSnap => remoteAudits.push({ id: docSnap.id, ...docSnap.data() }));
-
-      if (remoteAudits.length > 0) {
-        remoteAudits.forEach(ra => {
-          const existingIdx = auditReports.findIndex(a => 
-            a.id === ra.id || 
-            a.reportId === ra.id || 
-            (ra.reportId && a.id === ra.reportId) || 
-            (ra.id && a.reportId === ra.id) ||
-            (ra.qrSignature && (a.qrSignature === ra.qrSignature || a.qrHash === ra.qrSignature))
-          );
-          if (existingIdx >= 0) {
-            const hasSameHash = (auditReports[existingIdx].qrSignature === ra.qrSignature || auditReports[existingIdx].qrHash === ra.qrSignature || auditReports[existingIdx].qrSignature === ra.qrHash);
-            const isCertified = ra.status === 'Certified' || (auditReports[existingIdx].status === 'Certified' && hasSameHash);
-            auditReports[existingIdx] = { 
-              ...auditReports[existingIdx], 
-              ...ra,
-              status: isCertified ? 'Certified' : (ra.status || 'Pending')
-            };
-          } else {
-            auditReports.unshift(ra);
-          }
-        });
-
-        // Strictly deduplicate auditReports in place
-        const reportMap = new Map();
-        auditReports.forEach(r => {
-          if (!r) return;
-          const key = r.reportId || r.id;
-          if (key) reportMap.set(key, r);
-        });
-        auditReports.length = 0;
-        auditReports.push(...reportMap.values());
-
-        saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
-        saveItem('@hugpong_audit_logs', auditReports);
-        notify();
-      }
+      snapshot.forEach(docSnap => remoteAudits.push(fromAuditReportDocument(docSnap.id, docSnap.data())));
+      auditReports.length = 0;
+      auditReports.push(...remoteAudits);
+      saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+      saveItem('@hugpong_audit_logs', auditReports);
+      notify();
     }, (err) => console.warn('[Mobile] Audit reports listener notice:', err));
 
     // 7. Live Audit Logs / System History Listener (Authoritative Cloud Sync)
-    const unsubAuditLogs = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
-      if (snapshot.empty) return;
+    const unsubAuditLogs = isMember ? () => {} : onSnapshot(collection(db, COLLECTIONS.AUDIT_LOGS), (snapshot) => {
       const remoteLogs = [];
       snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
 
@@ -2755,6 +2389,7 @@ export const listenToCloudSync = () => {
     return () => {
       unsubBlockFarms();
       unsubPrices();
+      unsubCycles();
       unsubFields();
       unsubLogs();
       unsubTickets();
@@ -2779,7 +2414,7 @@ export const performMobileSync = async () => {
 
   // Mark all active logs as synced and cleared of offline state locally
   operationLogs.forEach(l => {
-    if (!l.isDeleted && !l.isArchived && !l.isPastCycle) {
+    if (l.status === 'ACTIVE') {
       l.synced = true;
       l.isOffline = false;
       l.cloudQueueStatus = 'transmitted';
@@ -2793,16 +2428,14 @@ export const performMobileSync = async () => {
   // Push all local operationLogs to Firestore in parallel
   if (db && Array.isArray(operationLogs) && operationLogs.length > 0) {
     try {
-      const activeLogs = operationLogs.filter(l => !l.isDeleted && !l.isArchived && !l.isPastCycle && l && l.id);
+      const activeLogs = operationLogs.filter(l => l && l.id && l.status === 'ACTIVE' && l.cycleId);
       const pushPromises = activeLogs.map(log => {
-        const cleanLog = cleanDataForFirestore({
-          ...log,
-          synced: true,
-          isOffline: false,
-          cloudQueueStatus: 'transmitted',
-          syncedAt: log.syncedAt || new Date().toISOString()
+        const cleanLog = toOperationLogDocument(log, {
+          cycleId: log.cycleId,
+          submittedByUserId: log.submittedByUserId || log.loggedById,
+          status: 'ACTIVE'
         });
-        return setDoc(doc(db, 'operation_logs', log.id), cleanLog, { merge: true });
+        return setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), cleanLog);
       });
       await Promise.all(pushPromises);
     } catch (logSyncErr) {
@@ -2818,24 +2451,27 @@ export const performMobileSync = async () => {
     if (db && Array.isArray(auditReports) && auditReports.length > 0) {
       const reportPromises = auditReports.filter(rep => rep && (rep.reportId || rep.id)).map(async (rep) => {
         const docId = rep.reportId || rep.id;
-        const docRef = doc(db, 'audit_reports', docId);
+        const docRef = doc(db, COLLECTIONS.AUDIT_REPORTS, docId);
         try {
           const snap = await getDoc(docRef);
-          if (snap.exists() && snap.data()?.status === 'Certified') {
-            const snapHash = snap.data().qrHash || snap.data().qrSignature;
+          if (snap.exists() && snap.data()?.status === 'CERTIFIED') {
+            const snapHash = snap.data().qrHash;
             const repHash = rep.qrHash || rep.qrSignature;
             if (snapHash && snapHash === repHash) {
-              rep.status = 'Certified';
-              rep.certifiedBy = snap.data().certifiedBy || rep.certifiedBy;
-              rep.certifiedRole = snap.data().certifiedRole || rep.certifiedRole;
+              rep.status = 'CERTIFIED';
+              rep.certifiedByUserId = snap.data().certifiedByUserId || rep.certifiedByUserId;
               rep.certifiedAt = snap.data().certifiedAt || rep.certifiedAt;
               rep.cloudQueueStatus = 'transmitted';
               return;
             }
           }
         } catch (ge) {}
-        const cleanedRep = cleanDataForFirestore({ ...rep, updatedAt: new Date().toISOString() });
-        await setDoc(docRef, cleanedRep, { merge: true });
+        const cleanedRep = toAuditReportDocument(rep, {
+          compiledByUserId: rep.compiledByUserId || CURRENT_SESSION?.employeeId || '',
+          status: rep.status,
+          updatedAt: new Date().toISOString()
+        });
+        await setDoc(docRef, cleanedRep);
         rep.cloudQueueStatus = 'transmitted';
         rep.cloudQueuedAt = new Date().toISOString();
       });
@@ -2869,43 +2505,28 @@ export const initializeOfflineStorage = async () => {
     await initSyncEngine();
     const stored = await hydrateAllStorage();
     if (stored[STORAGE_KEYS.AUTH_TOKEN] && stored[STORAGE_KEYS.SESSION]) {
-      const check = verifyAuthToken(stored[STORAGE_KEYS.AUTH_TOKEN]);
-      if (check.valid) {
-        CURRENT_SESSION = stored[STORAGE_KEYS.SESSION];
-      } else {
-        CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
-        await clearAuthSessionStorage();
-      }
+      CURRENT_SESSION = stripCredentialFields(stored[STORAGE_KEYS.SESSION]);
     } else if (stored[STORAGE_KEYS.SESSION]) {
-      CURRENT_SESSION = stored[STORAGE_KEYS.SESSION];
+      CURRENT_SESSION = stripCredentialFields(stored[STORAGE_KEYS.SESSION]);
     } else {
       CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
     }
     if (Array.isArray(stored[STORAGE_KEYS.USERS]) && stored[STORAGE_KEYS.USERS].length > 0) {
       users.length = 0;
-      stored[STORAGE_KEYS.USERS].forEach(u => users.push(u));
-    }
-    if (Array.isArray(stored[STORAGE_KEYS.DELETED_LOG_IDS]) && stored[STORAGE_KEYS.DELETED_LOG_IDS].length > 0) {
-      stored[STORAGE_KEYS.DELETED_LOG_IDS].forEach(id => deletedLogIds.add(id));
+      stored[STORAGE_KEYS.USERS].forEach(u => users.push(stripCredentialFields(u)));
     }
     if (Array.isArray(stored[STORAGE_KEYS.LOGS]) && stored[STORAGE_KEYS.LOGS].length > 0) {
       operationLogs.length = 0;
       const normalized = cleanupDuplicateLogs(stored[STORAGE_KEYS.LOGS])
-        .filter(l => l && !l.isDeleted && !deletedLogIds.has(l.id))
+        .filter(l => l && l.cycleId && (l.status === 'ACTIVE' || l.status === 'ARCHIVED'))
         .map(l => {
-        let effCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-        const opName = (l.sraOperationId || l.task || l.activity || '').toLowerCase();
-        if (effCost === 0 && (opName.includes('cutting') || opName.includes('loading') || opName.includes('sra-11') || opName.includes('harvest'))) {
-          const ha = Number(l.hectares) || 1.5;
-          effCost = Math.round(ha * 60 * 450);
-        }
+        const effCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
         const displayDate = formatDisplayDate(l.date || l.period);
-        const isPastOrArchived = l.isPastCycle === true || l.isArchived === true || l.isDeleted === true || (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-')));
         return {
           ...l,
-          synced: isPastOrArchived ? true : (l.synced !== undefined ? l.synced : true),
-          isOffline: isPastOrArchived ? false : (l.isOffline === true ? true : false),
-          cloudQueueStatus: isPastOrArchived ? 'transmitted' : (l.cloudQueueStatus || (l.isOffline ? 'offline_queued' : 'synced')),
+          synced: l.synced !== undefined ? l.synced : true,
+          isOffline: l.isOffline === true,
+          cloudQueueStatus: l.cloudQueueStatus || (l.isOffline ? 'offline_queued' : 'synced'),
           cost: effCost,
           totalCost: effCost,
           date: displayDate,
@@ -2924,7 +2545,7 @@ export const initializeOfflineStorage = async () => {
       stored[STORAGE_KEYS.ARCHIVED_FIELDS].forEach(af => archivedFields.push(af));
     }
     if (Array.isArray(stored[STORAGE_KEYS.FIELDS]) && stored[STORAGE_KEYS.FIELDS].length > 0) {
-      const cleanFields = mergeFieldsWithSeeds(stored[STORAGE_KEYS.FIELDS], archivedFields);
+      const cleanFields = mergeActiveFields(stored[STORAGE_KEYS.FIELDS], archivedFields);
       fields.length = 0;
       cleanFields.forEach(f => fields.push(f));
     }
@@ -2950,15 +2571,7 @@ export const initializeOfflineStorage = async () => {
     if (Array.isArray(stored[STORAGE_KEYS.AUDIT_REPORTS]) && stored[STORAGE_KEYS.AUDIT_REPORTS].length > 0) {
       auditReports.length = 0;
       stored[STORAGE_KEYS.AUDIT_REPORTS].forEach(a => {
-        const p = (a.period || a.month || '').toLowerCase();
-        if (p.includes('may 2026') || a.id === 'AUD-2026-09' || a.id === 'RPT-2026-05-NCY01' || a.id === 'AUD-2026-0001') {
-          return;
-        }
-        if (!a.certifiedBy && a.status === 'Certified') {
-          a.status = 'Pending SRA';
-          a.verifiedBy = 'Pending SRA Inspector Review';
-        }
-        auditReports.push(a);
+        if (a && (a.status === 'PENDING' || a.status === 'CERTIFIED')) auditReports.push(a);
       });
     }
 
@@ -2980,7 +2593,16 @@ export const initializeOfflineStorage = async () => {
     notify();
 
     try {
-      listenToCloudSync();
+      let stopCloudSync = null;
+      if (auth) {
+        onAuthStateChanged(auth, firebaseUser => {
+          if (stopCloudSync) {
+            stopCloudSync();
+            stopCloudSync = null;
+          }
+          if (firebaseUser) stopCloudSync = listenToCloudSync();
+        });
+      }
       // Publish background device telemetry
       if (CURRENT_SESSION && CURRENT_SESSION.name) {
         publishTerminalTelemetry(CURRENT_SESSION, pendingCount).catch(() => {});
@@ -2988,7 +2610,9 @@ export const initializeOfflineStorage = async () => {
       // If internet is connected, auto-sync immediately on launch
       checkConnectivity().then(online => {
         if (online) {
-          performMobileSync().catch(() => {});
+          restoreSessionFromToken()
+            .then(result => { if (result.success) return performMobileSync(); })
+            .catch(() => {});
         }
       });
     } catch (cloudErr) {

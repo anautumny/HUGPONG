@@ -3,7 +3,13 @@ import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
-import { authenticateUser, isValidUserIdentifier, resetUserPasswordByIdentifier } from '../../data/dataStore';
+import {
+  authenticateUser,
+  isValidUserIdentifier,
+  requestCurrentPhoneVerification,
+  updateUserPassword,
+  verifyCurrentPhone
+} from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { isOnline, addNetworkListener } from '../../services/networkService';
 
@@ -33,6 +39,11 @@ export default function LoginScreen({ navigation }) {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [firstLoginError, setFirstLoginError] = useState('');
   const [firstLoginSaving, setFirstLoginSaving] = useState(false);
+  const [showPhoneVerificationModal, setShowPhoneVerificationModal] = useState(false);
+  const [phoneVerificationCode, setPhoneVerificationCode] = useState('');
+  const [phoneVerificationError, setPhoneVerificationError] = useState('');
+  const [phoneVerificationSaving, setPhoneVerificationSaving] = useState(false);
+  const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
 
   useEffect(() => {
     const unsubNet = addNetworkListener((status) => {
@@ -72,7 +83,7 @@ export default function LoginScreen({ navigation }) {
     return Object.keys(e).length === 0;
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (lockoutSeconds > 0) {
       Alert.alert(
         'Account Temporarily Locked',
@@ -85,8 +96,8 @@ export default function LoginScreen({ navigation }) {
     if (!validate()) return;
     setLoading(true);
 
-    setTimeout(() => {
-      const res = authenticateUser(contactNumber, password);
+    try {
+      const res = await authenticateUser(contactNumber, password);
       setLoading(false);
 
       if (!res.success) {
@@ -106,10 +117,21 @@ export default function LoginScreen({ navigation }) {
       setFailedAttempts(0);
       setAuthError('');
 
-      // Check if user requires password change on first login or temporary default password
-      const isDefault = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
-      if (res.requiresPasswordChange || isDefault) {
-        setAuthenticatedUser(res.user);
+      setAuthenticatedUser(res.user);
+      if (res.user?.pendingFirstLoginVerification === true || res.user?.phoneVerified === false) {
+        setPendingPasswordChange(res.requiresPasswordChange === true);
+        setPhoneVerificationCode('');
+        setPhoneVerificationError('');
+        const request = await requestCurrentPhoneVerification();
+        if (!request.success) {
+          setAuthError(request.error || 'A phone verification code could not be sent.');
+          return;
+        }
+        setShowPhoneVerificationModal(true);
+        return;
+      }
+
+      if (res.requiresPasswordChange) {
         setNewPassword('');
         setConfirmPassword('');
         setFirstLoginError('');
@@ -118,7 +140,35 @@ export default function LoginScreen({ navigation }) {
       }
 
       navigation.replace('MainTabs');
-    }, 450);
+    } catch (error) {
+      setLoading(false);
+      setAuthError('Authentication service is unavailable. An online server login is required.');
+    }
+  };
+
+  const handleVerifyPhone = async () => {
+    if (!/^\d{6}$/.test(phoneVerificationCode.trim())) {
+      setPhoneVerificationError('Enter the complete 6-digit verification code.');
+      return;
+    }
+    setPhoneVerificationSaving(true);
+    setPhoneVerificationError('');
+    const result = await verifyCurrentPhone(phoneVerificationCode.trim());
+    setPhoneVerificationSaving(false);
+    if (!result.success) {
+      setPhoneVerificationError(result.error || 'The verification code is incorrect or expired.');
+      return;
+    }
+    setAuthenticatedUser(result.user);
+    setShowPhoneVerificationModal(false);
+    if (pendingPasswordChange) {
+      setNewPassword('');
+      setConfirmPassword('');
+      setFirstLoginError('');
+      setShowFirstLoginModal(true);
+      return;
+    }
+    navigation.replace('MainTabs');
   };
 
   const handleSaveFirstLoginPassword = async () => {
@@ -151,8 +201,7 @@ export default function LoginScreen({ navigation }) {
     setFirstLoginSaving(true);
     setFirstLoginError('');
     try {
-      const identifier = authenticatedUser?.employeeId || authenticatedUser?.contact || contactNumber;
-      const res = await resetUserPasswordByIdentifier(identifier, newPassword);
+      const res = await updateUserPassword(password, newPassword);
       setFirstLoginSaving(false);
 
       if (!res.success) {
@@ -327,6 +376,61 @@ export default function LoginScreen({ navigation }) {
         </ScrollView>
       </KeyboardAvoidingView>
 
+      <Modal visible={showPhoneVerificationModal} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+            <View style={s.modalCard}>
+              <View style={s.modalHeaderRow}>
+                <View style={s.modalIconWrap}>
+                  <Ionicons name="phone-portrait-outline" size={22} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.modalTitle}>Verify Your Registered Phone</Text>
+                  <Text style={s.modalSub}>Enter the 6-digit code sent by the HUGPONG server before opening farm records.</Text>
+                </View>
+              </View>
+              {phoneVerificationError ? (
+                <View style={s.firstLoginErrorBox}>
+                  <Ionicons name="alert-circle" size={16} color="#DC2626" />
+                  <Text style={s.firstLoginErrorText}>{phoneVerificationError}</Text>
+                </View>
+              ) : null}
+              <View style={s.fieldGroup}>
+                <Text style={s.label}>Verification Code</Text>
+                <View style={s.inputWrap}>
+                  <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
+                  <TextInput
+                    style={[s.input, { letterSpacing: 4 }]}
+                    value={phoneVerificationCode}
+                    onChangeText={value => { setPhoneVerificationCode(value); setPhoneVerificationError(''); }}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    placeholder="123456"
+                    placeholderTextColor={COLORS.textMuted}
+                  />
+                </View>
+              </View>
+              <View style={s.modalBtnRow}>
+                <TouchableOpacity
+                  style={s.modalCancelBtn}
+                  onPress={async () => {
+                    const result = await requestCurrentPhoneVerification();
+                    if (!result.success) setPhoneVerificationError(result.error || 'A new code could not be sent.');
+                  }}
+                >
+                  <Text style={s.modalCancelText}>Resend Code</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.modalSaveBtn} onPress={handleVerifyPhone} disabled={phoneVerificationSaving}>
+                  {phoneVerificationSaving
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={s.modalSaveText}>Verify Phone</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
       {/* ── FIRST-TIME LOGIN PASSWORD CHANGE ASSISTANT MODAL ── */}
       <Modal
         visible={showFirstLoginModal}
@@ -361,7 +465,7 @@ export default function LoginScreen({ navigation }) {
                 <View style={[s.modalAccountRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 4 }]}>
                   <Text style={s.modalAccountLbl}>User ID / Role</Text>
                   <Text style={[s.modalAccountVal, { color: COLORS.primary, fontWeight: '800' }]}>
-                    {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Member'})
+                    {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Member Farmer'})
                   </Text>
                 </View>
               </View>

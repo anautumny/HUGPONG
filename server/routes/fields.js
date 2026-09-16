@@ -1,174 +1,150 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — Field Plot Registry API
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
 const express = require('express');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
+const {
+  COLLECTIONS,
+  ROLES,
+  canonicalRole,
+  createCycleId,
+  nowIso,
+  requiredString,
+  optionalString,
+  nullableId,
+  finiteNumber,
+  integer
+} = require('../schema/firestoreSchema');
 
-// ── GET /api/fields ──────────────────────────────────────────
-router.get('/', async (req, res) => {
+async function assertManagerScope(blockFarmId, user) {
+  const role = canonicalRole(user.role || user.roleKey);
+  if (role === ROLES.SUPER_ADMIN) return;
+  const userId = String(user.employeeId || user.userId || '').trim();
+  const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
+  if (!farm.exists || farm.data().managerUserId !== userId) {
+    throw new Error('Farm Managers may change fields only in their assigned block farm.');
+  }
+}
+
+router.get('/', requireAuth, async (req, res) => {
   try {
-    let fields = [];
-    if (db) {
-      const snap = await db.collection('fields').get();
-      if (!snap.empty) {
-        snap.forEach(docSnap => fields.push({ id: docSnap.id, ...docSnap.data() }));
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const role = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    let query = db.collection(COLLECTIONS.FIELDS);
+    if (role === ROLES.MEMBER_FARMER) {
+      query = query.where('memberUserId', '==', actorId);
+    } else if (role === ROLES.FARM_MANAGER) {
+      const farms = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', actorId).get();
+      const farmIds = farms.docs.map(doc => doc.id);
+      if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
+      if (farmIds.length > 10) return res.status(409).json({ success: false, error: 'Manager farm scope exceeds the Firestore query limit.' });
+      query = query.where('blockFarmId', 'in', farmIds);
+    } else if (role !== ROLES.SRA_ADMIN && role !== ROLES.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: 'Role is not authorized to list fields.' });
+    }
+    const snapshot = await query.get();
+    return res.json({ success: true, count: snapshot.size, data: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const fieldId = requiredString(req.body.id, 'id', { max: 80 }).toUpperCase();
+    if (!/^[A-Z0-9_-]{3,80}$/.test(fieldId)) throw new Error('id contains unsupported characters.');
+    const blockFarmId = requiredString(req.body.blockFarmId, 'blockFarmId', { max: 80 }).toUpperCase();
+    await assertManagerScope(blockFarmId, req.session.user);
+    const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
+    if (!farm.exists || farm.data().status !== 'ACTIVE') throw new Error('blockFarmId must reference an ACTIVE block farm.');
+
+    const memberUserId = nullableId(req.body.memberUserId);
+    if (memberUserId) {
+      const member = await db.collection(COLLECTIONS.USERS).doc(memberUserId).get();
+      if (!member.exists || canonicalRole(member.data().role) !== ROLES.MEMBER_FARMER) {
+        throw new Error('memberUserId must reference a Member Farmer.');
       }
     }
-    return res.json({ success: true, count: fields.length, data: fields });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+
+    const now = nowIso();
+    const cycleId = createCycleId(fieldId, 1);
+    const field = {
+      blockFarmId,
+      memberUserId,
+      areaHa: finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
+      variety: optionalString(req.body.variety, { max: 120 }),
+      soilType: optionalString(req.body.soilType, { max: 120 }),
+      currentCycleId: cycleId,
+      status: 'ACTIVE',
+      customStages: Array.isArray(req.body.customStages) ? req.body.customStages : [],
+      customOperations: req.body.customOperations && typeof req.body.customOperations === 'object' ? req.body.customOperations : {},
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null
+    };
+    const cycle = {
+      fieldId,
+      sequenceNumber: 1,
+      cropType: optionalString(req.body.cropType, { max: 120 }),
+      cropYear: optionalString(req.body.cropYear, { max: 40 }),
+      currentStageNumber: integer(req.body.currentStageNumber == null ? 1 : req.body.currentStageNumber, 'currentStageNumber', { min: 1, max: 6 }),
+      elapsedMonths: finiteNumber(req.body.elapsedMonths == null ? 0 : req.body.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 }),
+      batchNumber: integer(req.body.batchNumber == null ? 1 : req.body.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
+      status: 'ACTIVE',
+      startedAt: now,
+      updatedAt: now,
+      archivedAt: null,
+      archivedByUserId: null
+    };
+    const batch = db.batch();
+    batch.create(db.collection(COLLECTIONS.FIELDS).doc(fieldId), field);
+    batch.create(db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId), cycle);
+    await batch.commit();
+    return res.status(201).json({ success: true, data: { field: { id: fieldId, ...field }, cycle: { id: cycleId, ...cycle } } });
+  } catch (error) {
+    const status = /already exists/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ success: false, error: error.message });
   }
 });
 
-// ── POST /api/fields (Managers & Admins) ──────────────────────
-router.post('/', requireAuth, requireRole(['farm manager', 'super admin', 'admin']), async (req, res) => {
-  const {
-    id,
-    memberId,
-    memberName,
-    member,
-    memberContact,
-    blockFarmId,
-    ha,
-    stage,
-    stageNumber,
-    blockFarm,
-    customStages,
-    customOperations,
-    variety,
-    soilType,
-    cycleType,
-    cropYear,
-    month,
-    batchMonth
-  } = req.body;
-
-  if (!id || typeof id !== 'string' || !id.trim()) {
-    return res.status(400).json({ success: false, error: 'Validation Error: Field ID is required.' });
-  }
-  const cleanId = String(id).trim().toUpperCase();
-  if (!/^[A-Za-z0-9_-]{3,25}$/.test(cleanId)) {
-    return res.status(400).json({ success: false, error: 'Validation Error: Field ID must be 3-25 alphanumeric characters (e.g., FLD-NCY-006).' });
-  }
-
-  const parsedHa = Number(ha);
-  if (isNaN(parsedHa) || parsedHa <= 0 || parsedHa > 500) {
-    return res.status(400).json({ success: false, error: 'Validation Error: Hectares must be a positive number between 0.01 and 500.' });
-  }
-
-  const sessionUser = req.session ? req.session.user : null;
-  const isManager = sessionUser && String(sessionUser.role || '').toLowerCase().includes('manager');
-  const isSuperAdmin = sessionUser && String(sessionUser.role || '').toLowerCase().includes('super');
-  const isSRAAdmin = sessionUser && (String(sessionUser.role || '').toLowerCase().includes('sra') || (String(sessionUser.role || '').toLowerCase().includes('admin') && !isManager));
-
-  if (isManager && !isSuperAdmin && !isSRAAdmin) {
-    const mgrFarm = (sessionUser.blockFarm || '').trim().toLowerCase();
-    const reqFarm = (blockFarm || '').trim().toLowerCase();
-    if (mgrFarm && reqFarm && mgrFarm !== reqFarm) {
-      return res.status(403).json({
-        success: false,
-        error: `Permission Denied: Farm Managers are restricted to their assigned block farm (${sessionUser.blockFarm}).`
-      });
-    }
-  }
-
-  const assignedBlockFarm = (isManager && !isSuperAdmin && !isSRAAdmin && sessionUser?.blockFarm) 
-    ? sessionUser.blockFarm 
-    : (blockFarm || '');
-
-  const fieldPayload = {
-    id: cleanId,
-    blockFarmId: blockFarmId || '',
-    blockFarm: assignedBlockFarm,
-    memberId: memberId || '',
-    memberName: memberName || member || 'Assigned Member',
-    member: memberName || member || 'Assigned Member',
-    memberContact: memberContact || '',
-    ha: parsedHa,
-    stage: stage || 'Pre-Planting & Land Preparation',
-    stageNumber: stageNumber !== undefined ? Number(stageNumber) : 1,
-    variety: variety || 'VMC 84-524',
-    soilType: soilType || 'Clay Loam',
-    cycleType: cycleType || 'Plant Cane (New Plant)',
-    cropYear: cropYear || 'CY 2025–2026',
-    month: month !== undefined ? Number(month) : 0.5,
-    batchMonth: batchMonth !== undefined ? Number(batchMonth) : 1,
-    customStages: Array.isArray(customStages) ? customStages : [],
-    customOperations: (customOperations && typeof customOperations === 'object') ? customOperations : {},
-    synced: true,
-    lastSync: 'Just now',
-    updatedAt: new Date().toISOString()
-  };
-
+router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
-    if (db) {
-      await db.collection('fields').doc(cleanId).set(fieldPayload, { merge: true });
+    const fieldId = String(req.params.id || '').trim().toUpperCase();
+    const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Field not found.' });
+    await assertManagerScope(snapshot.data().blockFarmId, req.session.user);
+    const customOperations = req.body.customOperations;
+    if (!customOperations || typeof customOperations !== 'object' || Array.isArray(customOperations)) {
+      return res.status(400).json({ success: false, error: 'customOperations must be an object keyed by stage number.' });
     }
-    console.log(`[HUGPONG Fields] Field Saved: ${cleanId} (${fieldPayload.stage}) with ${Object.keys(fieldPayload.customOperations).length} stage custom operation sets`);
-    return res.json({ success: true, data: fieldPayload });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    const updatedAt = nowIso();
+    await ref.update({ customOperations, updatedAt });
+    return res.json({ success: true, data: { id: fieldId, customOperations, updatedAt } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 
-// ── PUT /api/fields/:id/custom-operations ─────────────────────
-router.put('/:id/custom-operations', requireAuth, async (req, res) => {
-  const fieldId = String(req.params.id || '').trim().toUpperCase();
-  const { customOperations, stageNumber, operations } = req.body;
-
-  if (!fieldId) {
-    return res.status(400).json({ success: false, error: 'Field ID is required.' });
-  }
-
+router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
-    let updatedOps = {};
-    if (db) {
-      const fieldDoc = await db.collection('fields').doc(fieldId).get();
-      const existingData = fieldDoc.exists ? fieldDoc.data() : {};
-      updatedOps = { ...(existingData.customOperations || {}) };
-
-      if (customOperations && typeof customOperations === 'object') {
-        updatedOps = { ...updatedOps, ...customOperations };
-      } else if (stageNumber !== undefined && Array.isArray(operations)) {
-        updatedOps[stageNumber] = operations;
-      }
-
-      await db.collection('fields').doc(fieldId).set({
-        customOperations: updatedOps,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+    const fieldId = String(req.params.id || '').trim().toUpperCase();
+    const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Field not found.' });
+    await assertManagerScope(snapshot.data().blockFarmId, req.session.user);
+    if (!Array.isArray(req.body.customStages)) {
+      return res.status(400).json({ success: false, error: 'customStages must be an array.' });
     }
-    console.log(`[HUGPONG Fields] Custom Operations persisted for ${fieldId}`);
-    return res.json({ success: true, fieldId, customOperations: updatedOps });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── PUT /api/fields/:id/custom-stages ─────────────────────────
-router.put('/:id/custom-stages', requireAuth, async (req, res) => {
-  const fieldId = String(req.params.id || '').trim().toUpperCase();
-  const { customStages } = req.body;
-
-  if (!fieldId || !Array.isArray(customStages)) {
-    return res.status(400).json({ success: false, error: 'Field ID and valid customStages array required.' });
-  }
-
-  try {
-    if (db) {
-      await db.collection('fields').doc(fieldId).set({
-        customStages,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-    }
-    console.log(`[HUGPONG Fields] Custom Stages persisted for ${fieldId}`);
-    return res.json({ success: true, fieldId, customStages });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    const updatedAt = nowIso();
+    await ref.update({ customStages: req.body.customStages, updatedAt });
+    return res.json({ success: true, data: { id: fieldId, customStages: req.body.customStages, updatedAt } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 

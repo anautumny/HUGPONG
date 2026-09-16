@@ -13,6 +13,7 @@ import { useTranslation } from '../../services/i18n';
 function ManagerHomeView({
   session = {},
   fields = [],
+  blockFarms = [],
   navigation,
   onManualSync
 }) {
@@ -20,10 +21,12 @@ function ManagerHomeView({
   const [showAllLogs, setShowAllLogs] = useState(false);
   const DISPLAY_LIMIT = 3;
 
-  const targetFarm = session?.farm || session?.blockFarm || 'District Central';
+  const managerUserId = session?.employeeId || session?.id || '';
+  const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === managerUserId).map(farm => farm.id));
+  const targetFarm = blockFarms.find(farm => managedFarmIds.has(farm.id))?.name || 'Unassigned Block Farm';
 
   const { managedFields, totalHectares, totalOperationsCount, allFormattedLogs } = React.useMemo(() => {
-    const mf = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm || f.blockFarmId === session?.blockFarmId);
+    const mf = fields.filter(field => managedFarmIds.has(field.blockFarmId));
     const th = mf.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
     const mIds = mf.map(f => f.id);
     const fieldMap = Object.fromEntries(mf.map(f => [f.id, f]));
@@ -31,17 +34,10 @@ function ManagerHomeView({
     // Strictly filter for current active cycle operations belonging to this block farm
     const farmLogs = operationLogs.filter(l => {
       if (!l) return false;
-      // Exclude past cycle archives, drafts, and certified past history
-      if (l.isPastCycle === true || l.isPastCycle === 'true') return false;
-      if (l.isArchived === true || l.isDeleted === true) return false;
-      if (l.isDraft === true || l.status === 'Draft' || l.status === 'Archived') return false;
-      if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
+      if (l.status !== 'ACTIVE' || l.isDraft === true) return false;
 
       // Ensure block farm association
-      const belongsToFarm = (l.blockFarm && (l.blockFarm === targetFarm || l.blockFarmId === session?.blockFarmId)) || 
-                            (l.fieldId && mIds.includes(l.fieldId)) || 
-                            (!l.blockFarm && mIds.length === 0);
-      return belongsToFarm;
+      return Boolean(l.fieldId && mIds.includes(l.fieldId));
     });
     const toc = farmLogs.length;
 
@@ -80,7 +76,7 @@ function ManagerHomeView({
       totalOperationsCount: toc,
       allFormattedLogs: formatted
     };
-  }, [fields, targetFarm]);
+  }, [fields, targetFarm, managerUserId]);
 
   const displayedLogs = showAllLogs ? allFormattedLogs : allFormattedLogs.slice(0, DISPLAY_LIMIT);
 

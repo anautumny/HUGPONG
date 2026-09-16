@@ -1,4 +1,5 @@
 import { STORAGE_KEYS, getItem, saveItem } from './storageService';
+import { COLLECTIONS, toOperationLogDocument, toSupportTicketDocument } from '../data/firestoreSchema';
 
 let outboxQueue = [];
 let isProcessing = false;
@@ -362,7 +363,7 @@ export async function processOutbox(remoteUploadHandler) {
 export async function flushOutboxToFirestore() {
   try {
     const { db } = require('../firebase/config');
-    const { doc, setDoc, getDoc } = require('firebase/firestore');
+    const { doc, setDoc } = require('firebase/firestore');
 
     if (!db) {
       console.warn('[syncEngine] Firestore instance not initialized, skipping cloud flush.');
@@ -373,100 +374,31 @@ export async function flushOutboxToFirestore() {
       const { type, payload } = item;
 
       if (type === 'operation_log' || type === 'takeover_log') {
-        const docRef = doc(db, 'operation_logs', payload.id);
-        const cleanPayload = {};
-        for (const [k, v] of Object.entries(payload || {})) {
-          if (v !== undefined) cleanPayload[k] = v;
-        }
-        await setDoc(docRef, {
-          ...cleanPayload,
-          synced: true,
-          syncedAt: new Date().toISOString()
-        }, { merge: true });
-
-        // Update corresponding field plot stage safely with conflict resolution
-        const incomingStage = payload.stage || payload.stageName;
-        if (incomingStage && payload.fieldId) {
-          const fieldRef = doc(db, 'fields', payload.fieldId);
-          try {
-            const currentSnap = await getDoc(fieldRef);
-            if (currentSnap.exists()) {
-              const currentData = currentSnap.data();
-              const conflict = resolveStageConflict(
-                currentData.stage,
-                incomingStage,
-                currentData.updatedAt,
-                payload.createdAt || item.enqueuedAt
-              );
-              if (conflict.resolution !== 'rejected_regression_preserved_advanced_stage') {
-                await setDoc(fieldRef, {
-                  stage: conflict.stage,
-                  stageNumber: getStageLevel(conflict.stage),
-                  lastSync: 'Just now',
-                  synced: true,
-                  updatedAt: new Date().toISOString()
-                }, { merge: true });
-              } else {
-                console.log(`[syncEngine] Preserved advanced stage ${currentData.stage} over regressive offline stage ${incomingStage} for ${payload.fieldId}`);
-              }
-            } else {
-              await setDoc(fieldRef, {
-                stage: incomingStage,
-                stageNumber: getStageLevel(incomingStage),
-                lastSync: 'Just now',
-                synced: true,
-                updatedAt: new Date().toISOString()
-              }, { merge: true });
-            }
-          } catch (stageErr) {
-            console.warn('[syncEngine] Field stage sync notice:', stageErr);
-          }
-        }
+        if (!payload.id || !payload.cycleId) throw new Error('Queued operation requires stable id and cycleId.');
+        const docRef = doc(db, COLLECTIONS.OPERATION_LOGS, payload.id);
+        const canonical = toOperationLogDocument(payload, {
+          cycleId: payload.cycleId,
+          submittedByUserId: payload.submittedByUserId || payload.loggedById,
+          status: payload.status || 'ACTIVE'
+        });
+        await setDoc(docRef, canonical);
         return true;
       } else if (type === 'ticket') {
-        const docRef = doc(db, 'support_tickets', payload.id);
-        await setDoc(docRef, { ...payload, synced: true, syncedAt: new Date().toISOString() }, { merge: true });
+        const docRef = doc(db, COLLECTIONS.SUPPORT_TICKETS, payload.id);
+        await setDoc(docRef, toSupportTicketDocument(payload, payload.createdByUserId || payload.memberId));
         return true;
       } else if (type === 'stage_update') {
-        const incomingStage = payload.stage || payload.stageName;
-        const fieldRef = doc(db, 'fields', payload.fieldId);
-        try {
-          const currentSnap = await getDoc(fieldRef);
-          if (currentSnap.exists()) {
-            const currentData = currentSnap.data();
-            const conflict = resolveStageConflict(
-              currentData.stage,
-              incomingStage,
-              currentData.updatedAt,
-              payload.createdAt || item.enqueuedAt
-            );
-            if (conflict.resolution !== 'rejected_regression_preserved_advanced_stage') {
-              await setDoc(fieldRef, {
-                stage: conflict.stage,
-                stageNumber: getStageLevel(conflict.stage),
-                lastSync: 'Just now',
-                synced: true,
-                updatedAt: new Date().toISOString()
-              }, { merge: true });
-            } else {
-              console.log(`[syncEngine] Preserved advanced stage ${currentData.stage} over regressive offline stage ${incomingStage} for ${payload.fieldId}`);
-            }
-          } else {
-            await setDoc(fieldRef, {
-              stage: incomingStage,
-              stageNumber: getStageLevel(incomingStage),
-              lastSync: 'Just now',
-              synced: true,
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-          }
-        } catch (stageErr) {
-          console.warn('[syncEngine] Stage update notice:', stageErr);
-        }
+        if (!payload.cycleId) throw new Error('Queued stage update requires cycleId.');
+        await setDoc(doc(db, COLLECTIONS.CROP_CYCLES, payload.cycleId), {
+          currentStageNumber: Number(payload.currentStageNumber || payload.stageNumber),
+          elapsedMonths: Number(payload.elapsedMonths || 0),
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
         return true;
       } else if (type === 'audit_log' || type === 'system_event') {
-        const docRef = doc(db, 'audit_logs', payload.id);
-        await setDoc(docRef, { ...payload, synced: true, syncedAt: new Date().toISOString() }, { merge: true });
+        const docRef = doc(db, COLLECTIONS.AUDIT_LOGS, payload.id);
+        const { id, ...event } = payload;
+        await setDoc(docRef, event);
         return true;
       }
       return true;

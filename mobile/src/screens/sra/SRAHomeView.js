@@ -1,7 +1,7 @@
 import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — SRA Administrator Home View Component
-// Role: SRA (Admin) · Silay Sugar Regulatory Administration
+// Role: SRA Admin · Silay Sugar Regulatory Administration
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
@@ -44,7 +44,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 
   const complianceRate = React.useMemo(() => {
     if (!auditReports || auditReports.length === 0) return 100;
-    const certified = auditReports.filter(a => a.status === 'Certified').length;
+    const certified = auditReports.filter(a => a.status === 'CERTIFIED').length;
     return Math.round((certified / auditReports.length) * 100);
   }, [auditReports]);
 

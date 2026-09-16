@@ -1,61 +1,53 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — SRA Sugar Price Management API
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
 const express = require('express');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
+const {
+  COLLECTIONS,
+  ROLES,
+  requiredString,
+  finiteNumber,
+  calendarDate,
+  nowIso
+} = require('../schema/firestoreSchema');
 
-// ── GET /api/prices ──────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
-    let prices = [];
-    if (db) {
-      const snap = await db.collection('sra_prices').get();
-      if (!snap.empty) {
-        snap.forEach(docSnap => prices.push({ id: docSnap.id, ...docSnap.data() }));
-      }
-    }
-    prices.sort((a, b) => (b.timestamp || new Date(b.date || 0).getTime()) - (a.timestamp || new Date(a.date || 0).getTime()));
-    return res.json({ success: true, count: prices.length, data: prices });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const snapshot = await db.collection(COLLECTIONS.SRA_PRICES).get();
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    return res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ── POST /api/prices (SRA Admin only) ────────────────────────
-router.post('/', requireAuth, requireRole(['sra (admin)', 'admin', 'super admin']), async (req, res) => {
-  const { price, change, molasses, molassesChange, week, month, date, source } = req.body;
-
-  if (!price) {
-    return res.status(400).json({ success: false, error: 'Price value is required.' });
-  }
-
-  const pricePayload = {
-    price: Number(price),
-    change: Number(change) || 0,
-    molasses: Number(molasses) || 4300,
-    molassesChange: Number(molassesChange) || 0,
-    week: week || 'Current Circular',
-    month: month || 'May',
-    date: date || new Date().toISOString().split('T')[0],
-    source: source || 'Official SRA Circular',
-    publishedBy: req.session.user ? req.session.user.name : 'SRA Administrator',
-    createdAt: new Date().toISOString(),
-    timestamp: Date.now()
-  };
-
+router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
-    const pId = `PRC-${Date.now()}`;
-    if (db) {
-      await db.collection('sra_prices').doc(pId).set({ ...pricePayload, id: pId });
-    }
-    console.log(`[HUGPONG Prices] SRA Price Published: ₱${price}/Lkg by ${pricePayload.publishedBy}`);
-    return res.json({ success: true, data: { id: pId, ...pricePayload } });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const publishedAt = nowIso();
+    const priceId = req.body.id || `PRC-${Date.now().toString(36).toUpperCase()}`;
+    const payload = {
+      effectiveDate: calendarDate(req.body.effectiveDate, 'effectiveDate'),
+      weekLabel: requiredString(req.body.weekLabel, 'weekLabel', { max: 100 }),
+      sugarPricePerLkg: finiteNumber(req.body.sugarPricePerLkg, 'sugarPricePerLkg'),
+      sugarPriceChange: finiteNumber(req.body.sugarPriceChange == null ? 0 : req.body.sugarPriceChange, 'sugarPriceChange', { min: -1000000, max: 1000000 }),
+      molassesPricePerMetricTon: finiteNumber(req.body.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
+      molassesPriceChange: finiteNumber(req.body.molassesPriceChange == null ? 0 : req.body.molassesPriceChange, 'molassesPriceChange', { min: -1000000, max: 1000000 }),
+      circularNumber: requiredString(req.body.circularNumber, 'circularNumber', { max: 120 }),
+      source: requiredString(req.body.source, 'source', { max: 300 }),
+      publishedByUserId: String(req.session.user.employeeId || req.session.user.userId || '').trim(),
+      publishedAt
+    };
+    await db.collection(COLLECTIONS.SRA_PRICES).doc(priceId).create(payload);
+    return res.status(201).json({ success: true, data: { id: priceId, ...payload } });
+  } catch (error) {
+    const status = /already exists/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ success: false, error: error.message });
   }
 });
 

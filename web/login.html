@@ -400,6 +400,7 @@
 
   <script src="shared/firebase-config.js?v=2.2"></script>
   <script type="module" src="shared/firebase-init.js?v=2.2"></script>
+  <script src="shared/firestore-schema.js?v=3.0"></script>
   <script src="shared/core.js?v=2.2"></script>
   <script>
     function toast(msg) {
@@ -494,7 +495,7 @@
       try {
         let authResult = null;
         const cleanContact = contactNum.replace(/\D/g, '');
-        const SERVER_URL = 'http://localhost:3000';
+        const SERVER_URL = '';
 
         // 1. Try Express Server Backend
         try {
@@ -509,60 +510,17 @@
             authResult = data;
           }
         } catch (serverErr) {
-          console.warn('[HUGPONG Auth] Server endpoint offline, checking database/registry directly...');
+          console.warn('[HUGPONG Auth] Authentication service unavailable.');
         }
 
-        // 2. If not returned from server, verify with Cloud Firestore or Local DB
         if (!authResult) {
-          let matched = null;
-          if (window.firebaseDB && window.firestore) {
-            try {
-              const { collection, getDocs } = window.firestore;
-              const snap = await getDocs(collection(window.firebaseDB, 'users'));
-              snap.forEach(docSnap => {
-                const u = docSnap.data();
-                const uContact = (u.contact || u.mobile || '').replace(/\D/g, '');
-                const uEmp = (u.employeeId || '').trim();
-                if (uContact === cleanContact || uEmp === cleanContact || docSnap.id === cleanContact || docSnap.id === contactNum) {
-                  matched = { id: docSnap.id, ...u };
-                }
-              });
-            } catch (dbErr) {
-              console.warn('[HUGPONG Auth] Firestore query note:', dbErr);
-            }
-          }
-
-          if (!matched && typeof getDB === 'function') {
-            const db = getDB();
-            matched = (db.users || []).find(u => {
-              const uEmp = (u.employeeId || '').trim();
-              const uCont = (u.contact || '').replace(/\D/g, '');
-              return (uEmp && (uEmp === contactNum || uEmp === cleanContact)) || (cleanContact && uCont === cleanContact);
-            });
-          }
-
-          if (!matched) {
-            throw new Error('Account not found. Please verify your User ID or mobile number, or contact your administrator.');
-          }
-
-          const storedHash = matched.passwordHash || '';
-          const storedPlain = matched.password || '';
-          const isValid = typeof verifyPassword === 'function' 
-            ? (verifyPassword(password, storedHash) || verifyPassword(password, storedPlain) || password === storedPlain || password === storedHash)
-            : (password === storedPlain || password === storedHash || password === 'password123' || password === 'hugpong2026');
-          if (!isValid) {
-            throw new Error('Invalid password. Please try again.');
-          }
-
-          const rKey = (matched.roleKey || matched.role || '').toLowerCase();
-          const roleKey = rKey.includes('super') ? 'superadmin' : (rKey.includes('manager') ? 'manager' : 'admin');
-          authResult = {
-            success: true,
-            roleKey: roleKey,
-            user: matched,
-            redirectUrl: roleKey === 'superadmin' ? 'roles/super-admin/dashboard.html' : (roleKey === 'manager' ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html')
-          };
+          throw new Error('Authentication service unavailable or credentials were rejected.');
         }
+
+        if (typeof window.signInHugpongWithCustomToken !== 'function' || !authResult.firebaseCustomToken) {
+          throw new Error('Firebase authentication is not ready. Please retry in a moment.');
+        }
+        await window.signInHugpongWithCustomToken(authResult.firebaseCustomToken);
 
         // Authentication successful
         failedAttempts = 0;
@@ -586,15 +544,13 @@
           localStorage.removeItem('hugpong_role');
           localStorage.removeItem('hugpong_auth_token');
           
-          openFirstLoginVerificationModal(authResult.user, authResult.redirectUrl);
+          openFirstLoginVerificationModal(authResult.user, authResult.redirectUrl, authResult.token);
           return;
         }
 
         // Check for required password change on first login
-        const isDefaultPasswordUsed = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
         const needsPasswordChange = authResult.user && (
-          (authResult.user.requiresPasswordChange === true && authResult.user.passwordChanged !== true) ||
-          isDefaultPasswordUsed
+          authResult.user.requiresPasswordChange === true && authResult.user.passwordChanged !== true
         );
 
         if (needsPasswordChange) {
@@ -606,13 +562,13 @@
           localStorage.removeItem('hugpong_role');
           localStorage.removeItem('hugpong_auth_token');
           
-          openFirstLoginChangePasswordModal(authResult.user, authResult.redirectUrl);
+          openFirstLoginChangePasswordModal(authResult.user, authResult.redirectUrl, authResult.token);
           return;
         }
 
         // Save persistent tokenized session ONLY after phone verification and password setup are guaranteed
         if (typeof saveWebAuthSession === 'function' && authResult.user) {
-          saveWebAuthSession(authResult.user, authResult.roleKey);
+          saveWebAuthSession(authResult.user, authResult.roleKey, authResult.token);
         } else {
           localStorage.setItem('hugpong_role', authResult.roleKey);
           if (authResult.user) {

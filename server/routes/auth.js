@@ -1,269 +1,342 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — Authentication Routes
-// Handles Login, Session Verification, and Logout
-// ══════════════════════════════════════════════════════════════
+'use strict';
 
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
-const { db, hasServiceAccount } = require('../firebase-admin');
+const { db, auth } = require('../firebase-admin');
+const { requireAuth } = require('../middleware/auth');
+const { issueToken } = require('../security/token');
+const { hashPassword, verifyPassword, validatePassword } = require('../security/password');
+const { publicUser } = require('../security/userProjection');
+const { buildFirebaseClaims } = require('../security/firebaseClaims');
+const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp } = require('../security/otp');
+const { sendSemaphoreSms } = require('../services/smsGateway');
+const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso } = require('../schema/firestoreSchema');
 
-const PASSWORD_SALT_PREFIX = 'hugpong_salt_2026:';
-
-function hashPassword(plain) {
-  if (!plain) return '';
-  return crypto.createHash('sha256').update(PASSWORD_SALT_PREFIX + String(plain)).digest('hex');
-}
-
-const DEFAULT_SEED_PASSWORD_HASH = hashPassword('password123'); // e6ae0a8605ad39ce73bcfe4eb671f4e7fd4d58ebfcc4a477adefea318db9b972
-const DEFAULT_MASTER_PASSWORD_HASH = hashPassword('hugpong2026'); // e92f049beccbfc47312b7662d4742dc3beeeff8edd4b74c94af0601ab6b5188d
-
-function verifyPassword(inputPassword, storedHash) {
-  if (!inputPassword) return false;
-  const inputHash = hashPassword(inputPassword);
-  if (storedHash && storedHash.length === 64 && inputHash === storedHash) return true;
-  if (storedHash && storedHash.length < 64 && inputPassword === storedHash) return true;
-  return false;
-}
-
-function normalizeContact(c) {
-  return (c || '').replace(/\D/g, '');
+function normalizeContact(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.startsWith('639') && digits.length === 12 ? `0${digits.slice(2)}` : digits;
 }
 
 function getRoleKey(role) {
-  const r = (role || '').toLowerCase();
-  if (r.includes('super')) return 'superadmin';
-  if (r.includes('manager')) return 'manager';
-  if (r.includes('sra') || r.includes('admin')) return 'admin';
+  const canonical = canonicalRole(role);
+  if (canonical === ROLES.SUPER_ADMIN) return 'superadmin';
+  if (canonical === ROLES.FARM_MANAGER) return 'manager';
+  if (canonical === ROLES.SRA_ADMIN) return 'admin';
   return 'member';
 }
 
-// ── POST /auth/login ─────────────────────────────────────────
+function createUserId(role) {
+  const prefixes = { [ROLES.SUPER_ADMIN]: '01', [ROLES.SRA_ADMIN]: '02', [ROLES.FARM_MANAGER]: '03', [ROLES.MEMBER_FARMER]: '04' };
+  return `${prefixes[role]}${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+async function resolveAssignments(userId, role) {
+  if (!db) return { blockFarmId: '', fieldId: '' };
+  if (role === ROLES.FARM_MANAGER) {
+    const farms = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', userId).limit(1).get();
+    return { blockFarmId: farms.empty ? '' : farms.docs[0].id, fieldId: '' };
+  }
+  if (role === ROLES.MEMBER_FARMER) {
+    const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).limit(1).get();
+    const field = fields.empty ? null : fields.docs[0];
+    return { blockFarmId: field ? field.data().blockFarmId : '', fieldId: field ? field.id : '' };
+  }
+  return { blockFarmId: '', fieldId: '' };
+}
+
+async function findUser(identifier) {
+  if (!db) return null;
+  const raw = String(identifier || '').trim();
+  const normalized = normalizeContact(raw);
+  if (/^0[1-4]\d{6}$/.test(raw)) {
+    const direct = await db.collection(COLLECTIONS.USERS).doc(raw).get();
+    if (direct.exists) return { id: direct.id, ...direct.data() };
+  }
+  if (normalized) {
+    const match = await db.collection(COLLECTIONS.USERS).where('phone', '==', normalized).limit(1).get();
+    if (!match.empty) return { id: match.docs[0].id, ...match.docs[0].data() };
+  }
+  return null;
+}
+
+async function buildSessionUser(userId, user) {
+  const role = canonicalRole(user.role);
+  if (!role) throw new Error('Account has an invalid role.');
+  const assignments = await resolveAssignments(userId, role);
+  const requiresPasswordChange = user.requiresPasswordChange === true;
+  return {
+    employeeId: userId,
+    contact: user.phone || '',
+    mobile: user.phone || '',
+    name: user.displayName || 'HUGPONG Operator',
+    role: publicRoleLabel(role),
+    canonicalRole: role,
+    roleKey: getRoleKey(role),
+    blockFarmId: assignments.blockFarmId,
+    fieldId: assignments.fieldId,
+    phoneVerified: Boolean(user.phoneVerifiedAt),
+    pendingFirstLoginVerification: !user.phoneVerifiedAt,
+    requiresPasswordChange,
+    passwordChanged: Boolean(user.passwordChangedAt) || !requiresPasswordChange,
+    authenticatedAt: nowIso()
+  };
+}
+
+async function issueCredentials(sessionUser) {
+  if (!auth) throw new Error('Firebase Authentication is unavailable.');
+  return {
+    token: issueToken(sessionUser, sessionUser.roleKey),
+    firebaseCustomToken: await auth.createCustomToken(sessionUser.employeeId, buildFirebaseClaims(sessionUser))
+  };
+}
+
+async function verifyCurrentPassword(userId, password) {
+  if (!db) return false;
+  const credential = await db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId).get();
+  return credential.exists && verifyPassword(password, credential.data().passwordHash);
+}
+
+async function sendVerificationCode(phone, code, displayName) {
+  const greeting = displayName ? `Hello ${displayName}, ` : '';
+  const result = await sendSemaphoreSms(
+    phone,
+    `[HUGPONG] ${greeting}Your security verification code is ${code}. Valid for 5 minutes. Do not share this code.`
+  );
+  if (!result.success) {
+    const error = new Error('SMS delivery failed.');
+    error.code = 'SMS_DELIVERY_FAILED';
+    throw error;
+  }
+}
+
 router.post('/login', async (req, res) => {
-  const { contactNumber, password } = req.body;
-  const cleanContact = normalizeContact(contactNumber);
-
-  if (!cleanContact || !password) {
-    return res.status(400).json({
-      success: false,
-      error: 'Contact number and password are required.'
-    });
+  const identifier = req.body?.contactNumber || req.body?.identifier;
+  const password = req.body?.password;
+  if (!String(identifier || '').trim() || !password) {
+    return res.status(400).json({ success: false, error: 'User ID or contact number and password are required.' });
   }
-
+  if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication service is unavailable.' });
   try {
-    let matchedUser = null;
-
-    // Query Cloud Firestore users collection exclusively
-    if (db) {
-      try {
-        const snapshot = await db.collection('users').get();
-        if (snapshot && !snapshot.empty) {
-          snapshot.forEach(docSnap => {
-            const u = docSnap.data();
-            const uContact = normalizeContact(u.contact || u.mobile);
-            const uEmployeeId = (u.employeeId || '').trim();
-            if (uContact === cleanContact || uEmployeeId === cleanContact || docSnap.id === cleanContact) {
-              matchedUser = { ...u, id: docSnap.id };
-            }
-          });
-        }
-      } catch (dbErr) {
-        console.warn('[HUGPONG Auth] Firestore query error:', dbErr.message);
-      }
+    const matchedUser = await findUser(identifier);
+    if (!matchedUser) return res.status(401).json({ success: false, error: 'Invalid credentials.' });
+    if (matchedUser.status !== 'ACTIVE') return res.status(403).json({ success: false, error: 'This account is not active.' });
+    if (!(await verifyCurrentPassword(matchedUser.id, password))) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials.' });
     }
-
-    // Fallback to canonical registry if database query yielded no match
-    if (!matchedUser) {
-      const canonical = [
-        { employeeId: '01000001', contact: '09451774699', mobile: '09451774699', name: 'Matt Daniel Delotavo', role: 'Super Admin', roleKey: 'superadmin', blockFarmId: '', fieldId: '', passwordHash: '482804ea7508bbdbaac3a5e18b30c7659ac3a67f9773e7029e6ed17d71356283', password: 'Admin@HUGPONG' },
-        { employeeId: '02000001', contact: '09181234567', mobile: '09181234567', name: 'Engr. Maria Santos', role: 'SRA (Admin)', roleKey: 'admin', blockFarmId: '', fieldId: '', passwordHash: DEFAULT_SEED_PASSWORD_HASH, password: 'password123' },
-        { employeeId: '03000001', contact: '09171234567', mobile: '09171234567', name: 'Jose Reyes', role: 'Farm Manager', roleKey: 'manager', blockFarmId: 'BLK-NCY-01', blockFarm: 'Nacayao Block Farm', fieldId: '', passwordHash: DEFAULT_SEED_PASSWORD_HASH, password: 'password123' }
-      ];
-      matchedUser = canonical.find(u => normalizeContact(u.contact) === cleanContact || u.employeeId === cleanContact);
-    }
-
-    if (!matchedUser) {
-      return res.status(401).json({
-        success: false,
-        error: 'Account not found. Please verify your contact number or register with your cooperative administrator.'
-      });
-    }
-
-    // Validate credentials using cryptographic hashing
-    const storedSecret = matchedUser.passwordHash || matchedUser.password || '';
-    const isPasswordValid = verifyPassword(password, storedSecret) || password === 'hugpong2026' || password === 'password123' || password === 'Admin@HUGPONG';
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid password. Please try again.'
-      });
-    }
-
-    const roleKey = getRoleKey(matchedUser.roleKey || matchedUser.role);
-
-    const isVerified = matchedUser.phoneVerified === true;
-    const isPendingFirstLogin = matchedUser.pendingFirstLoginVerification === true || !isVerified;
-    const isDefaultPasswordUsed = password === 'hugpong2026' || password === 'hugpong' || password === 'password123';
-    const isRequiresPasswordChange = (matchedUser.requiresPasswordChange === true && matchedUser.passwordChanged !== true) || isDefaultPasswordUsed;
-    const isPasswordChanged = matchedUser.passwordChanged === true || !isRequiresPasswordChange;
-
-    // Establish server-side session with actual registered mobile contact
-    const registeredPhone = matchedUser.contact || matchedUser.mobile || (cleanContact.startsWith('09') ? cleanContact : '');
-    const userEmployeeId = matchedUser.employeeId || (cleanContact.length === 8 ? cleanContact : '04000001');
-
-    req.session.user = {
-      employeeId: userEmployeeId,
-      contact: registeredPhone,
-      mobile: registeredPhone,
-      name: matchedUser.name || 'HUGPONG Operator',
-      role: matchedUser.role || 'Member',
-      roleKey: roleKey,
-      blockFarmId: matchedUser.blockFarmId || '',
-      blockFarm: matchedUser.blockFarm || '',
-      fieldId: matchedUser.fieldId || '',
-      phoneVerified: isVerified,
-      pendingFirstLoginVerification: isPendingFirstLogin,
-      requiresPasswordChange: isRequiresPasswordChange,
-      passwordChanged: isPasswordChanged,
-      authenticatedAt: new Date().toISOString()
-    };
-
-    console.log(`[HUGPONG Auth] User authenticated: ${req.session.user.name} (${req.session.user.role})`);
-
-    // Generate Bearer token
-    const now = Date.now();
-    const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
-    const payload = {
-      uid: req.session.user.employeeId,
-      role: roleKey,
-      name: req.session.user.name,
-      issuedAt: now,
-      expiresAt
-    };
-    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
-    const signature = crypto.createHash('sha256').update(`${payload.uid}:${roleKey}:${expiresAt}:HUGPONG_WEB_SEC_2026`).digest('hex').slice(0, 16);
-    const token = `HUGPONG.${payloadB64}.${signature}`;
-
+    const sessionUser = await buildSessionUser(matchedUser.id, matchedUser);
+    req.session.user = sessionUser;
+    const credentials = await issueCredentials(sessionUser);
     return res.json({
       success: true,
-      user: req.session.user,
-      token: token,
-      roleKey: roleKey,
-      redirectUrl: (roleKey === 'superadmin' || roleKey === 'super_admin') 
-        ? 'roles/super-admin/dashboard.html' 
-        : ((roleKey === 'manager' || roleKey === 'farm_manager' || roleKey.includes('manager')) ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html')
+      user: sessionUser,
+      roleKey: sessionUser.roleKey,
+      ...credentials,
+      redirectUrl: sessionUser.roleKey === 'superadmin'
+        ? 'roles/super-admin/dashboard.html'
+        : (sessionUser.roleKey === 'manager' ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html')
     });
-  } catch (err) {
-    console.error('[HUGPONG Auth] Login error:', err);
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error during authentication.'
-    });
+  } catch (error) {
+    console.error('[HUGPONG Auth] Login error:', error);
+    return res.status(500).json({ success: false, error: 'Authentication could not be completed.' });
   }
 });
 
-// ── POST /auth/verify-phone ──────────────────────────────────
-router.post('/verify-phone', async (req, res) => {
-  const { employeeId, contact } = req.body || {};
-  const cleanPhone = (contact || '').replace(/\D/g, '');
-
-  if (req.session && req.session.user) {
-    req.session.user.phoneVerified = true;
-    req.session.user.pendingFirstLoginVerification = false;
-    req.session.user.phoneVerifiedAt = new Date().toISOString();
-    if (cleanPhone) {
-      req.session.user.contact = cleanPhone;
-      req.session.user.mobile = cleanPhone;
-    }
-  }
-
-  // Update Firestore if available
-  if (db && (employeeId || cleanPhone)) {
+router.post('/registration-otp/request', async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  const phone = normalizeContact(req.body?.phone);
+  if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
+  try {
+    const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+    if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
+    const challenge = issueOtp('registration', phone, phone);
     try {
-      const targetId = employeeId || cleanPhone;
-      await db.collection('users').doc(targetId).set({
-        phoneVerified: true,
-        pendingFirstLoginVerification: false,
-        phoneVerifiedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (e) {
-      console.warn('[HUGPONG Auth] Error updating phoneVerified in Firestore:', e.message);
+      await sendVerificationCode(phone, challenge.code, String(req.body?.displayName || '').trim());
+    } catch (error) {
+      discardOtp('registration', phone);
+      throw error;
     }
+    return res.json({ success: true, expiresAt: challenge.expiresAt, message: 'Verification code sent.' });
+  } catch (error) {
+    const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
+    return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
   }
-
-  return res.json({
-    success: true,
-    message: 'Phone verified successfully in server session.',
-    user: req.session ? req.session.user : null
-  });
 });
 
-// ── POST /auth/change-password ──────────────────────────────
-router.post('/change-password', async (req, res) => {
-  const { employeeId, newPassword, newPasswordHash } = req.body || {};
-  const hash = newPasswordHash || (newPassword ? hashPassword(newPassword) : '');
-
-  if (!hash) {
-    return res.status(400).json({ success: false, error: 'New password is required.' });
+router.post('/registration-otp/verify', async (req, res) => {
+  const phone = normalizeContact(req.body?.phone);
+  const code = String(req.body?.code || '').trim();
+  if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'A valid mobile number and 6-digit code are required.' });
   }
-
-  if (req.session && req.session.user) {
-    req.session.user.requiresPasswordChange = false;
-    req.session.user.passwordChanged = true;
-    req.session.user.passwordChangedAt = new Date().toISOString();
-  }
-
-  // Update in Firestore
-  if (db && employeeId) {
-    try {
-      await db.collection('users').doc(employeeId).set({
-        passwordHash: hash,
-        password: '', // clear plain password
-        requiresPasswordChange: false,
-        passwordChanged: true,
-        passwordChangedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (e) {
-      console.warn('[HUGPONG Auth] Error updating password in Firestore:', e.message);
-    }
-  }
-
-  return res.json({
-    success: true,
-    message: 'Password updated successfully.',
-    user: req.session ? req.session.user : null
-  });
+  const result = verifyOtp('registration', phone, phone, code);
+  if (!result.success) return res.status(400).json(result);
+  return res.json({ success: true, verified: true });
 });
 
-// ── GET /auth/session ────────────────────────────────────────
-router.get('/session', (req, res) => {
-  if (req.session && req.session.user) {
-    return res.json({
-      success: true,
-      authenticated: true,
-      user: req.session.user
+router.post('/register', async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  try {
+    const role = canonicalRole(req.body?.role || ROLES.MEMBER_FARMER);
+    if (role !== ROLES.MEMBER_FARMER) {
+      return res.status(403).json({ success: false, error: 'Self-registration is limited to Member Farmer accounts.' });
+    }
+    const displayName = String(req.body?.displayName || '').trim();
+    const phone = normalizeContact(req.body?.phone);
+    const password = req.body?.password;
+    const blockFarmId = String(req.body?.blockFarmId || '').trim().toUpperCase();
+    if (!displayName || displayName.length > 200) throw new Error('A valid display name is required.');
+    if (!/^09\d{9}$/.test(phone)) throw new Error('A valid Philippine mobile number is required.');
+    validatePassword(password);
+    if (blockFarmId) {
+      const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
+      if (!farm.exists) throw new Error('The selected block farm does not exist.');
+    }
+    const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+    if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
+    if (!consumeVerifiedOtp('registration', phone, phone)) {
+      return res.status(403).json({ success: false, error: 'Server-verified phone confirmation is required before registration.' });
+    }
+    const userId = createUserId(role);
+    const now = nowIso();
+    const user = {
+      displayName,
+      phone,
+      role,
+      status: 'PENDING',
+      requestedBlockFarmId: blockFarmId || null,
+      phoneVerifiedAt: now,
+      requiresPasswordChange: false,
+      passwordChangedAt: now,
+      approvedByUserId: null,
+      approvedAt: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    const batch = db.batch();
+    batch.create(db.collection(COLLECTIONS.USERS).doc(userId), user);
+    batch.create(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), {
+      passwordHash: await hashPassword(password),
+      createdAt: now,
+      updatedAt: now
     });
+    await batch.commit();
+    return res.status(201).json({ success: true, pendingApproval: true, user: publicUser(user, userId) });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
-  return res.json({
-    success: false,
-    authenticated: false,
-    user: null
-  });
 });
 
-// ── POST /auth/logout ────────────────────────────────────────
+router.post('/request-phone-verification', requireAuth, async (req, res) => {
+  const employeeId = req.session.user.employeeId;
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  try {
+    const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
+    const user = snapshot.data();
+    const phone = normalizeContact(user.phone);
+    if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'The account does not have a valid mobile number.' });
+    const challenge = issueOtp('first-login', employeeId, phone);
+    try {
+      await sendVerificationCode(phone, challenge.code, user.displayName);
+    } catch (error) {
+      discardOtp('first-login', employeeId);
+      throw error;
+    }
+    return res.json({ success: true, expiresAt: challenge.expiresAt, message: 'Verification code sent.' });
+  } catch (error) {
+    const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
+    return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
+  }
+});
+
+router.post('/verify-phone', requireAuth, async (req, res) => {
+  const employeeId = req.session.user.employeeId;
+  const code = String(req.body?.code || '').trim();
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ success: false, error: 'A valid 6-digit verification code is required.' });
+  try {
+    const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
+    const phone = normalizeContact(snapshot.data().phone);
+    const verification = verifyAndConsumeOtp('first-login', employeeId, phone, code);
+    if (!verification.success) return res.status(403).json(verification);
+    const phoneVerifiedAt = nowIso();
+    await snapshot.ref.update({ phoneVerifiedAt, updatedAt: phoneVerifiedAt });
+    Object.assign(req.session.user, { phoneVerified: true, pendingFirstLoginVerification: false, phoneVerifiedAt });
+    return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: 'Phone verification could not be saved.' });
+  }
+});
+
+router.post('/verify-password', requireAuth, async (req, res) => {
+  const valid = await verifyCurrentPassword(req.session.user.employeeId, req.body?.password);
+  if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.' });
+  return res.json({ success: true, verified: true });
+});
+
+router.post('/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const employeeId = req.session.user.employeeId;
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  try {
+    validatePassword(newPassword);
+    if (req.session.user.requiresPasswordChange !== true && !(await verifyCurrentPassword(employeeId, currentPassword))) {
+      return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+    }
+    const now = nowIso();
+    const batch = db.batch();
+    batch.set(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(employeeId), { passwordHash: await hashPassword(newPassword), updatedAt: now }, { merge: true });
+    batch.update(db.collection(COLLECTIONS.USERS).doc(employeeId), { requiresPasswordChange: false, passwordChangedAt: now, updatedAt: now });
+    await batch.commit();
+    Object.assign(req.session.user, { requiresPasswordChange: false, passwordChanged: true, passwordChangedAt: now });
+    return res.json({ success: true, message: 'Password updated successfully.', user: req.session.user, ...(await issueCredentials(req.session.user)) });
+  } catch (error) {
+    const status = /between 8 and 256/.test(error.message) ? 400 : 500;
+    return res.status(status).json({ success: false, error: status === 400 ? error.message : 'Password update could not be saved.' });
+  }
+});
+
+router.post('/change-phone', requireAuth, async (req, res) => {
+  const employeeId = req.session.user.employeeId;
+  const phone = normalizeContact(req.body?.phone);
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
+  if (!(await verifyCurrentPassword(employeeId, req.body?.currentPassword))) {
+    return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+  }
+  const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+  if (!duplicate.empty && duplicate.docs[0].id !== employeeId) {
+    return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
+  }
+  const now = nowIso();
+  await db.collection(COLLECTIONS.USERS).doc(employeeId).update({ phone, phoneVerifiedAt: null, updatedAt: now });
+  Object.assign(req.session.user, { contact: phone, mobile: phone, phoneVerified: false, pendingFirstLoginVerification: true });
+  return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
+});
+
+router.get('/session', requireAuth, async (req, res) => {
+  try {
+    const snapshot = await db.collection(COLLECTIONS.USERS).doc(req.session.user.employeeId).get();
+    if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
+      return res.status(401).json({ success: false, authenticated: false, error: 'The account is no longer active.' });
+    }
+    const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
+    req.session.user = sessionUser;
+    return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
+  } catch (error) {
+    return res.status(503).json({ success: false, authenticated: false, error: 'Firebase authentication is unavailable.' });
+  }
+});
+
 router.post('/logout', (req, res) => {
-  if (req.session) {
-    req.session.destroy(err => {
-      if (err) {
-        return res.status(500).json({ success: false, error: 'Could not log out.' });
-      }
-      res.clearCookie('hugpong.sid');
-      return res.json({ success: true, message: 'Logged out successfully.' });
-    });
-  } else {
-    return res.json({ success: true, message: 'No active session.' });
-  }
+  if (!req.session || typeof req.session.destroy !== 'function') return res.json({ success: true, message: 'Signed out locally.' });
+  req.session.destroy(error => {
+    if (error) return res.status(500).json({ success: false, error: 'Could not log out.' });
+    res.clearCookie('hugpong.sid');
+    return res.json({ success: true, message: 'Logged out successfully.' });
+  });
 });
 
 module.exports = router;
+module.exports._test = { normalizeContact, getRoleKey };

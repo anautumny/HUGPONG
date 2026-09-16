@@ -140,7 +140,7 @@ export default function SecurityScreen({ navigation }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.userName}>{session?.name || 'HUGPONG User'}</Text>
-              <Text style={s.userRole}>{session?.role || 'Member'} · {session?.farm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
+              <Text style={s.userRole}>{session?.role || 'Member Farmer'} · {session?.farm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
             </View>
           </View>
 

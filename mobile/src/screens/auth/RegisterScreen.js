@@ -8,14 +8,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { registerUser, blockFarms } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
-import { sendFirebasePhoneSMS, formatToE164 } from '../../services/smsService';
+import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
+import { formatToE164 } from '../../services/smsService';
 
-const ROLES = ['Member', 'Farm Manager', 'SRA (Admin)'];
+const ROLES = ['Member Farmer', 'Farm Manager', 'SRA Admin'];
 
 const ROLE_DESCRIPTIONS = {
-  'Member': 'Logs weekly/monthly field operations',
+  'Member Farmer': 'Logs weekly/monthly field operations',
   'Farm Manager': 'Reviews logs & compiles SRA reports',
-  'SRA (Admin)': 'Scans QR & audits monthly reports',
+  'SRA Admin': 'Scans QR & audits monthly reports',
 };
 
 const getAvailableBlockFarms = () => {
@@ -84,7 +85,7 @@ export default function RegisterScreen({ navigation }) {
     firstName: '',
     middleInitial: '',
     lastName: '',
-    role: 'Member',
+    role: 'Member Farmer',
     blockFarm: '',
     contactNumber: '',
     password: '', 
@@ -97,7 +98,6 @@ export default function RegisterScreen({ navigation }) {
   const [codeSent, setCodeSent] = useState(false);
   const [codeVerified, setCodeVerified] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
-  const [expectedCode, setExpectedCode] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
@@ -154,19 +154,18 @@ export default function RegisterScreen({ navigation }) {
     }
 
     const formatted = formatToE164(raw);
-    const randomOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    setExpectedCode(randomOtp);
-    setCodeSent(true);
     setVerificationCode('');
-    setCountdown(60);
     setErrors(p => ({ ...p, contactNumber: null, verificationCode: null }));
     setLoading(true);
 
     try {
-      const smsResult = await sendFirebasePhoneSMS(raw, randomOtp, form.firstName);
+      const displayName = `${form.firstName} ${form.lastName}`.trim();
+      const smsResult = await requestRegistrationOtp(raw, displayName);
       setLoading(false);
 
       if (smsResult.success) {
+        setCodeSent(true);
+        setCountdown(60);
         Alert.alert(
           '📱 SMS Code Dispatched',
           `A 6-digit one-time SMS verification code has been dispatched to ${formatted}.\n\nPlease enter your code below to verify your mobile number.`,
@@ -177,20 +176,27 @@ export default function RegisterScreen({ navigation }) {
       }
     } catch (err) {
       setLoading(false);
-      Alert.alert('Verification Code', `Your code is: ${randomOtp}`);
+      Alert.alert('SMS Unavailable', 'The verification service is unavailable. No code was issued.');
     }
   };
 
-  const handleVerifyCode = () => {
+  const handleVerifyCode = async () => {
     const entered = verificationCode.trim();
     if (!entered || entered.length !== 6 || !/^\d{6}$/.test(entered)) {
       setErrors(p => ({ ...p, verificationCode: t('reg_enter_code_label', 'Please enter the complete 6-digit verification code.') }));
       return;
     }
-
-    setCodeVerified(true);
-    setErrors(p => ({ ...p, verificationCode: null }));
-    setStep(4);
+    setLoading(true);
+    try {
+      await verifyRegistrationOtp(form.contactNumber, entered);
+      setCodeVerified(true);
+      setErrors(p => ({ ...p, verificationCode: null }));
+      setStep(4);
+    } catch (error) {
+      setErrors(p => ({ ...p, verificationCode: error.message || 'The verification code is incorrect or expired.' }));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const validateStep = () => {
@@ -244,7 +250,9 @@ export default function RegisterScreen({ navigation }) {
     try {
       const res = await registerUser(form);
       setLoading(false);
-      if (res && res.user) {
+      if (!res?.success) {
+        Alert.alert('Registration Error', res?.error || 'The account could not be created.');
+      } else if (res.user) {
         setRegisteredAccount(res.user);
         setShowSuccessModal(true);
       } else {
@@ -584,15 +592,15 @@ export default function RegisterScreen({ navigation }) {
               <Ionicons name="checkmark-circle" size={46} color={COLORS.primary} />
             </View>
 
-            <Text style={s.successTitle}>Registration Successful!</Text>
+            <Text style={s.successTitle}>Registration Submitted</Text>
             <Text style={s.successSub}>
-              Welcome to HUGPONG, <Text style={{ fontWeight: '700', color: COLORS.text }}>{registeredAccount?.name || `${form.firstName} ${form.lastName}`}</Text>
+              Your Member Farmer account is pending approval. You can sign in after an authorized Farm Manager or administrator activates it.
             </Text>
 
             {/* Permanent User ID Display */}
             <View style={s.credIdBox}>
               <Text style={s.credIdLabel}>OFFICIAL PERMANENT USER ID</Text>
-              <Text selectable style={s.credIdVal}>{registeredAccount?.employeeId || '04000006'}</Text>
+              <Text selectable style={s.credIdVal}>{registeredAccount?.employeeId || 'Pending'}</Text>
               <Text style={s.credIdSub}>Immutable 8-digit Login Credential</Text>
             </View>
 
@@ -621,7 +629,7 @@ export default function RegisterScreen({ navigation }) {
               <TouchableOpacity
                 style={s.shareCredBtn}
                 onPress={async () => {
-                  const id = registeredAccount?.employeeId || '04000006';
+                  const id = registeredAccount?.employeeId || 'Pending';
                   try {
                     await Share.share({
                       message: `HUGPONG Farmer Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
@@ -641,11 +649,11 @@ export default function RegisterScreen({ navigation }) {
                 style={s.proceedBtn}
                 onPress={() => {
                   setShowSuccessModal(false);
-                  navigation.replace('MainTabs');
+                  navigation.replace('Login');
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={s.proceedBtnText}>Go to Dashboard</Text>
+                <Text style={s.proceedBtnText}>Return to Sign In</Text>
                 <Ionicons name="arrow-forward" size={16} color="#fff" />
               </TouchableOpacity>
             </View>

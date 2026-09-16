@@ -30,6 +30,12 @@ export default function ProfileScreen({ navigation }) {
   const [ticketForm, setTicketForm] = useState({ title: '', category: 'Offline Sync', priority: 'Normal', details: '' });
   const [ticketsList, setTicketsList] = useState(supportTickets);
 
+  const sessionUserId = session?.id || session?.employeeId || '';
+  const memberFields = fields.filter(field => field.memberUserId === sessionUserId);
+  const managedFarm = blockFarms.find(farm => farm.managerUserId === sessionUserId);
+  const memberFarm = blockFarms.find(farm => farm.id === memberFields[0]?.blockFarmId);
+  const assignedFarm = session?.role === 'Farm Manager' ? managedFarm : memberFarm;
+
   useEffect(() => {
     const unsubscribeSession = subscribe(() => {
       const sess = getCurrentSession();
@@ -190,7 +196,7 @@ export default function ProfileScreen({ navigation }) {
             <Text style={s.identityName}>{session?.name || 'User'}</Text>
             <View style={s.roleBadge}>
               <Text style={s.roleText}>
-                {session?.role === 'Member' ? t('role_member', 'Sugarcane Block Farm Member') : (session?.role === 'Farm Manager' ? t('role_manager', 'Block Farm Manager') : t('role_sra', 'SRA Administrator'))}
+                {session?.role === 'Member Farmer' ? t('role_member', 'Sugarcane Block Farm Member') : (session?.role === 'Farm Manager' ? t('role_manager', 'Block Farm Manager') : t('role_sra', 'SRA Administrator'))}
               </Text>
             </View>
             <Text style={s.identityId}>ID: {session?.employeeId || session?.contact || '—'}</Text>
@@ -200,42 +206,37 @@ export default function ProfileScreen({ navigation }) {
         {/* ── Operational Assignment ── */}
         <View style={s.card}>
           <Text style={s.cardTitle}>
-            {session?.role === 'SRA (Admin)' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Operational Assignment')}
+            {session?.role === 'SRA Admin' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Operational Assignment')}
           </Text>
           {[
             { 
               key: 'farm_agency',
               icon: 'business', 
-              label: session?.role === 'SRA (Admin)' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm Location')), 
-              value: session?.role === 'SRA (Admin)' ? 'Sugar Regulatory Administration (SRA)' : (session?.farm || (session?.farm || session?.blockFarm || 'District Central'))
+              label: session?.role === 'SRA Admin' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm Location')),
+              value: session?.role === 'SRA Admin' ? 'Sugar Regulatory Administration (SRA)' : (assignedFarm?.name || 'Unassigned')
             },
             { 
               key: 'field_scope',
               icon: 'map', 
-              label: session?.role === 'SRA (Admin)' 
+              label: session?.role === 'SRA Admin'
                 ? t('profile_admin_jurisdiction', 'Jurisdiction') 
                 : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
               value: (() => {
-                if (session?.role === 'SRA (Admin)') {
-                  const districtName = session?.district || 'District 3';
-                  const loc = session?.location || (blockFarms.length > 0 && blockFarms[0]?.location ? blockFarms[0].location : 'Silay City, Negros Occidental');
+                if (session?.role === 'SRA Admin') {
+                  const districtName = session?.district || 'District not assigned';
+                  const loc = session?.location || 'Location not assigned';
                   return `${districtName} · ${loc}`;
                 }
                 if (session?.role === 'Farm Manager') {
-                  const totalPlots = fields.length;
-                  const totalHa = fields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
-                  return `${session?.farm || (session?.farm || session?.blockFarm || 'District Central')} (${totalPlots} Plots · ${totalHa.toFixed(1)} Ha)`;
+                  const managedFields = fields.filter(field => field.blockFarmId === managedFarm?.id);
+                  const totalHa = managedFields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
+                  return `${managedFarm?.name || 'Unassigned'} (${managedFields.length} Plots · ${totalHa.toFixed(1)} Ha)`;
                 }
                 // Member Role: Show assigned plots
-                const memberPlots = fields.filter(f => 
-                  f.member === session?.name || 
-                  f.memberId === session?.employeeId || 
-                  f.id === session?.fieldId
-                );
-                if (memberPlots.length > 0) {
-                  return memberPlots.map(f => `${f.id} (${f.ha} Ha)`).join(', ');
+                if (memberFields.length > 0) {
+                  return memberFields.map(f => `${f.id} (${f.ha} Ha)`).join(', ');
                 }
-                return session.fieldId ? `${session.fieldId}` : 'No Plot Assigned';
+                return 'No Plot Assigned';
               })()
             },
             { key: 'mobile_contact', icon: 'call', label: t('profile_mobile_contact', 'Mobile Contact'), value: session.mobile || session.contact || '—' },
@@ -249,7 +250,7 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         {/* ── SRA Regulatory Status (SRA Admin only) ── */}
-        {session?.role === 'SRA (Admin)' && (
+        {session?.role === 'SRA Admin' && (
           <View style={s.card}>
             <View style={s.syncHeader}>
               <Text style={s.cardTitle}>{t('profile_sra_status', 'SRA Regulatory System Status')}</Text>
@@ -261,8 +262,8 @@ export default function ProfileScreen({ navigation }) {
               <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_district_cert', 'District Certification:')}</Text>
               <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.success }}>
                 {(() => {
-                  const district = session?.district || (blockFarms.length > 0 && blockFarms[0]?.location ? blockFarms[0].location.split(',')[0] : 'Silay District 3');
-                  const certCount = (auditReports || []).filter(a => a.status === 'Certified').length;
+                  const district = session?.district || 'District not assigned';
+                  const certCount = (auditReports || []).filter(a => a.status === 'CERTIFIED').length;
                   const totalAudits = (auditReports || []).length;
                   const totalHa = (fields || []).reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
                   if (totalAudits > 0) {
@@ -312,7 +313,7 @@ export default function ProfileScreen({ navigation }) {
         )}
 
         {/* ── Auto Sync Option (Field Roles only: Member & Farm Manager) ── */}
-        {(session?.role === 'Member' || session?.role === 'Farm Manager') && (
+        {(session?.role === 'Member Farmer' || session?.role === 'Farm Manager') && (
           <View style={s.card}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
@@ -368,7 +369,7 @@ export default function ProfileScreen({ navigation }) {
               label: t('profile_sync_monitor', 'Member Sync Telemetry Monitor'), 
               color: COLORS.blue, 
               onPress: () => navigation.navigate('SyncMonitor') 
-            }] : (session?.role === 'Member' ? [{
+            }] : (session?.role === 'Member Farmer' ? [{
               icon: 'cloud-upload-outline', 
               label: t('action_sync_hub', 'Sync Status & Diagnostics'), 
               color: COLORS.blue, 

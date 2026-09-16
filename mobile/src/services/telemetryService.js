@@ -12,13 +12,13 @@ export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
 
   try {
     const cleanContact = (session.contact || '').replace(/\D/g, '');
-    const userRole = session.role || 'Member';
+    const userRole = session.role || 'Member Farmer';
     
     // Generate deterministic device ID based on user contact or role
     const deviceSuffix = cleanContact ? cleanContact.slice(-4) : (session.employeeId ? session.employeeId.slice(-4) : '01');
     const deviceId = session.deviceId || (
       userRole === 'Farm Manager' ? `SM-S23U-${deviceSuffix}` :
-      (userRole === 'SRA (Admin)' ? `SM-TAB9-${deviceSuffix}` :
+      (userRole === 'SRA Admin' ? `SM-TAB9-${deviceSuffix}` :
       (userRole === 'Super Admin' ? `SM-N20U-${deviceSuffix}` : `SM-A146P-${deviceSuffix}`))
     );
 
@@ -30,7 +30,7 @@ export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
     
     const hardwareModel = (Platform.constants && Platform.constants.Model) 
       ? Platform.constants.Model 
-      : (userRole === 'Farm Manager' ? 'Samsung Galaxy S23' : (userRole === 'SRA (Admin)' ? 'Samsung Galaxy Tab S9' : 'Samsung Galaxy A14'));
+      : (userRole === 'Farm Manager' ? 'Samsung Galaxy S23' : (userRole === 'SRA Admin' ? 'Samsung Galaxy Tab S9' : 'Samsung Galaxy A14'));
 
     // Estimated battery level
     const batteryLevel = session.battery || '88%';

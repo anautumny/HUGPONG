@@ -80,7 +80,7 @@ function ProfileNavigator() {
 }
 
 function MainTabs() {
-  const [role, setRole] = React.useState(getCurrentSession()?.role || 'Member');
+  const [role, setRole] = React.useState(getCurrentSession()?.role || 'Member Farmer');
   const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -88,7 +88,7 @@ function MainTabs() {
 
   React.useEffect(() => {
     const unsubSession = subscribe(() => {
-      setRole(getCurrentSession()?.role || 'Member');
+      setRole(getCurrentSession()?.role || 'Member Farmer');
     });
     const unsubNet = subscribeToNetwork((online) => {
       setIsOnline(online);
@@ -140,7 +140,7 @@ function MainTabs() {
   }), [bottomInset]);
 
   // Strict Offline Barrier for SRA Admin & Super Admin to protect audit integrity
-  if (!isOnline && (role === 'SRA (Admin)' || role === 'Super Admin')) {
+  if (!isOnline && (role === 'SRA Admin' || role === 'Super Admin')) {
     return (
       <AdminOfflineBarrier
         session={getCurrentSession()}
@@ -152,7 +152,7 @@ function MainTabs() {
   return (
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={HomeNavigator} />
-      {role !== 'SRA (Admin)' && (
+      {role !== 'SRA Admin' && (
         <Tab.Screen name="Planner" component={CalcNavigator} />
       )}
       <Tab.Screen name="Field Ops" component={SchedNavigator} />

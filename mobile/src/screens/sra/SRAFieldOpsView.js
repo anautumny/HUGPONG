@@ -1,7 +1,7 @@
 import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — SRA Administrator Field Operations View Component
-// Role: SRA (Admin) · Silay Sugar Regulatory Administration
+// Role: SRA Admin · Silay Sugar Regulatory Administration
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';

@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
+import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { getOutboxCount } from '../services/syncEngine';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
@@ -32,32 +32,25 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   const allLogs = customLogs || operationLogs || [];
   const allDrafts = customDrafts || draftLogs || [];
 
-  const userRole = session?.role || 'Member';
-  const managerBlockFarm = (session?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')).toLowerCase();
-  
-  // Resolve fields belonging to this manager's block farm
-  const managerFieldIds = fields.filter(f => {
-    const fFarm = (f.blockFarm || (session?.farm || session?.blockFarm || 'District Central')).toLowerCase();
-    return fFarm.includes(managerBlockFarm) || managerBlockFarm.includes(fFarm);
-  }).map(f => f.id);
+  const userRole = session?.role || 'Member Farmer';
+  const userId = session?.employeeId || session?.id || '';
+  const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
+  const managerFieldIds = fields.filter(field => managedFarmIds.has(field.blockFarmId)).map(field => field.id);
 
   // 1. Offline Logs Alert (Pending Cloud Sync - Scoped by Role, strictly excluding past cycle/archived)
   let scopedLogs = allLogs.filter(l => {
     if (!l) return false;
-    if (l.isPastCycle === true || l.isPastCycle === 'true') return false;
-    if (l.isArchived === true || l.isDeleted === true || l.isDraft === true) return false;
-    if (typeof l.id === 'string' && (l.id.startsWith('PAST-') || l.id.startsWith('DFT-'))) return false;
-    return true;
+    return l.status === 'ACTIVE' && l.isDraft !== true;
   });
 
-  if (userRole === 'Member') {
-    const userFieldId = session?.fieldId || (fields[0]?.id || '');
-    scopedLogs = scopedLogs.filter(l => l.fieldId === userFieldId || l.authorName === session?.name || (l.loggedBy && l.loggedBy.includes(session?.name)));
+  if (userRole === 'Member Farmer') {
+    const memberFieldIds = new Set(fields.filter(field => field.memberUserId === userId).map(field => field.id));
+    scopedLogs = scopedLogs.filter(log => memberFieldIds.has(log.fieldId));
   } else if (userRole === 'Farm Manager') {
-    scopedLogs = scopedLogs.filter(l => managerFieldIds.includes(l.fieldId) || (l.loggedBy && l.loggedBy.includes(session?.name)));
+    scopedLogs = scopedLogs.filter(log => managerFieldIds.includes(log.fieldId));
   }
 
-  const offlineLogsCount = scopedLogs.filter(l => l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued').length + (userRole !== 'SRA (Admin)' ? outboxCount : 0);
+  const offlineLogsCount = scopedLogs.filter(l => l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued').length + (userRole !== 'SRA Admin' ? outboxCount : 0);
   if (offlineLogsCount > 0 && !dismissedIds.has('notif-offline-sync')) {
     notifs.push({
       id: 'notif-offline-sync',
@@ -96,9 +89,9 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   }
 
   // 3. Unsubmitted Drafts Alert (Only for Member and their Block Farm Manager)
-  if (userRole === 'Member' || userRole === 'Farm Manager') {
-    const scopedDrafts = userRole === 'Member'
-      ? allDrafts.filter(d => (session?.fieldId && d.fieldId === session.fieldId) || d.authorName === session?.name)
+  if (userRole === 'Member Farmer' || userRole === 'Farm Manager') {
+    const scopedDrafts = userRole === 'Member Farmer'
+      ? allDrafts.filter(d => fields.some(field => field.memberUserId === userId && field.id === d.fieldId))
       : allDrafts.filter(d => managerFieldIds.includes(d.fieldId) || d.authorName === session?.name);
 
     if (scopedDrafts.length > 0 && !dismissedIds.has('notif-unsubmitted-drafts')) {
@@ -108,7 +101,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'document-text-outline',
         color: '#0284C7',
         title: 'Unsubmitted Field Drafts',
-        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member' ? (session?.fieldId || 'your plot') : (session?.blockFarm || (session?.farm || session?.blockFarm || 'District Central'))}. Tap to review, edit, and record operations.`,
+        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member Farmer' ? 'your assigned plot(s)' : 'your managed block farm'}. Tap to review, edit, and record operations.`,
         time: `${scopedDrafts.length} draft${scopedDrafts.length !== 1 ? 's' : ''}`,
         badgeText: 'Review Drafts',
         unread: !readIds.has('notif-unsubmitted-drafts'),
@@ -313,7 +306,7 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleOpenPriceModal = () => {
-    if (session?.role === 'SRA (Admin)') {
+    if (session?.role === 'SRA Admin') {
       if (!synced) {
         Alert.alert('Offline Mode', 'You are currently offline. Please connect to the internet to broadcast official SRA weekly benchmark circulars.');
         return;
@@ -329,7 +322,7 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const isFieldRole = session?.role === 'Member' || session?.role === 'Farm Manager';
+  const isFieldRole = session?.role === 'Member Farmer' || session?.role === 'Farm Manager';
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -376,7 +369,7 @@ export default function HomeScreen({ navigation }) {
                   <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
                 </TouchableOpacity>
 
-                {session?.role !== 'SRA (Admin)' && (
+                {session?.role !== 'SRA Admin' && (
                   <TouchableOpacity
                     style={[s.offlineActionBtn, { marginTop: 10 }]}
                     onPress={() => navigation.navigate('Planner')}
@@ -424,7 +417,7 @@ export default function HomeScreen({ navigation }) {
             {/* ── 1. Top HPCo · Silay Price Card ── */}
             <TouchableOpacity
               style={[s.card, s.priceCard]}
-              activeOpacity={session?.role === 'SRA (Admin)' ? 0.7 : 1}
+              activeOpacity={session?.role === 'SRA Admin' ? 0.7 : 1}
               onPress={handleOpenPriceModal}
             >
           <View style={s.priceCardHeader}>
@@ -477,7 +470,7 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
 
-          {session?.role === 'SRA (Admin)' && (
+          {session?.role === 'SRA Admin' && (
             <View style={s.sraEditHint}>
               <Ionicons name="create-outline" size={13} color={COLORS.primary} />
               <Text style={s.sraEditText}>{t('tap_to_broadcast', 'Tap to broadcast new official SRA weekly price')}</Text>
@@ -677,10 +670,10 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── 3. Role-Specific Modular Views ── */}
-        {session?.role === 'Member' && (
+        {session?.role === 'Member Farmer' && (
           <MemberHomeView
             session={session}
-            myFields={fields.filter(f => f.member === session?.name || f.id === session?.fieldId)}
+            myFields={fields.filter(field => field.memberUserId === (session?.employeeId || session?.id))}
             navigation={navigation}
             onManualSync={handleManualSync}
           />
@@ -689,11 +682,12 @@ export default function HomeScreen({ navigation }) {
           <ManagerHomeView
             session={session}
             fields={fields}
+            blockFarms={blockFarms}
             navigation={navigation}
             onManualSync={handleManualSync}
           />
         )}
-        {session?.role === 'SRA (Admin)' && (
+        {session?.role === 'SRA Admin' && (
           <SRAHomeView
             session={session}
             fields={fields}
