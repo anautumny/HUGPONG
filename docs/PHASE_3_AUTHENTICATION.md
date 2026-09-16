@@ -34,6 +34,7 @@ Rules are configured by `firebase.json` but are not deployed automatically by th
 - `SESSION_SECRET`: random value of at least 32 characters.
 - Firebase Admin credentials capable of signing custom tokens, preferably application default credentials/workload identity. Local development may use the gitignored `server/serviceAccountKey.json` or `GOOGLE_APPLICATION_CREDENTIALS`.
 - Rotated `SEMAPHORE_API_KEY` and `SEMAPHORE_SENDER_NAME`.
+- `SMS_PROVIDER=semaphore` in production. Local OTP testing may explicitly use `SMS_PROVIDER=console`; console delivery is rejected in production and never falls back from Semaphore. See `DEVELOPMENT_AUTH_RBAC_TESTING.md` for the gated development setup.
 - `CORS_ORIGINS` for allowed browser origins.
 - Mobile `EXPO_PUBLIC_API_BASE_URL` pointing at the Express server.
 

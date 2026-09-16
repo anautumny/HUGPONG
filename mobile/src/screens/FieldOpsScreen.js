@@ -8,12 +8,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { formatDisplayDate, toISODateString, cleanupDuplicateLogs, subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, SRA_PRICE_HISTORY, addSRAPrice, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, logSystemEvent, generateNextFieldId, cleanDataForFirestore, verifyCurrentPassword } from '../data/dataStore';
+import { formatDisplayDate, toISODateString, cleanupDuplicateLogs, subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, logSystemEvent, generateNextFieldId, cleanDataForFirestore, verifyCurrentPassword } from '../data/dataStore';
 import { saveItem, STORAGE_KEYS } from '../services/storageService';
-import { enqueueOutboxItem, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
+import { enqueueAndFlushMutation, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus } from '../services/networkService';
-import { db } from '../firebase/config';
-import { doc, setDoc } from 'firebase/firestore';
 import { useTranslation } from '../services/i18n';
 import MemberFieldOpsView from './member/MemberFieldOpsView';
 import ManagerFieldOpsView from './manager/ManagerFieldOpsView';
@@ -23,17 +21,25 @@ import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
 import { safeAlert } from '../utils/dialogs';
 import {
-  COLLECTIONS,
   canonicalRole,
   fromAuditReportDocument,
   operationSnapshot,
-  toAuditReportDocument,
   toOperationLogDocument,
   toReportPeriod
 } from '../data/firestoreSchema';
 
-const { height, width } = Dimensions.get('window');
+const commitExplicitMutation = async (type, payload, options = {}) => {
+  const outcome = await enqueueAndFlushMutation(type, payload, options);
+  if (outcome.queued && (outcome.item?.status === 'conflict' || outcome.item?.status === 'rejected')) {
+    const error = new Error(outcome.item.lastError || 'The server rejected this mutation.');
+    error.status = outcome.item.status === 'conflict' ? 409 : 400;
+    error.data = outcome.item.conflict || null;
+    throw error;
+  }
+  return outcome;
+};
 
+const { height, width } = Dimensions.get('window');
 // Cane Varieties, Soil Types, and Growth Stages for Field Plot Registration (Web & Mobile Parity)
 const CANE_VARIETIES = ['VMC 84-524', 'Phil 99-1793', 'Phil 2006-2289', 'Phil 58-260', 'Phil 80-13'];
 const SOIL_TYPES = ['Clay Loam', 'Sandy Loam', 'Loam', 'Clay', 'Silt Loam'];
@@ -1420,23 +1426,23 @@ export default function FieldOpsScreen({ navigation, route }) {
       notes: `Compiled by Farm Manager ${session?.name || 'Farm Manager'}. Awaiting SRA District inspection.`
     };
 
-    // Sync to Firestore if online (Cloud Audit Queue)
-    if (db) {
-      try {
-        const docRef = doc(db, 'audit_reports', targetReportId);
-        const cleanedData = toAuditReportDocument(newReport, {
-          compiledByUserId: compilerUserId,
-          status: 'PENDING',
-          updatedAt: nowIso
-        });
-        await setDoc(docRef, cleanedData);
+    try {
+      const outcome = await commitExplicitMutation('audit_report', {
+        id: targetReportId,
+        blockFarmId: targetFarmId,
+        period: toReportPeriod(compileMonth),
+        operationLogIds: logsToCompile.map(log => log.id)
+      });
+      Object.assign(newReport, outcome.response?.data || {});
+      if (!outcome.queued) {
         cloudQueueStatus = 'transmitted';
         cloudQueuedAt = nowIso;
         newReport.cloudQueueStatus = 'transmitted';
         newReport.cloudQueuedAt = nowIso;
-      } catch (e) {
-        console.warn('[FieldOpsScreen] Firestore sync fallback to offline queue:', e);
       }
+    } catch (e) {
+      Alert.alert('Audit Report Not Compiled', e.message || 'The server rejected this report.');
+      return;
     }
 
     const existingIdx = auditReports.findIndex(a => a.id === targetReportId || a.reportId === targetReportId);
@@ -1551,32 +1557,19 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
-    // 1. Update in auditReports
-    const existingIdx = auditReports.findIndex(a => a.id === report.id || a.reportId === report.reportId || a.qrSignature === report.qrSignature);
-    if (existingIdx >= 0) {
-      auditReports[existingIdx] = {
-        ...auditReports[existingIdx],
-        status: 'CERTIFIED',
-        certifiedByUserId: auditorUserId,
-        certifiedAt: certifiedAt
-      };
-    }
-
     try {
-      if (db) {
-        const reportDocId = report.reportId || report.id;
-        const docRef = doc(db, COLLECTIONS.AUDIT_REPORTS, reportDocId);
-        await setDoc(docRef, {
-          status: 'CERTIFIED',
-          certificationNotes: report.certificationNotes || '',
-          certifiedByUserId: auditorUserId,
-          certifiedAt,
-          updatedAt: certifiedAt
-        }, { merge: true });
-      }
+      await commitExplicitMutation('audit_certification', {
+        id: report.reportId || report.id,
+        certificationNotes: report.certificationNotes || ''
+      }, { baseVersion: report.updatedAt || null });
     } catch (e) {
       Alert.alert('Certification Failed', e.message || 'The report could not be certified.');
       return;
+    }
+
+    const existingIdx = auditReports.findIndex(a => a.id === report.id || a.reportId === report.reportId || a.qrSignature === report.qrSignature);
+    if (existingIdx >= 0) {
+      auditReports[existingIdx] = { ...auditReports[existingIdx], status: 'CERTIFIED', certifiedByUserId: auditorUserId, certifiedAt };
     }
 
     // Update scanned report in state
@@ -1666,44 +1659,31 @@ export default function FieldOpsScreen({ navigation, route }) {
     }));
     const stage1Name = baseStages[0].name || baseStages[0].label || 'Pre-Planting & Land Preparation';
 
-    // 1. Immediately reset component timeline stages
-    setCycleTasksByField(p => ({
-      ...p,
-      [fieldId]: baseStages.map(s => ({ ...s, done: false, active: s.stageNumber === 1 }))
-    }));
-
-    setSelectedField(prevF => ({
-      ...prevF,
-      stage: stage1Name,
-      stageNumber: 1,
-      isCompleted: false,
-      customStages: baseStages.map(s => ({ ...s, done: false, active: s.stageNumber === 1 })),
-      cycleType: finalCycleType,
-      cropYear: finalCropYear,
-      cycleNumber: (Number(prevF?.cycleNumber) || 1) + 1
-    }));
-
-    // 2. Perform canonical archival across dataStore & Firestore in one clean unified call
-    await archiveFieldCropCycle(fieldId, {
+    // The server transaction is authoritative when online; offline work is queued by dataStore.
+    const rolloverResult = await archiveFieldCropCycle(fieldId, {
       cycleType: finalCycleType,
       cropYear: finalCropYear,
       stage: stage1Name,
       customStages: baseStages.map(s => ({ ...s, done: false, active: s.stageNumber === 1 }))
     });
+    if (!rolloverResult.success) {
+      safeAlert('Crop Cycle Not Renewed', rolloverResult.message || 'The server rejected this crop-cycle renewal. Refresh and try again.');
+      return;
+    }
 
-    // 3. Force-clone every log object so React memoized selectors (fieldLogs, visibleLogs, pastLogs) recompute cleanly
+    // Force-clone every log object so React memoized selectors recompute cleanly.
     setLogs(operationLogs.map(l => ({ ...l })));
     setDraftLogs(prev => prev.filter(d => (d.fieldId || '').trim().toUpperCase() !== cleanFieldId));
     setHighlightedSubmittedLogIds(new Set());
     setHighlightedDraftIds(new Set());
 
-    // 4. Hard-reset cycleTasksByField for this field to fresh base stages
+    // Reset the local timeline only after the server accepted (or safely queued) the rollover.
     setCycleTasksByField(prev => ({
       ...prev,
       [fieldId]: baseStages.map(s => ({ ...s, done: false, active: s.stageNumber === 1 }))
     }));
 
-    // 5. Refresh selectedField from the updated fields store
+    // Refresh selectedField from the updated fields store.
     const refreshedField = fields.find(f => (f.id || '').trim().toUpperCase() === cleanFieldId);
     if (refreshedField) {
       setSelectedField({ ...refreshedField, stage: stage1Name, stageNumber: 1, isCompleted: false, customStages: baseStages });
@@ -2481,10 +2461,6 @@ export default function FieldOpsScreen({ navigation, route }) {
             return;
           }
 
-          // If submitting a draft, remove draft and add to operationLogs
-          const draftIdx = draftLogsStore.findIndex(d => d.id === logForm.id);
-          if (draftIdx >= 0) draftLogsStore.splice(draftIdx, 1);
-          setDraftLogs([...draftLogsStore]);
         }
 
         newLog.synced = isNetOnline;
@@ -2499,15 +2475,20 @@ export default function FieldOpsScreen({ navigation, route }) {
           status: 'ACTIVE'
         });
 
-        if (isNetOnline && db) {
-          try {
-            await setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, newLog.id), cleanNewLog);
-          } catch (err) {
-            console.warn('[FieldOpsScreen] Direct Firestore write error, queuing:', err);
-            enqueueOutboxItem('operation_log', { id: newLog.id, ...cleanNewLog });
+        try {
+          const outcome = await commitExplicitMutation('operation_log', { id: newLog.id, ...cleanNewLog });
+          if (outcome.response?.data) {
+            Object.assign(newLog, outcome.response.data, { id: outcome.response.data.id || newLog.id });
           }
-        } else {
-          enqueueOutboxItem('operation_log', { id: newLog.id, ...cleanNewLog });
+          if (outcome.queued) {
+            newLog.synced = false;
+            newLog.isOffline = true;
+            newLog.cloudQueueStatus = 'offline_queued';
+          }
+        }
+        catch (err) {
+          Alert.alert('Operation Not Submitted', err.message || 'The server rejected this operation. Refresh the field and try again.');
+          return;
         }
 
         const existingIdx = operationLogs.findIndex(l => l.id === newLog.id);
@@ -2518,6 +2499,9 @@ export default function FieldOpsScreen({ navigation, route }) {
         }
         await saveItem(STORAGE_KEYS.LOGS, operationLogs);
         if (logForm.id) {
+          const draftIdx = draftLogsStore.findIndex(d => d.id === logForm.id);
+          if (draftIdx >= 0) draftLogsStore.splice(draftIdx, 1);
+          setDraftLogs([...draftLogsStore]);
           await saveDraftLogs();
         }
         setHighlightedSubmittedLogIds(prev => new Set([newLog.id, ...prev]));
@@ -2625,16 +2609,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       Alert.alert('Crop Cycle Required', 'This field has no explicit active crop cycle. Synchronize the field before submitting this draft.');
       return;
     }
-    const idx = draftLogsStore.findIndex(d => d.id === log.id);
-    if (idx >= 0) draftLogsStore.splice(idx, 1);
-    setDraftLogs([...draftLogsStore]);
-    setSelectedDraftIds(prev => {
-      const next = new Set(prev);
-      next.delete(log.id);
-      return next;
-    });
-    await saveDraftLogs();
-
     const cleanFieldId = (log.fieldId || safeField.id || activeFieldId).trim().toUpperCase();
     const submittedId = generateLogId(cleanFieldId);
     const opCost = Number(log.cost || log.totalCost || 0);
@@ -2663,16 +2637,31 @@ export default function FieldOpsScreen({ navigation, route }) {
       status: 'ACTIVE'
     });
 
-    if (db) {
-      try {
-        await setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, submittedId), cleanSubmitted);
-      } catch (err) {
-        console.warn('[FieldOpsScreen] Firestore draft upload notice:', err);
-        enqueueOutboxItem('operation_log', { id: submittedId, ...cleanSubmitted });
+    try {
+      const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanSubmitted });
+      if (outcome.response?.data) {
+        Object.assign(submittedLog, outcome.response.data, { id: outcome.response.data.id || submittedId });
       }
-    } else {
-      enqueueOutboxItem('operation_log', { id: submittedId, ...cleanSubmitted });
+      if (outcome.queued) {
+        submittedLog.synced = false;
+        submittedLog.isOffline = true;
+        submittedLog.cloudQueueStatus = 'offline_queued';
+      }
     }
+    catch (err) {
+      Alert.alert('Draft Not Submitted', err.message || 'The server rejected this operation. The local draft was preserved.');
+      return;
+    }
+
+    const idx = draftLogsStore.findIndex(d => d.id === log.id);
+    if (idx >= 0) draftLogsStore.splice(idx, 1);
+    setDraftLogs([...draftLogsStore]);
+    setSelectedDraftIds(prev => {
+      const next = new Set(prev);
+      next.delete(log.id);
+      return next;
+    });
+    await saveDraftLogs();
 
     operationLogs.unshift(submittedLog);
     await saveItem(STORAGE_KEYS.LOGS, operationLogs);
@@ -2821,15 +2810,21 @@ export default function FieldOpsScreen({ navigation, route }) {
                 status: 'ACTIVE'
               });
 
-              if (db) {
-                try {
-                  await setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, submittedId), cleanBatchLog);
-                } catch (err) {
-                  console.warn('[FieldOpsScreen] Batch draft upload notice:', err);
-                  enqueueOutboxItem('operation_log', { id: submittedId, ...cleanBatchLog });
+              try {
+                const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanBatchLog });
+                if (outcome.response?.data) {
+                  Object.assign(submittedLog, outcome.response.data, { id: outcome.response.data.id || submittedId });
                 }
-              } else {
-                enqueueOutboxItem('operation_log', { id: submittedId, ...cleanBatchLog });
+                if (outcome.queued) {
+                  submittedLog.synced = false;
+                  submittedLog.isOffline = true;
+                  submittedLog.cloudQueueStatus = 'offline_queued';
+                }
+              }
+              catch (err) {
+                remainingDrafts.push(d);
+                console.warn('[FieldOpsScreen] Batch draft rejected; draft retained:', err.message);
+                continue;
               }
 
               const existingIdx = operationLogs.findIndex(l => l.id === submittedLog.id);
@@ -2860,7 +2855,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             Alert.alert(
               'Drafts Submitted',
-              `${newlySubmitted.length} draft operations recorded to field history! Field stages remain active for additional operations.`
+              `${newlySubmitted.length} draft operations recorded to field history.${remainingDrafts.length ? ` ${remainingDrafts.length} rejected draft(s) were preserved for review.` : ''} Field stages remain active for additional operations.`
             );
           }
         }

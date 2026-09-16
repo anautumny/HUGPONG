@@ -23,6 +23,8 @@ const cropCycleRoutes = require('./routes/cropCycles');
 const auditReportRoutes = require('./routes/auditReports');
 const ticketRoutes = require('./routes/tickets');
 const smsRoutes = require('./routes/sms');
+const auditEventRoutes = require('./routes/auditEvents');
+const telemetryRoutes = require('./routes/telemetry');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -77,6 +79,8 @@ app.use('/api/crop-cycles', cropCycleRoutes);
 app.use('/api/audit-reports', auditReportRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/sms', smsRoutes);
+app.use('/api/audit-events', auditEventRoutes);
+app.use('/api/terminal-diagnostics', telemetryRoutes);
 
 // ── Static Web Dashboard Serving ────────────────────────────
 app.use(express.static(path.join(__dirname, '../web')));

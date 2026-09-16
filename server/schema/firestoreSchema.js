@@ -233,6 +233,31 @@ function buildOperationSnapshot(logId, log) {
   };
 }
 
+function buildSraPrice(input, context = {}) {
+  for (const fieldName of [
+    'sugarPricePerLkg',
+    'sugarPriceChange',
+    'molassesPricePerMetricTon',
+    'molassesPriceChange'
+  ]) {
+    if (input[fieldName] == null || input[fieldName] === '') {
+      throw new Error(`${fieldName} is required.`);
+    }
+  }
+  return {
+    effectiveDate: calendarDate(input.effectiveDate, 'effectiveDate'),
+    weekLabel: requiredString(input.weekLabel, 'weekLabel', { max: 100 }),
+    sugarPricePerLkg: finiteNumber(input.sugarPricePerLkg, 'sugarPricePerLkg'),
+    sugarPriceChange: finiteNumber(input.sugarPriceChange, 'sugarPriceChange', { min: -1000000, max: 1000000 }),
+    molassesPricePerMetricTon: finiteNumber(input.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
+    molassesPriceChange: finiteNumber(input.molassesPriceChange, 'molassesPriceChange', { min: -1000000, max: 1000000 }),
+    circularNumber: requiredString(input.circularNumber, 'circularNumber', { max: 120 }),
+    source: requiredString(input.source, 'source', { max: 300 }),
+    publishedByUserId: requiredString(context.publishedByUserId || input.publishedByUserId, 'publishedByUserId', { max: 80 }),
+    publishedAt: isoTimestamp(context.publishedAt || input.publishedAt, 'publishedAt')
+  };
+}
+
 function createAuditHash(reportId, blockFarmId, period, snapshots) {
   const canonical = JSON.stringify({ reportId, blockFarmId, period, operationSnapshots: snapshots });
   return `HUG-${crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 24).toUpperCase()}`;
@@ -276,6 +301,7 @@ module.exports = {
   cleanObject,
   buildOperationLog,
   buildOperationSnapshot,
+  buildSraPrice,
   createAuditHash,
   createCycleId,
   createOperationLogId,

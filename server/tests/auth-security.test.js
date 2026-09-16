@@ -15,6 +15,8 @@ const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
 const { ROLES, publicRoleLabel } = require('../schema/firestoreSchema');
+const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
+const webAuthRouting = require('../../web/shared/auth-routing');
 
 function responseRecorder() {
   return {
@@ -111,6 +113,51 @@ test('a server-issued bearer authenticates but cannot cross a role guard', () =>
   assert.equal(roleRes.body.code, 'FORBIDDEN');
 });
 
+test('web role routing uses exact canonical mappings without substring collisions', () => {
+  const aliases = {
+    'Super Admin': 'superadmin',
+    SUPER_ADMIN: 'superadmin',
+    'super-admin': 'superadmin',
+    'SRA Admin': 'admin',
+    SRA_ADMIN: 'admin',
+    'sra-admin': 'admin',
+    'Farm Manager': 'manager',
+    FARM_MANAGER: 'manager',
+    'Member Farmer': 'member',
+    MEMBER_FARMER: 'member'
+  };
+  for (const [input, expected] of Object.entries(aliases)) {
+    assert.equal(webAuthRouting.normalizeRole(input), expected);
+  }
+  assert.equal(webAuthRouting.roleKeyFromUser({ canonicalRole: 'SUPER_ADMIN', role: 'SRA Admin' }), 'superadmin');
+  assert.equal(webAuthRouting.dashboardPath('superadmin'), '/roles/super-admin/dashboard.html');
+  assert.equal(webAuthRouting.dashboardPath('admin'), '/roles/sra-admin/dashboard.html');
+  assert.equal(webAuthRouting.dashboardPath('manager'), '/roles/farm-manager/dashboard.html');
+  assert.equal(webAuthRouting.dashboardPath('member'), null);
+});
+
+test('role pages wait for session resolution and use the shared exact route guard', () => {
+  for (const roleDirectory of ['super-admin', 'sra-admin', 'farm-manager']) {
+    const html = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/dashboard.html`), 'utf8');
+    const guard = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/${roleDirectory}.js`), 'utf8');
+    assert.match(html, /<html[^>]+class="auth-pending"/);
+    assert.match(html, /auth-routing\.js/);
+    assert.match(guard, /webRoleKeyFromUser\(/);
+    assert.match(guard, /getWebDashboardPath\(/);
+    assert.doesNotMatch(guard, /roleLower\.includes\(/);
+  }
+});
+
+test('Firestore users listener updates the directory but never the authenticated identity', () => {
+  const core = fs.readFileSync(path.resolve(__dirname, '../../web/shared/core.js'), 'utf8');
+  const usersListenerStart = core.indexOf('// 6. Listen on Users Directory');
+  const usersListenerEnd = core.indexOf('// 7. Listen on Audit Reports');
+  assert.ok(usersListenerStart >= 0 && usersListenerEnd > usersListenerStart);
+  const usersListener = core.slice(usersListenerStart, usersListenerEnd);
+  assert.match(usersListener, /db\.users = remoteUsers/);
+  assert.doesNotMatch(usersListener, /hugpong_user|activeUser\s*=|sessionUser\s*=/);
+});
+
 test('OTP values remain server-side, enforce matching context, and are single-use', () => {
   const subject = `registration-${Date.now()}`;
   const challenge = issueOtp('registration', subject, '09171234567');
@@ -126,6 +173,65 @@ test('OTP values remain server-side, enforce matching context, and are single-us
   assert.equal(verifyAndConsumeOtp('first-login', loginSubject, '09181234567', loginChallenge.code).success, false);
 });
 
+test('OTP resend cooldown, expiry, and attempt cap remain enforced independently of delivery provider', () => {
+  const issuedAt = Date.now();
+  const cooldownSubject = `cooldown-${issuedAt}`;
+  const first = issueOtp('delivery-test', cooldownSubject, '09171234567', issuedAt);
+  assert.throws(
+    () => issueOtp('delivery-test', cooldownSubject, '09171234567', issuedAt + 1),
+    error => error.code === 'OTP_RATE_LIMITED'
+  );
+
+  const expirySubject = `expiry-${issuedAt}`;
+  const expiring = issueOtp('delivery-test', expirySubject, '09171234567', issuedAt);
+  assert.match(verifyOtp('delivery-test', expirySubject, '09171234567', expiring.code, expiring.expiresAt).error, /expired/i);
+
+  const attemptsSubject = `attempts-${issuedAt}`;
+  const attempted = issueOtp('delivery-test', attemptsSubject, '09171234567', issuedAt);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    assert.equal(verifyOtp('delivery-test', attemptsSubject, '09171234567', '000000', issuedAt + 10 + attempt).success, false);
+  }
+  assert.match(verifyOtp('delivery-test', attemptsSubject, '09171234567', attempted.code, issuedAt + 20).error, /too many/i);
+  assert.equal(first.code.length, 6);
+});
+
+test('development test-account bootstrap is explicit and cannot run in production', () => {
+  const safeEnv = {
+    NODE_ENV: 'development',
+    SMS_PROVIDER: 'console',
+    ALLOW_DEVELOPMENT_TEST_ACCOUNTS: 'true',
+    DEVELOPMENT_TEST_PASSWORD: 'StrongPassword123!'
+  };
+  assert.doesNotThrow(() => assertDevelopmentBootstrapAllowed(safeEnv));
+  assert.throws(() => assertDevelopmentBootstrapAllowed({ ...safeEnv, NODE_ENV: 'production' }), /forbidden in production/i);
+  assert.throws(() => assertDevelopmentBootstrapAllowed({ ...safeEnv, ALLOW_DEVELOPMENT_TEST_ACCOUNTS: 'false' }), /ALLOW_DEVELOPMENT_TEST_ACCOUNTS/i);
+  assert.throws(() => assertDevelopmentBootstrapAllowed({ ...safeEnv, SMS_PROVIDER: 'semaphore' }), /SMS_PROVIDER=console/i);
+
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+  assert.doesNotMatch(packageJson.scripts.start, /bootstrap:dev-test-accounts/);
+  assert.match(packageJson.scripts['bootstrap:dev-test-accounts'], /bootstrapDevelopmentTestAccounts/);
+});
+
+test('OTP request responses never serialize the generated challenge code', () => {
+  const authRoute = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
+  assert.doesNotMatch(authRoute, /res\.json\(\s*\{[\s\S]{0,300}challenge\.code/);
+});
+
+test('web and mobile runtime source contain no Semaphore credential or provider endpoint', () => {
+  const roots = [path.resolve(__dirname, '../../web'), path.resolve(__dirname, '../../mobile/src')];
+  const visit = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(fullPath);
+      else if (entry.isFile() && /\.(js|jsx|ts|tsx|html)$/.test(entry.name)) {
+        const source = fs.readFileSync(fullPath, 'utf8');
+        assert.doesNotMatch(source, /\bSEMAPHORE_(?:API_KEY|SENDER_NAME)\b|api\.semaphore\.co/i, `Semaphore material in ${fullPath}`);
+      }
+    }
+  };
+  roots.forEach(visit);
+});
+
 test('Firestore rules deny all client access to credentials and deny unmatched collections', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
   assert.match(rules, /match \/user_credentials\/\{userId\}[\s\S]*?allow read, write: if false;/);
@@ -133,4 +239,29 @@ test('Firestore rules deny all client access to credentials and deny unmatched c
   assert.match(rules, /request\.auth\.uid == userId \|\| staff\(\)/);
   assert.match(rules, /resource\.data\.memberUserId == request\.auth\.uid/);
   assert.match(rules, /match \/\{document=\*\*\}[\s\S]*?allow read, write: if false;/);
+});
+
+test('canonical Firestore collections deny every client write', () => {
+  const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
+  for (const collection of ['users', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics']) {
+    const block = new RegExp(`match \/${collection}\/\\{[^}]+\\}[\\s\\S]*?allow (?:create, update, delete|write): if false;`);
+    assert.match(rules, block, `${collection} must be server-write-only`);
+  }
+});
+
+test('web and mobile runtime source contain no direct Firestore mutation calls', () => {
+  const roots = [path.resolve(__dirname, '../../web'), path.resolve(__dirname, '../../mobile/src')];
+  const sourceFiles = [];
+  const visit = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(fullPath);
+      else if (/\.(js|jsx|ts|tsx)$/.test(entry.name)) sourceFiles.push(fullPath);
+    }
+  };
+  roots.forEach(visit);
+  for (const file of sourceFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(source, /\b(?:setDoc|addDoc|updateDoc|deleteDoc|writeBatch)\s*\(/, `direct Firestore mutation in ${file}`);
+  }
 });

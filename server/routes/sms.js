@@ -3,8 +3,8 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
-const { semaphoreApiKey, semaphoreSenderName } = require('../config');
-const { sendSemaphoreSms } = require('../services/smsGateway');
+const { smsProvider, semaphoreApiKey, semaphoreSenderName } = require('../config');
+const { sendSms } = require('../services/smsGateway');
 
 router.post('/send-alert', requireAuth, async (req, res) => {
   try {
@@ -13,7 +13,7 @@ router.post('/send-alert', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Phone and message are required.' });
     }
     const cleanPhone = String(phone).replace(/\D/g, '');
-    const smsResult = await sendSemaphoreSms(cleanPhone, `[HUGPONG Alert] ${message}`);
+    const smsResult = await sendSms(cleanPhone, `[HUGPONG Alert] ${message}`);
     if (!smsResult.success) return res.status(502).json({ success: false, error: 'SMS delivery failed.' });
     return res.json({ success: true, providerAccepted: true });
   } catch (error) {
@@ -25,8 +25,8 @@ router.post('/send-alert', requireAuth, async (req, res) => {
 
 router.get('/status', requireAuth, (req, res) => {
   res.json({
-    gateway: 'Semaphore Philippines (api.semaphore.co)',
-    configured: Boolean(semaphoreApiKey),
+    gateway: smsProvider,
+    configured: smsProvider === 'console' || Boolean(semaphoreApiKey),
     sender: semaphoreSenderName
   });
 });

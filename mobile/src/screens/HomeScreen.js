@@ -139,7 +139,7 @@ export default function HomeScreen({ navigation }) {
   const [inputEffectiveDate, setInputEffectiveDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [inputBag, setInputBag] = useState(() => currentPrice.value ? String(currentPrice.value) : '');
   const [inputMol, setInputMol] = useState(() => currentMarketObservation.value ? String(currentMarketObservation.value) : '');
-  const [inputCircular, setInputCircular] = useState('SRA Circular #105 (Official SRA Millsite Notice)');
+  const [inputCircular, setInputCircular] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
@@ -317,7 +317,7 @@ export default function HomeScreen({ navigation }) {
       setInputMol(liveMol.toString());
       setInputWeek(autoWeek);
       setInputEffectiveDate(today);
-      setInputCircular('SRA Circular #105 (Official SRA Millsite Notice)');
+      setInputCircular('');
       setShowPriceModal(true);
     }
   };
@@ -603,8 +603,8 @@ export default function HomeScreen({ navigation }) {
               {(() => {
                 const sorted = getSortedPrices();
                 if (sorted.length < 2) return <Text style={s.statValue}>—</Text>;
-                const latest = Number(sorted[0].price) || 0;
-                const prev = Number(sorted[sorted.length - 1].price) || 0;
+                const latest = sorted[0].sugarPricePerLkg;
+                const prev = sorted[sorted.length - 1].sugarPricePerLkg;
                 const pct = prev > 0 ? (((latest - prev) / prev) * 100).toFixed(1) : null;
                 if (!pct) return <Text style={s.statValue}>—</Text>;
                 const up = parseFloat(pct) >= 0;
@@ -853,8 +853,12 @@ export default function HomeScreen({ navigation }) {
                 onPress={() => {
                   const b = parseFloat(inputBag);
                   const m = parseFloat(inputMol);
-                  if (isNaN(b) || isNaN(m)) {
-                    Alert.alert(t('error_title', 'Error'), t('invalid_numbers_error', 'Please enter valid numbers'));
+                  const parsedDate = new Date(`${inputEffectiveDate}T00:00:00.000Z`);
+                  const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(inputEffectiveDate)
+                    && !Number.isNaN(parsedDate.getTime())
+                    && parsedDate.toISOString().slice(0, 10) === inputEffectiveDate;
+                  if (!Number.isFinite(b) || !Number.isFinite(m) || !inputWeek.trim() || !inputCircular.trim() || !canonicalDate) {
+                    Alert.alert(t('error_title', 'Error'), 'Enter both prices, a week label, an official circular/source, and an effective date in YYYY-MM-DD format.');
                     return;
                   }
 
@@ -868,19 +872,19 @@ export default function HomeScreen({ navigation }) {
                         onPress: async () => {
                           try {
                             const newPost = await publishSraPrice({
-                              price: b,
-                              molasses: m,
-                              week: inputWeek || 'Current Week',
-                              circular: inputCircular || 'SRA Circular #105',
-                              source: inputCircular || 'SRA Circular #105 (Official SRA Millsite Notice)',
+                              sugarPricePerLkg: b,
+                              molassesPricePerMetricTon: m,
+                              weekLabel: inputWeek.trim(),
+                              circularNumber: inputCircular.trim(),
+                              source: inputCircular.trim(),
                               effectiveDate: inputEffectiveDate
                             });
 
                             setPriceData({
                               livePrice: b,
                               liveMol: m,
-                              liveWeek: inputWeek || 'Current Week',
-                              liveDate: newPost.date,
+                              liveWeek: newPost.weekLabel,
+                              liveDate: newPost.effectiveDate,
                               liveChange: b - (currentPrice.value || b)
                             });
 

@@ -364,32 +364,47 @@ export function fromAuditReportDocument(id, value = {}) {
 }
 
 export function toPriceDocument(value = {}, userId = '') {
+  const requiredText = (fieldValue, fieldName) => {
+    const result = String(fieldValue == null ? '' : fieldValue).trim();
+    if (!result) throw new Error(`Invalid sra_prices record: ${fieldName} is required.`);
+    return result;
+  };
+  const requiredNumber = (fieldValue, fieldName) => {
+    if (fieldValue == null || fieldValue === '') throw new Error(`Invalid sra_prices record: ${fieldName} is required.`);
+    const result = Number(fieldValue);
+    if (!Number.isFinite(result)) throw new Error(`Invalid sra_prices record: ${fieldName} must be numeric.`);
+    return result;
+  };
+  const effectiveDate = requiredText(value.effectiveDate, 'effectiveDate');
+  const parsedEffectiveDate = new Date(`${effectiveDate}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)
+    || Number.isNaN(parsedEffectiveDate.getTime())
+    || parsedEffectiveDate.toISOString().slice(0, 10) !== effectiveDate) {
+    throw new Error('Invalid sra_prices record: effectiveDate must use YYYY-MM-DD.');
+  }
+  const publishedAt = requiredText(value.publishedAt || new Date().toISOString(), 'publishedAt');
+  const parsedPublishedAt = new Date(publishedAt);
+  if (Number.isNaN(parsedPublishedAt.getTime()) || !publishedAt.includes('T')) {
+    throw new Error('Invalid sra_prices record: publishedAt must be an ISO-8601 timestamp.');
+  }
   return {
-    effectiveDate: value.effectiveDate || value.date,
-    weekLabel: value.weekLabel || value.week,
-    sugarPricePerLkg: Number(value.sugarPricePerLkg ?? value.price ?? 0),
-    sugarPriceChange: Number(value.sugarPriceChange ?? value.change ?? 0),
-    molassesPricePerMetricTon: Number(value.molassesPricePerMetricTon ?? value.molasses ?? 0),
-    molassesPriceChange: Number(value.molassesPriceChange ?? value.molassesChange ?? 0),
-    circularNumber: value.circularNumber || value.circular || '',
-    source: value.source || '',
-    publishedByUserId: value.publishedByUserId || userId,
-    publishedAt: value.publishedAt || value.createdAt || new Date().toISOString()
+    effectiveDate,
+    weekLabel: requiredText(value.weekLabel, 'weekLabel'),
+    sugarPricePerLkg: requiredNumber(value.sugarPricePerLkg, 'sugarPricePerLkg'),
+    sugarPriceChange: requiredNumber(value.sugarPriceChange, 'sugarPriceChange'),
+    molassesPricePerMetricTon: requiredNumber(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
+    molassesPriceChange: requiredNumber(value.molassesPriceChange, 'molassesPriceChange'),
+    circularNumber: requiredText(value.circularNumber, 'circularNumber'),
+    source: requiredText(value.source, 'source'),
+    publishedByUserId: requiredText(value.publishedByUserId || userId, 'publishedByUserId'),
+    publishedAt: parsedPublishedAt.toISOString()
   };
 }
 
 export function fromPriceDocument(id, value = {}) {
   return {
     id,
-    ...value,
-    date: value.effectiveDate,
-    week: value.weekLabel,
-    price: value.sugarPricePerLkg,
-    change: value.sugarPriceChange,
-    molasses: value.molassesPricePerMetricTon,
-    molassesChange: value.molassesPriceChange,
-    circular: value.circularNumber,
-    createdAt: value.publishedAt
+    ...toPriceDocument(value, value.publishedByUserId)
   };
 }
 

@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export const MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1';
+
 export const STORAGE_KEYS = {
+  CACHE_SCHEMA_VERSION: '@hugpong_cache_schema_version',
   AUTH_TOKEN: '@hugpong_auth_token',
   SESSION: '@hugpong_session',
   USERS: '@hugpong_users',
@@ -18,10 +21,15 @@ export const STORAGE_KEYS = {
   LAST_SYNC: '@hugpong_last_sync',
   AUDIT_REPORTS: '@hugpong_audit_reports',
   SYSTEM_HISTORY: '@hugpong_system_history',
-  DELETED_LOG_IDS: '@hugpong_deleted_log_ids',
   READ_NOTIF_IDS: '@hugpong_read_notif_ids',
   DISMISSED_NOTIF_IDS: '@hugpong_dismissed_notif_ids',
 };
+
+const PRESERVED_INSTALLATION_KEYS = new Set([
+  '@hugpong_language',
+  '@hugpong_lang_chosen',
+  '@hugpong_onboarded'
+]);
 
 // In-memory shadow cache for synchronous reads after initial hydration
 const memoryCache = new Map();
@@ -42,6 +50,28 @@ export async function saveItem(key, value) {
 }
 
 export const setItem = saveItem;
+
+/**
+ * One-way cache epoch migration. Old replicas, sessions, drafts, and outboxes
+ * must not survive the controlled development database reset and later replay
+ * obsolete documents into the canonical database.
+ */
+export async function ensureCurrentCacheSchema() {
+  const storedVersion = await AsyncStorage.getItem(STORAGE_KEYS.CACHE_SCHEMA_VERSION);
+  if (storedVersion === MOBILE_CACHE_SCHEMA_VERSION) return { reset: false, version: storedVersion };
+
+  const allKeys = await AsyncStorage.getAllKeys();
+  const staleKeys = allKeys.filter(key =>
+    key.startsWith('@hugpong_')
+    && key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION
+    && !PRESERVED_INSTALLATION_KEYS.has(key)
+  );
+  if (staleKeys.length) await AsyncStorage.multiRemove(staleKeys);
+  memoryCache.clear();
+  await AsyncStorage.setItem(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
+  memoryCache.set(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
+  return { reset: true, version: MOBILE_CACHE_SCHEMA_VERSION, removedKeyCount: staleKeys.length };
+}
 
 /**
  * Get an item from memory cache or AsyncStorage
@@ -111,7 +141,7 @@ export async function multiSave(keyValuePairs) {
 export async function clearHugpongStorage() {
   try {
     memoryCache.clear();
-    const allKeys = Object.values(STORAGE_KEYS);
+    const allKeys = Object.values(STORAGE_KEYS).filter(key => key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION);
     await AsyncStorage.multiRemove(allKeys);
     return true;
   } catch (error) {

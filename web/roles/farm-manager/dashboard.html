@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="auth-pending">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -11,6 +11,7 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="../../shared/qrcode.min.js"></script>
   <link rel="stylesheet" href="../../admin.css"/>
+  <style>html.auth-pending body { visibility: hidden; }</style>
   <style type="text/tailwindcss">
     @theme {
       --color-primary: #2D5016;
@@ -4351,9 +4352,10 @@
 <script src="../../shared/firebase-config.js?v=2.2"></script>
 <script type="module" src="../../shared/firebase-init.js?v=2.2"></script>
 <script src="../../shared/webDataStore.js?v=2.2"></script>
-<script src="../../shared/firestore-schema.js?v=3.0"></script>
-<script src="../../shared/core.js?v=2.2"></script>
-<script src="./farm-manager.js?v=2.2"></script>
+<script src="../../shared/firestore-schema.js?v=3.1"></script>
+<script src="../../shared/auth-routing.js?v=1.0"></script>
+<script src="../../shared/core.js?v=2.5"></script>
+<script src="./farm-manager.js?v=2.3"></script>
 <!-- FOCUSED OPERATION EDIT MODAL (ALIGNED WITH MOBILE) -->
 <div id="modal-edit-operation" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
   <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-border flex flex-col">

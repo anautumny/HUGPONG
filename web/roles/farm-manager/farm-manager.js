@@ -25,14 +25,19 @@ console.log('[HUGPONG] Initializing Farm Manager workspace...');
     const data = await res.json();
     if (data.authenticated && data.user) {
       user = data.user;
+      currentRole = webRoleKeyFromUser(user, data.roleKey);
+      if (!currentRole) {
+        window.location.replace('../../login.html');
+        return;
+      }
       if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
         await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
       }
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(user, user.roleKey || 'manager', data.token);
+        saveWebAuthSession(user, currentRole, data.token);
       } else {
         localStorage.setItem('hugpong_user', JSON.stringify(user));
-        localStorage.setItem('hugpong_role', user.roleKey || 'manager');
+        localStorage.setItem('hugpong_role', currentRole);
       }
     } else {
       window.location.replace('../../login.html');
@@ -57,15 +62,14 @@ console.log('[HUGPONG] Initializing Farm Manager workspace...');
     return;
   }
 
-  const roleLower = String(user?.roleKey || user?.role || currentRole || '').toLowerCase();
-  if (!roleLower.includes('manager')) {
-    console.warn('[HUGPONG] Unauthorized access attempt to Farm Manager workspace.');
-    alert('Access Restricted: You do not have Farm Manager permissions.');
-    window.location.replace('../../login.html');
+  const roleKey = webRoleKeyFromUser(user, currentRole);
+  if (roleKey !== 'manager') {
+    window.location.replace(getWebDashboardPath(roleKey) || '/login.html?role=member');
     return;
   }
 
-  localStorage.setItem('hugpong_role', 'manager');
+  localStorage.setItem('hugpong_role', roleKey);
+  document.documentElement.classList.remove('auth-pending');
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {

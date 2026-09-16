@@ -3,17 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <title>HUGPONG Workspace Redirect</title>
+  <script src="shared/auth-routing.js?v=1.0"></script>
   <script>
-    const role = (localStorage.getItem('hugpong_role') || '').toLowerCase();
-    if (role.includes('super')) {
-      window.location.replace('roles/super-admin/dashboard.html');
-    } else if (role.includes('manager')) {
-      window.location.replace('roles/farm-manager/dashboard.html');
-    } else if (role.includes('admin') || role.includes('sra')) {
-      window.location.replace('roles/sra-admin/dashboard.html');
-    } else {
-      window.location.replace('login.html');
-    }
+    (async function routeAuthoritativeSession() {
+      try {
+        const token = localStorage.getItem('hugpong_auth_token');
+        const response = await fetch('/auth/session', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include'
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.authenticated || !data.user) throw new Error('Unauthenticated');
+        const roleKey = window.HugpongAuthRouting.roleKeyFromUser(data.user, data.roleKey);
+        const destination = window.HugpongAuthRouting.dashboardPath(roleKey);
+        window.location.replace(destination || '/login.html?role=member');
+      } catch (error) {
+        window.location.replace('/login.html');
+      }
+    })();
   </script>
 </head>
 <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #F2F4EF; color: #5A6B4A;">

@@ -16,6 +16,7 @@ const {
   nowIso,
   optionalString
 } = require('../schema/firestoreSchema');
+const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
@@ -47,9 +48,23 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     if (operationLogIds.length > 500) throw new Error('A report cannot contain more than 500 operation logs.');
 
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const mutationContext = readMutationContext(req);
     const farmSnapshot = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
     if (!farmSnapshot.exists || farmSnapshot.data().managerUserId !== actorId) {
       return res.status(403).json({ success: false, error: 'Only the assigned Farm Manager may compile this block farm report.' });
+    }
+
+    if (req.body.id) {
+      const existingById = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.body.id)).get();
+      if (existingById.exists) {
+        const current = existingById.data();
+        const currentIds = (current.operationSnapshots || []).map(item => item.operationLogId).sort();
+        const requestedIds = [...operationLogIds].sort();
+        if (current.blockFarmId === blockFarmId && current.period === period && current.compiledByUserId === actorId && JSON.stringify(currentIds) === JSON.stringify(requestedIds)) {
+          return res.json({ success: true, replayed: true, data: { id: existingById.id, ...current } });
+        }
+        return res.status(409).json({ success: false, error: 'Audit report ID already belongs to another report.' });
+      }
     }
 
     const logSnapshots = await Promise.all(operationLogIds.map(id => db.collection(COLLECTIONS.OPERATION_LOGS).doc(id).get()));
@@ -108,13 +123,18 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const reportId = String(req.params.id || '').trim();
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const mutationContext = readMutationContext(req);
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
       const reportRef = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId);
       const reportSnapshot = await transaction.get(reportRef);
       if (!reportSnapshot.exists) throw new Error('Audit report not found.');
       const report = reportSnapshot.data();
+      if (report.status === 'CERTIFIED' && report.certifiedByUserId === actorId) {
+        return { id: reportId, ...report, replayed: true };
+      }
       if (report.status !== 'PENDING') throw new Error('Only a PENDING audit report can be certified.');
+      assertBaseVersion(report.updatedAt, mutationContext, reportId, { id: reportId, ...report });
       const certificationNotes = optionalString(req.body.certificationNotes, { max: 2000 });
       const update = {
         status: 'CERTIFIED',
@@ -138,7 +158,7 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
     });
     return res.json({ success: true, data: result });
   } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
 

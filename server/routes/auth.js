@@ -9,7 +9,7 @@ const { hashPassword, verifyPassword, validatePassword } = require('../security/
 const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp } = require('../security/otp');
-const { sendSemaphoreSms } = require('../services/smsGateway');
+const { sendSms } = require('../services/smsGateway');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso } = require('../schema/firestoreSchema');
 
 function normalizeContact(value) {
@@ -96,11 +96,12 @@ async function verifyCurrentPassword(userId, password) {
   return credential.exists && verifyPassword(password, credential.data().passwordHash);
 }
 
-async function sendVerificationCode(phone, code, displayName) {
+async function sendVerificationCode(phone, code, displayName, purpose = 'verification') {
   const greeting = displayName ? `Hello ${displayName}, ` : '';
-  const result = await sendSemaphoreSms(
+  const result = await sendSms(
     phone,
-    `[HUGPONG] ${greeting}Your security verification code is ${code}. Valid for 5 minutes. Do not share this code.`
+    `[HUGPONG] ${greeting}Your security verification code is ${code}. Valid for 5 minutes. Do not share this code.`,
+    { otpCode: code, purpose }
   );
   if (!result.success) {
     const error = new Error('SMS delivery failed.');
@@ -130,10 +131,7 @@ router.post('/login', async (req, res) => {
       success: true,
       user: sessionUser,
       roleKey: sessionUser.roleKey,
-      ...credentials,
-      redirectUrl: sessionUser.roleKey === 'superadmin'
-        ? 'roles/super-admin/dashboard.html'
-        : (sessionUser.roleKey === 'manager' ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html')
+      ...credentials
     });
   } catch (error) {
     console.error('[HUGPONG Auth] Login error:', error);
@@ -150,7 +148,7 @@ router.post('/registration-otp/request', async (req, res) => {
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
     const challenge = issueOtp('registration', phone, phone);
     try {
-      await sendVerificationCode(phone, challenge.code, String(req.body?.displayName || '').trim());
+      await sendVerificationCode(phone, challenge.code, String(req.body?.displayName || '').trim(), 'registration');
     } catch (error) {
       discardOtp('registration', phone);
       throw error;
@@ -237,7 +235,7 @@ router.post('/request-phone-verification', requireAuth, async (req, res) => {
     if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'The account does not have a valid mobile number.' });
     const challenge = issueOtp('first-login', employeeId, phone);
     try {
-      await sendVerificationCode(phone, challenge.code, user.displayName);
+      await sendVerificationCode(phone, challenge.code, user.displayName, 'first-login');
     } catch (error) {
       discardOtp('first-login', employeeId);
       throw error;

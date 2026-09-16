@@ -284,10 +284,10 @@ export default function ProfileScreen({ navigation }) {
                 {(() => {
                   const sorted = getSortedPrices();
                   if (sorted.length > 0 && sorted[0].source) {
-                    return `${sorted[0].source} (${sorted[0].week || 'Active'})`;
+                    return `${sorted[0].circularNumber} · ${sorted[0].source} (${sorted[0].weekLabel})`;
                   }
-                  if (sorted.length > 0 && sorted[0].week) {
-                    return `SRA Millgate · ${sorted[0].week} (Active)`;
+                  if (sorted.length > 0 && sorted[0].weekLabel) {
+                    return `${sorted[0].circularNumber} (${sorted[0].weekLabel})`;
                   }
                   return 'No Active Circular in Database';
                 })()}

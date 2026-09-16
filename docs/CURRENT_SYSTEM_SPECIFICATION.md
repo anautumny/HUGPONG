@@ -1,5 +1,7 @@
 # HUGPONG Current-System Specification
 
+> Historical baseline: this document captured the pre-remediation implementation. Phase implementation documents, including `PHASE_4_MUTATION_CENTRALIZATION.md` and `PHASE_6_MUTATION_OUTBOX.md`, supersede its statements about direct client writes and synchronization.
+
 **Status:** Authoritative pre-refactor baseline  
 **Audited revision:** `5502195bb855b6648ae47d89b49a071dee9f982b` (`pre-refactor`)  
 **Audit date:** 2026-09-15  

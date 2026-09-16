@@ -1,9 +1,10 @@
-import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave } from '../services/storageService';
-import { initSyncEngine, enqueueOutboxItem, processOutbox, getOutboxCount, clearOutbox, flushOutboxToFirestore, generateUserNumericId, generateTicketId } from '../services/syncEngine';
+import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema } from '../services/storageService';
+import { initSyncEngine, enqueueAndFlushMutation, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
 import { publishTerminalTelemetry } from '../services/telemetryService';
 import { db, auth } from '../firebase/config';
-import { collection, onSnapshot, doc, setDoc, getDoc, writeBatch, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {
   loginWithServer,
   refreshServerSession,
@@ -13,8 +14,7 @@ import {
   registerWithServer,
   requestPhoneVerificationWithServer,
   verifyPhoneWithServer,
-  logoutFromServer,
-  authenticatedRequest
+  logoutFromServer
 } from '../services/authService';
 import {
   COLLECTIONS,
@@ -29,15 +29,23 @@ import {
   fromPriceDocument,
   fromSupportTicketDocument,
   fromUserDocument,
-  toCycleDocument,
-  toAuditReportDocument,
   toFieldDocument,
   toOperationLogDocument,
   toPriceDocument,
   toSupportTicketDocument
 } from './firestoreSchema';
 
-import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
+const commitExplicitMutation = async (type, payload, options = {}) => {
+  const outcome = await enqueueAndFlushMutation(type, payload, options);
+  const retainedStatus = outcome.queued ? outcome.item?.status : null;
+  if (retainedStatus === 'conflict' || retainedStatus === 'rejected') {
+    const error = new Error(outcome.item?.lastError || 'The server rejected this mutation.');
+    error.status = retainedStatus === 'conflict' ? 409 : 400;
+    error.data = outcome.item?.conflict || null;
+    throw error;
+  }
+  return outcome;
+};
 
 export { publishTerminalTelemetry, getNetworkStatus, subscribeToNetwork, checkConnectivity };
 
@@ -297,10 +305,11 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   }
 
   try {
-    const approved = await authenticatedRequest('/api/users/approve', {
-      method: 'POST',
-      body: { id: empId, role: 'MEMBER_FARMER' }
-    });
+    const approvalOutcome = await commitExplicitMutation('user_approve', {
+      id: empId,
+      role: 'MEMBER_FARMER'
+    }, { baseVersion: existingUserSnapshot?.updatedAt || applicant.updatedAt || null });
+    const approved = approvalOutcome.response;
     const activeUser = users.find(user => user.employeeId === empId);
     if (activeUser && approved.data) Object.assign(activeUser, fromUserDocument(empId, approved.data));
   } catch (error) {
@@ -536,23 +545,29 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   // Persist to offline AsyncStorage
   await saveItem(STORAGE_KEYS.FIELDS, fields);
 
-  // Sync to Cloud Firestore if online
-  if (db) {
-    try {
-      const canonicalField = toFieldDocument(formattedField);
-      if (isNew) {
-        const canonicalCycle = toCycleDocument(formattedField);
-        const batch = writeBatch(db);
-        batch.set(doc(db, COLLECTIONS.FIELDS, formattedField.id), canonicalField);
-        batch.set(doc(db, COLLECTIONS.CROP_CYCLES, formattedField.currentCycleId), canonicalCycle);
-        await batch.commit();
-        cropCycles.push(fromCycleDocument(formattedField.currentCycleId, canonicalCycle));
-      } else {
-        await setDoc(doc(db, COLLECTIONS.FIELDS, formattedField.id), canonicalField, { merge: true });
-      }
-    } catch (e) {
-      console.warn('[dataStore] saveFieldPlot Firestore sync fallback to offline:', e);
+  const canonicalField = toFieldDocument(formattedField);
+  const fieldMutationPayload = {
+    id: formattedField.id,
+    ...canonicalField,
+    isNew,
+    ...(isNew ? {
+      cropType: formattedField.cycleType,
+      cropYear: formattedField.cropYear,
+      currentStageNumber: formattedField.stageNumber,
+      elapsedMonths: formattedField.month,
+      batchNumber: formattedField.batchMonth
+    } : {})
+  };
+  try {
+    const outcome = await commitExplicitMutation('field_upsert', fieldMutationPayload, {
+      baseVersion: isNew ? null : (currentF.updatedAt || null)
+    });
+    if (outcome.response?.data?.cycle) {
+      cropCycles.push(fromCycleDocument(outcome.response.data.cycle.id, outcome.response.data.cycle));
     }
+  } catch (e) {
+    console.warn('[dataStore] Field mutation rejected:', e);
+    return { success: false, message: e.message || 'The field change was rejected by the server.' };
   }
 
   notifyDataUpdate();
@@ -634,17 +649,12 @@ export const resolveBlockFarmManager = (blockFarm) => {
 
 // ── Deterministic Price Parsing & Sorting Helper ─────────────
 function parsePriceTime(p) {
-  if (p.timestamp) return p.timestamp;
-  if (p.createdAt) {
-    const t = new Date(p.createdAt).getTime();
+  if (p.publishedAt) {
+    const t = new Date(p.publishedAt).getTime();
     if (!isNaN(t)) return t;
   }
-  if (p.isoDate) {
-    const t = new Date(p.isoDate).getTime();
-    if (!isNaN(t)) return t;
-  }
-  if (p.date) {
-    const t = new Date(p.date).getTime();
+  if (p.effectiveDate) {
+    const t = new Date(`${p.effectiveDate}T00:00:00Z`).getTime();
     if (!isNaN(t)) return t;
   }
   return 0;
@@ -658,84 +668,51 @@ export const getSortedPrices = () => {
 export const currentPrice = {
   get value() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (Number(sorted[0].price) || 0) : 0;
+    return sorted.length > 0 ? sorted[0].sugarPricePerLkg : 0;
   },
   get change() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (Number(sorted[0].change) || 0) : 0;
+    return sorted.length > 0 ? sorted[0].sugarPriceChange : 0;
   },
   get unit() { return 'Lkg'; },
   get mill() { return 'HPCo'; },
   get location() { return 'Silay'; },
   get lastUpdated() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (sorted[0].date || sorted[0].isoDate || 'Latest Circular') : 'No records';
+    return sorted.length > 0 ? sorted[0].effectiveDate : 'No records';
   },
   get week() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (sorted[0].week || 'Current Week') : 'No records';
+    return sorted.length > 0 ? sorted[0].weekLabel : 'No records';
   }
 };
 
 export const currentMarketObservation = {
   get value() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (Number(sorted[0].molasses) || 0) : 0;
+    return sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : 0;
   },
   get change() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (Number(sorted[0].molassesChange) || 0) : 0;
+    return sorted.length > 0 ? sorted[0].molassesPriceChange : 0;
   },
   get unit() { return 'MT'; },
   get lastUpdated() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (sorted[0].date || sorted[0].isoDate || 'Latest Circular') : 'No records';
+    return sorted.length > 0 ? sorted[0].effectiveDate : 'No records';
   },
   get week() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? (sorted[0].week || 'Current Week') : 'No records';
+    return sorted.length > 0 ? sorted[0].weekLabel : 'No records';
   }
 };
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const extractPriceMonth = (p) => {
-  if (!p) return 'May';
-  if (p.month && typeof p.month === 'string' && p.month !== 'Invalid Date') return p.month;
-
-  // 1. Check week string (e.g., "Week 1 Sep", "Week 4 May", "Week 4 Apr")
-  if (p.week && typeof p.week === 'string') {
-    for (const m of MONTH_NAMES) {
-      if (p.week.toLowerCase().includes(m.toLowerCase())) return m;
-    }
-  }
-
-  // 2. Check date or isoDate string (e.g. "2026-09-03", "Sep 03, 2026")
-  const rawDate = p.isoDate || p.date;
-  if (rawDate && typeof rawDate === 'string') {
-    for (const m of MONTH_NAMES) {
-      if (rawDate.toLowerCase().includes(m.toLowerCase())) return m;
-    }
-    const parts = rawDate.split('-');
-    if (parts.length >= 2) {
-      const monthIdx = parseInt(parts[1], 10) - 1;
-      if (monthIdx >= 0 && monthIdx < 12) return MONTH_NAMES[monthIdx];
-    }
-    const parsed = new Date(rawDate);
-    if (!isNaN(parsed.getTime())) {
-      return MONTH_NAMES[parsed.getMonth()];
-    }
-  }
-
-  // 3. Check timestamp
-  if (p.timestamp) {
-    const parsed = new Date(Number(p.timestamp));
-    if (!isNaN(parsed.getTime())) {
-      return MONTH_NAMES[parsed.getMonth()];
-    }
-  }
-
-  return 'May';
+  if (!p || !/^\d{4}-\d{2}-\d{2}$/.test(p.effectiveDate || '')) return null;
+  const monthIndex = Number(p.effectiveDate.slice(5, 7)) - 1;
+  return MONTH_NAMES[monthIndex] || null;
 };
 
 export const priceAnalytics = {
@@ -757,22 +734,22 @@ export const priceAnalytics = {
     return [0, 1, 2, 3].map(wIndex => {
       return months.map(m => {
         const matching = sorted.filter(p => extractPriceMonth(p) === m);
-        if (matching.length > wIndex) return Number(matching[wIndex].price) || 0;
-        if (matching.length > 0) return Number(matching[0].price) || 0;
-        return Number(sorted[0].price) || 0;
+        if (matching.length > wIndex) return matching[wIndex].sugarPricePerLkg;
+        if (matching.length > 0) return matching[0].sugarPricePerLkg;
+        return sorted[0].sugarPricePerLkg;
       });
     });
   },
   get monthlyAvg() {
     const sorted = getSortedPrices();
     if (sorted.length === 0) return 0;
-    const sum = sorted.reduce((acc, p) => acc + (Number(p.price) || 0), 0);
+    const sum = sorted.reduce((acc, p) => acc + p.sugarPricePerLkg, 0);
     return Math.round(sum / sorted.length);
   },
   get cropYearPeak() {
     const sorted = getSortedPrices();
     if (sorted.length === 0) return 0;
-    return Math.max(...sorted.map(p => Number(p.price) || 0));
+    return Math.max(...sorted.map(p => p.sugarPricePerLkg));
   }
 };
 
@@ -1095,28 +1072,33 @@ export const updateSessionFieldId = (fieldId) => {
 };
 
 export const updateFieldStageAndCycle = async (fieldId, updates) => {
-  if (!fieldId) return;
+  if (!fieldId) return { success: false, message: 'Field ID is required.' };
   const targetField = fields.find(f => f.id === fieldId);
-  if (targetField) {
-    Object.assign(targetField, updates);
-  }
-  saveItem(STORAGE_KEYS.FIELDS, fields);
+  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit currentCycleId.' };
+  const previousField = { ...targetField };
+  const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
+  const baseVersion = localCycle?.updatedAt || null;
+  Object.assign(targetField, updates);
+  await saveItem(STORAGE_KEYS.FIELDS, fields);
   notify();
 
-  if (db && fieldId) {
-    try {
-      if (!targetField?.currentCycleId) throw new Error('Field has no explicit currentCycleId.');
-      const cycleUpdate = {
-        currentStageNumber: Number(updates.stageNumber || targetField.stageNumber || 1),
-        elapsedMonths: Number(updates.month ?? targetField.month ?? 0),
-        updatedAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, COLLECTIONS.CROP_CYCLES, targetField.currentCycleId), cycleUpdate, { merge: true });
-      const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
-      if (localCycle) Object.assign(localCycle, cycleUpdate);
-    } catch (e) {
-      console.warn('[dataStore] Failed to sync field stage/cycle to Firestore:', e);
-    }
+  try {
+    const cycleUpdate = {
+      currentStageNumber: Number(updates.stageNumber || targetField.stageNumber || 1),
+      elapsedMonths: Number(updates.month ?? targetField.month ?? 0)
+    };
+    const outcome = await commitExplicitMutation('stage_update', {
+      cycleId: targetField.currentCycleId,
+      ...cycleUpdate
+    }, { baseVersion });
+    if (localCycle && outcome.response?.data) Object.assign(localCycle, outcome.response.data);
+    return { success: true, data: outcome.response?.data, queuedOffline: outcome.queued };
+  } catch (e) {
+    Object.keys(targetField).forEach(key => delete targetField[key]);
+    Object.assign(targetField, previousField);
+    await saveItem(STORAGE_KEYS.FIELDS, fields);
+    notify();
+    return { success: false, message: e.message || 'The stage update was rejected by the server.' };
   }
 };
 
@@ -1132,14 +1114,64 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   const nextSequence = Number(oldCycle?.sequenceNumber || targetField.cycleNumber || 1) + 1;
   const newCycleId = createCycleId(cleanId, nextSequence);
   const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
+  const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
+  const finalCropYear = options.cropYear || targetField.cropYear || 'CY 2026-2027';
+  const request = {
+    previousCycleId: oldCycleId,
+    cropType: finalCycleType,
+    cropYear: finalCropYear,
+    batchNumber: targetField.batchMonth || 1
+  };
+  let result;
+  let queuedOffline = false;
+  try {
+    const outcome = await commitExplicitMutation('cycle_rollover', { fieldId: cleanId, ...request }, {
+      baseVersion: targetField.updatedAt || null
+    });
+    queuedOffline = outcome.queued;
+    result = outcome.response?.data;
+    if (!queuedOffline && !result) throw new Error('Crop-cycle rollover returned no server response.');
+  } catch (err) {
+    return { success: false, message: err.message || 'Crop-cycle rollover was rejected by the server.' };
+  }
+  if (queuedOffline) {
+    const offlineLogIds = operationLogs
+      .filter(log => log.cycleId === oldCycleId && log.status === 'ACTIVE')
+      .map(log => log.id);
+    result = {
+      oldCycleId,
+      newCycleId,
+      archivedLogCount: offlineLogIds.length,
+      archivedOperationLogIds: offlineLogIds,
+      oldCycle: { ...oldCycle, status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso },
+      newCycle: {
+        fieldId: cleanId,
+        sequenceNumber: nextSequence,
+        cropType: finalCycleType,
+        cropYear: finalCropYear,
+        currentStageNumber: 1,
+        elapsedMonths: 0,
+        batchNumber: request.batchNumber,
+        status: 'ACTIVE',
+        startedAt: nowIso,
+        updatedAt: nowIso,
+        archivedAt: null,
+        archivedByUserId: null
+      }
+    };
+  }
+  if (!result?.newCycleId || !result.newCycle) {
+    return { success: false, message: 'Crop-cycle rollover returned an incomplete response.' };
+  }
   const targetLogs = operationLogs.filter(l => {
-    return l.cycleId === oldCycleId && l.status === 'ACTIVE';
+    return l.cycleId === result.oldCycleId && l.status === 'ACTIVE';
   });
 
   targetLogs.forEach(l => {
     l.status = 'ARCHIVED';
-    l.archivedAt = l.archivedAt || nowIso;
-    l.archivedByUserId = actorUserId;
+    l.archivedAt = result.oldCycle?.archivedAt;
+    l.archivedByUserId = result.oldCycle?.archivedByUserId;
+    l.updatedAt = result.oldCycle?.updatedAt;
   });
   
   // Remove drafts belonging to the archived cycle
@@ -1149,58 +1181,33 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
 
   // Canonical reset of the field plot in dataStore to Stage 1 of the new crop cycle
   if (targetField) {
-    const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-    const finalCropYear = options.cropYear || targetField.cropYear || 'CY 2026–2027';
     const stage1Name = options.stage || 'Pre-Planting & Land Preparation';
     const freshCustomStages = Array.isArray(options.customStages) && options.customStages.length > 0
       ? options.customStages
       : [];
 
     targetField.stage = stage1Name;
-    targetField.stageNumber = 1;
+    targetField.stageNumber = result.newCycle.currentStageNumber;
     targetField.isCompleted = false;
     targetField.customStages = freshCustomStages;
-    targetField.cycleType = finalCycleType;
-    targetField.cropYear = finalCropYear;
-    targetField.cycleNumber = nextSequence;
-    targetField.currentCycleId = newCycleId;
-    targetField.lastUpdated = nowIso;
-    targetField.lastSync = 'Just now';
-    targetField.synced = true;
+    targetField.cycleType = result.newCycle.cropType;
+    targetField.cropYear = result.newCycle.cropYear;
+    targetField.cycleNumber = result.newCycle.sequenceNumber;
+    targetField.currentCycleId = result.newCycleId;
+    targetField.lastUpdated = result.newCycle.updatedAt;
+    targetField.lastSync = queuedOffline ? targetField.lastSync : 'Just now';
+    targetField.synced = !queuedOffline;
     await saveItem(STORAGE_KEYS.FIELDS, fields);
   }
+
+  if (oldCycle && result.oldCycle) Object.assign(oldCycle, result.oldCycle);
+  const existingNewCycle = cropCycles.find(cycle => cycle.id === result.newCycleId);
+  if (existingNewCycle) Object.assign(existingNewCycle, fromCycleDocument(result.newCycleId, result.newCycle));
+  else cropCycles.push(fromCycleDocument(result.newCycleId, result.newCycle));
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
   notify();
-
-  if (db) {
-    try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, COLLECTIONS.CROP_CYCLES, oldCycleId), {
-        status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
-      });
-      targetLogs.forEach(log => batch.update(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), {
-        status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
-      }));
-      const newCycle = toCycleDocument(targetField, {
-        sequenceNumber: nextSequence,
-        cropType: targetField.cycleType,
-        cropYear: targetField.cropYear,
-        currentStageNumber: 1,
-        status: 'ACTIVE',
-        startedAt: nowIso,
-        updatedAt: nowIso
-      });
-      batch.set(doc(db, COLLECTIONS.CROP_CYCLES, newCycleId), newCycle);
-      batch.update(doc(db, COLLECTIONS.FIELDS, targetField.id), { currentCycleId: newCycleId, updatedAt: nowIso });
-      await batch.commit();
-      if (oldCycle) Object.assign(oldCycle, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso });
-      cropCycles.push(fromCycleDocument(newCycleId, newCycle));
-    } catch (err) {
-      console.warn('[dataStore] Error archiving logs in Firestore:', err);
-    }
-  }
 
   // Record audit history event shared with Web & Cloud
   const session = getCurrentSession();
@@ -1213,7 +1220,7 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
     actorName,
     'Completed'
   );
-  return { success: true, archivedCount: targetLogs.length };
+  return { success: true, archivedCount: result.archivedLogCount, cycleId: result.newCycleId, queuedOffline };
 };
 
 export const archiveFieldPlot = async (fieldId) => {
@@ -1225,8 +1232,22 @@ export const archiveFieldPlot = async (fieldId) => {
   if (targetIdx === -1) return { success: false, message: 'Field plot not found' };
 
   const targetField = fields[targetIdx];
-  targetField.status = 'ARCHIVED';
-  targetField.archivedAt = nowIso;
+  let authoritativeField = null;
+  let queuedOffline = false;
+  try {
+    const outcome = await commitExplicitMutation('field_archive', { id: cleanId }, {
+      baseVersion: targetField.updatedAt || null
+    });
+    queuedOffline = outcome.queued;
+    authoritativeField = outcome.response?.data;
+  } catch (error) {
+    return { success: false, message: error.message || 'The field archive was rejected by the server.' };
+  }
+  Object.assign(targetField, authoritativeField || {
+    status: 'ARCHIVED',
+    archivedAt: nowIso,
+    updatedAt: nowIso
+  });
   targetField.updatedAt = nowIso;
 
   // Remove from active fields array
@@ -1240,10 +1261,11 @@ export const archiveFieldPlot = async (fieldId) => {
   // Archive all logs belonging to this field
   const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   operationLogs.forEach(l => {
-    if (l.cycleId === targetField.currentCycleId && l.status === 'ACTIVE') {
+    if (String(l.fieldId || '').trim().toUpperCase() === cleanId && l.status === 'ACTIVE') {
       l.status = 'ARCHIVED';
-      l.archivedAt = l.archivedAt || nowIso;
+      l.archivedAt = l.archivedAt || targetField.archivedAt || nowIso;
       l.archivedByUserId = actorUserId;
+      l.updatedAt = targetField.updatedAt || nowIso;
     }
   });
 
@@ -1251,21 +1273,6 @@ export const archiveFieldPlot = async (fieldId) => {
   await saveItem(STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields);
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   notify();
-
-  if (db) {
-    try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, COLLECTIONS.FIELDS, cleanId), { status: 'ARCHIVED', archivedAt: nowIso, updatedAt: nowIso });
-      operationLogs.filter(l => l.cycleId === targetField.currentCycleId && l.status === 'ARCHIVED').forEach(log => {
-        batch.update(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), {
-          status: 'ARCHIVED', archivedAt: log.archivedAt, archivedByUserId: actorUserId, updatedAt: nowIso
-        });
-      });
-      await batch.commit();
-    } catch (e) {
-      console.warn('[dataStore] Error archiving field in Firestore:', e);
-    }
-  }
 
   await logSystemEvent(
     'plot',
@@ -1276,7 +1283,7 @@ export const archiveFieldPlot = async (fieldId) => {
     'Archived'
   );
 
-  return { success: true, fieldId: cleanId };
+  return { success: true, fieldId: cleanId, queuedOffline };
 };
 
 export const logSystemEvent = async (category, eventType, entity, details, actor, status = 'Recorded') => {
@@ -1306,8 +1313,10 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
     actor: actor || defaultActor,
     status: status || 'Recorded'
   };
+  const operationEntityIsLog = operationLogs.some(log => log.id === String(entity || ''));
+  const blockFarmEntity = blockFarms.find(farm => farm.id === entity || farm.code === entity || farm.name === entity);
   const entityTypes = {
-    operation: 'OPERATION_LOG',
+    operation: operationEntityIsLog ? 'OPERATION_LOG' : 'FIELD',
     plot: 'FIELD',
     block: 'BLOCK_FARM',
     user: 'USER',
@@ -1319,7 +1328,7 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
     eventType: String(eventType || 'SYSTEM_EVENT').trim().replace(/\s+/g, '_').toUpperCase(),
     actorUserId: session?.employeeId || session?.id || '',
     entityType: entityTypes[category] || 'AUDIT_REPORT',
-    entityId: String(entity || 'SYSTEM'),
+    entityId: String(blockFarmEntity?.id || entity || 'SYSTEM'),
     details: details || '',
     outcome: String(status || '').toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS',
     createdAt: now.toISOString()
@@ -1335,20 +1344,10 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
   await saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
   notify();
 
-  // Enqueue for background / offline outbox sync
   try {
-    enqueueOutboxItem('audit_log', { id: auditId, ...canonicalEvent });
+    await commitExplicitMutation('audit_log', { id: auditId, ...canonicalEvent });
   } catch (e) {
-    console.warn('[dataStore] Enqueue audit log notice:', e);
-  }
-
-  // Direct sync to Cloud Firestore if online
-  if (db) {
-    try {
-      await setDoc(doc(db, COLLECTIONS.AUDIT_LOGS, auditId), canonicalEvent);
-    } catch (e) {
-      console.warn('[dataStore] Firestore audit log notice:', e);
-    }
+    console.warn('[dataStore] Audit event rejected:', e);
   }
 
   return newEvent;
@@ -1491,12 +1490,12 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   };
 
   const existingHistory = Array.isArray(targetLog.amendments) ? targetLog.amendments : [];
+  const originalLog = JSON.parse(JSON.stringify(targetLog));
   
   const displayDate = formatDisplayDate(updates.date || updates.period || targetLog.date || targetLog.period);
   const costNum = Number(updates.totalCost != null ? updates.totalCost : (updates.cost != null ? updates.cost : (targetLog.totalCost != null ? targetLog.totalCost : targetLog.cost || 0)));
 
-  // Apply updates to target log
-  Object.assign(targetLog, updates, {
+  const candidateLog = { ...targetLog, ...updates,
     date: displayDate,
     period: displayDate,
     isoDate: toISODateString(displayDate),
@@ -1505,24 +1504,39 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     amendments: [...existingHistory, editRecord],
     status: 'ACTIVE',
     updatedAt: new Date().toISOString()
+  };
+
+  const canonicalChanges = toOperationLogDocument(candidateLog, {
+    cycleId: candidateLog.cycleId,
+    submittedByUserId: candidateLog.submittedByUserId || candidateLog.loggedById,
+    status: 'ACTIVE'
   });
-
-  await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-
-  if (db && IS_SYNCED) {
-    try {
-      const canonicalLog = toOperationLogDocument(targetLog, {
-        cycleId: targetLog.cycleId,
-        submittedByUserId: targetLog.submittedByUserId || targetLog.loggedById,
-        status: 'ACTIVE'
-      });
-      await setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, logId), canonicalLog);
-    } catch (e) {
-      console.warn('[dataStore] Direct Firestore log update failed, queuing outbox:', e);
-      await enqueueOutboxItem('operation_log', targetLog);
+  delete canonicalChanges.amendments;
+  try {
+    const outcome = await commitExplicitMutation('operation_amendment', {
+      id: logId,
+      changes: canonicalChanges,
+      amendment: editRecord
+    }, { baseVersion: originalLog.updatedAt || null });
+    if (outcome.response?.data) {
+      const authoritative = fromOperationLogDocument(outcome.response.data.id || logId, outcome.response.data);
+      Object.keys(targetLog).forEach(key => delete targetLog[key]);
+      Object.assign(targetLog, authoritative);
+      await saveItem(STORAGE_KEYS.LOGS, operationLogs);
+    } else if (outcome.queued) {
+      Object.keys(targetLog).forEach(key => delete targetLog[key]);
+      Object.assign(targetLog, candidateLog);
+      await saveItem(STORAGE_KEYS.LOGS, operationLogs);
     }
-  } else {
-    await enqueueOutboxItem('operation_log', targetLog);
+  } catch (e) {
+    const authoritative = e.data?.status === 'ARCHIVED'
+      ? fromOperationLogDocument(e.data.id || logId, e.data)
+      : originalLog;
+    Object.keys(targetLog).forEach(key => delete targetLog[key]);
+    Object.assign(targetLog, authoritative);
+    await saveItem(STORAGE_KEYS.LOGS, operationLogs);
+    notify();
+    return { success: false, error: e.message || 'The operation amendment was rejected by the server.' };
   }
 
   // Record audit history event shared with Web & Cloud
@@ -1530,7 +1544,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   await logSystemEvent(
     'operation',
     'Operation Log Correction',
-    targetLog.fieldId || 'Field Plot',
+    targetLog.id,
     `Amended operation record ${targetLog.id} (${targetLog.activity || targetLog.task || 'Operation'}, ₱${costNum.toLocaleString()}). Reason: ${reasonTrimmed}`,
     actorName,
     'Amended'
@@ -1549,32 +1563,28 @@ export const archivePastLogsForField = async (fieldId) => {
   if (!field?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle' };
   const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   const toArchive = operationLogs.filter(l => l.cycleId === field.currentCycleId && l.status === 'ACTIVE');
-  
-  toArchive.forEach(l => {
-    l.status = 'ARCHIVED';
-    l.archivedAt = l.archivedAt || nowIso;
-    l.archivedByUserId = actorUserId;
-  });
+  if (!toArchive.length) return { success: true, archivedCount: 0 };
 
+  let archivedAt = nowIso;
+  try {
+    const outcome = await commitExplicitMutation('operation_archive', {
+      operationLogIds: toArchive.map(log => log.id)
+    }, {
+      baseVersion: Object.fromEntries(toArchive.map(log => [log.id, log.updatedAt || null]))
+    });
+    archivedAt = outcome.response?.data?.archivedAt || outcome.response?.archivedAt || archivedAt;
+  } catch (err) {
+    return { success: false, message: err.message || 'The archive request was rejected by the server.' };
+  }
+
+  toArchive.forEach(log => {
+    log.status = 'ARCHIVED';
+    log.archivedAt = archivedAt;
+    log.archivedByUserId = actorUserId;
+    log.updatedAt = archivedAt;
+  });
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   notify();
-
-  if (db) {
-    try {
-      const promises = toArchive.map(l => setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, l.id),
-        toOperationLogDocument(l, {
-          cycleId: l.cycleId,
-          submittedByUserId: l.submittedByUserId || l.loggedById,
-          status: 'ARCHIVED',
-          archivedAt: l.archivedAt,
-          archivedByUserId: actorUserId
-        })
-      ));
-      await Promise.all(promises);
-    } catch (err) {
-      console.warn('[dataStore] Error archiving logs in Firestore:', err);
-    }
-  }
 
   return { success: true, archivedCount: toArchive.length };
 };
@@ -1599,53 +1609,50 @@ export const calculateSRAWeekLabel = (dateInput = new Date()) => {
   return `Week ${boundedWeek} ${monthName}`;
 };
 
-export const publishSraPrice = async ({ price, molasses, week, circular, source, effectiveDate }) => {
+export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, weekLabel, circularNumber, source, effectiveDate }) => {
   const sorted = getSortedPrices();
-  const prevPrice = (sorted.length > 0 && sorted[0].price !== undefined) ? sorted[0].price : price;
-  const prevMol = (sorted.length > 0 && sorted[0].molasses !== undefined) ? sorted[0].molasses : molasses;
-  const change = price - prevPrice;
-  const molChange = molasses - prevMol;
-
-  let targetDate = new Date();
-  if (effectiveDate) {
-    const parsed = new Date(effectiveDate);
-    if (!isNaN(parsed.getTime())) targetDate = parsed;
-  }
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const formattedDate = `${months[targetDate.getMonth()]} ${String(targetDate.getDate()).padStart(2, '0')}, ${targetDate.getFullYear()}`;
-  const isoDate = targetDate.toISOString().split('T')[0];
+  const prevPrice = sorted.length > 0 ? sorted[0].sugarPricePerLkg : sugarPricePerLkg;
+  const prevMol = sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : molassesPricePerMetricTon;
+  const change = sugarPricePerLkg - prevPrice;
+  const molChange = molassesPricePerMetricTon - prevMol;
 
   const pId = `PRC-${Date.now()}`;
-  const newPost = {
+  const newPost = toPriceDocument({
     id: pId,
-    week: week || 'Current Week',
-    price: Number(price),
-    molasses: Number(molasses),
-    date: formattedDate,
-    isoDate: isoDate,
-    timestamp: Date.now(),
-    change,
-    molassesChange: molChange,
-    source: source || circular || 'SRA Circular #105 (Official SRA Millsite Notice)',
-    circular: circular || 'SRA Circular #105',
-    createdAt: new Date().toISOString()
-  };
+    effectiveDate,
+    weekLabel,
+    sugarPricePerLkg,
+    sugarPriceChange: change,
+    molassesPricePerMetricTon,
+    molassesPriceChange: molChange,
+    circularNumber,
+    source,
+    publishedAt: new Date().toISOString()
+  }, CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+  const localRecord = { id: pId, ...newPost };
 
-  priceHistory.unshift(newPost);
+  priceHistory.unshift(localRecord);
   await saveItem(STORAGE_KEYS.PRICES, priceHistory);
   notify();
 
-  // Push directly to Firestore 'sra_prices'
-  if (db) {
-    try {
-      await setDoc(doc(db, COLLECTIONS.SRA_PRICES, pId), toPriceDocument(newPost, CURRENT_SESSION?.employeeId || ''));
-      console.log('[Mobile] Published price broadcasted to Firestore:', pId);
-    } catch (err) {
-      console.warn('[Mobile] Error broadcasting price to Firestore:', err);
+  try {
+    const outcome = await commitExplicitMutation('price', { id: pId, ...newPost });
+    if (outcome.response?.data) {
+      const confirmed = fromPriceDocument(outcome.response.data.id, outcome.response.data);
+      const localIndex = priceHistory.findIndex(priceRecord => priceRecord.id === pId);
+      if (localIndex >= 0) priceHistory[localIndex] = confirmed;
+      await saveItem(STORAGE_KEYS.PRICES, priceHistory);
+      notify();
     }
+  } catch (err) {
+    const localIndex = priceHistory.findIndex(priceRecord => priceRecord.id === pId);
+    if (localIndex >= 0) priceHistory.splice(localIndex, 1);
+    await saveItem(STORAGE_KEYS.PRICES, priceHistory);
+    notify();
+    throw err;
   }
 
-  return newPost;
+  return localRecord;
 };
 
 let MEMBER_SYNC_LAG_DAYS = 0;
@@ -1953,19 +1960,14 @@ export const updateFieldCustomStages = async (fieldId, stages) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
   if (field) {
+    const baseVersion = field.updatedAt || null;
     field.customStages = Array.isArray(stages) ? stages : [];
     field.updatedAt = new Date().toISOString();
     await saveItem(STORAGE_KEYS.FIELDS, fields);
-    if (db) {
-      try {
-        await setDoc(doc(db, 'fields', field.id), {
-          customStages: field.customStages,
-          updatedAt: field.updatedAt
-        }, { merge: true });
-      } catch (e) {
-        console.warn('[dataStore] updateFieldCustomStages Firestore sync notice:', e);
-      }
-    }
+    await commitExplicitMutation('custom_stages', {
+      fieldId: field.id,
+      customStages: field.customStages
+    }, { baseVersion });
     notifyDataUpdate();
   }
 };
@@ -2057,6 +2059,7 @@ export const saveFieldCustomOperations = async (fieldId, stageNumber, operations
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
   if (field) {
+    const baseVersion = field.updatedAt || null;
     if (!field.customOperations) field.customOperations = {};
     field.customOperations[stageNumber] = (operations || []).map(op => ({
       ...op,
@@ -2066,16 +2069,10 @@ export const saveFieldCustomOperations = async (fieldId, stageNumber, operations
     }));
     field.updatedAt = new Date().toISOString();
     await saveItem(STORAGE_KEYS.FIELDS, fields);
-    if (db) {
-      try {
-        await setDoc(doc(db, 'fields', field.id), {
-          customOperations: field.customOperations,
-          updatedAt: field.updatedAt
-        }, { merge: true });
-      } catch (e) {
-        console.warn('[dataStore] saveFieldCustomOperations Firestore sync notice:', e);
-      }
-    }
+    await commitExplicitMutation('custom_operations', {
+      fieldId: field.id,
+      customOperations: field.customOperations
+    }, { baseVersion });
     notifyDataUpdate();
   }
 };
@@ -2084,54 +2081,16 @@ export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
   if (field) {
+    const baseVersion = field.updatedAt || null;
     field.customOperations = { ...(fullPlanByStage || {}) };
     field.updatedAt = new Date().toISOString();
     await saveItem(STORAGE_KEYS.FIELDS, fields);
-    if (db) {
-      try {
-        await setDoc(doc(db, 'fields', field.id), {
-          customOperations: field.customOperations,
-          updatedAt: field.updatedAt
-        }, { merge: true });
-      } catch (e) {
-        console.warn('[dataStore] saveFieldFullPlan Firestore sync notice:', e);
-      }
-    }
+    await commitExplicitMutation('custom_operations', {
+      fieldId: field.id,
+      customOperations: field.customOperations
+    }, { baseVersion });
     notifyDataUpdate();
   }
-};
-
-export const addSRAPrice = async (price) => {
-  const sorted = getSortedPrices();
-  const nextMonth = 'May';
-  const nextWeek = 'Week 4';
-  const dateStr = new Date().toISOString().split('T')[0];
-  const priceRecord = {
-    id: `PRC-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`,
-    week: `${nextWeek} ${nextMonth}`,
-    month: nextMonth,
-    price: Number(price) || 0,
-    date: dateStr,
-    createdAt: new Date().toISOString()
-  };
-  priceHistory.unshift(priceRecord);
-
-  if (db) {
-    try {
-      await setDoc(doc(db, COLLECTIONS.SRA_PRICES, priceRecord.id), toPriceDocument({
-        ...priceRecord,
-        molasses: 0,
-        change: 0,
-        molassesChange: 0,
-        circular: 'Manual SRA Publication',
-        source: 'SRA Admin'
-      }, CURRENT_SESSION?.employeeId || ''));
-    } catch (e) {
-      console.warn('[dataStore] Failed to write price to Firestore:', e);
-    }
-  }
-
-  notify();
 };
 
 export const submitSupportTicket = async (ticket) => {
@@ -2162,20 +2121,8 @@ export const submitSupportTicket = async (ticket) => {
   };
   supportTickets.unshift(newTicket);
 
-  if (db && IS_SYNCED) {
-    try {
-      await setDoc(doc(db, COLLECTIONS.SUPPORT_TICKETS, newId), toSupportTicketDocument({
-        ...newTicket,
-        title: newTicket.subject,
-        details: ticket.details || ticket.message || ''
-      }, CURRENT_SESSION?.employeeId || ''));
-    } catch (e) {
-      console.warn('[dataStore] Failed to write ticket to Firestore, queuing:', e);
-      await enqueueOutboxItem('ticket', newTicket);
-    }
-  } else if (!IS_SYNCED) {
-    await enqueueOutboxItem('ticket', newTicket);
-  }
+  const ticketPayload = { id: newId, ...toSupportTicketDocument({ ...newTicket, title: newTicket.subject, details: ticket.details || ticket.message || '' }, CURRENT_SESSION?.employeeId || '') };
+  await commitExplicitMutation('ticket', ticketPayload);
 
   notify();
   return newTicket;
@@ -2244,7 +2191,13 @@ export const listenToCloudSync = () => {
     // 1. Live SRA Sugar Prices Listener
     const unsubPrices = onSnapshot(collection(db, COLLECTIONS.SRA_PRICES), (snapshot) => {
       const remotePrices = [];
-      snapshot.forEach(docSnap => remotePrices.push(fromPriceDocument(docSnap.id, docSnap.data())));
+      snapshot.forEach(docSnap => {
+        try {
+          remotePrices.push(fromPriceDocument(docSnap.id, docSnap.data()));
+        } catch (error) {
+          console.error('[Mobile] Rejected invalid sra_prices document:', docSnap.id, error.message);
+        }
+      });
       
       remotePrices.sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
 
@@ -2284,28 +2237,24 @@ export const listenToCloudSync = () => {
         }
       });
 
-      // Merge remote logs with existing local logs, keeping local logs that aren't yet in cloud!
+      // Snapshot data replaces the canonical local replica. The only overlay is
+      // derived from an explicit pending create mutation, never from a cached
+      // record that happens to be absent from Firestore.
       const remoteIds = new Set(remoteLogs.map(r => r.id));
-      const localOnly = operationLogs.filter(l => !remoteIds.has(l.id) && l.status === 'ACTIVE' && l.cycleId);
-      
-      // Auto-reconcile: If there are local-only logs, automatically push them to Firestore!
-      if (localOnly.length > 0 && db) {
-        localOnly.forEach(l => {
-          l.synced = true;
-          l.isOffline = false;
-          l.cloudQueueStatus = 'transmitted';
-          const clean = toOperationLogDocument(l, {
-            cycleId: l.cycleId,
-            submittedByUserId: l.submittedByUserId || l.loggedById,
-            status: 'ACTIVE'
-          });
-          setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, l.id), clean).catch(e => {
-            console.warn('[Mobile] Auto-reconcile local log upload notice:', e);
-          });
-        });
-      }
+      const pendingCreateOverlays = getOutboxQueue()
+        .filter(item =>
+          (item.type === 'operation_log' || item.type === 'takeover_log') &&
+          ['queued', 'retryable', 'failed', 'syncing'].includes(item.status) &&
+          item.payload?.id && !remoteIds.has(item.payload.id)
+        )
+        .map(item => ({
+          ...fromOperationLogDocument(item.payload.id, item.payload),
+          synced: false,
+          isOffline: true,
+          cloudQueueStatus: 'offline_queued'
+        }));
 
-      const merged = [...remoteLogs, ...localOnly];
+      const merged = [...remoteLogs, ...pendingCreateOverlays];
       merged.sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
         const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
@@ -2372,18 +2321,10 @@ export const listenToCloudSync = () => {
       const remoteLogs = [];
       snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
 
-      if (remoteLogs.length > 0) {
-        remoteLogs.forEach(rl => {
-          const existingIdx = systemHistory.findIndex(a => a.id === rl.id);
-          if (existingIdx >= 0) {
-            systemHistory[existingIdx] = { ...systemHistory[existingIdx], ...rl };
-          } else {
-            systemHistory.unshift(rl);
-          }
-        });
-        saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
-        notify();
-      }
+      systemHistory.length = 0;
+      systemHistory.push(...remoteLogs);
+      saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
+      notify();
     }, (err) => console.warn('[Mobile] Audit logs listener notice:', err));
 
     return () => {
@@ -2404,91 +2345,11 @@ export const listenToCloudSync = () => {
 };
 
 export const performMobileSync = async () => {
-  IS_SYNCED = true;
-  if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
-  
-  fields.forEach(f => {
-    f.synced = true;
-    f.lastSync = 'Just now';
-  });
-
-  // Mark all active logs as synced and cleared of offline state locally
-  operationLogs.forEach(l => {
-    if (l.status === 'ACTIVE') {
-      l.synced = true;
-      l.isOffline = false;
-      l.cloudQueueStatus = 'transmitted';
-    }
-  });
-
+  const res = await flushOutboxToApi();
+  IS_SYNCED = getOutboxCount() === 0;
+  if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = getPendingSyncCount(CURRENT_SESSION);
   notify();
-
-  const res = await flushOutboxToFirestore();
-
-  // Push all local operationLogs to Firestore in parallel
-  if (db && Array.isArray(operationLogs) && operationLogs.length > 0) {
-    try {
-      const activeLogs = operationLogs.filter(l => l && l.id && l.status === 'ACTIVE' && l.cycleId);
-      const pushPromises = activeLogs.map(log => {
-        const cleanLog = toOperationLogDocument(log, {
-          cycleId: log.cycleId,
-          submittedByUserId: log.submittedByUserId || log.loggedById,
-          status: 'ACTIVE'
-        });
-        return setDoc(doc(db, COLLECTIONS.OPERATION_LOGS, log.id), cleanLog);
-      });
-      await Promise.all(pushPromises);
-    } catch (logSyncErr) {
-      console.warn('[performMobileSync] operationLogs push error:', logSyncErr);
-    }
-  }
-
-  await saveItem(STORAGE_KEYS.FIELDS, fields);
-  await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-
-  // Flush compiled audit reports to Firestore (District Audit Queue) in parallel
-  try {
-    if (db && Array.isArray(auditReports) && auditReports.length > 0) {
-      const reportPromises = auditReports.filter(rep => rep && (rep.reportId || rep.id)).map(async (rep) => {
-        const docId = rep.reportId || rep.id;
-        const docRef = doc(db, COLLECTIONS.AUDIT_REPORTS, docId);
-        try {
-          const snap = await getDoc(docRef);
-          if (snap.exists() && snap.data()?.status === 'CERTIFIED') {
-            const snapHash = snap.data().qrHash;
-            const repHash = rep.qrHash || rep.qrSignature;
-            if (snapHash && snapHash === repHash) {
-              rep.status = 'CERTIFIED';
-              rep.certifiedByUserId = snap.data().certifiedByUserId || rep.certifiedByUserId;
-              rep.certifiedAt = snap.data().certifiedAt || rep.certifiedAt;
-              rep.cloudQueueStatus = 'transmitted';
-              return;
-            }
-          }
-        } catch (ge) {}
-        const cleanedRep = toAuditReportDocument(rep, {
-          compiledByUserId: rep.compiledByUserId || CURRENT_SESSION?.employeeId || '',
-          status: rep.status,
-          updatedAt: new Date().toISOString()
-        });
-        await setDoc(docRef, cleanedRep);
-        rep.cloudQueueStatus = 'transmitted';
-        rep.cloudQueuedAt = new Date().toISOString();
-      });
-      await Promise.all(reportPromises);
-      await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
-    }
-  } catch (e) {
-    console.warn('[performMobileSync] auditReports push error:', e);
-  }
-
-  // Broadcast device health telemetry
-  try {
-    await publishTerminalTelemetry(CURRENT_SESSION, 0);
-  } catch (e) {}
-  
-  notify();
-  return true;
+  return res;
 };
 
 // Register automatic sync on network reconnection
@@ -2496,12 +2357,7 @@ setOnReconnectCallback(performMobileSync);
 
 export const initializeOfflineStorage = async () => {
   try {
-    const CLEAN_KEY = '@hugpong_clean_prod_v2';
-    const isCleaned = await getItem(CLEAN_KEY);
-    if (!isCleaned) {
-      await clearHugpongStorage();
-      await saveItem(CLEAN_KEY, true);
-    }
+    await ensureCurrentCacheSchema();
     await initSyncEngine();
     const stored = await hydrateAllStorage();
     if (stored[STORAGE_KEYS.AUTH_TOKEN] && stored[STORAGE_KEYS.SESSION]) {
@@ -2558,7 +2414,13 @@ export const initializeOfflineStorage = async () => {
     // Hydrate cached price circulars
     if (Array.isArray(stored[STORAGE_KEYS.PRICES]) && stored[STORAGE_KEYS.PRICES].length > 0) {
       priceHistory.length = 0;
-      stored[STORAGE_KEYS.PRICES].forEach(p => priceHistory.push(p));
+      stored[STORAGE_KEYS.PRICES].forEach(p => {
+        try {
+          priceHistory.push(fromPriceDocument(p.id, p));
+        } catch (error) {
+          console.warn('[Mobile] Ignoring non-canonical cached sra_prices record:', p?.id || '(missing id)', error.message);
+        }
+      });
     }
 
     // Hydrate cached pending member registrations

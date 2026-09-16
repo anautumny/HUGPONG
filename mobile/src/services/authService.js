@@ -9,6 +9,7 @@ async function parseResponse(response) {
   if (!response.ok || !data.success) {
     const error = new Error(data.error || `Authentication request failed (${response.status}).`);
     error.status = response.status;
+    error.data = data.data;
     throw error;
   }
   return data;

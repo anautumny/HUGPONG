@@ -25,14 +25,19 @@ console.log('[HUGPONG] Initializing SRA Admin workspace...');
     const data = await res.json();
     if (data.authenticated && data.user) {
       user = data.user;
+      currentRole = webRoleKeyFromUser(user, data.roleKey);
+      if (!currentRole) {
+        window.location.replace('../../login.html');
+        return;
+      }
       if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
         await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
       }
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(user, user.roleKey || 'admin', data.token);
+        saveWebAuthSession(user, currentRole, data.token);
       } else {
         localStorage.setItem('hugpong_user', JSON.stringify(user));
-        localStorage.setItem('hugpong_role', user.roleKey || 'admin');
+        localStorage.setItem('hugpong_role', currentRole);
       }
     } else {
       window.location.replace('../../login.html');
@@ -57,25 +62,14 @@ console.log('[HUGPONG] Initializing SRA Admin workspace...');
     return;
   }
 
-  const roleLower = String(user?.roleKey || user?.role || currentRole || '').toLowerCase();
-  if (roleLower.includes('manager')) {
-    console.log('[HUGPONG] Routing Farm Manager to designated console...');
-    window.location.replace('../farm-manager/dashboard.html');
-    return;
-  }
-  if (roleLower.includes('super')) {
-    console.log('[HUGPONG] Routing Super Admin to central console...');
-    window.location.replace('../super-admin/dashboard.html');
-    return;
-  }
-  if (!roleLower.includes('admin') && !roleLower.includes('sra')) {
-    console.warn('[HUGPONG] Unauthorized access attempt to SRA Admin console.');
-    alert('Access Restricted: You do not have SRA Administrator permissions.');
-    window.location.replace('../../login.html');
+  const roleKey = webRoleKeyFromUser(user, currentRole);
+  if (roleKey !== 'admin') {
+    window.location.replace(getWebDashboardPath(roleKey) || '/login.html?role=member');
     return;
   }
 
-  localStorage.setItem('hugpong_role', 'admin');
+  localStorage.setItem('hugpong_role', roleKey);
+  document.documentElement.classList.remove('auth-pending');
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {

@@ -150,12 +150,48 @@
       totalCost: operations.reduce((sum, item) => sum + Number(item.totalCost || 0), 0), operations, logs: operations,
       qrSignature: value.qrHash, certifiedBy: value.certifiedByUserId, compiledBy: value.compiledByUserId };
   };
-  const toPrice = (value, userId) => ({ effectiveDate: value.effectiveDate || value.date, weekLabel: value.weekLabel || value.week,
-    sugarPricePerLkg: Number(value.sugarPricePerLkg ?? value.price ?? 0), sugarPriceChange: Number(value.sugarPriceChange ?? value.change ?? 0),
-    molassesPricePerMetricTon: Number(value.molassesPricePerMetricTon ?? value.molasses ?? 0), molassesPriceChange: Number(value.molassesPriceChange ?? value.molassesChange ?? 0),
-    circularNumber: value.circularNumber || value.circular || '', source: value.source || '', publishedByUserId: value.publishedByUserId || userId || '', publishedAt: value.publishedAt || value.createdAt || now() });
-  const fromPrice = (id, value) => ({ id, ...value, date: value.effectiveDate, week: value.weekLabel, price: value.sugarPricePerLkg,
-    change: value.sugarPriceChange, molasses: value.molassesPricePerMetricTon, molassesChange: value.molassesPriceChange, circular: value.circularNumber, createdAt: value.publishedAt });
+  const priceString = (value, fieldName) => {
+    const result = String(value == null ? '' : value).trim();
+    if (!result) throw new Error(`Invalid sra_prices record: ${fieldName} is required.`);
+    return result;
+  };
+  const priceNumber = (value, fieldName) => {
+    if (value == null || value === '') throw new Error(`Invalid sra_prices record: ${fieldName} is required.`);
+    const result = Number(value);
+    if (!Number.isFinite(result)) throw new Error(`Invalid sra_prices record: ${fieldName} must be numeric.`);
+    return result;
+  };
+  const priceTimestamp = value => {
+    const result = priceString(value, 'publishedAt');
+    const parsed = new Date(result);
+    if (Number.isNaN(parsed.getTime()) || !result.includes('T')) {
+      throw new Error('Invalid sra_prices record: publishedAt must be an ISO-8601 timestamp.');
+    }
+    return parsed.toISOString();
+  };
+  const canonicalPrice = (value, userId) => {
+    const effectiveDate = priceString(value.effectiveDate, 'effectiveDate');
+    const parsedEffectiveDate = new Date(`${effectiveDate}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)
+      || Number.isNaN(parsedEffectiveDate.getTime())
+      || parsedEffectiveDate.toISOString().slice(0, 10) !== effectiveDate) {
+      throw new Error('Invalid sra_prices record: effectiveDate must use YYYY-MM-DD.');
+    }
+    return {
+      effectiveDate,
+      weekLabel: priceString(value.weekLabel, 'weekLabel'),
+      sugarPricePerLkg: priceNumber(value.sugarPricePerLkg, 'sugarPricePerLkg'),
+      sugarPriceChange: priceNumber(value.sugarPriceChange, 'sugarPriceChange'),
+      molassesPricePerMetricTon: priceNumber(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
+      molassesPriceChange: priceNumber(value.molassesPriceChange, 'molassesPriceChange'),
+      circularNumber: priceString(value.circularNumber, 'circularNumber'),
+      source: priceString(value.source, 'source'),
+      publishedByUserId: priceString(value.publishedByUserId || userId, 'publishedByUserId'),
+      publishedAt: priceTimestamp(value.publishedAt || now())
+    };
+  };
+  const toPrice = (value, userId) => canonicalPrice(value || {}, userId);
+  const fromPrice = (id, value) => ({ id: priceString(id, 'id'), ...canonicalPrice(value || {}) });
   const toTicket = (value, userId) => ({ createdByUserId: value.createdByUserId || value.memberId || userId || '', fieldId: value.fieldId || null,
     title: value.title || value.subject || '', category: value.category || 'General Support', priority: String(value.priority || 'NORMAL').toUpperCase(),
     status: String(value.status || 'OPEN').replace(/\s+/g, '_').toUpperCase(), details: value.details || '', resolutionNotes: value.resolutionNotes || '',

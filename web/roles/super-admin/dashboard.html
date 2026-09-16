@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="auth-pending">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -11,6 +11,7 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="../../shared/qrcode.min.js"></script>
   <link rel="stylesheet" href="../../admin.css"/>
+  <style>html.auth-pending body { visibility: hidden; }</style>
   <style type="text/tailwindcss">
     @theme {
       --color-primary: #2D5016;
@@ -342,9 +343,9 @@
         <div class="px-2.5 py-2 border-b border-border/60 mb-0.5">
           <div class="flex items-center gap-2 mb-1">
             <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-            <p class="text-xs font-bold text-hug-text" id="popover-user-name">Matt Daniel Delotavo</p>
+            <p class="text-xs font-bold text-hug-text" id="popover-user-name">Super Admin</p>
           </div>
-          <p class="text-[10px] text-hug-muted font-medium" id="popover-user-role">Super Admin · Matt Daniel Delotavo</p>
+          <p class="text-[10px] text-hug-muted font-medium" id="popover-user-role">Super Admin</p>
         </div>
         
         <button onclick="navigate('settings'); closeUserMenu();" class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-hug-text2 hover:bg-bg hover:text-primary transition-all cursor-pointer text-left">
@@ -384,7 +385,7 @@
         <div class="flex items-center gap-2.5 min-w-0">
           <div id="sidebar-admin-avatar" class="w-9 h-9 rounded-full bg-primary-bg flex items-center justify-center font-bold text-primary text-sm flex-shrink-0 group-hover:scale-105 transition-transform">M</div>
           <div class="min-w-0">
-            <p id="sidebar-admin-name" class="text-hug-text text-sm font-semibold truncate">Matt Daniel Delotavo</p>
+            <p id="sidebar-admin-name" class="text-hug-text text-sm font-semibold truncate">Super Admin</p>
             <p id="sidebar-admin-role" class="text-hug-muted text-xs truncate">Super Admin</p>
           </div>
         </div>
@@ -2169,7 +2170,7 @@
             <div class="bg-bg p-4 rounded-xl border border-border flex flex-col gap-3 text-xs">
               <div class="flex justify-between items-center pb-2 border-b border-border">
                 <span class="text-hug-muted">Authenticated User</span>
-                <span class="font-bold text-hug-text" id="settings-diag-user">Matt Daniel Delotavo</span>
+                <span class="font-bold text-hug-text" id="settings-diag-user">Super Admin</span>
               </div>
               <div class="flex justify-between items-center pb-2 border-b border-border">
                 <span class="text-hug-muted">Active Clearance</span>
@@ -4211,9 +4212,10 @@
 <script src="../../shared/firebase-config.js?v=2.2"></script>
 <script type="module" src="../../shared/firebase-init.js?v=2.2"></script>
 <script src="../../shared/webDataStore.js?v=2.2"></script>
-<script src="../../shared/firestore-schema.js?v=3.0"></script>
-<script src="../../shared/core.js?v=2.2"></script>
-<script src="./super-admin.js?v=2.2"></script>
+<script src="../../shared/firestore-schema.js?v=3.1"></script>
+<script src="../../shared/auth-routing.js?v=1.0"></script>
+<script src="../../shared/core.js?v=2.5"></script>
+<script src="./super-admin.js?v=2.3"></script>
 <!-- FOCUSED OPERATION EDIT MODAL (ALIGNED WITH MOBILE) -->
 <div id="modal-edit-operation" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
   <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-border flex flex-col">

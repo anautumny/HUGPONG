@@ -1,5 +1,28 @@
 import { STORAGE_KEYS, getItem, saveItem } from './storageService';
-import { COLLECTIONS, toOperationLogDocument, toSupportTicketDocument } from '../data/firestoreSchema';
+import {
+  createOperation,
+  amendOperation,
+  archiveOperations,
+  createTicket,
+  updateCycleStage,
+  createAuditEvent,
+  createField,
+  updateField,
+  archiveField,
+  rolloverCycle,
+  publishPrice,
+  saveCustomStages,
+  saveCustomOperations,
+  compileAuditReport,
+  certifyAuditReport,
+  approveUser
+} from './mutationService';
+const {
+  createMutationEnvelope,
+  migrateOutbox,
+  appendUniqueMutation,
+  drainMutationQueue
+} = require('./mutationOutboxCore');
 
 let outboxQueue = [];
 let isProcessing = false;
@@ -219,7 +242,10 @@ export function generateCustomOpId(stageNumber = 1) {
 export async function initSyncEngine() {
   try {
     const savedOutbox = await getItem(STORAGE_KEYS.OUTBOX, []);
-    outboxQueue = Array.isArray(savedOutbox) ? savedOutbox : [];
+    outboxQueue = migrateOutbox(savedOutbox);
+    // Persist migrations immediately so a restart reuses the same idempotency
+    // keys instead of manufacturing a second mutation.
+    await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
     notifySyncEngine();
     return outboxQueue;
   } catch (error) {
@@ -240,37 +266,32 @@ export function getOutboxQueue() {
  * Get number of unsynced items in outbox
  */
 export function getOutboxCount() {
-  return outboxQueue.filter(item => item.status !== 'synced').length;
+  return outboxQueue.length;
 }
 
 /**
  * Enqueue a new operation log or field action to the outbox queue
  */
-export async function enqueueOutboxItem(type, payload) {
-  const clientGeneratedId = payload.id || generateDeterministicLogId(payload.fieldId);
-  const timeHex = Date.now().toString(36).toUpperCase();
-  const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const outboxItem = {
-    outboxId: `OUT-${timeHex}-${randHex}`,
-    id: clientGeneratedId,
-    type: type || 'operation_log', // 'operation_log', 'stage_update', 'ticket'
-    payload: {
-      ...payload,
-      id: clientGeneratedId,
-      createdAt: payload.createdAt || new Date().toISOString(),
-      offlineCaptured: true
-    },
-    status: 'queued', // 'queued', 'syncing', 'failed', 'synced'
-    enqueuedAt: new Date().toISOString(),
-    retryCount: 0,
-    lastAttempt: null,
-    lastError: null
-  };
-
-  outboxQueue.push(outboxItem);
+export async function enqueueOutboxItem(type, payload, options = {}) {
+  const outboxItem = createMutationEnvelope(type, payload, options, outboxQueue);
+  const appended = appendUniqueMutation(outboxQueue, outboxItem);
+  if (!appended.inserted) return appended.item;
+  outboxQueue = appended.queue;
   await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
   notifySyncEngine();
   return outboxItem;
+}
+
+/**
+ * Persist the user's intent before making any network request, then attempt a
+ * flush. A network failure leaves the exact same mutation and idempotency key
+ * on disk for restart/retry.
+ */
+export async function enqueueAndFlushMutation(type, payload, options = {}) {
+  const item = await enqueueOutboxItem(type, payload, options);
+  const result = await flushOutboxToApi();
+  const retained = outboxQueue.find(queued => queued.mutationId === item.mutationId);
+  return { item: retained || item, result, queued: !!retained, response: result.responses?.[item.mutationId] };
 }
 
 /**
@@ -288,7 +309,7 @@ export async function removeOutboxItem(outboxId) {
 export async function markOutboxItemFailed(outboxId, errorMessage) {
   const item = outboxQueue.find(i => i.outboxId === outboxId || i.id === outboxId);
   if (item) {
-    item.status = 'failed';
+    item.status = 'retryable';
     item.retryCount = (item.retryCount || 0) + 1;
     item.lastAttempt = new Date().toISOString();
     item.lastError = errorMessage;
@@ -306,105 +327,85 @@ export async function processOutbox(remoteUploadHandler) {
   if (outboxQueue.length === 0) return { success: true, processedCount: 0 };
 
   isProcessing = true;
-  let processedCount = 0;
-  let failedCount = 0;
-
   try {
-    const itemsToProcess = [...outboxQueue];
-
-    for (const item of itemsToProcess) {
-      item.status = 'syncing';
-      item.lastAttempt = new Date().toISOString();
-      notifySyncEngine();
-
-      try {
-        let isSuccess = true;
-        if (typeof remoteUploadHandler === 'function') {
-          isSuccess = await remoteUploadHandler(item);
-        }
-
-        if (isSuccess) {
-          item.status = 'synced';
-          processedCount++;
-          // Remove from outbox
-          outboxQueue = outboxQueue.filter(q => q.outboxId !== item.outboxId);
-        } else {
-          item.status = 'failed';
-          item.retryCount = (item.retryCount || 0) + 1;
-          item.lastError = 'Remote rejected or network unavailable';
-          failedCount++;
-        }
-      } catch (err) {
-        item.status = 'failed';
-        item.retryCount = (item.retryCount || 0) + 1;
-        item.lastError = err.message || 'Sync connection timeout';
-        failedCount++;
+    const drained = await drainMutationQueue(
+      outboxQueue,
+      typeof remoteUploadHandler === 'function' ? remoteUploadHandler : async () => true,
+      nextQueue => {
+        outboxQueue = nextQueue;
+        notifySyncEngine();
       }
-    }
+    );
+    outboxQueue = drained.queue;
 
     await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
     await saveItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
     notifySyncEngine();
 
-    return {
-      success: failedCount === 0,
-      processedCount,
-      failedCount,
-      remainingCount: outboxQueue.length
-    };
+    const { queue: _persistedQueue, ...result } = drained;
+    return result;
   } finally {
     isProcessing = false;
   }
 }
 
 /**
- * Flush all outbox items directly to Cloud Firestore (hugpong-ff)
+ * Flush queued offline work through the authoritative Express API.
  */
-export async function flushOutboxToFirestore() {
+export async function flushOutboxToApi() {
   try {
-    const { db } = require('../firebase/config');
-    const { doc, setDoc } = require('firebase/firestore');
-
-    if (!db) {
-      console.warn('[syncEngine] Firestore instance not initialized, skipping cloud flush.');
-      return { success: false, reason: 'Firestore unavailable' };
-    }
-
     return await processOutbox(async (item) => {
       const { type, payload } = item;
+      const mutation = {
+        mutationId: item.mutationId,
+        idempotencyKey: item.idempotencyKey,
+        entityKey: item.entityKey,
+        baseVersion: item.baseVersion
+      };
 
       if (type === 'operation_log' || type === 'takeover_log') {
         if (!payload.id || !payload.cycleId) throw new Error('Queued operation requires stable id and cycleId.');
-        const docRef = doc(db, COLLECTIONS.OPERATION_LOGS, payload.id);
-        const canonical = toOperationLogDocument(payload, {
-          cycleId: payload.cycleId,
-          submittedByUserId: payload.submittedByUserId || payload.loggedById,
-          status: payload.status || 'ACTIVE'
-        });
-        await setDoc(docRef, canonical);
-        return true;
+        return createOperation(payload, mutation);
       } else if (type === 'ticket') {
-        const docRef = doc(db, COLLECTIONS.SUPPORT_TICKETS, payload.id);
-        await setDoc(docRef, toSupportTicketDocument(payload, payload.createdByUserId || payload.memberId));
-        return true;
+        return createTicket(payload, mutation);
       } else if (type === 'stage_update') {
         if (!payload.cycleId) throw new Error('Queued stage update requires cycleId.');
-        await setDoc(doc(db, COLLECTIONS.CROP_CYCLES, payload.cycleId), {
+        return updateCycleStage(payload.cycleId, {
           currentStageNumber: Number(payload.currentStageNumber || payload.stageNumber),
-          elapsedMonths: Number(payload.elapsedMonths || 0),
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-        return true;
+          elapsedMonths: Number(payload.elapsedMonths || 0)
+        }, mutation);
       } else if (type === 'audit_log' || type === 'system_event') {
-        const docRef = doc(db, COLLECTIONS.AUDIT_LOGS, payload.id);
-        const { id, ...event } = payload;
-        await setDoc(docRef, event);
-        return true;
+        return createAuditEvent(payload, mutation);
+      } else if (type === 'operation_amendment') {
+        return amendOperation(payload.id, payload.changes, payload.amendment, mutation);
+      } else if (type === 'operation_archive') {
+        return archiveOperations(payload.operationLogIds || [payload.id], mutation);
+      } else if (type === 'field_upsert') {
+        if (payload.isNew) return createField(payload, mutation);
+        return updateField(payload.id, payload, mutation);
+      } else if (type === 'field_archive') {
+        return archiveField(payload.id, mutation);
+      } else if (type === 'cycle_rollover') {
+        return rolloverCycle(payload.fieldId, payload, mutation);
+      } else if (type === 'price') {
+        return publishPrice(payload, mutation);
+      } else if (type === 'custom_stages') {
+        return saveCustomStages(payload.fieldId, payload.customStages, mutation);
+      } else if (type === 'custom_operations') {
+        return saveCustomOperations(payload.fieldId, payload.customOperations, mutation);
+      } else if (type === 'audit_report') {
+        return compileAuditReport(payload, mutation);
+      } else if (type === 'audit_certification') {
+        return certifyAuditReport(payload.id, payload.certificationNotes, mutation);
+      } else if (type === 'user_approve') {
+        return approveUser(payload, mutation);
       }
-      return true;
+      const error = new Error(`Unsupported queued mutation type: ${type}`);
+      error.status = 400;
+      throw error;
     });
   } catch (err) {
-    console.warn('[syncEngine] Error flushing to Firestore:', err);
+    console.warn('[syncEngine] Error flushing through API:', err);
     return { success: false, error: err.message };
   }
 }

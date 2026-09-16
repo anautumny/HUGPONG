@@ -400,8 +400,9 @@
 
   <script src="shared/firebase-config.js?v=2.2"></script>
   <script type="module" src="shared/firebase-init.js?v=2.2"></script>
-  <script src="shared/firestore-schema.js?v=3.0"></script>
-  <script src="shared/core.js?v=2.2"></script>
+  <script src="shared/firestore-schema.js?v=3.1"></script>
+  <script src="shared/auth-routing.js?v=1.0"></script>
+  <script src="shared/core.js?v=2.5"></script>
   <script>
     function toast(msg) {
       let tc = document.getElementById('toast-container');
@@ -517,6 +518,10 @@
           throw new Error('Authentication service unavailable or credentials were rejected.');
         }
 
+        const authenticatedRole = webRoleKeyFromUser(authResult.user, authResult.roleKey);
+        if (!authenticatedRole) throw new Error('The authenticated account has an invalid role.');
+        const targetUrl = getWebDashboardPath(authenticatedRole);
+
         if (typeof window.signInHugpongWithCustomToken !== 'function' || !authResult.firebaseCustomToken) {
           throw new Error('Firebase authentication is not ready. Please retry in a moment.');
         }
@@ -544,7 +549,7 @@
           localStorage.removeItem('hugpong_role');
           localStorage.removeItem('hugpong_auth_token');
           
-          openFirstLoginVerificationModal(authResult.user, authResult.redirectUrl, authResult.token);
+          openFirstLoginVerificationModal(authResult.user, targetUrl, authResult.token);
           return;
         }
 
@@ -562,26 +567,35 @@
           localStorage.removeItem('hugpong_role');
           localStorage.removeItem('hugpong_auth_token');
           
-          openFirstLoginChangePasswordModal(authResult.user, authResult.redirectUrl, authResult.token);
+          openFirstLoginChangePasswordModal(authResult.user, targetUrl, authResult.token);
           return;
         }
 
         // Save persistent tokenized session ONLY after phone verification and password setup are guaranteed
         if (typeof saveWebAuthSession === 'function' && authResult.user) {
-          saveWebAuthSession(authResult.user, authResult.roleKey, authResult.token);
+          saveWebAuthSession(authResult.user, authenticatedRole, authResult.token);
         } else {
-          localStorage.setItem('hugpong_role', authResult.roleKey);
+          localStorage.setItem('hugpong_role', authenticatedRole);
           if (authResult.user) {
             localStorage.setItem('hugpong_user', JSON.stringify(authResult.user));
           }
         }
 
+        if (!targetUrl) {
+          spinner.style.display = 'none';
+          btnText.textContent = 'Sign In';
+          submitBtn.disabled = false;
+          errorMsg.textContent = 'Member Farmer accounts use the HUGPONG mobile application.';
+          errorBox.classList.remove('hidden');
+          return;
+        }
+
         // Animated Sign-in Overlay
         overlay.classList.remove('opacity-0', 'pointer-events-none');
         overlay.classList.add('opacity-100', 'pointer-events-auto');
-        statusText.textContent = `Opening ${authResult.roleKey.toUpperCase()} workspace...`;
+        statusText.textContent = `Opening ${authenticatedRole.toUpperCase()} workspace...`;
         setTimeout(() => {
-          window.location.href = authResult.redirectUrl;
+          window.location.replace(targetUrl);
         }, 500);
 
       } catch (err) {
@@ -615,7 +629,7 @@
     window.addEventListener('online', updateWebOfflineStatus);
     window.addEventListener('offline', updateWebOfflineStatus);
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       updateWebOfflineStatus();
 
       // Check if user has an active, valid session token
@@ -631,29 +645,56 @@
         return;
       }
 
-      if (typeof getWebAuthSession === 'function') {
-        const session = getWebAuthSession();
-        if (session && session.roleKey && session.user) {
-          const u = session.user;
-          const isVerified = u.phoneVerified === true;
-          const isSuperAdminDefault = (u.role === 'Super Admin' || session.roleKey === 'superadmin') && u.phoneVerified !== false;
+      if (typeof getWebAuthSession !== 'function') return;
+      const cachedSession = getWebAuthSession();
+      if (!cachedSession?.user || !cachedSession?.token) return;
 
-          // Security check: If phone verification is pending, open modal and do NOT loop-redirect
-          if (u.phoneVerified === false || u.pendingFirstLoginVerification === true || (!isVerified && !isSuperAdminDefault)) {
-            console.log('[HUGPONG Auth] Session requires phone verification before entering workspace.');
-            openFirstLoginVerificationModal(u);
-            return;
-          }
-
-          const roleKey = session.roleKey.toLowerCase();
-          const targetUrl = roleKey.includes('super') 
-            ? 'roles/super-admin/dashboard.html' 
-            : (roleKey.includes('manager') ? 'roles/farm-manager/dashboard.html' : 'roles/sra-admin/dashboard.html');
-          
-          console.log('[HUGPONG Auth] Valid session token found. Auto-opening workspace:', targetUrl);
-          window.location.href = targetUrl;
+      let resolvedSession = null;
+      try {
+        const response = await fetch('/auth/session', {
+          headers: { Authorization: `Bearer ${cachedSession.token}` },
+          credentials: 'include'
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.authenticated || !data.user) {
+          clearWebAuthSession();
+          return;
         }
+        if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
+          await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
+        }
+        const roleKey = webRoleKeyFromUser(data.user, data.roleKey);
+        saveWebAuthSession(data.user, roleKey, data.token);
+        resolvedSession = { user: data.user, roleKey, token: data.token };
+      } catch (error) {
+        const firebaseUser = window.hugpongFirebaseAuthReady
+          ? await window.hugpongFirebaseAuthReady
+          : window.firebaseAuth?.currentUser;
+        if (firebaseUser?.uid === cachedSession.user.employeeId) resolvedSession = cachedSession;
       }
+
+      if (!resolvedSession) return;
+      const u = resolvedSession.user;
+      const isVerified = u.phoneVerified === true;
+      const isSuperAdminDefault = resolvedSession.roleKey === 'superadmin' && u.phoneVerified !== false;
+      if (u.phoneVerified === false || u.pendingFirstLoginVerification === true || (!isVerified && !isSuperAdminDefault)) {
+        openFirstLoginVerificationModal(u, getWebDashboardPath(resolvedSession.roleKey), resolvedSession.token);
+        return;
+      }
+      if (u.requiresPasswordChange === true && u.passwordChanged !== true) {
+        openFirstLoginChangePasswordModal(u, getWebDashboardPath(resolvedSession.roleKey), resolvedSession.token);
+        return;
+      }
+
+      const targetUrl = getWebDashboardPath(resolvedSession.roleKey);
+      if (!targetUrl) {
+        const errorBox = document.getElementById('error-box');
+        const errorMsg = document.getElementById('error-message');
+        if (errorMsg) errorMsg.textContent = 'Member Farmer accounts use the HUGPONG mobile application.';
+        if (errorBox) errorBox.classList.remove('hidden');
+        return;
+      }
+      window.location.replace(targetUrl);
     });
   </script>
   <script src="shared/consent-banner.js"></script>

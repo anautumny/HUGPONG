@@ -8,11 +8,14 @@ const { requireRole } = require('../middleware/roleGuard');
 const {
   COLLECTIONS,
   ROLES,
-  canonicalRole,
-  buildOperationLog,
-  createOperationLogId,
-  nowIso
+  canonicalRole
 } = require('../schema/firestoreSchema');
+const {
+  createOperationRecord,
+  amendOperationRecord,
+  archiveOperationRecords
+} = require('../services/cropCycleOperations');
+const { readMutationContext } = require('../services/mutationContext');
 
 async function getActorScope(user) {
   const userId = String(user.employeeId || user.userId || '').trim();
@@ -35,36 +38,6 @@ async function getActorScope(user) {
   return { role, userId, fieldIds: fieldSnapshot.docs.map(doc => doc.id) };
 }
 
-async function assertCanRecord(fieldId, cycleId, user) {
-  if (!db) throw new Error('Database is unavailable.');
-  const [fieldDoc, cycleDoc] = await Promise.all([
-    db.collection(COLLECTIONS.FIELDS).doc(fieldId).get(),
-    db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId).get()
-  ]);
-  if (!fieldDoc.exists) throw new Error('The referenced field does not exist.');
-  if (!cycleDoc.exists) throw new Error('The referenced crop cycle does not exist.');
-
-  const field = fieldDoc.data();
-  const cycle = cycleDoc.data();
-  if (field.status !== 'ACTIVE') throw new Error('Operations can only be recorded for an ACTIVE field.');
-  if (field.currentCycleId !== cycleId || cycle.fieldId !== fieldId || cycle.status !== 'ACTIVE') {
-    throw new Error('cycleId must be the field\'s explicit ACTIVE crop cycle.');
-  }
-
-  const actorId = String(user.employeeId || user.userId || '').trim();
-  const actorRole = canonicalRole(user.role || user.roleKey);
-  if (actorRole === ROLES.MEMBER_FARMER && field.memberUserId !== actorId) {
-    throw new Error('Member Farmers may record only for an assigned field.');
-  }
-  if (actorRole === ROLES.FARM_MANAGER) {
-    const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId).get();
-    if (!farm.exists || farm.data().managerUserId !== actorId) {
-      throw new Error('Farm Managers may record only within their assigned block farm.');
-    }
-  }
-  return { field, cycle, actorId, actorRole };
-}
-
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
@@ -81,72 +54,44 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.post('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
   try {
-    const fieldId = String(req.body.fieldId || '').trim().toUpperCase();
-    const cycleId = String(req.body.cycleId || '').trim().toUpperCase();
-    const access = await assertCanRecord(fieldId, cycleId, req.session.user);
-    const logId = req.body.id || createOperationLogId(fieldId);
-    const now = nowIso();
-    const payload = buildOperationLog({
-      ...req.body,
-      fieldId,
-      cycleId,
-      status: 'ACTIVE',
-      archivedAt: null,
-      archivedByUserId: null,
-      createdAt: req.body.createdAt || now,
-      updatedAt: now,
-      submissionSource: access.actorRole === ROLES.FARM_MANAGER ? 'MANAGER_TAKEOVER' : 'MEMBER'
-    }, { submittedByUserId: access.actorId, now });
-
-    await db.collection(COLLECTIONS.OPERATION_LOGS).doc(logId).create(payload);
-    return res.status(201).json({ success: true, data: { id: logId, ...payload } });
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    readMutationContext(req);
+    const result = await createOperationRecord(db, req.body, req.session.user);
+    return res.status(result.replayed ? 200 : 201).json({
+      success: true,
+      replayed: result.replayed,
+      data: { id: result.id, ...result.record }
+    });
   } catch (error) {
-    const status = /already exists/i.test(error.message) ? 409 : 400;
-    return res.status(status).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
 
 router.patch('/:id', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const ref = db.collection(COLLECTIONS.OPERATION_LOGS).doc(req.params.id);
-    const snapshot = await ref.get();
-    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Operation log not found.' });
-    const existing = snapshot.data();
-    if (existing.status !== 'ACTIVE') {
-      return res.status(409).json({ success: false, error: 'ARCHIVED operation logs cannot be amended.' });
-    }
-    const access = await assertCanRecord(existing.fieldId, existing.cycleId, req.session.user);
-    const now = nowIso();
-    const amendment = req.body.amendment;
-    if (!amendment || !String(amendment.reason || '').trim()) {
-      return res.status(400).json({ success: false, error: 'An amendment reason is required.' });
-    }
-    const merged = {
-      ...existing,
-      ...req.body.changes,
-      status: 'ACTIVE',
-      fieldId: existing.fieldId,
-      cycleId: existing.cycleId,
-      submittedByUserId: existing.submittedByUserId,
-      createdAt: existing.createdAt,
-      updatedAt: now,
-      amendments: [
-        ...(existing.amendments || []),
-        {
-          amendmentId: amendment.amendmentId || `AMD-${Date.now().toString(36).toUpperCase()}`,
-          amendedByUserId: access.actorId,
-          reason: amendment.reason,
-          amendedAt: now,
-          changes: amendment.changes || {}
-        }
-      ]
-    };
-    const payload = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now });
-    await ref.set(payload);
-    return res.json({ success: true, data: { id: snapshot.id, ...payload } });
+    const result = await amendOperationRecord(
+      db,
+      req.params.id,
+      req.body.changes,
+      req.body.amendment,
+      req.session.user,
+      undefined,
+      readMutationContext(req)
+    );
+    return res.json({ success: true, replayed: result.replayed, data: { id: result.id, ...result.record } });
   } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
+  }
+});
+
+router.post('/archive', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const result = await archiveOperationRecords(db, req.body.ids, req.session.user, undefined, readMutationContext(req));
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message });
   }
 });
 

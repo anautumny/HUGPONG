@@ -4,8 +4,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import { Platform } from 'react-native';
-import { db } from '../firebase/config';
-import { doc, setDoc } from 'firebase/firestore';
+import { publishTelemetry } from './mutationService';
 
 export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
   if (!session || !session.name) return null;
@@ -55,10 +54,7 @@ export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
       timestamp: Date.now()
     };
 
-    if (db) {
-      const docRef = doc(db, 'terminal_diagnostics', deviceId);
-      await setDoc(docRef, telemetryPayload, { merge: true });
-    }
+    await publishTelemetry(deviceId, telemetryPayload);
 
     return telemetryPayload;
   } catch (err) {

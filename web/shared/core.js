@@ -74,6 +74,18 @@ function sha256(ascii) {
 if (typeof window !== 'undefined') {
   window.sha256 = sha256;
 }
+
+function normalizeWebRole(value) {
+  return window.HugpongAuthRouting?.normalizeRole(value) || '';
+}
+
+function webRoleKeyFromUser(user, fallback = '') {
+  return window.HugpongAuthRouting?.roleKeyFromUser(user, fallback) || '';
+}
+
+function getWebDashboardPath(value) {
+  return window.HugpongAuthRouting?.dashboardPath(value) || null;
+}
 function stripClientCredentialFields(value = {}) {
   const safe = {};
   for (const [key, fieldValue] of Object.entries(value || {})) {
@@ -169,8 +181,8 @@ if (typeof window !== 'undefined') {
 // ── TOKENIZATION & WEB AUTH SESSION PERSISTENCE ───────────
 function saveWebAuthSession(user, roleKey, serverToken = null) {
   if (!user) return null;
-  const rawRole = String(roleKey || user.roleKey || user.role || 'admin').toLowerCase();
-  const normalizedRole = rawRole.includes('super') ? 'superadmin' : (rawRole.includes('manager') ? 'manager' : 'admin');
+  const normalizedRole = webRoleKeyFromUser(user, roleKey);
+  if (!normalizedRole) throw new Error('Authenticated session has an invalid role.');
   
   const token = serverToken || localStorage.getItem('hugpong_auth_token') || null;
   const safeUser = stripClientCredentialFields(user);
@@ -197,7 +209,12 @@ function getWebAuthSession() {
 
   try {
     const user = stripClientCredentialFields(JSON.parse(userJson));
-    return { user, token, roleKey: role || user.roleKey || 'superadmin' };
+    const roleKey = webRoleKeyFromUser(user, role);
+    if (!roleKey) {
+      clearWebAuthSession();
+      return null;
+    }
+    return { user, token, roleKey };
   } catch (e) {
     clearWebAuthSession();
     return null;
@@ -211,20 +228,69 @@ function clearWebAuthSession() {
   localStorage.removeItem('hugpong_user_name');
 }
 
+function inferWebMutationBaseVersion(path, body) {
+  try {
+    const db = getDB();
+    const decodedPath = decodeURIComponent(String(path || ''));
+    let match = decodedPath.match(/^\/api\/logs\/([^/]+)$/);
+    if (match) return (db.logs || []).find(item => item.id === match[1])?.updatedAt || null;
+    if (decodedPath === '/api/logs/archive') {
+      return Object.fromEntries((body?.ids || []).map(id => [id, (db.logs || []).find(item => item.id === id)?.updatedAt || null]));
+    }
+    match = decodedPath.match(/^\/api\/fields\/([^/]+)(?:\/.*)?$/);
+    if (match) return [...(db.fields || []), ...(db.archivedFields || [])].find(item => item.id === match[1])?.updatedAt || null;
+    match = decodedPath.match(/^\/api\/crop-cycles\/([^/]+)\/stage$/);
+    if (match) return (db.cropCycles || []).find(item => item.id === match[1])?.updatedAt || null;
+    match = decodedPath.match(/^\/api\/crop-cycles\/([^/]+)\/rollover$/);
+    if (match) return (db.fields || []).find(item => item.id === match[1])?.updatedAt || null;
+    match = decodedPath.match(/^\/api\/audit-reports\/([^/]+)\/certify$/);
+    if (match) return (db.auditReports || []).find(item => (item.id || item.reportId) === match[1])?.updatedAt || null;
+    match = decodedPath.match(/^\/api\/users\/([^/]+)$/);
+    if (match) return (db.users || []).find(item => (item.id || item.employeeId) === match[1])?.updatedAt || null;
+  } catch (error) {
+    console.warn('[HUGPONG] Could not resolve mutation base version:', error.message);
+  }
+  return null;
+}
+
+function createWebMutationContext(path, body, suppliedBaseVersion) {
+  const token = `${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  const mutationId = `MUT-WEB-${token}`;
+  return {
+    mutationId,
+    idempotencyKey: mutationId,
+    entityKey: String(path || '').replace(/^\/api\//, '').replace(/\?.*$/, ''),
+    baseVersion: suppliedBaseVersion === undefined ? inferWebMutationBaseVersion(path, body) : suppliedBaseVersion
+  };
+}
+
 async function authenticatedWebRequest(path, options = {}) {
   const token = options.token || localStorage.getItem('hugpong_auth_token');
+  const method = String(options.method || 'GET').toUpperCase();
+  let requestBody = options.body;
+  if (path.startsWith('/api/') && !['GET', 'HEAD'].includes(method) && requestBody && typeof requestBody === 'object' && !requestBody._mutation) {
+    requestBody = {
+      ...requestBody,
+      _mutation: createWebMutationContext(path, requestBody, options.baseVersion)
+    };
+  }
   const response = await fetch(path, {
-    method: options.method || 'GET',
+    method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {})
     },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
     credentials: 'include'
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.success) throw new Error(result.error || 'Authenticated request was rejected.');
+  if (!response.ok || !result.success) {
+    const error = new Error(result.error || 'Authenticated request was rejected.');
+    error.status = response.status;
+    error.data = result.data;
+    throw error;
+  }
   if (result.token) localStorage.setItem('hugpong_auth_token', result.token);
   if (result.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
     await window.signInHugpongWithCustomToken(result.firebaseCustomToken);
@@ -257,6 +323,13 @@ function parseLocalDate(dateInput) {
     return new Date(y, m - 1, d);
   }
   return new Date(dateInput);
+}
+
+function isCanonicalCalendarDate(value) {
+  const result = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) return false;
+  const parsed = new Date(`${result}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === result;
 }
 
 function calculateSRAWeekLabel(dateInput) {
@@ -397,8 +470,6 @@ if (typeof window !== 'undefined') {
 }
 
 // ── GET & SET LOCAL STORAGE DATABASE ─────────────────────
-let _cloudSyncDebounceTimer = null;
-
 function getCanonicalInitialDB() {
   if (typeof window !== 'undefined' && window.INITIAL_DATABASE) {
     return window.INITIAL_DATABASE;
@@ -422,13 +493,18 @@ function getCanonicalInitialDB() {
 }
 
 function getDB() {
-  const CURRENT_DB_VERSION = '2026_09_16_canonical_v1';
+  const CURRENT_DB_VERSION = '2026_09_17_post_reset_v2';
   const savedVersion = localStorage.getItem('hugpong_db_version');
   const data = localStorage.getItem('hugpong_db');
   const canonical = getCanonicalInitialDB();
 
   // If local database version is outdated or contains legacy mock records, force wipe cache
   if (savedVersion !== CURRENT_DB_VERSION || !data || data.includes('Mario Dimagiba') || data.includes('Elena Batongbakal') || data.includes('HIST-REG-') || data.includes('FLD-KTR-') || data.includes('qwewqewqe')) {
+    // A cache epoch change invalidates both the replica and its authenticated
+    // identity. This prevents a pre-reset installation from replaying an old
+    // outbox or continuing with a session for a deleted development user.
+    clearWebAuthSession();
+    localStorage.removeItem('hugpong_sync_threshold_hours');
     localStorage.setItem('hugpong_db_version', CURRENT_DB_VERSION);
     const freshDb = JSON.parse(JSON.stringify(canonical));
     localStorage.setItem('hugpong_db', JSON.stringify(freshDb));
@@ -454,82 +530,19 @@ function getDB() {
   parsed.auditReports = parsed.auditReports.filter(report =>
     report && (report.status === 'PENDING' || report.status === 'CERTIFIED')
   );
+  parsed.priceHistory = parsed.priceHistory.flatMap(price => {
+    try {
+      return [window.HugpongSchema.fromPrice(price.id, price)];
+    } catch (error) {
+      console.warn('[HUGPONG] Ignoring non-canonical cached sra_prices record:', price?.id || '(missing id)', error.message);
+      return [];
+    }
+  });
   return parsed;
 }
 
 function saveDB(db, syncToCloud = true) {
   localStorage.setItem('hugpong_db', JSON.stringify(db));
-
-  if (syncToCloud && window.firebaseDB && window.firestore) {
-    if (_cloudSyncDebounceTimer) clearTimeout(_cloudSyncDebounceTimer);
-    _cloudSyncDebounceTimer = setTimeout(() => {
-      syncLocalChangesToFirestore(db).catch(err => {
-        console.warn('[HUGPONG] Background Firestore sync notice:', err.message);
-      });
-    }, 1500);
-  }
-}
-
-async function syncLocalChangesToFirestore(db) {
-  if (!window.firestore || !window.firebaseDB || !window.HugpongSchema) return;
-  const { doc, setDoc } = window.firestore;
-  const fDb = window.firebaseDB;
-  const schema = window.HugpongSchema;
-
-  // 1. Sync fields
-  if (Array.isArray(db.fields)) {
-    for (const f of db.fields) {
-      if (f.id) {
-        await setDoc(doc(fDb, schema.COLLECTIONS.FIELDS, f.id), schema.toField(f));
-      }
-    }
-  }
-
-  // 2. User profiles and credentials are mutated only through Express APIs.
-
-  // 3. Sync block farms
-  if (Array.isArray(db.blockFarms)) {
-    for (const b of db.blockFarms) {
-      if (b.id) {
-        await setDoc(doc(fDb, schema.COLLECTIONS.BLOCK_FARMS, b.id), schema.toBlockFarm(b));
-      }
-    }
-  }
-
-  // 4. Sync prices
-  if (Array.isArray(db.priceHistory)) {
-    for (const p of db.priceHistory) {
-      const pId = p.id || `PRC-${(p.date || '').replace(/\D/g, '') || Date.now()}`;
-      await setDoc(doc(fDb, schema.COLLECTIONS.SRA_PRICES, pId), schema.toPrice(p, activeUser?.employeeId || activeUser?.id || ''));
-    }
-  }
-
-  // 5. Sync operation logs
-  if (Array.isArray(db.logs)) {
-    for (const l of db.logs) {
-      if (l.id && l.cycleId && (l.status === 'ACTIVE' || l.status === 'ARCHIVED')) {
-        await setDoc(doc(fDb, schema.COLLECTIONS.OPERATION_LOGS, l.id), schema.toOperation(l));
-      }
-    }
-  }
-
-  // 6. Sync support tickets
-  if (Array.isArray(db.supportTickets)) {
-    for (const t of db.supportTickets) {
-      if (t.id) {
-        await setDoc(doc(fDb, schema.COLLECTIONS.SUPPORT_TICKETS, t.id), schema.toTicket(t, activeUser?.employeeId || activeUser?.id || ''));
-      }
-    }
-  }
-
-  if (Array.isArray(db.auditReports)) {
-    for (const report of db.auditReports) {
-      const reportId = report.reportId || report.id;
-      if (reportId && (report.status === 'PENDING' || report.status === 'CERTIFIED')) {
-        await setDoc(doc(fDb, schema.COLLECTIONS.AUDIT_REPORTS, reportId), schema.toReport(report));
-      }
-    }
-  }
 }
 
 let firestoreSyncInitialized = false;
@@ -661,10 +674,7 @@ function initFirestoreRealtimeSync() {
       remoteIds.add(docSnap.id);
       remoteLogs.push(window.HugpongSchema.fromOperation(docSnap.id, value));
     });
-    const canonicalLocalOnly = (db.logs || []).filter(log =>
-      log && log.id && log.cycleId && log.status === 'ACTIVE' && log.synced === false && !remoteIds.has(log.id)
-    );
-    db.logs = cleanupDuplicateLogs([...remoteLogs, ...canonicalLocalOnly]);
+    db.logs = cleanupDuplicateLogs(remoteLogs);
     saveDB(db, false);
     historyCurrentPage = 1;
     logCurrentPage = 1;
@@ -683,20 +693,21 @@ function initFirestoreRealtimeSync() {
   onSnapshot(collection(fDb, 'sra_prices'), (snapshot) => {
     const db = getDB();
     const remotePrices = [];
-    snapshot.forEach(docSnap => remotePrices.push(window.HugpongSchema.fromPrice(docSnap.id, docSnap.data())));
+    snapshot.forEach(docSnap => {
+      try {
+        remotePrices.push(window.HugpongSchema.fromPrice(docSnap.id, docSnap.data()));
+      } catch (error) {
+        console.error('[Firestore] Rejected invalid sra_prices document:', docSnap.id, error.message);
+      }
+    });
 
     function parsePriceTime(p) {
-      if (p.timestamp) return p.timestamp;
-      if (p.createdAt) {
-        const t = new Date(p.createdAt).getTime();
+      if (p.publishedAt) {
+        const t = new Date(p.publishedAt).getTime();
         if (!isNaN(t)) return t;
       }
-      if (p.isoDate) {
-        const t = new Date(p.isoDate).getTime();
-        if (!isNaN(t)) return t;
-      }
-      if (p.date) {
-        const t = new Date(p.date).getTime();
+      if (p.effectiveDate) {
+        const t = new Date(`${p.effectiveDate}T00:00:00Z`).getTime();
         if (!isNaN(t)) return t;
       }
       return 0;
@@ -705,13 +716,11 @@ function initFirestoreRealtimeSync() {
     // Sort by timestamp descending (newest first)
     remotePrices.sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
 
-    if (remotePrices.length > 0) {
-      db.priceHistory = remotePrices;
-      saveDB(db, false);
-      if (typeof renderPrices === 'function') renderPrices();
-      if (typeof renderPriceHistoryChart === 'function') renderPriceHistoryChart();
-      if (typeof renderDashboard === 'function') renderDashboard();
-    }
+    db.priceHistory = remotePrices;
+    saveDB(db, false);
+    if (typeof renderPrices === 'function') renderPrices();
+    if (typeof renderPriceHistoryChart === 'function') renderPriceHistoryChart();
+    if (typeof renderDashboard === 'function') renderDashboard();
   }, (err) => console.warn('[Firestore] sra_prices listener notice:', err));
 
   // 5. Listen on Support Tickets
@@ -759,23 +768,20 @@ function initFirestoreRealtimeSync() {
 
   // 8. Listen on Audit Logs (System Action History - Shared across Mobile & Web)
   onSnapshot(collection(fDb, 'audit_logs'), (snapshot) => {
-    if (snapshot.empty) return;
     const db = getDB();
     const remoteLogs = [];
     snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
 
-    const remoteIds = new Set(remoteLogs.map(r => r.id));
-    const localOnly = (db.systemHistory || []).filter(h => !remoteIds.has(h.id));
-    const merged = [...remoteLogs, ...localOnly];
-
-    merged.sort((a, b) => {
+    remoteLogs.sort((a, b) => {
       const timeA = new Date(a.rawTimestamp || a.timestamp || a.createdAt || 0).getTime();
       const timeB = new Date(b.rawTimestamp || b.timestamp || b.createdAt || 0).getTime();
       if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
       return (b.id || '').localeCompare(a.id || '');
     });
 
-    db.systemHistory = merged;
+    // Firestore replaces the read replica. Missing cached records never become
+    // upload candidates and are not retained as an implicit local authority.
+    db.systemHistory = remoteLogs;
     saveDB(db, false);
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderTabHistory === 'function') renderTabHistory();
@@ -803,17 +809,19 @@ async function verifyBackendSession() {
     const res = await fetch('/auth/session', { headers, credentials: 'include' });
     const data = await res.json();
     if (data.authenticated && data.user) {
+      const roleKey = webRoleKeyFromUser(data.user, data.roleKey);
+      if (!roleKey) return;
       if (data.firebaseCustomToken && typeof window.signInHugpongWithCustomToken === 'function') {
         await window.signInHugpongWithCustomToken(data.firebaseCustomToken);
       }
       if (typeof saveWebAuthSession === 'function') {
-        saveWebAuthSession(data.user, data.user.roleKey || 'admin', data.token);
+        saveWebAuthSession(data.user, roleKey, data.token);
       } else {
         localStorage.setItem('hugpong_user', JSON.stringify(data.user));
-        localStorage.setItem('hugpong_role', data.user.roleKey || 'admin');
+        localStorage.setItem('hugpong_role', roleKey);
       }
       if (typeof applyRoleLayout === 'function') {
-        applyRoleLayout(data.user.roleKey || 'admin');
+        applyRoleLayout(roleKey);
       }
     }
   } catch (e) {
@@ -967,11 +975,12 @@ function navigate(page) {
   if (page === 'settings') renderSettings();
 }
 
-function switchRole(role) {
-  localStorage.setItem('hugpong_role', role);
+function switchRole() {
+  const session = getWebAuthSession();
+  const role = webRoleKeyFromUser(session?.user, session?.roleKey);
+  if (!role) return;
   applyRoleLayout(role);
-  const roleName = role === 'superadmin' ? 'Super Admin' : (role === 'manager' ? `Farm Manager (${resolveManagedBlockFarm()?.name || 'Unassigned'})` : 'SRA Admin');
-  toast(`Switched identity to: ${roleName}`);
+  toast('Your role is controlled by the authenticated server session.');
   navigate('dashboard');
 }
 
@@ -989,10 +998,10 @@ function applyRoleLayout(role) {
     try { sessionUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch(e) {}
   }
 
-  const r = (role || '').toLowerCase();
-  if (r === 'superadmin' || r === 'super_admin') {
-    const adminName = sessionUser?.name || 'Matt Daniel Delotavo';
-    const initial = (adminName.trim()[0] || 'M').toUpperCase();
+  const r = normalizeWebRole(role);
+  if (r === 'superadmin') {
+    const adminName = sessionUser?.name || 'Super Admin';
+    const initial = (adminName.trim()[0] || 'S').toUpperCase();
     if (avatarEl) { avatarEl.textContent = initial; avatarEl.style.background = 'linear-gradient(135deg, #F5A623, #ff8c00)'; avatarEl.style.boxShadow = '0 0 8px rgba(245,166,35,0.5)'; }
     if (nameEl) nameEl.textContent = adminName;
     if (roleEl) roleEl.textContent = 'Super Admin';
@@ -1003,7 +1012,7 @@ function applyRoleLayout(role) {
     document.querySelectorAll('.sra-only').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.sra-or-manager').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.manager-only').forEach(el => el.classList.add('hidden'));
-  } else if (r === 'manager' || r === 'farm_manager') {
+  } else if (r === 'manager') {
     const mgrName = sessionUser?.name || (activeUser?.name || 'Farm Manager');
     const initial = (mgrName.trim()[0] || 'J').toUpperCase();
     if (avatarEl) { avatarEl.textContent = initial; avatarEl.style.background = 'linear-gradient(135deg, #1A6B9A, #2A7F8F)'; avatarEl.style.boxShadow = '0 0 8px rgba(26,107,154,0.4)'; }
@@ -1182,7 +1191,7 @@ function renderDashboard() {
   }
   const sessionUserId = sessionUser?.id || sessionUser?.employeeId || activeUser?.id || activeUser?.employeeId || '';
   const managerBlockFarm = (db.blockFarms || []).find(farm => farm.managerUserId === sessionUserId)?.name || 'Unassigned Block Farm';
-  const loggedUserName = sessionUser?.name || localStorage.getItem('hugpong_user_name') || (isManager ? (activeUser?.name || 'Farm Manager') : (isSuper ? 'Matt Daniel Delotavo' : 'SRA Officer'));
+    const loggedUserName = sessionUser?.name || localStorage.getItem('hugpong_user_name') || (isManager ? (activeUser?.name || 'Farm Manager') : (isSuper ? 'Super Admin' : 'SRA Officer'));
   const activeFieldsCount = (db && Array.isArray(db.fields)) ? db.fields.length : 0;
 
   // 1. Dynamic Hero Banner Text
@@ -1219,8 +1228,8 @@ function renderDashboard() {
       if (sraView) sraView.classList.add('hidden');
       if (superView) superView.classList.remove('hidden');
       // Update topbar price pill before early return
-      const _superPrice = Number(db.priceHistory?.[0]?.price) || 0;
-      const _superMol = Number(db.priceHistory?.[0]?.molasses) || 0;
+      const _superPrice = Number(db.priceHistory?.[0]?.sugarPricePerLkg) || 0;
+      const _superMol = Number(db.priceHistory?.[0]?.molassesPricePerMetricTon) || 0;
       const _topPEl = document.getElementById('topbar-sugar-price');
       const _topMEl = document.getElementById('topbar-molasses-price');
       if (_topPEl) _topPEl.textContent = _superPrice > 0 ? `₱${_superPrice.toLocaleString()} / Lkg` : '—';
@@ -1238,8 +1247,8 @@ function renderDashboard() {
     if (mgrView) mgrView.classList.remove('hidden');
     // Update topbar price pill for manager role before delegating
     const _hasPrice = Array.isArray(db.priceHistory) && db.priceHistory.length > 0;
-    const _mgrPrice = _hasPrice ? Number(db.priceHistory[0]?.price) : 0;
-    const _mgrMol = _hasPrice ? Number(db.priceHistory[0]?.molasses) : 0;
+    const _mgrPrice = _hasPrice ? Number(db.priceHistory[0]?.sugarPricePerLkg) : 0;
+    const _mgrMol = _hasPrice ? Number(db.priceHistory[0]?.molassesPricePerMetricTon) : 0;
     const _topPriceEl = document.getElementById('topbar-sugar-price');
     const _topMolEl = document.getElementById('topbar-molasses-price');
     if (_topPriceEl) _topPriceEl.textContent = _hasPrice ? `₱${_mgrPrice.toLocaleString()} / Lkg` : 'Sugar: Awaiting Circular';
@@ -1269,13 +1278,13 @@ function renderDashboard() {
 
   // 2. Load prices KPIs (Dual: Raw Sugar & Molasses)
   const hasPrices = Array.isArray(db.priceHistory) && db.priceHistory.length > 0;
-  const currentPrice = hasPrices ? Number(db.priceHistory[0]?.price) : 0;
-  const prevPrice = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.price) : currentPrice;
-  const change = hasPrices && db.priceHistory[0]?.change !== undefined ? Number(db.priceHistory[0].change) : (currentPrice - prevPrice);
+  const currentPrice = hasPrices ? Number(db.priceHistory[0]?.sugarPricePerLkg) : 0;
+  const prevPrice = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.sugarPricePerLkg) : currentPrice;
+  const change = hasPrices ? Number(db.priceHistory[0].sugarPriceChange) : (currentPrice - prevPrice);
 
-  const currentMol = hasPrices ? Number(db.priceHistory[0]?.molasses) : 0;
-  const prevMol = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.molasses) : currentMol;
-  const molChange = hasPrices && db.priceHistory[0]?.molassesChange !== undefined ? Number(db.priceHistory[0].molassesChange) : (currentMol - prevMol);
+  const currentMol = hasPrices ? Number(db.priceHistory[0]?.molassesPricePerMetricTon) : 0;
+  const prevMol = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.molassesPricePerMetricTon) : currentMol;
+  const molChange = hasPrices ? Number(db.priceHistory[0].molassesPriceChange) : (currentMol - prevMol);
 
   const topPriceEl = document.getElementById('topbar-sugar-price');
   const topMolEl = document.getElementById('topbar-molasses-price');
@@ -1444,16 +1453,18 @@ function renderPriceHistoryChart() {
   if (priceChartTimeframe === 'monthly') {
     // Group by month-year
     const monthMap = new Map();
-    const sorted = [...rawHistory].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sorted = [...rawHistory].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
     const mNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
     sorted.forEach(p => {
-      const d = new Date(p.date);
-      const key = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+      const [year, month] = p.effectiveDate.split('-').map(Number);
+      const key = `${mNames[month - 1]} ${year}`;
       if (!monthMap.has(key)) {
-        monthMap.set(key, { label: key, prices: [], lastDate: p.date, source: p.source });
+        monthMap.set(key, { label: key, prices: [], lastEffectiveDate: p.effectiveDate, source: p.source });
       }
-      monthMap.get(key).prices.push(Number(p.price) || 0);
+      const monthBucket = monthMap.get(key);
+      monthBucket.prices.push(p.sugarPricePerLkg);
+      monthBucket.lastEffectiveDate = p.effectiveDate;
     });
 
     let prevAvg = null;
@@ -1463,13 +1474,13 @@ function renderPriceHistoryChart() {
       prevAvg = avg;
       return {
         label: k,
-        week: k,
-        date: v.lastDate,
-        price: avg,
+        weekLabel: k,
+        effectiveDate: v.lastEffectiveDate,
+        sugarPricePerLkg: avg,
         min: Math.min(...v.prices),
         max: Math.max(...v.prices),
         count: v.prices.length,
-        change: change,
+        sugarPriceChange: change,
         source: `${v.prices.length} weekly circulars`
       };
     });
@@ -1477,14 +1488,14 @@ function renderPriceHistoryChart() {
     if (history.length > 8) history = history.slice(-8);
   } else {
     // Chronological sort: oldest to newest for left-to-right trajectory
-    const sorted = [...rawHistory].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sorted = [...rawHistory].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
     
     // Deduplicate by distinct week label to prevent overlapping cluster points
     const seen = new Set();
     const unique = [];
     for (let i = sorted.length - 1; i >= 0; i--) {
       const p = sorted[i];
-      const key = (p.week || '').trim().toLowerCase();
+      const key = p.weekLabel.trim().toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
         unique.unshift(p);
@@ -1496,7 +1507,7 @@ function renderPriceHistoryChart() {
 
   if (history.length === 0) return;
 
-  const prices = history.map(p => Number(p.price) || 0);
+  const prices = history.map(p => p.sugarPricePerLkg);
   const minP = Math.min(...prices) * 0.96;
   const maxP = Math.max(...prices) * 1.04;
   const range = maxP - minP || 1;
@@ -1513,7 +1524,7 @@ function renderPriceHistoryChart() {
 
   const points = history.map((p, i) => {
     const x = n > 1 ? padL + (i / (n - 1)) * W : padL + W / 2;
-    const y = padT + H - ((p.price - minP) / range) * H;
+    const y = padT + H - ((p.sugarPricePerLkg - minP) / range) * H;
     return { x, y, ...p };
   });
 
@@ -1553,10 +1564,10 @@ function renderPriceHistoryChart() {
     const circleFill = isLatest ? (isDark ? '#34D399' : '#2D5016') : (isDark ? '#10B981' : '#4A7C2F');
     const radius = isLatest ? 6 : 4;
     const pulse = isLatest ? `<circle cx="${pt.x}" cy="${pt.y}" r="11" fill="${circleFill}" opacity="0.25"/>` : '';
-    const cleanLabel = priceChartTimeframe === 'monthly' ? pt.label : pt.week.replace(/Week\s+/i, 'W');
+    const cleanLabel = priceChartTimeframe === 'monthly' ? pt.label : pt.weekLabel.replace(/Week\s+/i, 'W');
     const tooltip = priceChartTimeframe === 'monthly'
-      ? `${pt.week}: Average Php ${pt.price.toLocaleString()}/Lkg`
-      : `${pt.week} (${pt.date}): Php ${pt.price.toLocaleString()}/Lkg (${pt.source})`;
+      ? `${pt.weekLabel}: Average Php ${pt.sugarPricePerLkg.toLocaleString()}/Lkg`
+      : `${pt.weekLabel} (${formatDisplayDate(pt.effectiveDate)}): Php ${pt.sugarPricePerLkg.toLocaleString()}/Lkg (${pt.source})`;
 
     return `
       <g class="cursor-pointer">
@@ -2848,13 +2859,13 @@ function renderManager() {
 
   // SRA Price Benchmark for Manager (Dual: Raw Sugar & Molasses)
   const hasPrices = Array.isArray(db.priceHistory) && db.priceHistory.length > 0;
-  const currentPrice = hasPrices ? Number(db.priceHistory[0]?.price) : 0;
-  const prevPrice = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.price) : currentPrice;
-  const change = hasPrices && db.priceHistory[0]?.change !== undefined ? Number(db.priceHistory[0].change) : (currentPrice - prevPrice);
+  const currentPrice = hasPrices ? Number(db.priceHistory[0]?.sugarPricePerLkg) : 0;
+  const prevPrice = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.sugarPricePerLkg) : currentPrice;
+  const change = hasPrices ? Number(db.priceHistory[0].sugarPriceChange) : (currentPrice - prevPrice);
 
-  const currentMol = hasPrices ? Number(db.priceHistory[0]?.molasses) : 0;
-  const prevMol = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.molasses) : currentMol;
-  const molChange = hasPrices && db.priceHistory[0]?.molassesChange !== undefined ? Number(db.priceHistory[0].molassesChange) : (currentMol - prevMol);
+  const currentMol = hasPrices ? Number(db.priceHistory[0]?.molassesPricePerMetricTon) : 0;
+  const prevMol = hasPrices && db.priceHistory[1] ? Number(db.priceHistory[1]?.molassesPricePerMetricTon) : currentMol;
+  const molChange = hasPrices ? Number(db.priceHistory[0].molassesPriceChange) : (currentMol - prevMol);
 
   const mgrPriceEl = document.getElementById('mgr-dashboard-sugar-price');
   const mgrMolPriceEl = document.getElementById('mgr-dashboard-molasses-price');
@@ -4173,13 +4184,9 @@ async function saveFieldCustomOperations(fieldId, stageNumber, operations) {
     }));
     field.updatedAt = new Date().toISOString();
     saveDB(db);
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, 'fields', field.id), {
-        customOperations: field.customOperations,
-        updatedAt: field.updatedAt
-      }, { merge: true }).catch(err => console.warn('[HUGPONG] saveFieldCustomOperations notice:', err));
-    }
+    await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-operations`, {
+      method: 'PUT', body: { customOperations: field.customOperations }
+    });
   }
 }
 window.saveFieldCustomOperations = saveFieldCustomOperations;
@@ -4193,13 +4200,9 @@ async function saveFieldFullPlan(fieldId, fullPlanByStage) {
     field.customOperations = { ...(fullPlanByStage || {}) };
     field.updatedAt = new Date().toISOString();
     saveDB(db);
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, 'fields', field.id), {
-        customOperations: field.customOperations,
-        updatedAt: field.updatedAt
-      }, { merge: true }).catch(err => console.warn('[HUGPONG] saveFieldFullPlan notice:', err));
-    }
+    await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-operations`, {
+      method: 'PUT', body: { customOperations: field.customOperations }
+    });
   }
 }
 window.saveFieldFullPlan = saveFieldFullPlan;
@@ -4911,19 +4914,8 @@ async function takeOverSelectStage(stageId, targetLogId = null) {
 
     saveDB(db);
 
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
-          customStages: field.customStages, updatedAt: new Date().toISOString()
-        }, { merge: true });
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
-          currentStageNumber: field.stageNumber, updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (err) {
-        console.warn('[TakeOver Stage Advance] Firestore error:', err);
-      }
-    }
+    await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-stages`, { method: 'PUT', body: { customStages: field.customStages } });
+    await authenticatedWebRequest(`/api/crop-cycles/${encodeURIComponent(field.currentCycleId)}/stage`, { method: 'PATCH', body: { currentStageNumber: field.stageNumber } });
 
     logSystemEvent(
       'operation',
@@ -5289,6 +5281,9 @@ async function takeOverSubmitLog() {
       toast('Security Lockout: Archived operation logs cannot be modified.');
       return;
     }
+    const originalLog = JSON.parse(JSON.stringify(matchingLog));
+    const originalField = JSON.parse(JSON.stringify(field));
+    const originalStages = activeTakeOverStages.map(stage => ({ ...stage }));
 
     // Check if any changes were actually made
     const origAct = (matchingLog.activity || matchingLog.task || '').trim();
@@ -5348,7 +5343,6 @@ async function takeOverSubmitLog() {
     matchingLog.activity = activity;
     matchingLog.cost = Math.round(cost);
     matchingLog.totalCost = Math.round(cost);
-    matchingLog.status = 'ACTIVE';
     matchingLog.hectares = ha;
     matchingLog.people = people;
     matchingLog.stageNumber = stageNum;
@@ -5401,32 +5395,30 @@ async function takeOverSubmitLog() {
     field.customStages = activeTakeOverStages.map(s => ({ ...s }));
     field.synced = true;
     field.lastSync = 'Just now (Manager Take Over)';
-    saveDB(db);
-
-    // Write directly to Cloud Firestore operation_logs (PRESERVE BOTH cost and totalCost!)
-    if (window.firestore && window.firebaseDB) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        const logPayload = { 
-          ...matchingLog, 
-          cost: Math.round(cost),
-          totalCost: Math.round(cost),
-          date: date,
-          period: date,
-          isoDate: isoDate,
-          synced: true, 
-          syncedAt: new Date().toISOString() 
-        };
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, matchingLog.id), window.HugpongSchema.toOperation(logPayload));
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
-          customStages: field.customStages, updatedAt: new Date().toISOString()
-        }, { merge: true });
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
-          currentStageNumber: Number(field.stageNumber) || stageNum, updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (err) {
-        console.warn('[TakeOver] Failed direct Firestore log write:', err);
-      }
+    try {
+      const amendment = matchingLog.amendments[matchingLog.amendments.length - 1];
+      const response = await authenticatedWebRequest(`/api/logs/${encodeURIComponent(matchingLog.id)}`, {
+        method: 'PATCH',
+        body: {
+          changes: { ...window.HugpongSchema.toOperation(matchingLog), amendments: undefined },
+          amendment
+        }
+      });
+      const currentLog = (db.logs || []).find(log => log.id === matchingLog.id);
+      if (currentLog) Object.assign(currentLog, window.HugpongSchema.fromOperation(response.data.id || matchingLog.id, response.data));
+      await authenticatedWebRequest(`/api/crop-cycles/${encodeURIComponent(field.currentCycleId)}/stage`, { method: 'PATCH', body: { currentStageNumber: Number(field.stageNumber) || stageNum } });
+      await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-stages`, { method: 'PUT', body: { customStages: field.customStages } });
+      saveDB(db);
+    } catch (error) {
+      Object.keys(matchingLog).forEach(key => delete matchingLog[key]);
+      Object.assign(matchingLog, originalLog);
+      Object.keys(field).forEach(key => delete field[key]);
+      Object.assign(field, originalField);
+      activeTakeOverStages = originalStages;
+      toast(error.status === 409
+        ? 'This field changed on another device. The archived operation was not modified.'
+        : `Operation update failed: ${error.message}`);
+      return;
     }
 
     toast(`Updated and saved stage details for ${stageObj ? stageObj.label : activeTakeOverFieldId}!`);
@@ -5441,6 +5433,8 @@ async function takeOverSubmitLog() {
   }
 
   // New log creation for unrecorded stage
+  const originalField = JSON.parse(JSON.stringify(field));
+  const originalStages = activeTakeOverStages.map(stage => ({ ...stage }));
   const newLog = {
     id: `LOG-${String(activeTakeOverFieldId).replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
     fieldId: activeTakeOverFieldId,
@@ -5471,7 +5465,6 @@ async function takeOverSubmitLog() {
     amendments: []
   };
 
-  db.logs.unshift(newLog);
   historyCurrentPage = 1;
   logCurrentPage = 1;
   blockHistPage = 1;
@@ -5508,35 +5501,22 @@ async function takeOverSubmitLog() {
   field.customStages = activeTakeOverStages.map(s => ({ ...s }));
   field.synced = true;
   field.lastSync = 'Just now (Manager Take Over)';
-  saveDB(db);
-
-  // Sync directly to Cloud Firestore (PRESERVE BOTH cost and totalCost!)
-  if (window.firestore && window.firebaseDB) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      const fDb = window.firebaseDB;
-      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
-        customStages: field.customStages, updatedAt: new Date().toISOString()
-      }, { merge: true });
-      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
-        currentStageNumber: Number(field.stageNumber) || stageNum, updatedAt: new Date().toISOString()
-      }, { merge: true });
-
-      const logPayload = { 
-        ...newLog, 
-        cost: Math.round(cost),
-        totalCost: Math.round(cost),
-        date: date,
-        period: date,
-        isoDate: isoDate,
-        synced: true, 
-        syncedAt: new Date().toISOString() 
-      };
-      await setDoc(doc(fDb, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, newLog.id), window.HugpongSchema.toOperation(logPayload));
-    } catch (err) {
-      console.warn('[TakeOver] Direct Firestore sync error:', err);
-    }
+  try {
+    const response = await authenticatedWebRequest('/api/logs', { method: 'POST', body: { id: newLog.id, ...window.HugpongSchema.toOperation(newLog) } });
+    Object.assign(newLog, window.HugpongSchema.fromOperation(response.data.id || newLog.id, response.data));
+    await authenticatedWebRequest(`/api/crop-cycles/${encodeURIComponent(field.currentCycleId)}/stage`, { method: 'PATCH', body: { currentStageNumber: Number(field.stageNumber) || stageNum } });
+    await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-stages`, { method: 'PUT', body: { customStages: field.customStages } });
+  } catch (error) {
+    Object.keys(field).forEach(key => delete field[key]);
+    Object.assign(field, originalField);
+    activeTakeOverStages = originalStages;
+    toast(error.status === 409
+      ? 'This field changed on another device. No operation was added to the archived cycle.'
+      : `Operation submission failed: ${error.message}`);
+    return;
   }
+
+  db.logs.unshift(newLog);
 
   // Deduplicate and save
   db.logs = cleanupDuplicateLogs(db.logs);
@@ -5951,6 +5931,10 @@ async function submitEditOperationModal() {
     toast('Error: Target log not found in local database.');
     return;
   }
+  if (log.status !== 'ACTIVE') {
+    toast('Archived operation records cannot be amended or reactivated.');
+    return;
+  }
 
   const previousValues = {
     activity: log.activity || log.task || '',
@@ -6002,20 +5986,7 @@ async function submitEditOperationModal() {
     return;
   }
 
-  // Apply updates strictly to this single operation log
-  log.activity = activity;
-  log.task = activity;
-  log.date = date;
-  log.period = date;
-  log.isoDate = isoDate;
-  log.hectares = ha;
-  log.people = people;
-  log.cost = Math.round(cost);
-  log.totalCost = Math.round(cost);
-  log.subItems = compiledSubItems;
-  log.status = 'ACTIVE';
-  log.amendments = log.amendments || [];
-  log.amendments.push({
+  const amendment = {
     amendmentId: `AMD-${Date.now()}`,
     amendedByUserId: activeUser?.id || activeUser?.employeeId || '',
     amendedAt: new Date().toISOString(),
@@ -6027,29 +5998,38 @@ async function submitEditOperationModal() {
       peopleCount: { before: previousValues.people, after: people },
       performedOn: { before: previousValues.date, after: isoDate }
     }
-  });
+  };
+  const candidate = {
+    ...log,
+    activity,
+    task: activity,
+    date,
+    period: date,
+    isoDate,
+    hectares: ha,
+    people,
+    cost: Math.round(cost),
+    totalCost: Math.round(cost),
+    subItems: compiledSubItems,
+    amendments: [...(log.amendments || []), amendment]
+  };
 
-  saveDB(db);
-
-  // Sync to Cloud Firestore operation_logs directly
-  if (window.firestore && window.firebaseDB) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      const logPayload = {
-        ...log,
-        cost: Math.round(cost),
-        totalCost: Math.round(cost),
-        date: date,
-        period: date,
-        isoDate: isoDate,
-        synced: true,
-        syncedAt: new Date().toISOString()
-      };
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id), window.HugpongSchema.toOperation(logPayload));
-    } catch (err) {
-      console.warn('[EditOp] Failed Firestore log write:', err);
+  let response;
+  try {
+    response = await authenticatedWebRequest(`/api/logs/${encodeURIComponent(log.id)}`, {
+      method: 'PATCH',
+      body: { changes: { ...window.HugpongSchema.toOperation(candidate), amendments: undefined }, amendment }
+    });
+  } catch (error) {
+    if (error.status === 409) {
+      toast('This operation was archived or changed on another device and cannot be amended.');
+      return;
     }
+    toast(`Operation amendment failed: ${error.message}`);
+    return;
   }
+  Object.assign(log, candidate, window.HugpongSchema.fromOperation(response.data.id || log.id, response.data));
+  saveDB(db);
 
   closeEditOperationModal();
   toast(`Operation "${activity}" amended successfully.`);
@@ -6177,7 +6157,7 @@ async function takeOverResetToSRA() {
   toast('Reset to SRA Standard 8-Stage Template.');
 }
 
-function takeOverSaveStages() {
+async function takeOverSaveStages() {
   const db = getDB();
   const field = db.fields.find(f => f.id === activeTakeOverFieldId);
   if (!field) return;
@@ -6199,7 +6179,10 @@ async function managerAssignField() {
   const fieldId = fieldIdEl ? fieldIdEl.value.trim().toUpperCase() : '';
   const member = memberEl ? memberEl.value.trim() : '';
   const ha = haEl ? parseFloat(haEl.value) : NaN;
-  const blockFarm = (db.blockFarms?.[0]?.name || 'Block Farm');
+  const db = getDB();
+  const actor = getActiveWebUser() || sessionUser || {};
+  const managedFarm = (db.blockFarms || []).find(farm => farm.managerUserId === (actor.id || actor.employeeId)) || db.blockFarms?.[0];
+  const blockFarm = managedFarm?.name || 'Block Farm';
 
   if (!fieldId || !member || isNaN(ha) || ha <= 0) {
     toast('Error: Please enter a valid Field ID, Member Identifier, and positive Hectare size.');
@@ -6216,7 +6199,6 @@ async function managerAssignField() {
   const memberIdVal = matchedUser.employeeId || matchedUser.id || matchedUser.contact;
   const memberContactVal = matchedUser.contact || matchedUser.mobile || '';
 
-  const db = getDB();
   const existing = db.fields.find(f => f.id === fieldId);
   if (existing) {
     const ok = await showConfirmDialog({
@@ -6238,8 +6220,12 @@ async function managerAssignField() {
     existing.ha = ha;
     existing.area = ha;
     existing.blockFarm = blockFarm;
+    await authenticatedWebRequest(`/api/fields/${encodeURIComponent(fieldId)}`, {
+      method: 'PATCH', body: { memberUserId: memberIdVal, areaHa: ha, blockFarmId: managedFarm?.id }
+    });
     toast(`Updated assignment for ${fieldId} to ${memberDisplayName}`);
   } else {
+    const currentCycleId = window.HugpongSchema.cycleId(fieldId, 1);
     db.fields.push({
       id: fieldId,
       member: memberDisplayName,
@@ -6256,7 +6242,14 @@ async function managerAssignField() {
       lastSync: 'Just now',
       lag: 'Synced',
       blockFarm: blockFarm,
+      blockFarmId: managedFarm?.id,
+      memberUserId: memberIdVal,
+      currentCycleId,
+      status: 'ACTIVE',
       customStages: []
+    });
+    await authenticatedWebRequest('/api/fields', {
+      method: 'POST', body: { id: fieldId, blockFarmId: managedFarm?.id, memberUserId: memberIdVal, areaHa: ha, cropType: 'Sugarcane', cropYear: String(new Date().getFullYear()), currentStageNumber: 1, elapsedMonths: 0, batchNumber: 1 }
     });
     toast(`Assigned ${fieldId} (${ha} Ha) to ${memberDisplayName} in ${blockFarm}`);
   }
@@ -6627,23 +6620,11 @@ async function issueSRACertification(reportId) {
     return;
   }
   const certifiedAt = new Date().toISOString();
-  report.status = 'CERTIFIED';
-  report.certifiedByUserId = actorUserId;
-  report.certifiedAt = certifiedAt;
-  report.updatedAt = certifiedAt;
   const canonicalReportId = report.reportId || report.id;
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    await setDoc(
-      doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_REPORTS, canonicalReportId),
-      window.HugpongSchema.toReport(report, { status: 'CERTIFIED', certifiedByUserId: actorUserId, certifiedAt, updatedAt: certifiedAt })
-    );
-    const auditEventId = `AUD-${Date.now()}`;
-    await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_LOGS, auditEventId), {
-      eventType: 'AUDIT_REPORT_CERTIFIED', actorUserId, entityType: 'AUDIT_REPORT', entityId: canonicalReportId,
-      details: `Certified audit report ${canonicalReportId}.`, outcome: 'SUCCESS', createdAt: certifiedAt
-    });
-  }
+  const certified = await authenticatedWebRequest(`/api/audit-reports/${encodeURIComponent(canonicalReportId)}/certify`, {
+    method: 'POST', body: { certificationNotes: report.certificationNotes || '' }
+  });
+  Object.assign(report, certified.data || {}, { status: 'CERTIFIED', certifiedByUserId: actorUserId, certifiedAt, updatedAt: certifiedAt });
   saveDB(db, false);
   toast('SRA Digital Seal issued for the audit report.');
   loadAuditCertificate(report.qrHash || canonicalReportId);
@@ -6978,15 +6959,15 @@ function renderPrices() {
   
   if (searchQuery) {
     filtered = filtered.filter(p => 
-      p.week.toLowerCase().includes(searchQuery) || 
+      p.weekLabel.toLowerCase().includes(searchQuery) ||
       p.source.toLowerCase().includes(searchQuery)
     );
   }
 
   if (priceSortOrder === 'asc') {
-    filtered.sort((a, b) => a.price - b.price);
+    filtered.sort((a, b) => a.sugarPricePerLkg - b.sugarPricePerLkg);
   } else if (priceSortOrder === 'desc') {
-    filtered.sort((a, b) => b.price - a.price);
+    filtered.sort((a, b) => b.sugarPricePerLkg - a.sugarPricePerLkg);
   }
 
   const totalPages = Math.ceil(filtered.length / PRICES_PER_PAGE) || 1;
@@ -6997,24 +6978,24 @@ function renderPrices() {
 
   body.innerHTML = paginatedPrices.map(p => {
     // 1. Raw Sugar Trend (Php / Lkg)
-    const sugarChg = Number(p.change || 0);
+    const sugarChg = p.sugarPriceChange;
     let sugarDiff = '<span class="text-[11px] font-semibold text-hug-muted">Steady (₱0/Lkg)</span>';
     if (sugarChg > 0) sugarDiff = `<span class="text-[11px] font-bold text-success">▲ +₱${sugarChg.toLocaleString()}/Lkg</span>`;
     else if (sugarChg < 0) sugarDiff = `<span class="text-[11px] font-bold text-danger">▼ -₱${Math.abs(sugarChg).toLocaleString()}/Lkg</span>`;
 
     // 2. Molasses Trend (Php / MT)
-    const molChg = Number(p.molassesChange || 0);
+    const molChg = p.molassesPriceChange;
     let molDiff = '<span class="text-[11px] font-semibold text-hug-muted">Steady (₱0/MT)</span>';
     if (molChg > 0) molDiff = `<span class="text-[11px] font-bold text-success">▲ +₱${molChg.toLocaleString()}/MT</span>`;
     else if (molChg < 0) molDiff = `<span class="text-[11px] font-bold text-danger">▼ -₱${Math.abs(molChg).toLocaleString()}/MT</span>`;
 
-    const molVal = p.molasses ? `Php ${Number(p.molasses).toLocaleString()}` : 'Php 4,200';
+    const molVal = `Php ${p.molassesPricePerMetricTon.toLocaleString()}`;
 
     return `
       <tr class="border-b border-border/60 hover:bg-bg/50 transition-colors">
-        <td class="px-4 py-3 text-xs text-hug-muted whitespace-nowrap">${p.date}</td>
-        <td class="px-4 py-3 text-xs font-bold text-hug-text whitespace-nowrap">${p.week.replace('Wk', 'Week ')}</td>
-        <td class="px-4 py-3 text-xs font-extrabold text-primary whitespace-nowrap">Php ${Number(p.price || 0).toLocaleString()} <span class="text-[10px] text-hug-muted font-normal">/ Lkg</span></td>
+        <td class="px-4 py-3 text-xs text-hug-muted whitespace-nowrap">${formatDisplayDate(p.effectiveDate)}</td>
+        <td class="px-4 py-3 text-xs font-bold text-hug-text whitespace-nowrap">${p.weekLabel.replace('Wk', 'Week ')}</td>
+        <td class="px-4 py-3 text-xs font-extrabold text-primary whitespace-nowrap">Php ${p.sugarPricePerLkg.toLocaleString()} <span class="text-[10px] text-hug-muted font-normal">/ Lkg</span></td>
         <td class="px-4 py-3 text-xs font-bold text-hug-text2 whitespace-nowrap">${molVal} <span class="text-[10px] text-hug-muted font-normal">/ MT</span></td>
         <td class="px-4 py-3 whitespace-nowrap">
           <div class="flex flex-col gap-0.5">
@@ -7056,19 +7037,19 @@ function openPublishPriceModal() {
   if (dateEl) dateEl.value = today;
 
   const db = getDB();
-  const latest = db.priceHistory?.[0] || { price: 0, molasses: 0, week: '' };
+  const latest = db.priceHistory?.[0] || null;
   
   const weekEl = document.getElementById('modal-p-week');
-  if (weekEl) weekEl.value = latest.week || calculateSRAWeekLabel(today);
+  if (weekEl) weekEl.value = latest?.weekLabel || calculateSRAWeekLabel(today);
 
   const sugarEl = document.getElementById('modal-p-sugar');
-  if (sugarEl) sugarEl.value = latest.price || '';
+  if (sugarEl) sugarEl.value = latest?.sugarPricePerLkg ?? '';
 
   const molEl = document.getElementById('modal-p-molasses');
-  if (molEl) molEl.value = latest.molasses || '';
+  if (molEl) molEl.value = latest?.molassesPricePerMetricTon ?? '';
 
   const sourceEl = document.getElementById('modal-p-source');
-  if (sourceEl) sourceEl.value = 'SRA Sugar Order & Circular #105';
+  if (sourceEl) sourceEl.value = '';
 
   modal.classList.remove('hidden');
 }
@@ -7088,10 +7069,10 @@ async function submitPublishPrice() {
   const week = weekEl ? weekEl.value.trim() : '';
   const dateStr = dateEl ? dateEl.value : '';
   const sugarPrice = sugarEl ? parseFloat(sugarEl.value) : NaN;
-  const molassesPrice = molEl ? parseFloat(molEl.value) : 4200;
-  const source = sourceEl && sourceEl.value.trim() ? sourceEl.value.trim() : 'Official SRA release';
+  const molassesPrice = molEl ? parseFloat(molEl.value) : NaN;
+  const source = sourceEl ? sourceEl.value.trim() : '';
 
-  if (!week || isNaN(sugarPrice) || !dateStr) {
+  if (!week || !Number.isFinite(sugarPrice) || !Number.isFinite(molassesPrice) || !source || !isCanonicalCalendarDate(dateStr)) {
     toast('Error: Please fill in all required price fields.');
     return;
   }
@@ -7102,43 +7083,31 @@ async function submitPublishPrice() {
 
   try {
     const db = getDB();
-    const prevPrice = db.priceHistory?.[0]?.price || sugarPrice;
-    const prevMol = db.priceHistory?.[0]?.molasses || molassesPrice;
-    const change = sugarPrice - prevPrice;
-    const molChange = molassesPrice - prevMol;
+    const prevPrice = db.priceHistory?.[0]?.sugarPricePerLkg ?? sugarPrice;
+    const prevMol = db.priceHistory?.[0]?.molassesPricePerMetricTon ?? molassesPrice;
+    const sugarPriceChange = sugarPrice - prevPrice;
+    const molassesPriceChange = molassesPrice - prevMol;
 
     const dateObj = new Date(dateStr);
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const formattedDate = `${months[dateObj.getMonth()]} ${String(dateObj.getDate()).padStart(2, '0')}, ${dateObj.getFullYear()}`;
 
     const pId = `PRC-${Date.now()}`;
-    const newPost = {
-      id: pId,
-      week,
-      price: sugarPrice,
-      molasses: molassesPrice,
-      date: formattedDate,
-      isoDate: dateStr,
-      timestamp: Date.now(),
-      change,
-      molassesChange: molChange,
+    const payload = window.HugpongSchema.toPrice({
+      effectiveDate: dateStr,
+      weekLabel: week,
+      sugarPricePerLkg: sugarPrice,
+      sugarPriceChange,
+      molassesPricePerMetricTon: molassesPrice,
+      molassesPriceChange,
+      circularNumber: source,
       source,
-      createdAt: new Date().toISOString()
-    };
-
-    db.priceHistory.unshift(newPost);
-    saveDB(db, true);
-
-    // Directly push to Firestore if online
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SRA_PRICES, pId), window.HugpongSchema.toPrice(newPost, activeUser?.id || activeUser?.employeeId || ''));
-        console.log('[HUGPONG] Published price committed to Firestore:', pId);
-      } catch (e) {
-        console.warn('[HUGPONG] Direct Firestore price publish note:', e);
-      }
-    }
+      publishedAt: new Date().toISOString()
+    }, activeUser?.id || activeUser?.employeeId || '');
+    const result = await authenticatedWebRequest('/api/prices', { method: 'POST', body: { id: pId, ...payload } });
+    const newPost = window.HugpongSchema.fromPrice(result.data.id, result.data);
+    db.priceHistory = [newPost, ...db.priceHistory.filter(price => price.id !== newPost.id)];
+    saveDB(db, false);
 
     const actorName = (typeof getWebAuthSession === 'function' ? getWebAuthSession()?.user?.name : null) || 'SRA Administrator';
     logSystemEvent(
@@ -7956,6 +7925,10 @@ async function rejectRegistration(contact) {
   });
   if (!ok) return;
 
+  if (user.employeeId || user.id) {
+    await authenticatedWebRequest(`/api/users/${encodeURIComponent(user.employeeId || user.id)}`, { method: 'PATCH', body: { status: 'DISABLED' } });
+  }
+
   db.pendingUsers = db.pendingUsers.filter(u => u.contact !== contact);
   saveDB(db);
   logSystemEvent(
@@ -8000,6 +7973,8 @@ async function removeDirectoryUser(contact) {
     type: 'danger'
   });
   if (!ok) return;
+
+  await authenticatedWebRequest(`/api/users/${encodeURIComponent(target.employeeId || target.id)}`, { method: 'PATCH', body: { status: 'DISABLED' } });
 
   db.users = db.users.filter(u => u.contact !== contact);
   saveDB(db);
@@ -8448,48 +8423,60 @@ function renderFields() {
 async function archiveFieldCropCycle(fieldId, options = {}) {
   if (!fieldId) return { success: false, message: 'Field ID is required.' };
   const db = getDB();
-  const nowIso = new Date().toISOString();
   const targetField = (db.fields || []).find(f => f.id === fieldId);
   if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle.' };
   const oldCycleId = targetField.currentCycleId;
   const oldCycle = (db.cropCycles || []).find(cycle => cycle.id === oldCycleId);
-  const nextSequence = Number(oldCycle?.sequenceNumber || targetField.cycleNumber || 1) + 1;
-  const nextCycleId = window.HugpongSchema.cycleId(fieldId, nextSequence);
-  const actor = getActiveWebUser() || sessionUser || {};
-  const actorUserId = actor.id || actor.employeeId || '';
-  const targetLogs = (db.logs || []).filter(log => log.cycleId === oldCycleId && log.status === 'ACTIVE');
-  targetLogs.forEach(l => {
-    l.status = 'ARCHIVED';
-    l.archivedAt = nowIso;
-    l.archivedByUserId = actorUserId;
-  });
-  const nextCycle = {
-    id: nextCycleId, fieldId, sequenceNumber: nextSequence,
-    cropType: options.cycleType || oldCycle?.cropType || targetField.cycleType || '',
-    cropYear: options.cropYear || oldCycle?.cropYear || targetField.cropYear || '',
-    currentStageNumber: 1, elapsedMonths: 0, batchNumber: 1, status: 'ACTIVE', startedAt: nowIso, updatedAt: nowIso
-  };
-  if (!db.cropCycles) db.cropCycles = [];
-  if (oldCycle) Object.assign(oldCycle, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso });
-  db.cropCycles.push(nextCycle);
-  Object.assign(targetField, { currentCycleId: nextCycleId, stageNumber: 1, cycleNumber: nextSequence,
-    cycleType: nextCycle.cropType, cropYear: nextCycle.cropYear, updatedAt: nowIso });
-  saveDB(db, false);
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    const writes = targetLogs.map(log => setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id), window.HugpongSchema.toOperation(log)));
-    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, oldCycleId), {
-      status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso
-    }, { merge: true }));
-    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, nextCycleId), window.HugpongSchema.toCycle(targetField, nextCycle)));
-    writes.push(setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, fieldId), { currentCycleId: nextCycleId, updatedAt: nowIso }, { merge: true }));
-    await Promise.all(writes);
+  let rollover;
+  try {
+    rollover = await authenticatedWebRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, {
+      method: 'POST',
+      body: {
+        previousCycleId: oldCycleId,
+        cropType: options.cycleType || oldCycle?.cropType || targetField.cycleType || '',
+        cropYear: options.cropYear || oldCycle?.cropYear || targetField.cropYear || '',
+        batchNumber: 1
+      }
+    });
+  } catch (error) {
+    return { success: false, message: error.message || 'Crop-cycle rollover was rejected.' };
   }
+  const result = rollover.data;
+  if (!result?.newCycleId || !result.newCycle) throw new Error('Crop-cycle rollover returned an incomplete response.');
+
+  const archivedIds = new Set(result.archivedOperationLogIds || []);
+  const archivedMetadata = result.oldCycle || {};
+  (db.logs || []).forEach(log => {
+    if (archivedIds.has(log.id) || (log.cycleId === result.oldCycleId && log.status === 'ACTIVE')) {
+      Object.assign(log, {
+        status: 'ARCHIVED',
+        archivedAt: archivedMetadata.archivedAt,
+        archivedByUserId: archivedMetadata.archivedByUserId,
+        updatedAt: archivedMetadata.updatedAt
+      });
+    }
+  });
+
+  if (!db.cropCycles) db.cropCycles = [];
+  const localOldCycle = db.cropCycles.find(cycle => cycle.id === result.oldCycleId);
+  if (localOldCycle && result.oldCycle) Object.assign(localOldCycle, result.oldCycle);
+  const localNewCycle = db.cropCycles.find(cycle => cycle.id === result.newCycleId);
+  if (localNewCycle) Object.assign(localNewCycle, result.newCycle);
+  else db.cropCycles.push({ id: result.newCycleId, ...result.newCycle });
+  Object.assign(targetField, {
+    currentCycleId: result.newCycleId,
+    stageNumber: result.newCycle.currentStageNumber,
+    cycleNumber: result.newCycle.sequenceNumber,
+    cycleType: result.newCycle.cropType,
+    cropYear: result.newCycle.cropYear,
+    updatedAt: result.newCycle.updatedAt
+  });
+  saveDB(db, false);
   if (typeof renderOperations === 'function') renderOperations();
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof renderLogs === 'function') renderLogs();
   if (typeof renderEfficiency === 'function') renderEfficiency();
-  return { success: true, archivedCount: targetLogs.length, cycleId: nextCycleId };
+  return { success: true, archivedCount: result.archivedLogCount, cycleId: result.newCycleId, replayed: result.replayed === true };
 }
 window.archiveFieldCropCycle = archiveFieldCropCycle;
 
@@ -8503,44 +8490,15 @@ async function archiveFieldPlot(fieldId) {
   });
   if (!ok) return;
 
+  const archived = await authenticatedWebRequest(`/api/fields/${encodeURIComponent(String(fieldId).trim())}/archive`, { method: 'POST', body: {} });
   const db = getDB();
-  const nowIso = new Date().toISOString();
-  db.archivedFields = db.archivedFields || [];
-  const targetField = db.fields.find(f => f.id === fieldId) || { id: fieldId };
-  targetField.status = 'ARCHIVED';
-  targetField.archivedAt = nowIso;
-
-  if (!db.archivedFields.some(af => (typeof af === 'string' ? af : af.id).toUpperCase() === fieldId.toUpperCase())) {
-    db.archivedFields.push(targetField);
+  const index = (db.fields || []).findIndex(field => field.id === fieldId);
+  if (index >= 0) db.fields.splice(index, 1);
+  if (archived.data) {
+    db.archivedFields = (db.archivedFields || []).filter(field => field.id !== fieldId);
+    db.archivedFields.push(window.HugpongSchema.fromField(fieldId, archived.data));
   }
-
-  db.fields = db.fields.filter(f => f.id !== fieldId);
-
-  const actor = getActiveWebUser() || sessionUser || {};
-  const actorUserId = actor.id || actor.employeeId || '';
-  const archivedLogs = (db.logs || []).filter(log => log.fieldId === fieldId && log.status === 'ACTIVE');
-  archivedLogs.forEach(log => Object.assign(log, { status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId }));
-
-  saveDB(db);
-
-  // Sync to Firestore
-  if (window.firebaseDB && window.firestore) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      const cleanId = String(fieldId).trim();
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, cleanId), {
-        status: 'ARCHIVED',
-        archivedAt: nowIso,
-        updatedAt: nowIso
-      }, { merge: true });
-      await Promise.all(archivedLogs.map(log => setDoc(
-        doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.OPERATION_LOGS, log.id),
-        window.HugpongSchema.toOperation(log)
-      )));
-    } catch (err) {
-      console.warn('[Firestore archiveFieldPlot]', err);
-    }
-  }
+  saveDB(db, false);
 
   logSystemEvent(
     'plot',
@@ -10078,7 +10036,7 @@ let firstLoginTimerInterval = null;
 
 function openFirstLoginVerificationModal(user, redirectUrl, serverToken = null) {
   firstLoginPendingUser = user;
-  firstLoginRedirectUrl = redirectUrl || (typeof window !== 'undefined' ? window.location.href : '');
+  firstLoginRedirectUrl = redirectUrl || getWebDashboardPath(webRoleKeyFromUser(user)) || '/login.html?role=member';
   firstLoginPendingToken = serverToken;
   const modal = document.getElementById('modal-first-login-verify');
   const phoneEl = document.getElementById('first-login-verify-phone');
@@ -10215,8 +10173,7 @@ async function submitFirstLoginVerify() {
     firstLoginPendingUser.pendingFirstLoginVerification = false;
     firstLoginPendingUser.phoneVerifiedAt = new Date().toISOString();
 
-    const rKey = (firstLoginPendingUser.roleKey || firstLoginPendingUser.role || '').toLowerCase();
-    const roleKey = rKey.includes('super') ? 'superadmin' : (rKey.includes('manager') ? 'manager' : 'admin');
+    const roleKey = webRoleKeyFromUser(firstLoginPendingUser);
     if (typeof saveWebAuthSession === 'function') {
       saveWebAuthSession(firstLoginPendingUser, roleKey, firstLoginPendingToken);
     } else {
@@ -10303,7 +10260,7 @@ function handleFirstLoginPwdInput(inputEl) {
 
 function openFirstLoginChangePasswordModal(user, redirectUrl, serverToken = null) {
   firstLoginPwdUser = user;
-  firstLoginPwdRedirectUrl = redirectUrl || (typeof window !== 'undefined' ? window.location.href : '');
+  firstLoginPwdRedirectUrl = redirectUrl || getWebDashboardPath(webRoleKeyFromUser(user)) || '/login.html?role=member';
   firstLoginPwdToken = serverToken;
 
   const modal = document.getElementById('modal-first-login-change-password');
@@ -10428,8 +10385,7 @@ async function submitFirstLoginChangePassword() {
       }
 
       // Save authorized session
-      const rKey = (user.roleKey || user.role || '').toLowerCase();
-      const roleKey = rKey.includes('super') ? 'superadmin' : (rKey.includes('manager') ? 'manager' : 'admin');
+      const roleKey = webRoleKeyFromUser(user);
       if (typeof saveWebAuthSession === 'function') {
         saveWebAuthSession(user, roleKey, apiResult.token || firstLoginPwdToken);
       } else {
@@ -10655,7 +10611,8 @@ async function submitCreateUser() {
         role,
         password: rawPassword,
         phoneVerified: isVerifiedOnSpot,
-        requiresPasswordChange: true
+        requiresPasswordChange: true,
+        blockFarmId: matchedFarm?.id || null
       }
     });
     Object.assign(newUser, provisioned.data || {});
@@ -10665,10 +10622,7 @@ async function submitCreateUser() {
     if (role === 'Farm Manager' && matchedFarm) {
       matchedFarm.managerUserId = employeeId;
       matchedFarm.updatedAt = new Date().toISOString();
-      if (window.firebaseDB && window.firestore) {
-        const { doc, setDoc } = window.firestore;
-        setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, matchedFarm.id || matchedFarm.code), window.HugpongSchema.toBlockFarm(matchedFarm)).catch(e => console.warn(e));
-      }
+      await authenticatedWebRequest(`/api/block-farms/${encodeURIComponent(matchedFarm.id || matchedFarm.code)}`, { method: 'PUT', body: { managerUserId: employeeId } });
     }
 
     saveDB(db);
@@ -10936,7 +10890,7 @@ function closeEditPlotModal() {
   activeEditingPlotId = null;
 }
 
-function saveEditPlotModal() {
+async function saveEditPlotModal() {
   if (!activeEditingPlotId) return;
   const db = getDB();
   const field = db.fields.find(f => f.id === activeEditingPlotId);
@@ -10971,14 +10925,9 @@ function saveEditPlotModal() {
   field.updatedAt = new Date().toISOString();
 
   saveDB(db);
+  await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-stages`, { method: 'PUT', body: { customStages: field.customStages } });
 
-  // Write to Firestore
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), window.HugpongSchema.toField(field)).catch(err => {
-      console.warn('[HUGPONG] Edit plot Firestore write notice:', err);
-    });
-  }
+  await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}`, { method: 'PATCH', body: window.HugpongSchema.toField(field) });
 
   closeEditPlotModal();
   logSystemEvent(
@@ -11192,13 +11141,10 @@ async function submitRegisterFieldModal() {
     db.cropCycles.push(newCycle);
     saveDB(db, false);
 
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, newField.id), window.HugpongSchema.toField(newField)).catch(err => {
-        console.warn('[HUGPONG] Instant Firestore write field notice:', err);
-      });
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, newCycleId), window.HugpongSchema.toCycle(newField, newCycle));
-    }
+    await authenticatedWebRequest('/api/fields', {
+      method: 'POST',
+      body: { id: newField.id, ...window.HugpongSchema.toField(newField), cropType: newCycle.cropType, cropYear: newCycle.cropYear, currentStageNumber: newCycle.currentStageNumber, elapsedMonths: newCycle.elapsedMonths, batchNumber: newCycle.batchNumber }
+    });
 
     // Brief visual reassurance delay
     await new Promise(r => setTimeout(r, 250));
@@ -11319,7 +11265,7 @@ function closeRegisterBlockFarmModal() {
   activeEditingBlockFarmName = null;
 }
 
-function submitRegisterBlockFarmModal() {
+async function submitRegisterBlockFarmModal() {
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
   const nameEl = document.getElementById('dash-farm-name');
   const contactEl = document.getElementById('dash-farm-contact');
@@ -11380,12 +11326,7 @@ function submitRegisterBlockFarmModal() {
     saveDB(db);
     closeRegisterBlockFarmModal();
 
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      if (targetBf) {
-        setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, targetBf.id || blockCode), window.HugpongSchema.toBlockFarm(targetBf)).catch(e => console.warn(e));
-      }
-    }
+    if (targetBf) await authenticatedWebRequest(`/api/block-farms/${encodeURIComponent(targetBf.id || blockCode)}`, { method: 'PUT', body: window.HugpongSchema.toBlockFarm(targetBf) });
 
     logSystemEvent(
       'block',
@@ -11418,10 +11359,7 @@ function submitRegisterBlockFarmModal() {
     saveDB(db);
     closeRegisterBlockFarmModal();
 
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.BLOCK_FARMS, blockCode), window.HugpongSchema.toBlockFarm(newBlockFarm)).catch(e => console.warn(e));
-    }
+    await authenticatedWebRequest('/api/block-farms', { method: 'POST', body: { id: blockCode, ...window.HugpongSchema.toBlockFarm(newBlockFarm) } });
 
     logSystemEvent(
       'block',
@@ -11784,7 +11722,7 @@ function exportTabHistoryCSV() {
   toast(`Exported ${currentTabHistModule} history to CSV.`);
 }
 
-function logSystemEvent(category, eventType, entity, details, actor, status = 'Recorded') {
+async function logSystemEvent(category, eventType, entity, details, actor, status = 'Recorded') {
   const db = getDB();
   db.systemHistory = db.systemHistory || [];
   const currentRole = localStorage.getItem('hugpong_role') || 'manager';
@@ -11813,15 +11751,17 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
     actor: actor || defaultActor,
     status
   };
+  const operationEntityIsLog = (db.logs || []).some(log => log.id === String(entity || ''));
+  const blockFarmEntity = (db.blockFarms || []).find(farm => farm.id === entity || farm.code === entity || farm.name === entity);
   const entityTypes = {
-    operation: 'OPERATION_LOG', plot: 'FIELD', field: 'FIELD', block: 'BLOCK_FARM',
+    operation: operationEntityIsLog ? 'OPERATION_LOG' : 'FIELD', plot: 'FIELD', field: 'FIELD', block: 'BLOCK_FARM',
     user: 'USER', price: 'SRA_PRICE', sra: 'AUDIT_REPORT', audit: 'AUDIT_REPORT'
   };
   const canonicalEvent = {
     eventType: String(eventType || 'SYSTEM_EVENT').trim().replace(/\s+/g, '_').toUpperCase(),
     actorUserId: activeUser?.id || activeUser?.employeeId || '',
     entityType: entityTypes[category] || 'SYSTEM',
-    entityId: String(entity || 'SYSTEM'),
+    entityId: String(blockFarmEntity?.id || entity || 'SYSTEM'),
     details: details || '',
     outcome: String(status || '').toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS',
     createdAt: newEvent.createdAt
@@ -11832,16 +11772,10 @@ function logSystemEvent(category, eventType, entity, details, actor, status = 'R
   tabHistCurrentPage = 1;
   saveDB(db);
 
-  // Write to Firestore audit_logs so history persists across sessions
-  if (window.firebaseDB && window.firestore) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_LOGS, auditId), canonicalEvent).catch(e => {
-        console.warn('[HUGPONG] Audit log write notice:', e);
-      });
-    } catch(e) {
-      console.warn('[HUGPONG] Audit log Firestore note:', e);
-    }
+  try {
+    await authenticatedWebRequest('/api/audit-events', { method: 'POST', body: { id: auditId, ...canonicalEvent } });
+  } catch (e) {
+    console.warn('[HUGPONG] Audit event API notice:', e);
   }
 
   // Refresh history view if open
@@ -12201,11 +12135,6 @@ function renderHistory() {
 async function archivePastCropCycles() {
   const db = getDB();
   let pastLogs = (db.logs || []).filter(l => l.status === 'ARCHIVED');
-  
-  // If no 2025 logs exist, check for logs prior to June 2026
-  if (pastLogs.length === 0) {
-    pastLogs = (db.logs || []).filter(l => l.date && l.date < '2026-06-01');
-  }
 
   if (pastLogs.length === 0) {
     toast('Notice: No past crop cycle records pending archive. Active database is already optimized.');
@@ -12655,10 +12584,11 @@ function renderTickets() {
   }
 }
 
-function resolveSupportTicket(ticketId) {
+async function resolveSupportTicket(ticketId) {
   const db = getDB();
   const ticket = (db.supportTickets || []).find(t => t.id === ticketId);
   if (ticket) {
+    await authenticatedWebRequest(`/api/tickets/${encodeURIComponent(ticketId)}`, { method: 'PATCH', body: { status: 'RESOLVED', resolutionNotes: ticket.resolutionNotes || '' } });
     ticket.status = 'Resolved';
     saveDB(db);
     renderTickets();
@@ -12882,21 +12812,9 @@ function renderMaintenance() {
   const archiveBtnEl = document.getElementById('archive-action-btn');
   const activeCY = db.activeCropYear || 'CY 2026-2027';
 
-  const pastLogs = (db.logs || []).filter(l => {
-    if (l.status === 'ARCHIVED') return true;
-    if (l.cropYear && l.cropYear < activeCY) return true;
-    if (l.date && typeof l.date === 'string') {
-      const year = parseInt(l.date.slice(0, 4), 10);
-      if (!isNaN(year) && year < 2026) return true;
-    }
-    return false;
-  });
+  const pastLogs = (db.logs || []).filter(l => l.status === 'ARCHIVED');
 
-  const pastFields = (db.fields || []).filter(f => {
-    if (f.status === 'ARCHIVED') return true;
-    if (f.cropYear && f.cropYear < activeCY) return true;
-    return false;
-  });
+  const pastFields = (db.fields || []).filter(f => f.status === 'ARCHIVED');
   
   if (archiveDetectEl) {
     if (pastLogs.length > 0 || pastFields.length > 0) {
@@ -12914,15 +12832,7 @@ window.renderMaintenance = renderMaintenance;
 async function archiveHistoricalLogs() {
   const db = getDB();
   const activeCY = db.activeCropYear || 'CY 2026-2027';
-  const pastLogs = (db.logs || []).filter(l => {
-    if (l.status === 'ARCHIVED') return true;
-    if (l.cropYear && l.cropYear < activeCY) return true;
-    if (l.date && typeof l.date === 'string') {
-      const year = parseInt(l.date.slice(0, 4), 10);
-      if (!isNaN(year) && year < 2026) return true;
-    }
-    return false;
-  });
+  const pastLogs = (db.logs || []).filter(l => l.status === 'ARCHIVED');
   const currentLogs = (db.logs || []).filter(l => !pastLogs.includes(l));
   
   const currentRole = localStorage.getItem('hugpong_role') || 'admin';
@@ -13199,13 +13109,13 @@ function openPublishPriceModal() {
     }
   }
 
-  const latestPrice = db.priceHistory?.[0]?.price || 0;
+  const latestPrice = db.priceHistory?.[0]?.sugarPricePerLkg;
   const priceInput = document.getElementById('dash-price-val');
-  if (priceInput) priceInput.value = latestPrice || '';
+  if (priceInput) priceInput.value = latestPrice ?? '';
 
-  const latestMol = db.priceHistory?.[0]?.molasses || 0;
+  const latestMol = db.priceHistory?.[0]?.molassesPricePerMetricTon;
   const molInput = document.getElementById('dash-price-molasses');
-  if (molInput) molInput.value = latestMol || '';
+  if (molInput) molInput.value = latestMol ?? '';
 
   const weekInput = document.getElementById('dash-price-week');
   if (weekInput) {
@@ -13213,10 +13123,7 @@ function openPublishPriceModal() {
   }
 
   const sourceInput = document.getElementById('dash-price-source');
-  if (sourceInput && !sourceInput.value) {
-    const circNum = 104 + ((db.priceHistory?.length || 0) - 12);
-    sourceInput.value = `SRA Circular #${circNum > 104 ? circNum : 105} (Official SRA Millsite Notice)`;
-  }
+  if (sourceInput) sourceInput.value = '';
 
   calculatePriceMovementPreview();
   modal.classList.remove('hidden');
@@ -13229,8 +13136,8 @@ function closePublishPriceModal() {
 
 function calculatePriceMovementPreview() {
   const db = getDB();
-  const latestPrice = db.priceHistory?.[0]?.price || 0;
-  const latestMol = db.priceHistory?.[0]?.molasses || 0;
+  const latestPrice = db.priceHistory?.[0]?.sugarPricePerLkg ?? 0;
+  const latestMol = db.priceHistory?.[0]?.molassesPricePerMetricTon ?? 0;
 
   const priceInput = document.getElementById('dash-price-val');
   const molInput = document.getElementById('dash-price-molasses');
@@ -13280,12 +13187,12 @@ async function submitNewWeeklyPriceFromDashboard() {
   const sourceEl = document.getElementById('dash-price-source');
 
   const week = weekEl ? weekEl.value.trim() : '';
-  const price = priceEl ? parseInt(priceEl.value) : NaN;
-  const molasses = molEl ? parseInt(molEl.value) : 4200;
+  const price = priceEl ? parseFloat(priceEl.value) : NaN;
+  const molasses = molEl ? parseFloat(molEl.value) : NaN;
   const dateStr = dateEl ? dateEl.value : '';
-  const source = sourceEl ? sourceEl.value.trim() : 'Official SRA release';
+  const source = sourceEl ? sourceEl.value.trim() : '';
 
-  if (!week || isNaN(price) || !dateStr) {
+  if (!week || !Number.isFinite(price) || !Number.isFinite(molasses) || !source || !isCanonicalCalendarDate(dateStr)) {
     toast('Error: Please complete all required price fields.');
     return;
   }
@@ -13306,43 +13213,31 @@ async function submitNewWeeklyPriceFromDashboard() {
 
   try {
     const db = getDB();
-    const prevPrice = db.priceHistory[0]?.price || price;
-    const prevMol = db.priceHistory[0]?.molasses || molasses;
-    const change = price - prevPrice;
-    const molassesChange = molasses - prevMol;
+    const prevPrice = db.priceHistory[0]?.sugarPricePerLkg ?? price;
+    const prevMol = db.priceHistory[0]?.molassesPricePerMetricTon ?? molasses;
+    const sugarPriceChange = price - prevPrice;
+    const molassesPriceChange = molasses - prevMol;
 
     const dateObj = new Date(dateStr);
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const formattedDate = `${months[dateObj.getMonth()]} ${String(dateObj.getDate()).padStart(2, '0')}, ${dateObj.getFullYear()}`;
 
     const pId = `PRC-${Date.now()}`;
-    const newPost = {
-      id: pId,
-      week,
-      price,
-      molasses,
-      date: formattedDate,
-      isoDate: dateStr,
-      timestamp: Date.now(),
-      change,
-      molassesChange,
+    const payload = window.HugpongSchema.toPrice({
+      effectiveDate: dateStr,
+      weekLabel: week,
+      sugarPricePerLkg: price,
+      sugarPriceChange,
+      molassesPricePerMetricTon: molasses,
+      molassesPriceChange,
+      circularNumber: source,
       source,
-      createdAt: new Date().toISOString()
-    };
-
-    db.priceHistory.unshift(newPost);
-    saveDB(db, true);
-
-    // Directly push to Firestore if online
-    if (window.firebaseDB && window.firestore) {
-      try {
-        const { doc, setDoc } = window.firestore;
-        await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SRA_PRICES, pId), window.HugpongSchema.toPrice(newPost, activeUser?.id || activeUser?.employeeId || ''));
-        console.log('[HUGPONG] Published price committed to Firestore:', pId);
-      } catch (e) {
-        console.warn('[HUGPONG] Direct Firestore price publish note:', e);
-      }
-    }
+      publishedAt: new Date().toISOString()
+    }, activeUser?.id || activeUser?.employeeId || '');
+    const result = await authenticatedWebRequest('/api/prices', { method: 'POST', body: { id: pId, ...payload } });
+    const newPost = window.HugpongSchema.fromPrice(result.data.id, result.data);
+    db.priceHistory = [newPost, ...db.priceHistory.filter(existing => existing.id !== newPost.id)];
+    saveDB(db, false);
 
     const actorName = (typeof getWebAuthSession === 'function' ? getWebAuthSession()?.user?.name : null) || 'SRA Administrator';
     logSystemEvent(
@@ -13410,7 +13305,7 @@ function closeTicketDetailModal() {
   currentSelectedTicketId = null;
 }
 
-function saveTicketTriage() {
+async function saveTicketTriage() {
   if (!currentSelectedTicketId) return;
   const db = getDB();
   if (!db.supportTickets) db.supportTickets = INITIAL_DATABASE.supportTickets;
@@ -13419,6 +13314,7 @@ function saveTicketTriage() {
     t.status = document.getElementById('tck-modal-status').value;
     t.priority = document.getElementById('tck-modal-priority').value;
     t.resolutionNotes = document.getElementById('tck-modal-notes').value;
+    await authenticatedWebRequest(`/api/tickets/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { status: String(t.status).toUpperCase().replace(/ /g, '_'), priority: String(t.priority).toUpperCase(), resolutionNotes: t.resolutionNotes } });
     saveDB(db);
     toast(`Ticket ${t.id} updated to ${t.status}`);
     closeTicketDetailModal();
@@ -13429,9 +13325,9 @@ function saveTicketTriage() {
 async function deleteCurrentTicket() {
   if (!currentSelectedTicketId) return;
   const confirmed = await showConfirmDialog({
-    title: 'Delete Support Ticket?',
-    message: `Are you sure you want to permanently delete support ticket #${currentSelectedTicketId}? This action cannot be undone.`,
-    confirmText: 'Delete Ticket',
+    title: 'Close Support Ticket?',
+    message: `Close support ticket #${currentSelectedTicketId}? The record will be retained for support history.`,
+    confirmText: 'Close Ticket',
     cancelText: 'Keep Ticket',
     type: 'danger',
     icon: 'delete'
@@ -13440,9 +13336,11 @@ async function deleteCurrentTicket() {
 
   const db = getDB();
   if (!db.supportTickets) db.supportTickets = INITIAL_DATABASE.supportTickets;
-  db.supportTickets = db.supportTickets.filter(x => x.id !== currentSelectedTicketId);
+  const ticket = db.supportTickets.find(x => x.id === currentSelectedTicketId);
+  await authenticatedWebRequest(`/api/tickets/${encodeURIComponent(currentSelectedTicketId)}`, { method: 'PATCH', body: { status: 'CLOSED', resolutionNotes: ticket?.resolutionNotes || 'Closed by Super Admin.' } });
+  if (ticket) ticket.status = 'Closed';
   saveDB(db);
-  toast(`Ticket ${currentSelectedTicketId} deleted`);
+  toast(`Ticket ${currentSelectedTicketId} closed`);
   closeTicketDetailModal();
   renderTickets();
 }
@@ -13534,12 +13432,7 @@ async function submitNewTicket() {
     db.supportTickets.unshift(newTicket);
     saveDB(db);
 
-    // Write to Firestore
-    if (window.firebaseDB && window.firestore) {
-      const { doc, setDoc } = window.firestore;
-      setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.SUPPORT_TICKETS, newId), window.HugpongSchema.toTicket(newTicket, activeUser?.id || activeUser?.employeeId || ''))
-        .catch(e => console.warn('[HUGPONG] Ticket write notice:', e));
-    }
+    await authenticatedWebRequest('/api/tickets', { method: 'POST', body: { id: newId, ...window.HugpongSchema.toTicket(newTicket, activeUser?.id || activeUser?.employeeId || '') } });
 
     logSystemEvent(
       'user',
@@ -14146,7 +14039,7 @@ function renderSettings() {
   if (!sessionUser) {
     try { sessionUser = JSON.parse(localStorage.getItem('hugpong_user')); } catch(e) {}
   }
-  const userName = sessionUser?.name || (currentRole === 'manager' ? (activeUser?.name || 'Farm Manager') : (currentRole === 'superadmin' ? 'Matt Daniel Delotavo' : 'SRA Officer'));
+  const userName = sessionUser?.name || (currentRole === 'manager' ? (activeUser?.name || 'Farm Manager') : (currentRole === 'superadmin' ? 'Super Admin' : 'SRA Officer'));
 
   const diagUser = document.getElementById('settings-diag-user');
   const diagRole = document.getElementById('settings-diag-role');
@@ -14689,13 +14582,12 @@ async function executeCompileMonthlyAudit() {
     operationSnapshots: logsToCompile.map(log => window.HugpongSchema.snapshot(log.id, log)),
     certificationNotes: '', certifiedByUserId: null, certifiedAt: null
   };
+  const compiled = await authenticatedWebRequest('/api/audit-reports', {
+    method: 'POST', body: { id: reportId, blockFarmId: blockFarm.id, period, operationLogIds: logsToCompile.map(log => log.id) }
+  });
   if (!db.auditReports) db.auditReports = [];
-  db.auditReports.unshift(window.HugpongSchema.fromReport(reportId, window.HugpongSchema.toReport(report)));
+  db.auditReports.unshift(window.HugpongSchema.fromReport(reportId, compiled.data));
   saveDB(db, false);
-  if (window.firebaseDB && window.firestore) {
-    const { doc, setDoc } = window.firestore;
-    await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.AUDIT_REPORTS, reportId), window.HugpongSchema.toReport(report));
-  }
   if (typeof renderFarmManagerView === 'function') renderFarmManagerView();
   if (typeof renderAuditQueue === 'function') renderAuditQueue();
   updateCompileAuditPreview();
@@ -14957,19 +14849,8 @@ async function takeOverMarkAllStagesCompleted() {
   field.lastSync = 'Just now (Manager Take Over)';
   saveDB(db);
 
-  if (window.firestore && window.firebaseDB) {
-    try {
-      const { doc, setDoc } = window.firestore;
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.FIELDS, field.id), {
-        customStages: field.customStages, updatedAt: new Date().toISOString()
-      }, { merge: true });
-      await setDoc(doc(window.firebaseDB, window.HugpongSchema.COLLECTIONS.CROP_CYCLES, field.currentCycleId), {
-        currentStageNumber: 6, updatedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (err) {
-      console.warn('[takeOverMarkAllStagesCompleted] Firestore sync error:', err);
-    }
-  }
+  await authenticatedWebRequest(`/api/fields/${encodeURIComponent(field.id)}/custom-stages`, { method: 'PUT', body: { customStages: field.customStages } });
+  await authenticatedWebRequest(`/api/crop-cycles/${encodeURIComponent(field.currentCycleId)}/stage`, { method: 'PATCH', body: { currentStageNumber: 6 } });
 
   const stagePillEl = document.getElementById('takeover-current-stage-pill');
   if (stagePillEl) stagePillEl.textContent = `Current Stage: ${field.stage}`;

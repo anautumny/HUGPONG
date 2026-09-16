@@ -6,12 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/HUGPONG LOGO.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/HUGPONG LOGO.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F7F9F4"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -23,7 +17,6 @@
         "foregroundImage": "./assets/HUGPONG LOGO.png",
         "backgroundColor": "#F7F9F4"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.anonymous.hugpong",
       "permissions": [
         "CAMERA"
@@ -34,6 +27,16 @@
         "expo-camera",
         {
           "cameraPermission": "HUGPONG needs camera access to scan and verify SRA compliance QR codes."
+        }
+      ],
+      "expo-status-bar",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/HUGPONG LOGO.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F9F4"
         }
       ]
     ],

@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
+const { assertFieldScope } = require('../services/resourceScope');
 const {
   COLLECTIONS,
   TICKET_PRIORITIES,
@@ -14,12 +15,13 @@ const {
   nullableId,
   nowIso
 } = require('../schema/firestoreSchema');
+const { readMutationContext } = require('../services/mutationContext');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
-    const isSuperAdmin = String(req.session.user.role || '').toUpperCase() === 'SUPER ADMIN';
+    const isSuperAdmin = String(req.session.user.role || '').toUpperCase().replace(/ /g, '_') === 'SUPER_ADMIN';
     const snapshot = await db.collection(COLLECTIONS.SUPPORT_TICKETS).get();
     const data = snapshot.docs
       .filter(doc => isSuperAdmin || doc.data().createdByUserId === actorId)
@@ -33,11 +35,14 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    readMutationContext(req);
     const now = nowIso();
     const ticketId = req.body.id || `TCK-${Date.now().toString(36).toUpperCase()}`;
+    const fieldId = nullableId(req.body.fieldId);
+    if (fieldId) await assertFieldScope(fieldId, req.session.user);
     const payload = {
       createdByUserId: String(req.session.user.employeeId || req.session.user.userId || '').trim(),
-      fieldId: nullableId(req.body.fieldId),
+      fieldId,
       title: requiredString(req.body.title, 'title', { max: 300 }),
       category: requiredString(req.body.category, 'category', { max: 120 }),
       priority: enumValue(req.body.priority || 'NORMAL', TICKET_PRIORITIES, 'priority'),
@@ -49,7 +54,16 @@ router.post('/', requireAuth, async (req, res) => {
       resolvedAt: null,
       resolvedByUserId: null
     };
-    await db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(ticketId).create(payload);
+    const ref = db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(ticketId);
+    const existing = await ref.get();
+    if (existing.exists) {
+      const current = existing.data();
+      if (current.createdByUserId === payload.createdByUserId && current.title === payload.title) {
+        return res.json({ success: true, replayed: true, data: { id: ticketId, ...current } });
+      }
+      return res.status(409).json({ success: false, error: 'Ticket ID already belongs to another ticket.' });
+    }
+    await ref.create(payload);
     return res.status(201).json({ success: true, data: { id: ticketId, ...payload } });
   } catch (error) {
     const status = /already exists/i.test(error.message) ? 409 : 400;
@@ -60,7 +74,7 @@ router.post('/', requireAuth, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    if (String(req.session.user.role || '').toUpperCase() !== 'SUPER ADMIN') {
+    if (String(req.session.user.role || '').toUpperCase().replace(/ /g, '_') !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, error: 'Only Super Admin may update support tickets.' });
     }
     const ref = db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(req.params.id);
@@ -71,6 +85,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const resolved = status === 'RESOLVED' || status === 'CLOSED';
     const update = {
       status,
+      priority: req.body.priority == null ? snapshot.data().priority : enumValue(req.body.priority, TICKET_PRIORITIES, 'priority'),
       resolutionNotes: optionalString(req.body.resolutionNotes == null ? snapshot.data().resolutionNotes : req.body.resolutionNotes, { max: 5000 }),
       updatedAt: now,
       resolvedAt: resolved ? (snapshot.data().resolvedAt || now) : null,

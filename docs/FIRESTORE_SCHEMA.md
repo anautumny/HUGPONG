@@ -293,7 +293,9 @@ Create composite indexes only when the corresponding query is deployed:
 ## 5. Atomic workflow requirements
 
 - Field enrollment creates `fields/{fieldId}` and its first `crop_cycles/{cycleId}` in one server batch.
-- Cycle rollover runs in one transaction/batch: archive the current cycle, archive only logs whose explicit `cycleId` matches it and whose status is ACTIVE, create the next cycle, and update `fields.currentCycleId`.
+- Cycle rollover requires the caller's `previousCycleId` and runs in one transaction: verify it is still `fields.currentCycleId`, archive that cycle, archive only logs whose explicit `cycleId` matches it and whose status is ACTIVE, create the next cycle at stage 1 with zero elapsed months, and update `fields.currentCycleId`.
+- Operation creation, amendment, and stage updates validate the field pointer and cycle status inside their write transaction. A stale device cannot create against, amend, reactivate, or advance an ARCHIVED cycle or operation.
+- Field archival is also transactional with archival of its ACTIVE cycle and ACTIVE submitted operations; submitted records remain present with their original `fieldId` and `cycleId`.
 - Audit compilation creates one PENDING `audit_reports` document from an explicit list of ACTIVE logs. It does not modify those logs.
 - Audit certification changes only the report and appends an `audit_logs` event. Only an SRA Admin may perform it.
 

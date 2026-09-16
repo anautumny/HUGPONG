@@ -10,7 +10,6 @@ import AppHeader from '../components/AppHeader';
 import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { db } from '../firebase/config';
-import { doc, setDoc } from 'firebase/firestore';
 import { useTranslation } from '../services/i18n';
 
 // ── 6 Official SRA Sugarcane Growth Stages Baseline Configuration ──

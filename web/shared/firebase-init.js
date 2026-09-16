@@ -10,15 +10,10 @@ import {
   doc,
   getDocs,
   getDoc,
-  setDoc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
   onSnapshot,
   query,
   orderBy,
-  where,
-  serverTimestamp
+  where
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js';
 import {
   getAuth,
@@ -58,15 +53,10 @@ window.firestore = {
   doc,
   getDocs,
   getDoc,
-  setDoc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
   onSnapshot,
   query,
   orderBy,
-  where,
-  serverTimestamp
+  where
 };
 
 let initialAuthStateResolved = false;
