@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "description": "HUGPONG Farm Management System",
   "scripts": {
+    "prestart": "npm run build:web",
     "start": "node server/server.js",
     "server": "node server/server.js",
     "web": "node server/server.js",
+    "web:react": "npm --prefix web/react-app run dev",
+    "build:web": "npm --prefix web/react-app run build",
+    "test:web": "npm --prefix web/react-app run test",
     "mobile": "cd mobile && npm start"
   },
   "keywords": [],

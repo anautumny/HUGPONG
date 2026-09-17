@@ -9,6 +9,8 @@ mobile/yarn-error.log*
 
 # Web Client
 web/node_modules/
+web/react-app/node_modules/
+web/react-dist/
 
 # Backend Server & Secrets
 server/node_modules/

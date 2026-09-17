@@ -1,88 +1,45 @@
-# HUGPONG — System Architecture & Directory Reference
+# HUGPONG System Architecture and Directory Reference
 
-## 🌟 Overview
-HUGPONG is an offline-first agricultural management platform for sugarcane block farming, supporting Silay Sugar Regulatory Administration (SRA), Farm Managers, and cooperative Members.
-
----
-
-## 📁 Repository Directory Structure
-
-```
+```text
 HUGPONG/
-│
-├── shared/                                 ← Universal Shared Configuration
-│   └── firebase-config.js                  ← Single source of truth for Firebase project (hugpong-ff)
-│
-├── web/                                    ← Web Client Application
-│   ├── index.html                          ← Public portal & app landing
-│   ├── login.html                          ← Role-aware login portal with Express auth
-│   ├── dashboard.html                      ← Workspace auto-redirector
-│   ├── admin.css                           ← Global styling and theme tokens
-│   ├── logo.png                            ← Platform brand logo
-│   ├── shared/                             ← Web Shared Infrastructure
-│   │   ├── firebase-init.js                ← Web Firebase SDK connector & event emitter
-│   │   ├── webDataStore.js                 ← Empty-state store & SRA domain configuration
-│   │   └── core.js                         ← Database engine, Firestore listeners, session verification
-│   │
-│   └── roles/                              ← Role-Isolated Workspaces
-│       ├── super-admin/
-│       │   ├── dashboard.html              ← Super Admin console
-│       │   └── super-admin.js              ← User management & system governance
-│       ├── sra-admin/
-│       │   ├── dashboard.html              ← SRA Administrator console
-│       │   └── sra-admin.js                ← SRA weekly prices & QR audit desk
-│       └── farm-manager/
-│           ├── dashboard.html              ← Block farm operations workspace
-│           └── farm-manager.js             ← Field plot allocations & log certification
-│
-├── server/                                 ← Backend API & Security Gateway
-│   ├── server.js                           ← Express server application (port 3000)
-│   ├── firebase-admin.js                   ← Firebase Admin SDK initializer
-│   ├── package.json                        ← Dependencies: express, firebase-admin, express-session, cors
-│   │
-│   ├── middleware/
-│   │   ├── auth.js                         ← Session verification guard
-│   │   └── roleGuard.js                    ← Role authorization clearance middleware
-│   │
-│   └── routes/
-│       ├── auth.js                         ← /auth/login, /auth/logout, /auth/session
-│       ├── prices.js                       ← /api/prices
-│       ├── users.js                        ← /api/users, /api/users/approve
-│       ├── fields.js                       ← /api/fields
-│       ├── logs.js                         ← /api/logs, /api/logs/certify
-│       └── tickets.js                      ← /api/tickets
-│
-├── mobile/                                 ← React Native (Expo) Mobile Application
-│   ├── App.js
-│   ├── index.js
-│   ├── app.json
-│   ├── package.json
-│   │
-│   └── src/
-│       ├── firebase/config.js              ← React Native Firebase SDK initializer
-│       ├── data/dataStore.js               ← Production data store & local cache
-│       ├── services/                       ← syncEngine.js, storageService.js, i18n.js
-│       ├── components/                     ← AppHeader.js, EmptyState.js, ErrorState.js
-│       ├── navigation/RootNavigator.js     ← Tab & stack navigation
-│       ├── theme.js                        ← Colors, fonts, spacing, shadows
-│       └── screens/
-│           ├── HomeScreen.js               ← Modular role router
-│           ├── FieldOpsScreen.js           ← Crop cycle operations
-│           ├── AnalyticsScreen.js          ← Financial & yield analytics
-│           ├── PlannerScreen.js            ← Crop cycle stage planner
-│           ├── ProfileScreen.js            ← Profile & preferences
-│           ├── SecurityScreen.js           ← PIN & biometric lock
-│           ├── SyncMonitorScreen.js        ← Member telemetry & sync health
-│           ├── member/                     ← Member-specific modular views
-│           ├── manager/                    ← Farm Manager-specific modular views
-│           ├── sra/                        ← SRA Admin-specific modular views
-│           └── auth/                       ← Login, Register, Forgot Password, Onboarding
-│
-├── docs/                                   ← Project Documentation
-│   ├── system_flow_audit.md                ← Full security & connectivity audit report
-│   └── folder-structure.md                 ← Architecture & conventions documentation
-│
-├── run-web.bat                             ← Launches Web Console
-├── run-mobile.bat                          ← Starts Expo development server
-└── run-server.bat                          ← Starts Express backend server
+├── firestore.rules                 authenticated read rules; canonical client writes denied
+├── package.json                    root build/start/test shortcuts
+├── run-web.bat                     builds/opens the root SPA through Express
+├── server/
+│   ├── server.js                   Express auth/API gateway and SPA history fallback
+│   ├── routes/                     auth and server-authoritative domain endpoints
+│   ├── services/                   lifecycle, scope, outbox/idempotency, SMS, reset services
+│   ├── schema/                     canonical Firestore validation and relationships
+│   ├── security/                   password, token, Firebase claims, and projections
+│   ├── scripts/                    explicit development reset/bootstrap tools
+│   └── tests/                      security, RBAC, lifecycle, outbox, and migration checks
+├── web/
+│   ├── react-app/
+│   │   ├── index.html              the single maintained web HTML entry
+│   │   ├── vite.config.js
+│   │   └── src/
+│   │       ├── auth/               React authentication context
+│   │       ├── components/         shared presentation/layout components
+│   │       ├── domain/             pure routing, price, and selector rules
+│   │       ├── features/           registry, operations, regulatory, and system sections
+│   │       ├── hooks/              replica/action hooks
+│   │       ├── pages/              landing, legal, login, overview, workspace routing
+│   │       └── services/           API, Firebase auth/read, session, and replica adapters
+│   ├── react-dist/                 generated production build; ignored by Git
+│   └── logo.png                    reusable brand asset
+└── mobile/
+    └── src/
+        ├── data/                   local replica orchestration
+        ├── domain/                 pure mobile business rules
+        ├── services/               explicit outbox, API, storage, and Firebase reads
+        ├── components/             reusable native UI
+        └── screens/                role/mobile workflows
 ```
+
+## Authority boundaries
+
+- Firestore and Express are the canonical persistent system.
+- Express owns all authentication and persistent mutations.
+- Web and mobile use Firebase only for authenticated realtime reads.
+- Mobile user actions create explicit outbox mutations; snapshots update the replica only.
+- Web mutations go through focused API services; React components do not write to Firestore.

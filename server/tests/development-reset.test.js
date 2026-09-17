@@ -57,7 +57,7 @@ test('reset remains separate from explicit account bootstrap and runtime startup
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const resetScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'resetDevelopmentFirestore.js'), 'utf8');
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const webStore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'webDataStore.js'), 'utf8');
+  const webStore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'replicaStore.js'), 'utf8');
 
   assert.match(packageJson.scripts['reset:dev-firestore'], /--execute/);
   assert.match(packageJson.scripts['bootstrap:dev-test-accounts'], /bootstrapDevelopmentTestAccounts/);
@@ -67,17 +67,19 @@ test('reset remains separate from explicit account bootstrap and runtime startup
   assert.match(webStore, /blockFarms:\s*\[\]/);
   assert.match(webStore, /users:\s*\[\]/);
   assert.match(webStore, /logs:\s*\[\]/);
+  assert.doesNotMatch(webStore, /seed|mock|sample/i);
 });
 
 test('client cache epochs invalidate old replicas and outboxes', () => {
   const mobileStorage = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'storageService.js'), 'utf8');
   const mobileDataStore = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
-  const webCore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'core.js'), 'utf8');
+  const webCore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'replicaStore.js'), 'utf8');
 
   assert.match(mobileStorage, /MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1'/);
   assert.match(mobileStorage, /key\.startsWith\('@hugpong_'\)/);
   assert.match(mobileDataStore, /await ensureCurrentCacheSchema\(\)/);
   assert.doesNotMatch(mobileDataStore, /@hugpong_clean_prod_v2/);
-  assert.match(webCore, /CURRENT_DB_VERSION = '2026_09_17_post_reset_v2'/);
-  assert.match(webCore, /clearWebAuthSession\(\)/);
+  assert.match(webCore, /hugpong_react_replica_v1:\$\{userId\}/);
+  assert.match(webCore, /localStorage\.removeItem\(cacheKey\(targetUserId\)\)/);
+  assert.doesNotMatch(webCore, /localOnly|auto.*upload/i);
 });

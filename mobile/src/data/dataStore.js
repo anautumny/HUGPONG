@@ -6,6 +6,23 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {
+  calculateSRAWeekLabel as calculateSRAWeekLabelRule,
+  cleanDataForFirestore as cleanDataForFirestoreRule,
+  cleanupDuplicateLogs as cleanupDuplicateLogsRule,
+  extractFarmCodeFromName as extractFarmCodeFromNameRule,
+  extractPriceMonth as extractPriceMonthRule,
+  findUserByIdOrContact as findUserByIdOrContactRule,
+  formatDisplayDate as formatDisplayDateRule,
+  formatFullName as formatFullNameRule,
+  generateNextFieldId as generateNextFieldIdRule,
+  getFarmCode as getFarmCodeRule,
+  isValidUserIdentifier as isValidUserIdentifierRule,
+  sortPrices,
+  splitFullName as splitFullNameRule,
+  toISODateString as toISODateStringRule
+} from '../domain/dataRules';
+import { SRA_OPERATIONS_CATALOGUE } from '../domain/fieldOperations';
+import {
   loginWithServer,
   refreshServerSession,
   verifyPasswordWithServer,
@@ -64,84 +81,10 @@ const stripCredentialFields = (value = {}) => {
 // ══════════════════════════════════════════════════════════════
 
 // ── CANONICAL DATE & DEDUPLICATION UTILITIES ────────────────
-export function formatDisplayDate(dateStr) {
-  if (!dateStr) return '';
-  const str = String(dateStr).trim();
-  if (/^[A-Za-z]+ \d{1,2}, \d{4}$/.test(str)) {
-    return str;
-  }
-  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const y = parseInt(m[1], 10);
-    const monthIdx = parseInt(m[2], 10) - 1;
-    const d = parseInt(m[3], 10);
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    if (monthIdx >= 0 && monthIdx < 12) {
-      return `${months[monthIdx]} ${d}, ${y}`;
-    }
-  }
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) {
-    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  }
-  return str;
-}
-
-export function toISODateString(dateStr) {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
-  const str = String(dateStr).trim();
-  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const y = m[1];
-    const month = m[2].padStart(2, '0');
-    const day = m[3].padStart(2, '0');
-    return `${y}-${month}-${day}`;
-  }
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  return new Date().toISOString().split('T')[0];
-}
-
-export function cleanupDuplicateLogs(logs) {
-  if (!Array.isArray(logs)) return [];
-  const byId = new Map();
-  for (const l of logs) {
-    if (!l) continue;
-    const logId = l.id || `LOG-${l.fieldId}-${l.stageNumber || 1}-${l.activity || 'op'}-${l.date || Date.now()}`;
-    if (!byId.has(logId)) {
-      byId.set(logId, l);
-    } else {
-      const existing = byId.get(logId);
-      const timeExisting = new Date(existing.updatedAt || existing.createdAt || existing.date || 0).getTime();
-      const timeCurrent = new Date(l.updatedAt || l.createdAt || l.date || 0).getTime();
-      if (timeCurrent >= timeExisting) {
-        byId.set(logId, l);
-      }
-    }
-  }
-  return Array.from(byId.values());
-}
-
-export const cleanDataForFirestore = (obj) => {
-  if (obj === null || obj === undefined) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(cleanDataForFirestore);
-  const clean = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) {
-      clean[k] = cleanDataForFirestore(v);
-    }
-  }
-  return clean;
-};
+export const formatDisplayDate = formatDisplayDateRule;
+export const toISODateString = toISODateStringRule;
+export const cleanupDuplicateLogs = cleanupDuplicateLogsRule;
+export const cleanDataForFirestore = cleanDataForFirestoreRule;
 
 export const priceHistory = [];
 
@@ -338,88 +281,9 @@ export const rejectPendingRegistration = async (contact) => {
 /**
  * Unified Field ID Code Resolution and Auto-Generation (Synchronous Parity with Web)
  */
-export const extractFarmCodeFromName = (name) => {
-  if (!name) return '';
-  const clean = String(name).replace(/\b(block|farm|cooperative|coop|cluster|group|association)\b/gi, '').trim();
-  const words = clean.split(/[\s-_]+/).filter(Boolean);
-  if (words.length >= 2) {
-    return words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
-  } else if (words.length === 1) {
-    const word = words[0].toUpperCase();
-    if (word.length <= 4) return word;
-    if (word === 'NACAYAO') return 'NCY';
-    const vowelsRemoved = word.charAt(0) + word.slice(1).replace(/[AEIOU]/gi, '');
-    if (vowelsRemoved.length >= 3) return vowelsRemoved.slice(0, 3);
-    return word.slice(0, 3);
-  }
-  return String(name).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3) || 'FLD';
-};
-
-export const getFarmCode = (blockFarmInput, blockFarmsList = blockFarms) => {
-  const bfList = blockFarmsList || blockFarms || [];
-  if (!blockFarmInput) {
-    const defaultBf = Array.isArray(bfList) ? bfList[0] : null;
-    if (defaultBf) return getFarmCode(defaultBf, bfList);
-    return '';
-  }
-  let bf = (typeof blockFarmInput === 'object' && blockFarmInput !== null) ? blockFarmInput : null;
-  if (!bf && Array.isArray(bfList)) {
-    bf = bfList.find(b => b.name === blockFarmInput || b.id === blockFarmInput || b.code === blockFarmInput) || null;
-  }
-  
-  if (bf) {
-    if (bf.code) {
-      let c = String(bf.code).replace(/^BLK[-_]?/i, '').replace(/[-_]\d+$/, '').trim().toUpperCase();
-      if (c && !/^\d+$/.test(c)) return c;
-    }
-    if (bf.id) {
-      let c = String(bf.id).replace(/^BLK[-_]?/i, '').replace(/[-_]\d+$/, '').trim().toUpperCase();
-      if (c && !/^\d+$/.test(c)) return c;
-    }
-    if (bf.name) {
-      return extractFarmCodeFromName(bf.name);
-    }
-    if (bf.code) {
-      let c = String(bf.code).replace(/^BLK[-_]?/i, '').trim().toUpperCase();
-      if (c) return c;
-    }
-  }
-
-  if (typeof blockFarmInput === 'string' && blockFarmInput.trim()) {
-    return extractFarmCodeFromName(blockFarmInput);
-  }
-  return '';
-};
-
-export const generateNextFieldId = (blockFarmInput, existingFields = fields, blockFarmsList = blockFarms) => {
-  const fList = existingFields || fields || [];
-  const bfList = blockFarmsList || blockFarms || [];
-
-  const farmCode = getFarmCode(blockFarmInput, bfList);
-  const prefix = farmCode ? `FLD-${farmCode}` : 'FLD';
-
-  const matchingFields = (fList || []).filter(f => {
-    if (!f || !f.id) return false;
-    const fId = String(f.id).toUpperCase();
-    if (fId.startsWith(prefix + '-')) return true;
-    if (farmCode && (f.blockFarm === blockFarmInput || f.blockFarmId === blockFarmInput)) return true;
-    return false;
-  });
-
-  const existingNums = matchingFields
-    .map(f => {
-      const m = String(f.id || '').match(/(\d+)$/);
-      return m ? parseInt(m[1], 10) : null;
-    })
-    .filter(n => n !== null && !isNaN(n));
-
-  let nextNum = 1;
-  if (existingNums.length > 0) {
-    nextNum = Math.max(...existingNums) + 1;
-  }
-
-  return `${prefix}-${String(nextNum).padStart(3, '0')}`;
-};
+export const extractFarmCodeFromName = extractFarmCodeFromNameRule;
+export const getFarmCode = (blockFarmInput, blockFarmsList = blockFarms) => getFarmCodeRule(blockFarmInput, blockFarmsList || blockFarms || []);
+export const generateNextFieldId = (blockFarmInput, existingFields = fields, blockFarmsList = blockFarms) => generateNextFieldIdRule(blockFarmInput, existingFields || fields || [], blockFarmsList || blockFarms || []);
 
 /**
  * Comprehensive Validation for Field Plots (Add & Edit)
@@ -586,41 +450,11 @@ export {
 
 // ── Relational Derivation Resolvers ──────────────────────────
 export const findUserByIdOrContact = (inputStr) => {
-  if (!inputStr) return null;
-  const raw = String(inputStr).trim();
-  const clean = raw.replace(/\D/g, '');
-
-  return users.find(u => {
-    const uEmp = String(u.employeeId || '').trim();
-    const uEmpClean = uEmp.replace(/\D/g, '');
-    const uContact = String(u.contact || '').replace(/\D/g, '');
-    const uMobile = String(u.mobile || '').replace(/\D/g, '');
-    const uId = String(u.id || '').trim();
-    const uName = String(u.name || '').trim().toLowerCase();
-
-    if (uEmp && (uEmp === raw || (clean && uEmpClean === clean))) return true;
-    if (clean && uContact && uContact === clean) return true;
-    if (clean && uMobile && uMobile === clean) return true;
-    if (clean.length >= 7) {
-      if (uContact.length >= 7 && (uContact.endsWith(clean) || clean.endsWith(uContact))) return true;
-      if (uMobile.length >= 7 && (uMobile.endsWith(clean) || clean.endsWith(uMobile))) return true;
-    }
-    if (uId && (uId === raw || (clean && uId.replace(/\D/g, '') === clean))) return true;
-    if (uName && uName === raw.toLowerCase()) return true;
-    return false;
-  }) || null;
+  return findUserByIdOrContactRule(users, inputStr);
 };
 
 export const isValidUserIdentifier = (inputStr, requireExisting = true) => {
-  if (!inputStr) return false;
-  const user = findUserByIdOrContact(inputStr);
-  if (user) return true;
-  if (requireExisting) return false;
-  const raw = String(inputStr).trim();
-  const clean = raw.replace(/\D/g, '');
-  if (/^0[1-4]\d{6}$/.test(raw) || /^0[1-4]\d{6}$/.test(clean)) return true;
-  if (/^09\d{9}$/.test(clean) || (clean.startsWith('639') && clean.length === 12)) return true;
-  return false;
+  return isValidUserIdentifierRule(users, inputStr, requireExisting);
 };
 
 export const resolveFieldMember = (field) => {
@@ -648,20 +482,8 @@ export const resolveBlockFarmManager = (blockFarm) => {
 };
 
 // ── Deterministic Price Parsing & Sorting Helper ─────────────
-function parsePriceTime(p) {
-  if (p.publishedAt) {
-    const t = new Date(p.publishedAt).getTime();
-    if (!isNaN(t)) return t;
-  }
-  if (p.effectiveDate) {
-    const t = new Date(`${p.effectiveDate}T00:00:00Z`).getTime();
-    if (!isNaN(t)) return t;
-  }
-  return 0;
-}
-
 export const getSortedPrices = () => {
-  return [...priceHistory].sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
+  return sortPrices(priceHistory);
 };
 
 // ── Dynamic Current Price & Market Observation ──────────────
@@ -707,13 +529,7 @@ export const currentMarketObservation = {
   }
 };
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-export const extractPriceMonth = (p) => {
-  if (!p || !/^\d{4}-\d{2}-\d{2}$/.test(p.effectiveDate || '')) return null;
-  const monthIndex = Number(p.effectiveDate.slice(5, 7)) - 1;
-  return MONTH_NAMES[monthIndex] || null;
-};
+export const extractPriceMonth = extractPriceMonthRule;
 
 export const priceAnalytics = {
   get hasData() {
@@ -912,31 +728,8 @@ export const verifyCurrentPhone = async (code) => {
   }
 };
 
-export const formatFullName = (first = '', middle = '', last = '') => {
-  const f = (first || '').trim();
-  const m = (middle || '').trim();
-  const l = (last || '').trim();
-  if (!f && !l) return '';
-  if (m) {
-    const mFormatted = m.length === 1 ? `${m}.` : m;
-    return `${f} ${mFormatted} ${l}`.trim();
-  }
-  return `${f} ${l}`.trim();
-};
-
-export const splitFullName = (fullName = '') => {
-  const parts = (fullName || '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { firstName: '', middleName: '', lastName: '' };
-  if (parts.length === 1) return { firstName: parts[0], middleName: '', lastName: '' };
-  if (parts.length === 2) return { firstName: parts[0], middleName: '', lastName: parts[1] };
-  if (parts.length === 3) {
-    if (parts[1].length <= 2) {
-      return { firstName: parts[0], middleName: parts[1].replace('.', ''), lastName: parts[2] };
-    }
-    return { firstName: parts[0], middleName: parts[1], lastName: parts[2] };
-  }
-  return { firstName: parts.slice(0, -2).join(' '), middleName: parts[parts.length - 2], lastName: parts[parts.length - 1] };
-};
+export const formatFullName = formatFullNameRule;
+export const splitFullName = splitFullNameRule;
 
 export const registerUser = async (userData) => {
   const cleaned = (userData.contactNumber || '').replace(/\D/g, '');
@@ -1589,25 +1382,7 @@ export const archivePastLogsForField = async (fieldId) => {
   return { success: true, archivedCount: toArchive.length };
 };
 
-export const calculateSRAWeekLabel = (dateInput = new Date()) => {
-  let d = dateInput;
-  if (!(d instanceof Date)) {
-    if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput.trim())) {
-      const [y, m, dNum] = dateInput.trim().split('-').map(Number);
-      d = new Date(y, m - 1, dNum);
-    } else {
-      d = new Date(dateInput);
-    }
-  }
-  if (isNaN(d.getTime())) d = new Date();
-  const day = d.getDate();
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthName = monthNames[d.getMonth()];
-  const firstDayOfMonth = new Date(d.getFullYear(), d.getMonth(), 1).getDay(); // 0=Sun, 1=Mon...
-  const weekNum = Math.ceil((day + firstDayOfMonth) / 7);
-  const boundedWeek = Math.min(Math.max(weekNum, 1), 5);
-  return `Week ${boundedWeek} ${monthName}`;
-};
+export const calculateSRAWeekLabel = calculateSRAWeekLabelRule;
 
 export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, weekLabel, circularNumber, source, effectiveDate }) => {
   const sorted = getSortedPrices();
@@ -1708,253 +1483,7 @@ export const currentProfile = {
 export const profile = currentProfile;
 
 
-export const SRA_OPERATIONS_CATALOGUE = [
-  // ── Stage 1: Pre-Planting & Land Preparation ──
-  {
-    id: 'SRA-01',
-    stageNumber: 1,
-    stageName: 'Stage 1: Pre-Planting & Land Preparation',
-    section: 'I. Direct Operations',
-    name: 'Soil Sampling',
-    category: 'prep',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 100,
-    costPerHa: 100,
-    subItems: [
-      { id: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', qty: 1, unit: 'ha', unitCost: 100, subTotal: 100 }
-    ]
-  },
-  {
-    id: 'SRA-02',
-    stageNumber: 1,
-    stageName: 'Stage 1: Pre-Planting & Land Preparation',
-    section: 'I. Direct Operations',
-    name: 'Land Preparation',
-    category: 'prep',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 12000,
-    subItems: [
-      { id: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1, unit: 'ha', unitCost: 5000, subTotal: 5000 },
-      { id: 'SI-02-2', description: '2nd Pass Disc Harrowing', qty: 1, unit: 'ha', unitCost: 4000, subTotal: 4000 },
-      { id: 'SI-02-3', description: 'Furrowing / Tudling', qty: 1, unit: 'ha', unitCost: 3000, subTotal: 3000 }
-    ]
-  },
-
-  // ── Stage 2: Planting & Crop Establishment ──
-  {
-    id: 'SRA-03',
-    stageNumber: 2,
-    stageName: 'Stage 2: Planting & Crop Establishment',
-    section: 'I. Direct Operations',
-    name: 'Cost of Planting Material (Seedcane acquisition)',
-    category: 'plant',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 15000,
-    subItems: [
-      { id: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', qty: 5, unit: 'lac', unitCost: 3000, subTotal: 15000 }
-    ]
-  },
-  {
-    id: 'SRA-04',
-    stageNumber: 2,
-    stageName: 'Stage 2: Planting & Crop Establishment',
-    section: 'I. Direct Operations',
-    name: 'Planting Operations (Labor & Handling)',
-    category: 'plant',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 5000,
-    subItems: [
-      { id: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', qty: 5, unit: 'lac', unitCost: 600, subTotal: 3000 },
-      { id: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', qty: 5, unit: 'lac', unitCost: 400, subTotal: 2000 }
-    ]
-  },
-
-  // ── Stage 3: Basal Nutrition & Early Care ──
-  {
-    id: 'SRA-05',
-    stageNumber: 3,
-    stageName: 'Stage 3: Basal Nutrition & Early Care',
-    section: 'I. Direct Operations',
-    name: 'Basal Fertilizer Application (Labor & Materials)',
-    category: 'fert',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 15800,
-    subItems: [
-      { id: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', qty: 2, unit: 'bag', unitCost: 1600, subTotal: 3200 },
-      { id: 'SI-05-2', description: 'Application of 18-46-00 (DAP / Complete)', qty: 3, unit: 'bag', unitCost: 2500, subTotal: 7500 },
-      { id: 'SI-05-3', description: 'Application of 00-00-60 (MOP / Potash)', qty: 2, unit: 'bag', unitCost: 2200, subTotal: 4400 },
-      { id: 'SI-05-4', description: 'Fertilizer Application Labor', qty: 7, unit: 'bag', unitCost: 100, subTotal: 700 }
-    ]
-  },
-  {
-    id: 'SRA-06',
-    stageNumber: 3,
-    stageName: 'Stage 3: Basal Nutrition & Early Care',
-    section: 'I. Direct Operations',
-    name: 'Lime Application (Soil Amending)',
-    category: 'fert',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 2,
-    unit: 'ton',
-    rate: 2500,
-    costPerHa: 5000,
-    subItems: [
-      { id: 'SI-06-1', description: 'Agricultural Lime (Cal-Mag / Dolomite)', qty: 2, unit: 'ton', unitCost: 2500, subTotal: 5000 }
-    ]
-  },
-
-  // ── Stage 4: Cultivation & Weed Management ──
-  {
-    id: 'SRA-07',
-    stageNumber: 4,
-    stageName: 'Stage 4: Cultivation & Weed Management',
-    section: 'I. Direct Operations',
-    name: 'Cultivation (Off-barring & On-barring)',
-    category: 'weed',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 3000,
-    subItems: [
-      { id: 'SI-07-1', description: '1st Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 },
-      { id: 'SI-07-2', description: '2nd Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 }
-    ]
-  },
-  {
-    id: 'SRA-08',
-    stageNumber: 4,
-    stageName: 'Stage 4: Cultivation & Weed Management',
-    section: 'I. Direct Operations',
-    name: 'Weeding Operations',
-    category: 'weed',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 6000,
-    subItems: [
-      { id: 'SI-08-1', description: 'Manual Weeding (1st Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-2', description: 'Manual Weeding (2nd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-3', description: 'Manual Weeding (3rd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
-    ]
-  },
-
-  // ── Stage 5: Crop Maintenance & Final Hilling-Up ──
-  {
-    id: 'SRA-09',
-    stageNumber: 5,
-    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
-    section: 'I. Direct Operations',
-    name: 'Top-Dress / 2nd Dose Fertilization',
-    category: 'maint',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 2500,
-    subItems: [
-      { id: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', qty: 1.5, unit: 'bag', unitCost: 1600, subTotal: 2400 },
-      { id: 'SI-09-2', description: 'Side-dressing Application Labor', qty: 1.5, unit: 'bag', unitCost: 66.67, subTotal: 100 }
-    ]
-  },
-  {
-    id: 'SRA-10',
-    stageNumber: 5,
-    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
-    section: 'I. Direct Operations',
-    name: 'Final Hilling-up (Pasungkal)',
-    category: 'maint',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 2500,
-    costPerHa: 2500,
-    subItems: [
-      { id: 'SI-10-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 1, unit: 'ha', unitCost: 2500, subTotal: 2500 }
-    ]
-  },
-
-  // ── Stage 6: Harvesting & Transport ──
-  {
-    id: 'SRA-11',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Cutting and Loading Operations',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 450,
-    costPerHa: 27000,
-    subItems: [
-      { id: 'SI-11-1', description: 'Cutting, De-trashing, and Truck Loading', qty: 60, unit: 'ton', unitCost: 450, subTotal: 27000 }
-    ]
-  },
-  {
-    id: 'SRA-12',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Hauling (Trucking to Mill)',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 250,
-    costPerHa: 15000,
-    subItems: [
-      { id: 'SI-12-1', description: 'Flatbed Hauling to Haw-Phil Milling Terminal', qty: 60, unit: 'ton', unitCost: 250, subTotal: 15000 }
-    ]
-  },
-  {
-    id: 'SRA-13',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Bull Cart / In-field Transport',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 120,
-    costPerHa: 7200,
-    subItems: [
-      { id: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', qty: 60, unit: 'ton', unitCost: 120, subTotal: 7200 }
-    ]
-  },
-  {
-    id: 'SRA-14',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Drainage & Post-Harvest Field Clearing',
-    category: 'prep',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 2000,
-    costPerHa: 2000,
-    subItems: [
-      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
-    ]
-  }
-];
+export { SRA_OPERATIONS_CATALOGUE };
 
 export const updateFieldCustomStages = async (fieldId, stages) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();

@@ -136,7 +136,7 @@ test('server validates mutation identity and rejects stale base versions', () =>
 test('mobile sync has no broad lifecycle upload/refresh and listeners use explicit overlays only', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
   const syncSource = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'syncEngine.js'), 'utf8');
-  const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'core.js'), 'utf8');
+  const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'replicaStore.js'), 'utf8');
 
   assert.doesNotMatch(source, /authenticatedRequest\('\/api\/(crop-cycles|fields|logs)'\)/);
   assert.doesNotMatch(source, /const localOnly/);
@@ -145,4 +145,5 @@ test('mobile sync has no broad lifecycle upload/refresh and listeners use explic
   assert.match(syncSource, /idempotencyKey/);
   assert.match(syncSource, /baseVersion/);
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);
+  assert.doesNotMatch(webSource, /localOnly|upload/i);
 });

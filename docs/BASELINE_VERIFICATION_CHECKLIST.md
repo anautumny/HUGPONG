@@ -19,7 +19,7 @@
 
 - [ ] A-01 `npm start` at repository root starts the Express server.
 - [ ] A-02 `run-server.bat` starts port 3000.
-- [ ] A-03 `run-web.bat` opens `/login.html` and keeps the server running.
+- [ ] A-03 `run-web.bat` opens the React/Vite SPA at `/` and keeps the server running.
 - [ ] A-04 `run-mobile.bat` starts Expo from `/mobile`.
 - [ ] A-05 `/health` returns server/Firebase/session status.
 - [ ] A-06 `/api/data` returns the compatibility message.
@@ -27,7 +27,7 @@
 - [ ] A-08 Privacy, terms, and cookie pages open and cross-link correctly.
 - [ ] A-09 Necessary-storage consent banner displays once and persists acknowledgement.
 - [ ] A-10 Web login requires privacy/terms acknowledgement.
-- [ ] A-11 External assets (Tailwind, fonts, QR scanner) load when online and degradation is recorded when offline.
+- [ ] A-11 Bundled Tailwind and QR dependencies load; external web-font degradation is recorded when offline.
 
 ## B. Authentication and sessions
 

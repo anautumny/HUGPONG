@@ -310,7 +310,7 @@ Severity meanings: **Critical** violates an approved invariant or data/security 
 
 | ID | Severity | Contradiction | Evidence and baseline decision |
 | --- | --- | --- | --- |
-| C-01 | Critical | Submitted logs must never be deleted, but server/web/mobile permanently delete them. | `server/routes/logs.js`, `web/shared/core.js`, and `mobile/src/data/dataStore.js` contain delete/purge paths. Canonical behavior is archive-only. |
+| C-01 | Resolved in Phases 2–6 | Submitted logs must never be permanently deleted. | The canonical server, React web, and mobile outbox now enforce `ACTIVE → ARCHIVED`; stale archived records cannot be reactivated. The cited legacy web controller was removed in Phase 9. |
 | C-02 | Critical | Farm Manager log approval/certification is forbidden, but README, docs, and API grant it. | README says managers approve; `system_flow_audit.md`, `folder-structure.md`, and `/api/logs/certify` assign manager certification. Canonical manager action is record/monitor/compile, not approve/certify. |
 | C-03 | Critical | Certification belongs to SRA reports, but clients/server use `Certified` as an operation-log status. | Web/mobile SRA certification updates logs; server certifies individual logs. Canonical log status remains ACTIVE/ARCHIVED. |
 | C-04 | Critical | `AGENTS.md` requires centralized server authority, but both clients write most collections directly. | Direct `setDoc`/`deleteDoc` calls exist throughout web/mobile; outbox flush targets Firestore. |

@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const { hashPassword, verifyPassword, PASSWORD_HASH_FORMAT } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
@@ -16,7 +17,6 @@ const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
 const { ROLES, publicRoleLabel } = require('../schema/firestoreSchema');
 const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
-const webAuthRouting = require('../../web/shared/auth-routing');
 
 function responseRecorder() {
   return {
@@ -113,7 +113,8 @@ test('a server-issued bearer authenticates but cannot cross a role guard', () =>
   assert.equal(roleRes.body.code, 'FORBIDDEN');
 });
 
-test('web role routing uses exact canonical mappings without substring collisions', () => {
+test('web role routing uses exact canonical mappings without substring collisions', async () => {
+  const webAuthRouting = await import(pathToFileURL(path.resolve(__dirname, '../../web/react-app/src/services/roleRouting.js')).href);
   const aliases = {
     'Super Admin': 'superadmin',
     SUPER_ADMIN: 'superadmin',
@@ -130,32 +131,29 @@ test('web role routing uses exact canonical mappings without substring collision
     assert.equal(webAuthRouting.normalizeRole(input), expected);
   }
   assert.equal(webAuthRouting.roleKeyFromUser({ canonicalRole: 'SUPER_ADMIN', role: 'SRA Admin' }), 'superadmin');
-  assert.equal(webAuthRouting.dashboardPath('superadmin'), '/roles/super-admin/dashboard.html');
-  assert.equal(webAuthRouting.dashboardPath('admin'), '/roles/sra-admin/dashboard.html');
-  assert.equal(webAuthRouting.dashboardPath('manager'), '/roles/farm-manager/dashboard.html');
-  assert.equal(webAuthRouting.dashboardPath('member'), null);
+  assert.equal(webAuthRouting.workspacePath('superadmin'), '/workspace/super-admin');
+  assert.equal(webAuthRouting.workspacePath('admin'), '/workspace/sra-admin');
+  assert.equal(webAuthRouting.workspacePath('manager'), '/workspace/farm-manager');
+  assert.equal(webAuthRouting.workspacePath('member'), '/workspace/member');
 });
 
-test('role pages wait for session resolution and use the shared exact route guard', () => {
-  for (const roleDirectory of ['super-admin', 'sra-admin', 'farm-manager']) {
-    const html = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/dashboard.html`), 'utf8');
-    const guard = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/${roleDirectory}.js`), 'utf8');
-    assert.match(html, /<html[^>]+class="auth-pending"/);
-    assert.match(html, /auth-routing\.js/);
-    assert.match(guard, /webRoleKeyFromUser\(/);
-    assert.match(guard, /getWebDashboardPath\(/);
-    assert.doesNotMatch(guard, /roleLower\.includes\(/);
-  }
+test('React waits for session resolution and applies one exact role guard', () => {
+  const app = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/App.jsx'), 'utf8');
+  const page = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/pages/WorkspacePage.jsx'), 'utf8');
+  const routing = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/roleRouting.js'), 'utf8');
+  assert.match(app, /status === 'resolving'/);
+  assert.match(page, /workspaceGuardDestination\(session\.roleKey, workspace\)/);
+  assert.match(page, /<Navigate replace/);
+  assert.doesNotMatch(routing, /\.includes\(/);
 });
 
 test('Firestore users listener updates the directory but never the authenticated identity', () => {
-  const core = fs.readFileSync(path.resolve(__dirname, '../../web/shared/core.js'), 'utf8');
-  const usersListenerStart = core.indexOf('// 6. Listen on Users Directory');
-  const usersListenerEnd = core.indexOf('// 7. Listen on Audit Reports');
-  assert.ok(usersListenerStart >= 0 && usersListenerEnd > usersListenerStart);
-  const usersListener = core.slice(usersListenerStart, usersListenerEnd);
-  assert.match(usersListener, /db\.users = remoteUsers/);
-  assert.doesNotMatch(usersListener, /hugpong_user|activeUser\s*=|sessionUser\s*=/);
+  const replica = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/replicaStore.js'), 'utf8');
+  const session = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/sessionStore.js'), 'utf8');
+  assert.match(replica, /users: 'users'/);
+  assert.match(replica, /replace\(key, records\)/);
+  assert.doesNotMatch(replica, /saveSession|activeUser\s*=|currentUser\s*=/);
+  assert.doesNotMatch(session, /subscribeCollection|onSnapshot/);
 });
 
 test('OTP values remain server-side, enforce matching context, and are single-use', () => {
@@ -222,7 +220,7 @@ test('web and mobile runtime source contain no Semaphore credential or provider 
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(fullPath);
+      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'react-dist') visit(fullPath);
       else if (entry.isFile() && /\.(js|jsx|ts|tsx|html)$/.test(entry.name)) {
         const source = fs.readFileSync(fullPath, 'utf8');
         assert.doesNotMatch(source, /\bSEMAPHORE_(?:API_KEY|SENDER_NAME)\b|api\.semaphore\.co/i, `Semaphore material in ${fullPath}`);
@@ -255,7 +253,7 @@ test('web and mobile runtime source contain no direct Firestore mutation calls',
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(fullPath);
+      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'react-dist') visit(fullPath);
       else if (/\.(js|jsx|ts|tsx)$/.test(entry.name)) sourceFiles.push(fullPath);
     }
   };

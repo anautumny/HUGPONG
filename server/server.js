@@ -7,6 +7,7 @@ const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction } = require('./config');
 
 // Initialize Firebase Admin SDK
@@ -83,8 +84,6 @@ app.use('/api/audit-events', auditEventRoutes);
 app.use('/api/terminal-diagnostics', telemetryRoutes);
 
 // ── Static Web Dashboard Serving ────────────────────────────
-app.use(express.static(path.join(__dirname, '../web')));
-
 // ── Health Check & System Status ────────────────────────────
 app.get('/health', (req, res) => {
   res.json({
@@ -105,6 +104,18 @@ app.get('/api/data', require('./middleware/auth').requireAuth, (req, res) => {
     message: 'HUGPONG Server active. Please use dedicated /api/* endpoints or Firestore real-time sync.'
   });
 });
+
+// The compiled React/Vite application is the only web surface. API and auth
+// handlers are mounted first; React Router resolves every other GET route.
+const reactWebDist = path.join(__dirname, '../web/react-dist');
+const reactWebIndex = path.join(reactWebDist, 'index.html');
+if (fs.existsSync(reactWebIndex)) {
+  app.use(express.static(reactWebDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return next();
+    return res.sendFile(reactWebIndex);
+  });
+}
 
 // 404 Handler
 app.use((req, res) => {

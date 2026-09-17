@@ -366,12 +366,17 @@ test('field archival is atomic with cycle and submitted-operation archival', asy
 });
 
 test('web and mobile cache reconciliation defer to canonical server lifecycle state', () => {
-  const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'core.js'), 'utf8');
+  const webSource = [
+    path.join('services', 'replicaStore.js'),
+    path.join('services', 'domainApi.js')
+  ].map(file => fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', file), 'utf8')).join('\n');
   const mobileSource = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
 
-  assert.match(webSource, /db\.logs = cleanupDuplicateLogs\(remoteLogs\)/);
+  assert.match(webSource, /operation_logs: 'logs'/);
+  assert.match(webSource, /subscribeCollection/);
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);
   assert.doesNotMatch(webSource, /canonicalLocalOnly/);
+  assert.doesNotMatch(webSource, /\b(?:setDoc|addDoc|updateDoc|deleteDoc|writeBatch)\s*\(/);
   assert.match(mobileSource, /pendingCreateOverlays/);
   assert.doesNotMatch(mobileSource, /const localOnly/);
   assert.doesNotMatch(mobileSource, /authenticatedRequest\('\/api\/(crop-cycles|fields|logs)'\)/);
