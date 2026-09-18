@@ -29,7 +29,7 @@ function MemberFieldOpsView({
     return (
       <View style={s.container}>
         <Text style={s.sectionLabel}>{t('my_fields', 'My Sugarcane Plots')}</Text>
-        <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+        <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FEF0D0' }]}>
           <View style={s.fieldCardTop}>
             <View style={[s.fieldIdBadge, { backgroundColor: '#FEF3C7' }]}>
               <Text style={[s.fieldIdText, { color: '#B45309' }]}>UNASSIGNED</Text>

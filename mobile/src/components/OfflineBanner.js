@@ -22,7 +22,7 @@ const s = StyleSheet.create({
     gap: 8,
     backgroundColor: '#FEF3C7',
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: '#FEF0D0',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: RADIUS.md,

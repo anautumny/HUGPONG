@@ -117,7 +117,7 @@ export default function RegisterScreen({ navigation }) {
     if (hasUpper) score += 1;
     if (hasSpecial) score += 1;
 
-    if (score >= 3) return { score, level: 'Strong', color: '#10B981', pct: 100, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
+    if (score >= 3) return { score, level: 'Strong', color: '#267326', pct: 100, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
     if (score === 2) return { score, level: 'Moderate', color: '#F59E0B', pct: 60, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
     return { score, level: 'Weak', color: '#EF4444', pct: 30, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
   };

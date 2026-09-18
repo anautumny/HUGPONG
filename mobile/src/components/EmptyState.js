@@ -39,6 +39,6 @@ const s = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700', color: COLORS.text, textAlign: 'center' },
   titleCompact: { fontSize: 14 },
   subtitle: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20 },
-  actionBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingHorizontal: 24, paddingVertical: 11, marginTop: 4 },
+  actionBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingHorizontal: 24, paddingVertical: 12, minHeight: 44, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
   actionBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });

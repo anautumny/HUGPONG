@@ -626,12 +626,12 @@ export default function HomeScreen({ navigation }) {
           <View style={s.syncCard}>
             <View style={s.syncHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#E8F5E8' : '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
                   <Ionicons name={isOnline && synced && pendingSyncCount === 0 ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline")} size={16} color={isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706'} />
                 </View>
                 <Text style={s.syncTitle}>Cloud &amp; Device Sync</Text>
               </View>
-              <View style={[s.syncBadge, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#DCFCE7' : '#FEF3C7' }]}>
+              <View style={[s.syncBadge, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#E8F5E8' : '#FEF3C7' }]}>
                 <View style={[s.syncDot, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706' }]} />
                 <Text style={[s.syncBadgeText, { color: isOnline && synced && pendingSyncCount === 0 ? '#15803D' : '#B45309' }]}>
                   {isOnline && synced && pendingSyncCount === 0 ? 'Fully Synced' : `${pendingSyncCount} Pending`}
@@ -1237,7 +1237,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: '#FDE68A'
+    borderColor: '#FEF0D0'
   },
   offlineGateTitle: {
     fontSize: 18,
@@ -1289,7 +1289,7 @@ const s = StyleSheet.create({
     justifyContent: 'center'
   },
   activeOfflineBadge: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: '#E8F5E8',
     paddingHorizontal: 6,
     paddingVertical: 1.5,
     borderRadius: 4

@@ -157,7 +157,7 @@ const s = StyleSheet.create({
     borderRadius: 48,
     backgroundColor: '#FEF3C7',
     borderWidth: 2,
-    borderColor: '#FDE68A',
+    borderColor: '#FEF0D0',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,

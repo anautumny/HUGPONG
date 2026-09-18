@@ -510,7 +510,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
               {formatStageName ? formatStageName(log.stageName || `Stage ${log.stageNumber}`, true) : log.stageName || `Stage ${log.stageNumber}`}
             </Text>
             {log.isSupplemental && (
-              <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FDE68A' }}>
+              <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FEF0D0' }}>
                 <Text style={{ fontSize: 9, fontWeight: '800', color: '#92400E' }}>SUPPLEMENTAL</Text>
               </View>
             )}
@@ -537,10 +537,6 @@ const CompactLogItem = React.memo(function CompactLogItem({
         <View style={s.compactLogDrawer}>
           <View style={s.compactLogDivider} />
           <View style={s.receiptRow}>
-            <Text style={s.receiptLabel}>{t('operation_name_lbl', 'Operation Name')}</Text>
-            <Text style={s.receiptValue}>{log.sraOperationId ? `[${log.sraOperationId}] ` : ''}{log.operationName || log.activity}</Text>
-          </View>
-          <View style={s.receiptRow}>
             <Text style={s.receiptLabel}>{t('connected_stage_lbl', 'Connected Stage')}</Text>
             <Text style={[s.receiptValue, { color: COLORS.primary, fontWeight: '800' }]}>
               {log.stageName || (log.stageNumber ? `Stage ${log.stageNumber}` : 'General Operation')}
@@ -548,7 +544,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
           </View>
           <View style={s.receiptRow}>
             <Text style={s.receiptLabel}>{t('receipt_ref', 'Log Reference')}</Text>
-            <Text style={s.receiptValue}>#{log.id}</Text>
+            <Text style={[s.receiptValue, { flex: 1, textAlign: 'right' }]} numberOfLines={1} ellipsizeMode="middle">#{log.id}</Text>
           </View>
           <View style={s.receiptRow}>
             <Text style={s.receiptLabel}>{t('receipt_coverage', 'Work Coverage')}</Text>
@@ -557,22 +553,21 @@ const CompactLogItem = React.memo(function CompactLogItem({
 
           {/* Child Items / Materials & Inputs Breakdown */}
           {log.subItems && log.subItems.length > 0 && (
-            <View style={{ backgroundColor: '#F8FAF5', padding: 10, borderRadius: RADIUS.sm, gap: 5, marginVertical: 6, borderWidth: 1, borderColor: COLORS.border }}>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, textTransform: 'uppercase' }}>
+            <View style={{ paddingVertical: 4, gap: 4, marginVertical: 4 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.3 }}>
                 {t('op_children_materials_lbl', 'Operation Items & Materials')} ({log.subItems.length})
               </Text>
               {log.subItems.map((si, idx) => (
-                <View key={si.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: idx !== log.subItems.length - 1 ? 1 : 0, borderBottomColor: '#EDEDED', paddingVertical: 3 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.text, flex: 1, marginRight: 6 }}>
+                <View key={si.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '500', color: COLORS.text, flex: 1, marginRight: 8 }} numberOfLines={1}>
                     • {si.description}
                   </Text>
-                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: COLORS.textSecondary }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textSecondary }}>
                     {si.qty} {si.unit} @ ₱{Number(si.unitCost || 0).toLocaleString()} = ₱{Number(si.subTotal || 0).toLocaleString()}
                   </Text>
                 </View>
               ))}
-            </View>
-          )}
+            </View>)}
 
           {Boolean(log.inputQty) && (!log.subItems || log.subItems.length === 0) && (
             <View style={s.receiptRow}>
@@ -899,6 +894,8 @@ export default function FieldOpsScreen({ navigation, route }) {
   });
   const [draftLogs, setDraftLogs] = useState(draftLogsStore);
   const [isSavingLog, setIsSavingLog] = useState(false);
+  const [editingSubItemIdx, setEditingSubItemIdx] = useState(null);
+  const [isArchivingCycle, setIsArchivingCycle] = useState(false);
   const [highlightedDraftIds, setHighlightedDraftIds] = useState(new Set());
   const [highlightedSubmittedLogIds, setHighlightedSubmittedLogIds] = useState(new Set());
   const [viewedLogIds, setViewedLogIds] = useState(new Set());
@@ -1630,17 +1627,25 @@ export default function FieldOpsScreen({ navigation, route }) {
       if (uncompiledActiveLogs.length > 0) {
         const totalUncompiledCost = uncompiledActiveLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
         Alert.alert(
-          'Uncompiled Operations Detected',
-          `This field plot has ${uncompiledActiveLogs.length} active operation(s) (total ₱${totalUncompiledCost.toLocaleString()}) that have not yet been compiled into an official monthly SRA audit package.\n\nStarting a new cycle will archive these records as historical past cycle data, and they will no longer be eligible for future monthly compilation.\n\nDo you want to proceed with starting the new cycle?`,
+          'Archive operation?',
+          `This record will remain available in operation history.\n\nStarting a new cycle will archive ${uncompiledActiveLogs.length} current operation record(s) (total ₱${totalUncompiledCost.toLocaleString()}) as historical past cycle data.`,
           [
             {
               text: 'Cancel',
               style: 'cancel'
             },
             {
-              text: 'Archive & Start New Cycle',
+              text: isArchivingCycle ? 'Archiving...' : 'Archive',
               style: 'destructive',
-              onPress: () => handleStartNewCycle(fieldId, customCycleType, customCropYear, true)
+              onPress: async () => {
+                if (isArchivingCycle) return;
+                setIsArchivingCycle(true);
+                try {
+                  await handleStartNewCycle(fieldId, customCycleType, customCropYear, true);
+                } finally {
+                  setIsArchivingCycle(false);
+                }
+              }
             }
           ]
         );
@@ -2195,7 +2200,23 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const closeLog = () => {
-    setShowLog(false);
+    const hasUnsavedWork = Boolean(
+      (logForm.operationName && logForm.operationName !== 'Land Preparation') ||
+      logForm.notes ||
+      (logForm.subItems && logForm.subItems.length > 0)
+    );
+    if (hasUnsavedWork) {
+      Alert.alert(
+        'Discard changes?',
+        'Your unsaved operation details will be lost.',
+        [
+          { text: 'Keep Editing', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', onPress: () => setShowLog(false) }
+        ]
+      );
+    } else {
+      setShowLog(false);
+    }
   };
 
   const handleSaveLog = async (asSubmit = true, forceCostConfirm = false, forceDuplicateConfirm = false) => {
@@ -3535,7 +3556,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   style={[
                     { borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
                     isCurrentActive && { borderColor: COLORS.primary, backgroundColor: '#F8FAF5' },
-                    isPastDone && { borderColor: '#DCFCE7' },
+                    isPastDone && { borderColor: '#E8F5E8' },
                     isFutureLocked && { opacity: 0.75, backgroundColor: '#FAFAFA' }
                   ]}
                 >
@@ -3749,7 +3770,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     {isPastDone ? (
                       <Ionicons name="checkmark-circle" size={22} color={COLORS.success} />
                     ) : isCurrentActive ? (
-                      <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexShrink: 0 }}>
+                      <View style={{ backgroundColor: '#E8F5E8', paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#C0D9A8', flexShrink: 0 }}>
                         <Text style={{ fontSize: 10.5, fontWeight: '900', color: '#15803D' }}>{t('badge_active', 'ACTIVE')}</Text>
                       </View>
                     ) : isFutureLocked ? (
@@ -3792,7 +3813,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                                 padding: 10,
                                 borderRadius: RADIUS.md,
                                 borderWidth: 1.5,
-                                borderColor: isFullySyncedLog ? COLORS.primary + '50' : (hasUnsyncedLog ? '#FDE68A' : COLORS.border),
+                                borderColor: isFullySyncedLog ? COLORS.primary + '50' : (hasUnsyncedLog ? '#FEF0D0' : COLORS.border),
                                 ...SHADOW.card
                               }}
                               onPress={() => {
@@ -3820,7 +3841,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                                     <Text style={{ fontSize: 10.5, fontWeight: '900', color: COLORS.primary }}>{op.id}</Text>
                                   </View>
                                   {isFullySyncedLog && (
-                                    <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                                    <View style={{ backgroundColor: '#E8F5E8', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
                                       <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#15803D' }}>✓ {t('recorded_badge', 'RECORDED')}</Text>
                                     </View>
                                   )}
@@ -4004,7 +4025,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           )}
 
           {isFullyCompleted && activeRole === 'Farm Manager' && (
-            <View style={{ marginTop: 8, backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#86EFAC', paddingVertical: 13, paddingHorizontal: 16, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+            <View style={{ marginTop: 8, backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#C0D9A8', paddingVertical: 13, paddingHorizontal: 16, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
               <Ionicons name="checkmark-circle" size={19} color="#16A34A" />
               <Text style={{ color: '#166534', fontSize: 13, fontWeight: '800' }}>
                 Crop Cycle Completed (Awaiting Member / SRA Admin Cycle Renewal)
@@ -4093,7 +4114,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <View style={{
                       backgroundColor: '#FFFBEB',
                       borderWidth: 1.5,
-                      borderColor: '#FDE68A',
+                      borderColor: '#FEF0D0',
                       borderRadius: RADIUS.xl,
                       padding: SPACING.lg,
                       marginBottom: SPACING.md,
@@ -4116,7 +4137,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                         Your farmer member account is registered under <Text style={{ fontWeight: '800' }}>{sess.farm || sess.blockFarm || 'your Block Farm'}</Text>. Your Block Farm Manager has not yet allocated a sugarcane field plot to your account in the cooperative registry.
                       </Text>
 
-                      <View style={{ marginTop: 12, padding: 10, backgroundColor: '#FFF', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#FDE68A' }}>
+                      <View style={{ marginTop: 12, padding: 10, backgroundColor: '#FFF', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#FEF0D0' }}>
                         <Text style={{ fontSize: 11.5, color: '#92400E', lineHeight: 16 }}>
                           💡 <Text style={{ fontWeight: '700' }}>Next Steps:</Text> Once your Farm Manager registers your field plot (e.g. FLD-NCY-00X) and declares your land hectarage and cane variety, your 6-stage growth cycle timeline and operation logging will activate here automatically.
                         </Text>
@@ -4158,16 +4179,22 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Text style={{ fontSize: 12, color: COLORS.primary, flex: 1 }}>{t('field_alloc_notice')}</Text>
                   </View>
 
-                  <Text style={s.sectionLabel}>{t('field_plot', 'Selected Field Details')}</Text>
-                  <View style={s.fieldCard}>
-                    <View style={s.fieldCardTop}>
+                  <Text style={s.sectionLabel}>{t('field_plot', 'Selected Field')}</Text>
+                  <View style={{ backgroundColor: '#fff', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, marginBottom: SPACING.md }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField?.id || 'No Field'}</Text></View>
-                      <Text style={s.fieldHa}>{safeField?.ha || 1.5} Ha</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name={safeField?.synced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={13} color={safeField?.synced ? COLORS.success : COLORS.warning} />
+                        <Text style={{ fontSize: 12, color: safeField?.synced ? COLORS.success : COLORS.warning, fontWeight: '500' }}>
+                          {safeField?.synced ? t('synced', 'Synced') : t('not_synced', 'Not synced')}
+                        </Text>
+                      </View>
                     </View>
-                    <Text style={s.fieldMember}>{t('member_label', 'Member')}: {safeField?.member || safeField?.memberName || resolveFieldMember(selectedField) || (session?.name || 'Member')}</Text>
-                    <Text style={s.fieldSync}>
-                      <Ionicons name={safeField?.synced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={14} color={safeField?.synced ? '#267326' : '#C97A00'} />
-                      {' '}{safeField?.synced ? `${t('synced', 'Synced')} ${formatSyncTime(safeField?.lastSync || '10 mins ago')}` : `${t('not_synced', 'Not synced')} (${formatSyncTime(safeField?.lastSync || '10 mins ago')})`}
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: COLORS.text, marginTop: 2 }}>
+                      {safeField?.member || safeField?.memberName || resolveFieldMember(selectedField) || (session?.name || 'Member')} · {safeField?.ha || 1.5} ha
+                    </Text>
+                    <Text style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 2 }}>
+                      Current Stage: <Text style={{ fontWeight: '600', color: COLORS.primary }}>{formatStageName ? formatStageName(safeField?.stage) : safeField?.stage}</Text>
                     </Text>
                   </View>
 
@@ -4259,7 +4286,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       paddingVertical: 4,
                       borderRadius: RADIUS.full,
                       borderWidth: 1,
-                      borderColor: farmLogs.length === 0 ? '#E2EBDC' : (isAllCompiled ? '#B7E4C7' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FDE68A' : '#B7E4C7')),
+                      borderColor: farmLogs.length === 0 ? '#E2EBDC' : (isAllCompiled ? '#B7E4C7' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FEF0D0' : '#B7E4C7')),
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 4
@@ -4384,7 +4411,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               <View style={{
                 backgroundColor: '#FFFBEB',
                 borderWidth: 1.5,
-                borderColor: '#FDE68A',
+                borderColor: '#FEF0D0',
                 borderRadius: RADIUS.lg,
                 padding: 12,
                 marginBottom: 12,
@@ -4839,12 +4866,19 @@ export default function FieldOpsScreen({ navigation, route }) {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <View style={s.sheetHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={s.sheetTitle}>{logForm.id ? t('log_modal_edit_title', 'Edit Operation Record') : t('log_modal_record_title', 'Record Field Operation')}</Text>
-              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 1 }}>Field {logForm.fieldId || safeField.id} ({safeField.ha} Ha)</Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.text }}>
+                {logForm.id ? t('log_modal_edit_title', 'Edit Operation Record') : t('log_modal_record_title', 'Record Field Operation')}
+              </Text>
+              <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>
+                Field {logForm.fieldId || safeField.id} ({safeField.ha} Ha)
+              </Text>
             </View>
-            <TouchableOpacity onPress={closeLog} style={{ padding: 4 }}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={closeLog} style={{ padding: 6 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
           </View>
-          <ScrollView contentContainerStyle={s.sheetBody} keyboardShouldPersistTaps="handled">
+
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
             {!getNetworkStatus() && (
               <View style={{
@@ -4852,144 +4886,173 @@ export default function FieldOpsScreen({ navigation, route }) {
                 alignItems: 'center',
                 gap: 8,
                 backgroundColor: '#FFFBEB',
-                borderWidth: 1.5,
-                borderColor: '#FDE68A',
-                paddingHorizontal: 14,
+                borderWidth: 1,
+                borderColor: '#FEF0D0',
+                paddingHorizontal: 12,
                 paddingVertical: 10,
-                borderRadius: RADIUS.md,
-                marginBottom: SPACING.md
+                borderRadius: RADIUS.md
               }}>
                 <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
-                <Text style={{ flex: 1, fontSize: 11.5, color: '#92400E', fontWeight: '700', lineHeight: 16 }}>
-                  Offline Mode Active · This log will be saved to device local storage and automatically synced once internet is restored.
+                <Text style={{ flex: 1, fontSize: 12, color: '#92400E', fontWeight: '500', lineHeight: 18 }}>
+                  Offline Mode Active · Saved locally on device and automatically synced once connected.
                 </Text>
               </View>
             )}
 
-            {/* Target Operation & Connected Stage Banner */}
-            <View style={{ backgroundColor: '#F0F8EC', borderRadius: RADIUS.md, padding: 14, borderWidth: 1.5, borderColor: COLORS.primary, marginBottom: SPACING.md }}>
-              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
-                  <Ionicons name="construct" size={22} color="#fff" />
+            {/* ── SECTION 1: FIELD & OPERATION ── */}
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {t('section_field_op', 'Field & Operation')}
+              </Text>
+
+              {/* Compact Field Context (shown once) */}
+              <View style={{ backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.text }}>{logForm.fieldId || safeField.id}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '500', color: COLORS.textSecondary }}>{safeField.ha} Ha</Text>
+                </View>
+                <Text style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                  {safeField.member || safeField.memberName || session?.name || 'Member Farmer'}
+                </Text>
+                <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600', marginTop: 2 }}>
+                  Current Stage: {formatStageName ? formatStageName(safeField.stage) : safeField.stage}
+                </Text>
+              </View>
+
+              {/* Target Operation Details */}
+              <View style={{ backgroundColor: '#F0F8EC', borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderColor: COLORS.primaryBorder }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                  <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Ionicons name="construct" size={18} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ backgroundColor: COLORS.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>{logForm.sraOperationId || 'SRA'}</Text>
+                      </View>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.primary, textTransform: 'uppercase' }}>
+                        {logForm.sraOperationId === 'CUSTOM' ? 'Custom Operation' : t('log_target_op', 'Target Operation')}
+                      </Text>
+                    </View>
+
+                    {logForm.sraOperationId === 'CUSTOM' ? (
+                      <View style={{ marginTop: 6, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 4 }}>Operation / Activity Title *</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, fontWeight: '600', color: COLORS.text }}
+                          value={logForm.operationName || logForm.activity}
+                          onChangeText={v => setLogForm(p => ({ ...p, operationName: v, activity: v }))}
+                          placeholder="e.g. Canal Maintenance, Foliar Spray"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+                    ) : (
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text, marginTop: 3 }}>
+                        {formatOperationName ? formatOperationName(logForm.operationName || logForm.activity) : (logForm.operationName || logForm.activity || 'Field Operation')}
+                      </Text>
+                    )}
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                      <Ionicons name="git-branch-outline" size={12} color={COLORS.primary} />
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.primary }}>
+                        {t('log_connected_to', 'Connected to:')} {formatStageName ? formatStageName(logForm.stageName || (logForm.stageNumber ? `Stage ${logForm.stageNumber}` : 'Stage 1: Pre-Planting & Land Preparation')) : (logForm.stageName || 'Stage 1')}
+                      </Text>
+                    </View>
+                    {logForm.sraOperationId !== 'CUSTOM' && (
+                      <Text style={{ fontSize: 12, color: COLORS.textSecondary, marginTop: 3 }}>
+                        {t('log_std_cost', 'Standard Cost')}: ₱ {Number(SRA_OPERATIONS_CATALOGUE.find(o => o.id === logForm.sraOperationId)?.costPerHa || 0).toLocaleString()} / hectare
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              {/* Field Plot Selector (for new logs with multiple fields) */}
+              {!logForm.id && (
+                <View>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.text, marginBottom: 6 }}>{t('log_field_plot', 'Field Plot')}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 8 }}>
+                    {fields.filter(f => f.member === getCurrentSession().name || f.id === safeField.id).map(field => (
+                      <TouchableOpacity
+                        key={field.id}
+                        style={[
+                          { paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff' },
+                          logForm.fieldId === field.id && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                        ]}
+                        onPress={() => setLogForm(p => ({ ...p, fieldId: field.id }))}
+                      >
+                        <Text style={{ fontSize: 14, fontWeight: logForm.fieldId === field.id ? '700' : '500', color: logForm.fieldId === field.id ? COLORS.primary : COLORS.text }}>{field.id}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Date of Operation */}
+              <View>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.text, marginBottom: 6 }}>{t('log_date_of_op', 'Date of Operation')}</Text>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 14, paddingVertical: 12 }}
+                  onPress={() => setShowCalendar(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text }}>{logForm.period || t('log_tap_date', 'Tap to select date')}</Text>
+                  </View>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.primary }}>{t('btn_change_date', 'Change Date')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* ── SECTION 2: LABOR & RESOURCES ── */}
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {t('section_labor_res', 'Labor & Resources')}
+              </Text>
+              {/* Clean 2-column row of tightly related fields */}
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 6 }}>{t('log_ha_covered', 'Hectares Covered')}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12 }}>
+                    <TextInput
+                      style={{ flex: 1, height: 46, fontSize: 16, fontWeight: '600', color: COLORS.text }}
+                      value={logForm.hectares}
+                      onChangeText={v => {
+                        setLogForm(p => ({ ...p, hectares: v }));
+                        if (logForm.sraOperationId) selectSraOperation(logForm.sraOperationId, v);
+                      }}
+                      keyboardType="decimal-pad"
+                      placeholder='1.5'
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>Ha</Text>
+                  </View>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ backgroundColor: COLORS.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
-                      <Text style={{ fontSize: 11, fontWeight: '900', color: '#fff' }}>{logForm.sraOperationId || 'SRA'}</Text>
-                    </View>
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, textTransform: 'uppercase' }}>
-                      {logForm.sraOperationId === 'CUSTOM' ? 'Custom Operation' : t('log_target_op', 'Target Operation')}
-                    </Text>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 6 }}>{t('log_workers_crew', 'Workers / Crew')}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12 }}>
+                    <TextInput
+                      style={{ flex: 1, height: 46, fontSize: 16, fontWeight: '600', color: COLORS.text }}
+                      value={logForm.people}
+                      onChangeText={v => setLogForm(p => ({ ...p, people: v }))}
+                      keyboardType="number-pad"
+                      placeholder='2'
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>Pax</Text>
                   </View>
-
-                  {logForm.sraOperationId === 'CUSTOM' ? (
-                    <View style={{ marginTop: 6, marginBottom: 4 }}>
-                      <Text style={{ fontSize: 11.5, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 4 }}>Operation / Activity Title *</Text>
-                      <TextInput
-                        style={{ backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, fontWeight: '800', color: COLORS.text }}
-                        value={logForm.operationName || logForm.activity}
-                        onChangeText={v => setLogForm(p => ({ ...p, operationName: v, activity: v }))}
-                        placeholder="e.g. Canal Maintenance, Foliar Spray"
-                        placeholderTextColor={COLORS.textMuted}
-                      />
-                    </View>
-                  ) : (
-                    <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.text, marginTop: 3 }}>
-                      {formatOperationName ? formatOperationName(logForm.operationName || logForm.activity) : (logForm.operationName || logForm.activity || 'Field Operation')}
-                    </Text>
-                  )}
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-                    <Ionicons name="git-branch-outline" size={12} color={COLORS.primary} />
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.primary }}>
-                      {t('log_connected_to', 'Connected to:')} {formatStageName ? formatStageName(logForm.stageName || (logForm.stageNumber ? `Stage ${logForm.stageNumber}` : 'Stage 1: Pre-Planting & Land Preparation')) : (logForm.stageName || 'Stage 1')}
-                    </Text>
-                  </View>
-                  {logForm.sraOperationId !== 'CUSTOM' && (
-                    <Text style={{ fontSize: 11.5, color: COLORS.textSecondary, marginTop: 3 }}>
-                      {t('log_std_cost', 'Standard Cost')}: ₱ {Number(SRA_OPERATIONS_CATALOGUE.find(o => o.id === logForm.sraOperationId)?.costPerHa || 0).toLocaleString()} / hectare
-                    </Text>
-                  )}
-                </View>
-                <View style={{ padding: 6, backgroundColor: '#E2EED9', borderRadius: RADIUS.xs }}>
-                  <Ionicons name={logForm.sraOperationId === 'CUSTOM' ? "create-outline" : "lock-closed"} size={16} color={COLORS.primary} />
                 </View>
               </View>
             </View>
 
-            {/* Field Plot Selector - hidden when editing a specific operation */}
-            {!logForm.id && (
-              <>
-                <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_field_plot', 'Field Plot')}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg, marginBottom: SPACING.md }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 8 }}>
-                  {fields.filter(f => f.member === getCurrentSession().name || f.id === safeField.id).map(field => (
-                    <TouchableOpacity
-                      key={field.id}
-                      style={[
-                        { paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff' },
-                        logForm.fieldId === field.id && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                      ]}
-                      onPress={() => setLogForm(p => ({ ...p, fieldId: field.id }))}
-                    >
-                      <Text style={{ fontSize: 14, fontWeight: logForm.fieldId === field.id ? '900' : '600', color: logForm.fieldId === field.id ? COLORS.primary : COLORS.text }}>{field.id}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            )}
+            {/* ── SECTION 3: COST DETAILS ── */}
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {t('section_cost_details', 'Cost Details')}
+              </Text>
 
-            {/* Date Picker Button */}
-            <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_date_of_op', 'Date of Operation')}</Text>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, marginBottom: SPACING.md }}
-              onPress={() => setShowCalendar(true)}
-              activeOpacity={0.8}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Ionicons name="calendar-outline" size={20} color={COLORS.primary} />
-                <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.text }}>{logForm.period || t('log_tap_date', 'Tap to select date')}</Text>
-              </View>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{t('btn_change_date', 'Change Date')}</Text>
-            </TouchableOpacity>
-
-            {/* Hectares & Workers Side-by-Side */}
-            <View style={{ flexDirection: 'row', gap: 12, marginBottom: SPACING.md }}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_ha_covered', 'Hectares Covered')}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12 }}>
-                  <TextInput
-                    style={{ flex: 1, height: 48, fontSize: 16, fontWeight: '800', color: COLORS.text }}
-                    value={logForm.hectares}
-                    onChangeText={v => {
-                      setLogForm(p => ({ ...p, hectares: v }));
-                      if (logForm.sraOperationId) selectSraOperation(logForm.sraOperationId, v);
-                    }}
-                    keyboardType="decimal-pad"
-                    placeholder='1.5'
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted }}>Ha</Text>
-                </View>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_workers_crew', 'Workers / Crew')}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12 }}>
-                  <TextInput
-                    style={{ flex: 1, height: 48, fontSize: 16, fontWeight: '800', color: COLORS.text }}
-                    value={logForm.people}
-                    onChangeText={v => setLogForm(p => ({ ...p, people: v }))}
-                    keyboardType="number-pad"
-                    placeholder='2'
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted }}>Pax</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* ── Member Choice: Structure Mode Switcher ── */}
-            <View style={{ marginBottom: SPACING.md }}>
-              <Text style={[s.formLabel, { fontSize: 13, fontWeight: '700', marginBottom: 6 }]}>{t('log_input_style', 'Input Style (Member Choice)')}</Text>
+              {/* Mode Switcher */}
               <View style={{ flexDirection: 'row', backgroundColor: '#EDEFE9', borderRadius: RADIUS.sm, padding: 3 }}>
                 <TouchableOpacity
                   style={[
@@ -5007,8 +5070,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                   }}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="layers-outline" size={16} color={logForm.isGroup ? '#6D28D9' : COLORS.textMuted} />
-                  <Text style={{ fontSize: 12, fontWeight: logForm.isGroup ? '900' : '700', color: logForm.isGroup ? '#6D28D9' : COLORS.textSecondary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>{t('mode_title_child', 'Title with Child Items')}</Text>
+                  <Ionicons name="layers-outline" size={16} color={logForm.isGroup ? COLORS.primary : COLORS.textMuted} />
+                  <Text style={{ fontSize: 13, fontWeight: logForm.isGroup ? '700' : '500', color: logForm.isGroup ? COLORS.primary : COLORS.textSecondary }} numberOfLines={1}>{t('mode_title_child', 'Title with Child Items')}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -5034,192 +5097,224 @@ export default function FieldOpsScreen({ navigation, route }) {
                   }}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="create-outline" size={16} color={!logForm.isGroup ? '#15803D' : COLORS.textMuted} />
-                  <Text style={{ fontSize: 12, fontWeight: !logForm.isGroup ? '900' : '700', color: !logForm.isGroup ? '#15803D' : COLORS.textSecondary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>{t('mode_direct_input', 'Direct Input')}</Text>
+                  <Ionicons name="create-outline" size={16} color={!logForm.isGroup ? COLORS.primary : COLORS.textMuted} />
+                  <Text style={{ fontSize: 13, fontWeight: !logForm.isGroup ? '700' : '500', color: !logForm.isGroup ? COLORS.primary : COLORS.textSecondary }} numberOfLines={1}>{t('mode_direct_input', 'Direct Input')}</Text>
                 </TouchableOpacity>
               </View>
-            </View>
 
-            {/* ── Input Section: Title-Only Group vs Direct Input Operation ── */}
-            {logForm.isGroup ? (
-              /* CASE A: Title Only Group (e.g. Basal Fertilization) -> Inputs in Child Items */
-              <View style={{ backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.md, gap: 12, marginBottom: SPACING.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons name="list-circle" size={20} color={COLORS.primary} />
-                    <View>
-                      <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text }}>{t('log_child_materials', 'Child Materials & Labor')}</Text>
-                      <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>{t('log_child_sub', 'Inputs are recorded per child item')}</Text>
-                    </View>
+              {/* Group Mode vs Direct Mode View */}
+              {logForm.isGroup ? (
+                /* Group Mode: Compact Editable Rows */
+                <View style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.md, gap: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: COLORS.text }}>{t('log_child_materials', 'Expense & Resource Items')}</Text>
+                    <Text style={{ fontSize: 12, color: COLORS.textMuted }}>{logForm.subItems?.length || 0} item{(logForm.subItems?.length || 0) !== 1 ? 's' : ''}</Text>
                   </View>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMuted }}>{logForm.subItems?.length || 0} item{(logForm.subItems?.length || 0) !== 1 ? 's' : ''}</Text>
+
+                  {(logForm.subItems || []).map((item, index) => {
+                    const isExpanded = editingSubItemIdx === index;
+                    return (
+                      <View key={item.id || index} style={{ borderBottomWidth: index !== (logForm.subItems.length - 1) ? 1 : 0, borderBottomColor: COLORS.border, paddingBottom: 10, paddingTop: index > 0 ? 6 : 0, gap: 8 }}>
+                        {/* Compact row summary */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: COLORS.text }}>{item.description || `Item #${index + 1}`}</Text>
+                            <Text style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 2 }}>
+                              {item.qty} {item.unit} × ₱{Number(item.unitCost || 0).toLocaleString()}
+                            </Text>
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.primary, marginTop: 2 }}>
+                              ₱ {(item.subTotal || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <TouchableOpacity
+                              onPress={() => setEditingSubItemIdx(isExpanded ? null : index)}
+                              style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: RADIUS.xs, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.primary }}>
+                                {isExpanded ? 'Done' : 'Edit'}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => removeSubItemRow(index)} style={{ padding: 4 }}>
+                              <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Inline Editor Drawer (only shown when editing this row) */}
+                        {isExpanded && (
+                          <View style={{ backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 10, gap: 8, marginTop: 4 }}>
+                            <TextInput
+                              style={{ fontSize: 14, fontWeight: '600', color: COLORS.text, backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.xs, paddingHorizontal: 10, paddingVertical: 7 }}
+                              value={item.description}
+                              onChangeText={v => updateSubItemRow(index, 'description', v)}
+                              placeholder="Description / Material name"
+                              placeholderTextColor={COLORS.textMuted}
+                            />
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 12, color: COLORS.textSecondary, fontWeight: '500', marginBottom: 2 }}>Qty</Text>
+                                <TextInput
+                                  style={{ height: 40, backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.xs, paddingHorizontal: 8, fontSize: 14, fontWeight: '600', color: COLORS.text }}
+                                  value={String(item.qty || '')}
+                                  onChangeText={v => updateSubItemRow(index, 'qty', v)}
+                                  keyboardType="decimal-pad"
+                                />
+                              </View>
+                              <View style={{ flex: 1.4 }}>
+                                <Text style={{ fontSize: 12, color: COLORS.textSecondary, fontWeight: '500', marginBottom: 2 }}>Unit Cost (₱)</Text>
+                                <TextInput
+                                  style={{ height: 40, backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.xs, paddingHorizontal: 8, fontSize: 14, fontWeight: '600', color: COLORS.text }}
+                                  value={String(item.unitCost || '')}
+                                  onChangeText={v => updateSubItemRow(index, 'unitCost', v)}
+                                  keyboardType="decimal-pad"
+                                />
+                              </View>
+                            </View>
+                            {/* Unit Selector Chips */}
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingTop: 2 }}>
+                              {['bag', 'ha', 'pass', 'lac', 'ton', 'days', 'pax', 'liters'].map(u => (
+                                <TouchableOpacity
+                                  key={u}
+                                  style={[
+                                    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
+                                    item.unit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                                  ]}
+                                  onPress={() => updateSubItemRow(index, 'unit', u)}
+                                >
+                                  <Text style={{ fontSize: 11, fontWeight: '600', color: item.unit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.primary, borderStyle: 'dashed', borderRadius: RADIUS.sm, paddingVertical: 10, marginTop: 4 }}
+                    onPress={addCustomSubItem}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="add-circle" size={18} color={COLORS.primary} />
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.primary }}>
+                      {t('log_add_expense', 'Add Expense / Material')}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
-
-                {(logForm.subItems || []).map((item, index) => (
-                  <View key={item.id || index} style={{ backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12, gap: 8, ...SHADOW.card }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary, textTransform: 'uppercase' }}>{t('log_item_num', 'Item #')}{index + 1}</Text>
-                      <TouchableOpacity onPress={() => removeSubItemRow(index)} style={{ padding: 4 }}>
-                        <Ionicons name="trash-outline" size={18} color="#D9534F" />
-                      </TouchableOpacity>
-                    </View>
-
-                    <TextInput
-                      style={{ fontSize: 14.5, fontWeight: '700', color: COLORS.text, backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8 }}
-                      value={item.description}
-                      onChangeText={v => updateSubItemRow(index, 'description', v)}
-                      placeholder='e.g. 46-0-0 Urea / DAP / Labor Crew'
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 3 }}>{t('log_qty', 'Quantity')}</Text>
-                        <TextInput
-                          style={{ height: 42, backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 10, fontSize: 14, fontWeight: '800', color: COLORS.text }}
-                          value={String(item.qty || '')}
-                          onChangeText={v => updateSubItemRow(index, 'qty', v)}
-                          keyboardType="decimal-pad"
-                          placeholder='1'
-                        />
-                      </View>
-
-                      <View style={{ flex: 1.4 }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 3 }}>{t('log_unit_price', 'Unit Price (₱)')}</Text>
-                        <TextInput
-                          style={{ height: 42, backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 10, fontSize: 14, fontWeight: '800', color: COLORS.text }}
-                          value={String(item.unitCost || '')}
-                          onChangeText={v => updateSubItemRow(index, 'unitCost', v)}
-                          keyboardType="decimal-pad"
-                          placeholder='₱ 0'
-                        />
-                      </View>
-                    </View>
-
-                    {/* Unit Selector Chips */}
-                    <View>
-                      <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 4 }}>{t('log_select_unit', 'Select Unit:')}</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                        {['bag', 'ha', 'pass', 'lac', 'ton', 'days', 'pax', 'liters'].map(u => (
-                          <TouchableOpacity
-                            key={u}
-                            style={[
-                              { paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
-                              item.unit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                            ]}
-                            onPress={() => updateSubItemRow(index, 'unit', u)}
-                          >
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: item.unit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 6, marginTop: 2 }}>
-                      <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{item.unit === 'lac' ? 'Note: 1 lac = 10,000 points' : ''}</Text>
-                      <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.text }}>{t('log_subtotal', 'Subtotal:')} ₱ {(item.subTotal || 0).toLocaleString()}</Text>
-                    </View>
-                  </View>
-                ))}
-
-                <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.primary, borderStyle: 'dashed', borderRadius: RADIUS.md, paddingVertical: 12 }}
-                  onPress={addCustomSubItem}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="add-circle" size={20} color={COLORS.primary} />
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit>{t('log_add_expense', 'Add Expense / Material')}</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              /* CASE B: Direct Single Operation (e.g. Soil Sampling, Hauling) -> Direct Inputs */
-              <View style={{ backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.md, gap: 12, marginBottom: SPACING.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="create-outline" size={20} color={COLORS.primary} />
+              ) : (
+                /* Direct Mode: Simplified Hierarchy */
+                <View style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.md, gap: 12 }}>
                   <View>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text }}>{t('log_direct_inputs', 'Direct Operation Inputs')}</Text>
-                    <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>{t('log_direct_sub', 'Record direct quantity and rate for this operation')}</Text>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 4 }}>Quantity</Text>
-                    <TextInput
-                      style={{ height: 44, backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 15, fontWeight: '800', color: COLORS.text }}
-                      value={String(logForm.inputQty || '')}
-                      onChangeText={v => {
-                        const q = parseFloat(v) || 0;
-                        const r = parseFloat(logForm.directRate) || 0;
-                        setLogForm(p => ({ ...p, inputQty: v, cost: String(Math.round(q * r)) }));
-                      }}
-                      keyboardType="decimal-pad"
-                      placeholder="1"
-                      placeholderTextColor={COLORS.textMuted}
-                    />
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 6 }}>Quantity</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12 }}>
+                      <TextInput
+                        style={{ flex: 1, height: 46, fontSize: 16, fontWeight: '600', color: COLORS.text }}
+                        value={String(logForm.inputQty || '')}
+                        onChangeText={v => {
+                          const q = parseFloat(v) || 0;
+                          const r = parseFloat(logForm.directRate) || 0;
+                          setLogForm(p => ({ ...p, inputQty: v, cost: String(Math.round(q * r)) }));
+                        }}
+                        keyboardType="decimal-pad"
+                        placeholder="1.0"
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>{logForm.inputUnit || 'ha'}</Text>
+                    </View>
                   </View>
 
-                  <View style={{ flex: 1.4 }}>
-                    <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 4 }}>{t('log_unit_rate', 'Unit Rate / Cost (₱)')}</Text>
-                    <TextInput
-                      style={{ height: 44, backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 15, fontWeight: '800', color: COLORS.text }}
-                      value={String(logForm.directRate || '')}
-                      onChangeText={v => {
-                        const r = parseFloat(v) || 0;
-                        const q = parseFloat(logForm.inputQty) || 0;
-                        setLogForm(p => ({ ...p, directRate: v, cost: String(Math.round(q * r)) }));
-                      }}
-                      keyboardType="decimal-pad"
-                      placeholder="0"
-                      placeholderTextColor={COLORS.textMuted}
-                    />
+                  <View>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 6 }}>{t('log_unit_rate', 'Unit Rate / Cost (₱)')}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: COLORS.textMuted, marginRight: 4 }}>₱</Text>
+                      <TextInput
+                        style={{ flex: 1, height: 46, fontSize: 16, fontWeight: '600', color: COLORS.text }}
+                        value={String(logForm.directRate || '')}
+                        onChangeText={v => {
+                          const r = parseFloat(v) || 0;
+                          const q = parseFloat(logForm.inputQty) || 0;
+                          setLogForm(p => ({ ...p, directRate: v, cost: String(Math.round(q * r)) }));
+                        }}
+                        keyboardType="decimal-pad"
+                        placeholder="0"
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Unit Selector Chips */}
+                  <View>
+                    <Text style={{ fontSize: 13, color: COLORS.textSecondary, fontWeight: '500', marginBottom: 6 }}>Unit:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                      {['ha', 'ton', 'lac', 'pass', 'bag', 'days', 'pax', 'liters'].map(u => (
+                        <TouchableOpacity
+                          key={u}
+                          style={[
+                            { paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
+                            logForm.inputUnit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                          ]}
+                          onPress={() => setLogForm(p => ({ ...p, inputUnit: u }))}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: logForm.inputUnit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {/* Estimated Total - Prominent */}
+                  <View style={{ marginTop: 4, padding: 14, backgroundColor: '#F0F8EC', borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primaryBorder }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textSecondary }}>Estimated Total</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '700', color: COLORS.primary, marginTop: 2 }}>
+                      ₱ {Number(logForm.cost || 0).toLocaleString()}
+                    </Text>
                   </View>
                 </View>
+              )}
 
-                {/* Unit Selector Chips */}
-                <View>
-                  <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '700', marginBottom: 4 }}>Select Unit:</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                    {['ha', 'ton', 'lac', 'pass', 'bag', 'days', 'pax', 'liters'].map(u => (
-                      <TouchableOpacity
-                        key={u}
-                        style={[
-                          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff' },
-                          logForm.inputUnit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                        ]}
-                        onPress={() => setLogForm(p => ({ ...p, inputUnit: u }))}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: '800', color: logForm.inputUnit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              </View>
-            )}
-
-            {/* High-Visibility Cost Summary Card */}
-            <View style={{ backgroundColor: '#1E4D2B', borderRadius: RADIUS.lg, padding: 16, marginBottom: SPACING.md }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <View>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#D4EAD6', textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('log_total_cost', 'Total Operation Cost')}</Text>
-                  <Text style={{ fontSize: 26, fontWeight: '900', color: '#fff', marginTop: 2 }}>₱ {Number(logForm.cost || 0).toLocaleString()}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm }}>
-                  <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#D4EAD6' }}>{t('log_per_ha', 'Per Hectare')}</Text>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff', marginTop: 1 }}>
-                    ₱ {Math.round((Number(logForm.cost || 0)) / Math.max(parseFloat(logForm.hectares) || 1, 0.1)).toLocaleString()} / ha
-                  </Text>
+              {/* Total Operation Cost Banner */}
+              <View style={{ backgroundColor: '#1E4D2B', borderRadius: RADIUS.md, padding: SPACING.lg, marginTop: 4 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#D4EAD6', textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('log_total_cost', 'Total Operation Cost')}</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '700', color: '#fff', marginTop: 2 }}>₱ {Number(logForm.cost || 0).toLocaleString()}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm }}>
+                    <Text style={{ fontSize: 11, fontWeight: '500', color: '#D4EAD6' }}>{t('log_per_ha', 'Per Hectare')}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 1 }}>
+                      ₱ {Math.round((Number(logForm.cost || 0)) / Math.max(parseFloat(logForm.hectares) || 1, 0.1)).toLocaleString()} / ha
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
 
-            {/* Big Action Buttons */}
-            <View style={{ gap: 10, marginTop: SPACING.xs, paddingBottom: SPACING.lg }}>
+            {/* ── SECTION 4: NOTES ── */}
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {t('log_notes_lbl', 'Notes & Remarks')}
+              </Text>
+              <TextInput
+                style={{ minHeight: 64, backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: COLORS.text, textAlignVertical: 'top' }}
+                value={logForm.notes || ''}
+                onChangeText={v => setLogForm(p => ({ ...p, notes: v }))}
+                placeholder={t('log_notes_placeholder', 'Optional notes or remarks on field observations...')}
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+              />
+            </View>
+
+            {/* ── SECTION 5: REVIEW & SUBMIT ── */}
+            <View style={{ gap: 10, paddingBottom: SPACING.lg }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {t('review_and_submit', 'Review & Submit')}
+              </Text>
               <TouchableOpacity
                 style={{
                   backgroundColor: isSavingLog ? COLORS.primary + '99' : COLORS.primary,
-                  borderRadius: RADIUS.lg,
-                  paddingVertical: 16,
+                  borderRadius: RADIUS.md,
+                  minHeight: 48,
                   flexDirection: 'row',
                   justifyContent: 'center',
                   alignItems: 'center',
@@ -5233,17 +5328,17 @@ export default function FieldOpsScreen({ navigation, route }) {
                 {isSavingLog ? (
                   <>
                     <ActivityIndicator size="small" color="#fff" />
-                    <Text style={{ fontSize: 14.5, fontWeight: '900', color: '#fff', letterSpacing: 0.5 }}>
-                      {logForm.id ? 'Saving changes...' : (getNetworkStatus() ? 'SYNCHRONIZING TO CLOUD...' : 'SAVING TO DEVICE STORAGE...')}
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
+                      {logForm.id ? 'Saving changes...' : (getNetworkStatus() ? 'Recording...' : 'Saving offline...')}
                     </Text>
                   </>
                 ) : (
                   <>
-                    <Ionicons name={logForm.id ? "checkmark-circle" : (getNetworkStatus() ? "paper-plane" : "save-outline")} size={20} color="#fff" />
-                    <Text style={{ fontSize: 16, fontWeight: '900', color: '#fff', letterSpacing: 0.5 }}>
+                    <Ionicons name={logForm.id ? "checkmark-circle" : (getNetworkStatus() ? "paper-plane" : "save-outline")} size={18} color="#fff" />
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
                       {logForm.id
-                        ? t('log_save_changes', 'SAVE CHANGES')
-                        : (getNetworkStatus() ? t('log_record_op', 'RECORD OPERATION') : 'SAVE OFFLINE TO DEVICE')}
+                        ? t('log_save_changes', 'Save Changes')
+                        : (getNetworkStatus() ? t('log_record_op', 'Record Operation') : 'Save Offline to Device')}
                     </Text>
                   </>
                 )}
@@ -5254,9 +5349,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                   style={{
                     backgroundColor: '#FFFBF0',
                     borderWidth: 1.5,
-                    borderColor: '#F5A623',
+                    borderColor: COLORS.warning,
                     borderRadius: RADIUS.md,
-                    paddingVertical: 12,
+                    minHeight: 46,
                     flexDirection: 'row',
                     justifyContent: 'center',
                     alignItems: 'center',
@@ -5268,7 +5363,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   activeOpacity={0.8}
                 >
                   <Ionicons name="document-text-outline" size={16} color="#C97A00" />
-                  <Text style={{ fontSize: 13.5, fontWeight: '800', color: '#C97A00' }} numberOfLines={1} adjustsFontSizeToFit>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#C97A00' }}>
                     {t('log_save_draft', 'Save as Draft')}
                   </Text>
                 </TouchableOpacity>
@@ -5292,7 +5387,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               gap: 8,
               backgroundColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FFFBEB' : '#EBF7EE',
               borderWidth: 1,
-              borderColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FDE68A' : '#B7E4C7',
+              borderColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FEF0D0' : '#B7E4C7',
               paddingHorizontal: 10,
               paddingVertical: 7,
               borderRadius: RADIUS.md,
@@ -5596,13 +5691,12 @@ export default function FieldOpsScreen({ navigation, route }) {
         </View>
       </Modal>
       {/* ── Fields Search Modal ── */}
-      <Modal visible={showFieldsModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { height: '85%' }]}>
-          <View style={s.sheetHeader}>
-            <Text style={s.sheetTitle}>Block Farm Fields</Text>
-            <TouchableOpacity onPress={() => { setShowFieldsModal(false); setFieldSearch(''); }}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+      <Modal visible={showFieldsModal} animationType="slide" onRequestClose={() => { setShowFieldsModal(false); setFieldSearch(''); }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Block Farm Fields</Text>
+            <TouchableOpacity onPress={() => { setShowFieldsModal(false); setFieldSearch(''); }} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
           <View style={{ padding: SPACING.lg, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.background }}>
@@ -5712,7 +5806,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </>
             );
           })()}
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Audit History & Monthly Breakdown Modal ── */}
@@ -5726,35 +5820,33 @@ export default function FieldOpsScreen({ navigation, route }) {
       />
 
       {/* ── Take Over Security Authorization Modal (Mobile) ── */}
-      <Modal visible={showTakeOverAuthModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { maxHeight: '90%' }]}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="shield" size={18} color="#D97706" />
+      <Modal visible={showTakeOverAuthModal} animationType="slide" onRequestClose={() => setShowTakeOverAuthModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FEF0D0', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="shield" size={20} color="#C97A00" />
               </View>
-              <View>
-                <Text style={s.sheetTitle}>Authorize Field Take Over</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Administrative intervention & security gate</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Authorize Take Over</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Administrative supervision gate</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={() => setShowTakeOverAuthModal(false)}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            <TouchableOpacity onPress={() => setShowTakeOverAuthModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 14 }}>
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 16 }} keyboardShouldPersistTaps="handled">
             {/* Target Field Summary Card */}
             {selectedField && (
-              <View style={{ backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
+              <View style={{ backgroundColor: '#F9FAF7', borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
-                    {safeField.id}
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.text }}>
+                    {selectedField.id || safeField.id}
                   </Text>
-                  <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.xs }}>
-                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#D97706' }}>Manager Take Over</Text>
+                  <View style={{ backgroundColor: '#FEF0D0', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.full }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#A85E00' }}>Supervisor Action</Text>
                   </View>
                 </View>
                 <Text style={{ fontSize: 12, color: COLORS.text, fontWeight: '600' }}>
@@ -5767,20 +5859,20 @@ export default function FieldOpsScreen({ navigation, route }) {
             )}
 
             {/* Security Notice */}
-            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FFE8A3', flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
-              <Ionicons name="warning" size={18} color="#C97A00" style={{ marginTop: 1 }} />
-              <Text style={{ fontSize: 11.5, color: '#8F5700', lineHeight: 16, flex: 1 }}>
-                Taking over enables supervisory override. Any operation logged or stage completed will be stamped with your manager signature in the immutable SRA audit ledger.
+            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FEF0D0', flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <Ionicons name="shield-outline" size={18} color="#C97A00" />
+              <Text style={{ fontSize: 12, color: '#8F5700', flex: 1 }}>
+                Take over actions are permanently logged to the audit ledger.
               </Text>
             </View>
 
-            {/* Account Password Input */}
-            <View style={{ gap: 4 }}>
-              <Text style={s.formLabel}>Account Password <Text style={{ color: '#D9534F' }}>*</Text></Text>
+            {/* Manager Password Input */}
+            <View style={{ gap: 6 }}>
+              <Text style={s.formLabel}>Farm Manager Password <Text style={{ color: '#D9534F' }}>*</Text></Text>
               <View style={{ position: 'relative', justifyContent: 'center' }}>
                 <TextInput
                   secureTextEntry={!showTakeOverPassword}
-                  placeholder="Enter your login password"
+                  placeholder="Enter your manager password"
                   placeholderTextColor={COLORS.textMuted}
                   style={[s.formInput, { paddingRight: 45 }]}
                   value={takeOverAuthPassword}
@@ -5801,88 +5893,84 @@ export default function FieldOpsScreen({ navigation, route }) {
                   />
                 </TouchableOpacity>
               </View>
-              <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
-                Verifies authorization for {getCurrentSession().name || 'Farm Manager'}.
-              </Text>
             </View>
 
             {/* Error Message */}
             {Boolean(takeOverAuthError) && (
               <View style={{ backgroundColor: '#FFF5F5', padding: 10, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: '#FFD4D4', flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                 <Ionicons name="alert-circle" size={16} color="#D9534F" />
-                <Text style={{ fontSize: 11.5, color: '#D9534F', fontWeight: '700', flex: 1 }}>
+                <Text style={{ fontSize: 12, color: '#D9534F', fontWeight: '600', flex: 1 }}>
                   {takeOverAuthError}
                 </Text>
               </View>
             )}
 
             {/* Action Buttons */}
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6, paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, paddingBottom: 24 }}>
               <TouchableOpacity
-                style={s.cancelBtn}
+                style={[s.cancelBtn, { height: 48 }]}
                 onPress={() => setShowTakeOverAuthModal(false)}
               >
                 <Text style={s.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.submitBtn, { backgroundColor: '#D97706' }]}
+                style={[s.submitBtn, { backgroundColor: '#C97A00', height: 48 }]}
                 onPress={handleConfirmTakeOverAuth}
               >
-                <Text style={s.submitBtnText}>Authorize &amp; Take Over</Text>
+                <Ionicons name="shield-outline" size={18} color="#fff" />
+                <Text style={s.submitBtnText}>Authorize Take Over</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Edit Security Authorization Modal ── */}
-      <Modal visible={showEditAuthModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { maxHeight: '90%' }]}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#EBF3FB', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="shield-checkmark" size={18} color="#0B63B7" />
+      <Modal visible={showEditAuthModal} animationType="slide" onRequestClose={() => setShowEditAuthModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EBF3FB', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="shield-checkmark" size={20} color="#0B63B7" />
               </View>
-              <View>
-                <Text style={s.sheetTitle}>Authorize Log Amendment</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Identity verification & audit trail record</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Authorize Amendment</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Security & audit verification</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={() => setShowEditAuthModal(false)}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            <TouchableOpacity onPress={() => setShowEditAuthModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 14 }}>
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 16 }} keyboardShouldPersistTaps="handled">
             {/* Target Log Summary Card */}
             {pendingEditLog && (
-              <View style={{ backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>
+              <View style={{ backgroundColor: '#F9FAF7', borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text, flex: 1, marginRight: 12 }} numberOfLines={2}>
                     {pendingEditLog.sraOperationId ? `[${pendingEditLog.sraOperationId}] ` : ''}{pendingEditLog.operationName || pendingEditLog.activity}
                   </Text>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.primary }}>
                     ₱{Number(pendingEditLog.totalCost != null ? pendingEditLog.totalCost : pendingEditLog.cost || 0).toLocaleString()}
                   </Text>
                 </View>
-                <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
+                <Text style={{ fontSize: 12, color: COLORS.textSecondary }}>
                   {pendingEditLog.stageName || `Stage ${pendingEditLog.stageNumber || 1}`} · {pendingEditLog.date || pendingEditLog.period} · {pendingEditLog.hectares} Ha
                 </Text>
               </View>
             )}
 
-            {/* Security Notice */}
-            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FFE8A3', flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
-              <Ionicons name="information-circle" size={18} color="#C97A00" style={{ marginTop: 1 }} />
-              <Text style={{ fontSize: 11.5, color: '#8F5700', lineHeight: 16, flex: 1 }}>
-                All amendments to submitted operation logs are permanently recorded in the immutable SRA audit ledger to prevent unverified record tampering.
+            {/* Short Security Notice */}
+            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FEF0D0', flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <Ionicons name="information-circle" size={18} color="#C97A00" />
+              <Text style={{ fontSize: 12, color: '#8F5700', flex: 1 }}>
+                Amendments are permanently logged to the SRA audit ledger.
               </Text>
             </View>
 
             {/* Account Password Input */}
-            <View style={{ gap: 4 }}>
+            <View style={{ gap: 6 }}>
               <Text style={s.formLabel}>Account Password <Text style={{ color: '#D9534F' }}>*</Text></Text>
               <View style={{ position: 'relative', justifyContent: 'center' }}>
                 <TextInput
@@ -5908,18 +5996,15 @@ export default function FieldOpsScreen({ navigation, route }) {
                   />
                 </TouchableOpacity>
               </View>
-              <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
-                Verifies that you are authorized to amend records for {getCurrentSession().name}.
-              </Text>
             </View>
 
             {/* Mandatory Reason for Amendment */}
-            <View style={{ gap: 4 }}>
-              <Text style={s.formLabel}>Reason for Amendment / Correction <Text style={{ color: '#D9534F' }}>*</Text></Text>
+            <View style={{ gap: 6 }}>
+              <Text style={s.formLabel}>Reason for Amendment <Text style={{ color: '#D9534F' }}>*</Text></Text>
               <TextInput
                 multiline
                 numberOfLines={3}
-                placeholder="State the reason (e.g., Adjusted fertilizer receipt cost, labor headcount correction...)"
+                placeholder="State the reason (e.g. Receipt adjustment, headcount recount...)"
                 placeholderTextColor={COLORS.textMuted}
                 style={[s.formInput, { height: 75, textAlignVertical: 'top' }]}
                 value={editAuthReason}
@@ -5929,148 +6014,137 @@ export default function FieldOpsScreen({ navigation, route }) {
                 }}
               />
 
-              {/* Quick Preset Reason Chips */}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+              {/* Quick Preset Reason Chips (Horizontal Scroll) */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
                 {[
-                  'Voucher / Receipt cost adjustment',
-                  'Worker headcount recount',
-                  'Input volume / bags correction',
-                  'Date / Typo correction',
-                  'Supervisor field audit review'
-                ].map((preset, pIdx) => (
+                  { label: 'Cost adjustment', val: 'Voucher / Receipt cost adjustment' },
+                  { label: 'Headcount recount', val: 'Worker headcount recount' },
+                  { label: 'Volume correction', val: 'Input volume / bags correction' },
+                  { label: 'Typo fix', val: 'Date / Typo correction' },
+                  { label: 'Supervisor review', val: 'Supervisor field audit review' }
+                ].map((chip, pIdx) => (
                   <TouchableOpacity
                     key={pIdx}
                     onPress={() => {
-                      setEditAuthReason(preset);
+                      setEditAuthReason(chip.val);
                       setEditAuthError('');
                     }}
-                    style={{ backgroundColor: '#F0F6FC', paddingHorizontal: 9, paddingVertical: 5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#CCE0F5' }}
+                    style={{ backgroundColor: '#F0F6FC', paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#CCE0F5' }}
                   >
-                    <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#0B63B7' }}>+ {preset}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#0B63B7' }}>+ {chip.label}</Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             </View>
 
             {/* Error Message */}
             {Boolean(editAuthError) && (
               <View style={{ backgroundColor: '#FFF5F5', padding: 10, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: '#FFD4D4', flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                 <Ionicons name="alert-circle" size={16} color="#D9534F" />
-                <Text style={{ fontSize: 11.5, color: '#D9534F', fontWeight: '700', flex: 1 }}>
+                <Text style={{ fontSize: 12, color: '#D9534F', fontWeight: '600', flex: 1 }}>
                   {editAuthError}
                 </Text>
               </View>
             )}
 
             {/* Action Buttons */}
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6, paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, paddingBottom: 24 }}>
               <TouchableOpacity
-                style={s.cancelBtn}
+                style={[s.cancelBtn, { height: 48 }]}
                 onPress={() => setShowEditAuthModal(false)}
               >
                 <Text style={s.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.submitBtn, { backgroundColor: '#0B63B7' }]}
+                style={[s.submitBtn, { backgroundColor: '#0B63B7', height: 48 }]}
                 onPress={handleConfirmEditAuth}
               >
-                <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
+                <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
                 <Text style={s.submitBtnText}>Authorize & Edit</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Log Revision History & Audit Trail Modal ── */}
-      <Modal visible={showLogAuditModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { maxHeight: '90%' }]}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#EBF3FB', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="git-commit-outline" size={18} color="#0B63B7" />
+      <Modal visible={showLogAuditModal} animationType="slide" onRequestClose={() => setShowLogAuditModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EBF3FB', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="git-commit-outline" size={20} color="#0B63B7" />
               </View>
-              <View>
-                <Text style={s.sheetTitle}>Log Audit Trail</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Log Audit Trail</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }} numberOfLines={1}>
                   #{activeLogForAudit?.id} · {activeLogForAudit?.operationName || activeLogForAudit?.activity}
                 </Text>
               </View>
             </View>
-            <TouchableOpacity onPress={() => setShowLogAuditModal(false)}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            <TouchableOpacity onPress={() => setShowLogAuditModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 12, paddingBottom: 32 }}>
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 14, paddingBottom: 32 }}>
             {/* Log Header Summary */}
-            <View style={{ backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: COLORS.border }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text }}>
+            <View style={{ backgroundColor: '#F9FAF7', borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderColor: COLORS.border }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.text, flex: 1, marginRight: 12 }}>
                   {activeLogForAudit?.operationName || activeLogForAudit?.activity}
                 </Text>
-                <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>
+                <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.primary }}>
                   ₱{Number(activeLogForAudit?.totalCost != null ? activeLogForAudit?.totalCost : activeLogForAudit?.cost || 0).toLocaleString()}
                 </Text>
               </View>
-              <Text style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 2 }}>
+              <Text style={{ fontSize: 12, color: COLORS.textSecondary, marginTop: 4 }}>
                 {activeLogForAudit?.stageName || `Stage ${activeLogForAudit?.stageNumber || 1}`} · {activeLogForAudit?.date || activeLogForAudit?.period} · {activeLogForAudit?.hectares} Ha · {activeLogForAudit?.people} Workers
               </Text>
             </View>
 
             {/* Audit History Timeline */}
-            <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 }}>
               Revision History ({activeLogForAudit?.amendments?.length || 0} Amendment{activeLogForAudit?.amendments?.length !== 1 ? 's' : ''})
             </Text>
 
             {(!activeLogForAudit?.amendments || activeLogForAudit.amendments.length === 0) ? (
-              <View style={{ padding: 24, alignItems: 'center', backgroundColor: '#FAFAFA', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, gap: 6 }}>
-                <Ionicons name="shield-outline" size={28} color={COLORS.textMuted} />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>Original Record</Text>
-                <Text style={{ fontSize: 11.5, color: COLORS.textMuted, textAlign: 'center' }}>
-                  This operation log is in its original verified state and has not been modified.
+              <View style={{ alignItems: 'center', paddingVertical: 24, gap: 6 }}>
+                <Ionicons name="checkmark-circle-outline" size={36} color={COLORS.success} />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>Original Immutable Entry</Text>
+                <Text style={{ fontSize: 11.5, color: COLORS.textMuted, textAlign: 'center', maxWidth: 280 }}>
+                  This operation log has not undergone any administrative amendments since submission.
                 </Text>
               </View>
             ) : (
-              activeLogForAudit.amendments.map((rev, revIdx) => (
-                <View key={rev.amendmentId || revIdx} style={{ backgroundColor: '#fff', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#D1E3F6', padding: 12, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1 }}>
-                  {/* Revision Header */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#EDF3FA', paddingBottom: 6 }}>
+              activeLogForAudit.amendments.map((am, aIdx) => (
+                <View key={am.id || aIdx} style={{ backgroundColor: '#FFF', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#E2E8DC', gap: 6, ...SHADOW.sm }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={{ backgroundColor: '#0B63B7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
-                        <Text style={{ fontSize: 10, fontWeight: '900', color: '#fff' }}>REV #{revIdx + 1}</Text>
+                      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#EBF3FB', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '900', color: '#0B63B7' }}>{aIdx + 1}</Text>
                       </View>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>
-                        {rev.amendedByUserId || 'Authorized User'}
-                      </Text>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>{am.amendedByName || 'Supervisor'}</Text>
                     </View>
-                    <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
-                      {rev.amendedAt}
-                    </Text>
+                    <Text style={{ fontSize: 10, color: COLORS.textMuted }}>{am.amendedAt}</Text>
                   </View>
 
-                  {/* Stated Reason Box */}
-                  <View style={{ backgroundColor: '#F0F6FC', padding: 8, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#CCE0F5' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#0B63B7', textTransform: 'uppercase' }}>Reason for Correction</Text>
-                    <Text style={{ fontSize: 11.5, color: COLORS.text, fontWeight: '600', marginTop: 2 }}>
-                      "{rev.reason || 'Log values updated'}"
-                    </Text>
+                  <View style={{ backgroundColor: '#F8FAF5', padding: 8, borderRadius: RADIUS.xs, gap: 2 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textSecondary }}>REASON FOR CORRECTION:</Text>
+                    <Text style={{ fontSize: 11.5, color: COLORS.text, fontWeight: '600' }}>"{am.reason}"</Text>
                   </View>
 
-                  {/* Previous vs New Values Diff */}
-                  {rev.changes && Object.keys(rev.changes).length > 0 && (
-                    <View style={{ backgroundColor: '#FAFAFA', borderRadius: RADIUS.xs, padding: 8, gap: 4, borderWidth: 1, borderColor: '#EDEDED' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.textMuted, textTransform: 'uppercase' }}>Value Changes</Text>
-                      {Object.entries(rev.changes).map(([fieldName, change]) => (
-                        <View key={fieldName} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>{fieldName}:</Text>
-                          <Text style={{ fontSize: 11, fontWeight: '700' }}>
-                            <Text style={{ color: '#D9534F', textDecorationLine: 'line-through' }}>{String(change?.before ?? '—')}</Text>
-                            {' → '}
-                            <Text style={{ color: '#267326' }}>{String(change?.after ?? '—')}</Text>
-                          </Text>
+                  {am.changes && am.changes.length > 0 && (
+                    <View style={{ gap: 3, marginTop: 2 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted }}>FIELD DELTAS:</Text>
+                      {am.changes.map((ch, cIdx) => (
+                        <View key={cIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2, borderBottomWidth: cIdx !== am.changes.length - 1 ? 0.5 : 0, borderBottomColor: '#F0F0F0' }}>
+                          <Text style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: '600' }}>{ch.field}:</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Text style={{ fontSize: 11, color: '#D9534F', textDecorationLine: 'line-through' }}>{String(ch.from)}</Text>
+                            <Ionicons name="arrow-forward" size={10} color={COLORS.textMuted} />
+                            <Text style={{ fontSize: 11, color: '#267326', fontWeight: '800' }}>{String(ch.to)}</Text>
+                          </View>
                         </View>
                       ))}
                     </View>
@@ -6080,29 +6154,27 @@ export default function FieldOpsScreen({ navigation, route }) {
             )}
 
             <TouchableOpacity
-              style={[s.submitBtn, { marginTop: 8 }]}
+              style={[s.submitBtn, { marginTop: 12, height: 48 }]}
               onPress={() => setShowLogAuditModal(false)}
             >
               <Text style={s.submitBtnText}>Close Audit Trail</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Manager Assign Field Modal ── */}
-      <Modal visible={showManagerAssignModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { maxHeight: '92%' }]}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
+      <Modal visible={showManagerAssignModal} animationType="slide" onRequestClose={() => setShowManagerAssignModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
             <View style={{ flex: 1, paddingRight: 10 }}>
-              <Text style={s.sheetTitle}>{managerAssignForm.isEditing ? 'Edit Field Plot & Ownership' : 'Enroll New Field Plot'}</Text>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
-                {managerAssignForm.isEditing ? 'Modify parcel specifications and assigned member.' : 'Register parcel, soil specs, and assign an active member.'}
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>{managerAssignForm.isEditing ? 'Edit Field Plot & Ownership' : 'Enroll New Field Plot'}</Text>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                {managerAssignForm.isEditing ? 'Modify parcel specifications and member.' : 'Register parcel and assign member.'}
               </Text>
             </View>
-            <TouchableOpacity onPress={() => setShowManagerAssignModal(false)}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            <TouchableOpacity onPress={() => setShowManagerAssignModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
@@ -6489,19 +6561,17 @@ export default function FieldOpsScreen({ navigation, route }) {
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Pending Farmer Registrations Modal ── */}
-      <Modal visible={showPendingModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={[s.sheet, { maxHeight: height * 0.85 }]}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
+      <Modal visible={showPendingModal} animationType="slide" onRequestClose={() => setShowPendingModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={s.sheetTitle}>Pending Registrations</Text>
-                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#FDE68A' }}>
+                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#FEF0D0' }}>
                   <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>{pendingUsersList.length} Awaiting</Text>
                 </View>
               </View>
@@ -6638,27 +6708,25 @@ export default function FieldOpsScreen({ navigation, route }) {
               ))
             )}
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Crop Cycle Selection Modal ── */}
-      <Modal visible={showCycleModal} transparent animationType="slide">
-        <View style={s.overlay} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
-          <View style={s.sheetHeader}>
+      <Modal visible={showCycleModal} animationType="slide" onRequestClose={() => setShowCycleModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
             <View>
-              <Text style={s.sheetTitle}>Crop Cycle Configuration</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Crop Cycle Configuration</Text>
               <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Field {safeField.id} ({safeField.ha} Ha)</Text>
             </View>
-            <TouchableOpacity onPress={() => setShowCycleModal(false)}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+            <TouchableOpacity onPress={() => setShowCycleModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <View style={s.sheetBody}>
+          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 16 }}>
             <Text style={s.formLabel}>Select Sugarcane Cycle Type *</Text>
-            <View style={{ gap: 8, marginBottom: SPACING.md }}>
+            <View style={{ gap: 10 }}>
               {[
                 { type: 'Plant Cane (New Plant)', duration: '12–14 months', icon: 'leaf', desc: 'New planting cycle: Full soil prep, canepoints planting, basal & top-dress.' },
                 { type: '1st Ratoon (Ratoon 1)', duration: '10–12 months', icon: 'git-branch', desc: 'First ratoon stubble shaving, trash blanketing, off-barring & fertilization.' },
@@ -6668,66 +6736,56 @@ export default function FieldOpsScreen({ navigation, route }) {
                 return (
                   <TouchableOpacity
                     key={item.type}
-                    style={[
-                      { padding: 12, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff', gap: 3 },
-                      isSel && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                    ]}
-                    onPress={() => setCycleTypeForm(p => ({ ...p, cycleType: item.type }))}
+                    style={{
+                      padding: 14,
+                      borderRadius: RADIUS.md,
+                      borderWidth: 1.5,
+                      borderColor: isSel ? COLORS.primary : COLORS.border,
+                      backgroundColor: isSel ? COLORS.primaryBg : '#fff',
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                    }}
+                    onPress={() => setCycleTypeForm(prev => ({ ...prev, cycleType: item.type }))}
                   >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Ionicons name={item.icon} size={16} color={isSel ? COLORS.primary : COLORS.textSecondary} />
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: isSel ? COLORS.primary : COLORS.text }}>{item.type}</Text>
-                      </View>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? COLORS.primary : COLORS.textMuted }}>{item.duration}</Text>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isSel ? '#E2EBDC' : '#F4F7F2', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name={item.icon} size={18} color={isSel ? COLORS.primary : COLORS.textMuted} />
                     </View>
-                    <Text style={{ fontSize: 11, color: COLORS.textMuted, lineHeight: 15 }}>{item.desc}</Text>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: isSel ? COLORS.primary : COLORS.text }}>{item.type}</Text>
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{item.duration}</Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 4, lineHeight: 16 }}>{item.desc}</Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
             </View>
 
-            <Text style={s.formLabel}>Select Crop Year (CY) *</Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: SPACING.lg }}>
-              {['2025-2026', '2026-2027', '2027-2028'].map(cy => {
-                const isSel = cycleTypeForm.cropYear === cy;
-                return (
-                  <TouchableOpacity
-                    key={cy}
-                    style={[
-                      { flex: 1, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: '#fff', alignItems: 'center' },
-                      isSel && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
-                    ]}
-                    onPress={() => setCycleTypeForm(p => ({ ...p, cropYear: cy }))}
-                  >
-                    <Text style={{ fontSize: 11.5, fontWeight: isSel ? '800' : '600', color: isSel ? COLORS.primary : COLORS.text }}>{cy}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+            <View style={{ gap: 6, marginTop: 4 }}>
+              <Text style={s.formLabel}>Crop Year (Milling Period) *</Text>
+              <TextInput
+                style={s.formInput}
+                placeholder="e.g. 2026-2027"
+                placeholderTextColor={COLORS.textMuted}
+                value={cycleTypeForm.cropYear}
+                onChangeText={(val) => setCycleTypeForm(prev => ({ ...prev, cropYear: val }))}
+              />
             </View>
 
-            <View style={s.sheetFooter}>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setShowCycleModal(false)}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, paddingBottom: 24 }}>
+              <TouchableOpacity
+                style={[s.cancelBtn, { height: 48 }]}
+                onPress={() => setShowCycleModal(false)}
+              >
                 <Text style={s.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={s.submitBtn}
+                style={[s.submitBtn, { height: 48 }]}
                 onPress={() => {
-                  const activeFieldLogs = operationLogs.filter(l => l.fieldId === safeField.id && l.status === 'ACTIVE');
-                  if (activeFieldLogs.length > 0) {
-                    Alert.alert(
-                      'Start New Crop Cycle',
-                      `Starting a new cycle will archive ${activeFieldLogs.length} current operation record(s) for ${safeField.id} and initialize Stage 1: Pre-Planting & Land Preparation under ${cycleTypeForm.cycleType} (${cycleTypeForm.cropYear}).\n\nDo you want to proceed?`,
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Yes, Start New Cycle',
-                          style: 'default',
-                          onPress: () => handleStartNewCycle(safeField.id, cycleTypeForm.cycleType, cycleTypeForm.cropYear)
-                        }
-                      ]
-                    );
-                  } else {
+                  setShowCycleModal(false);
+                  if (handleStartNewCycle) {
                     handleStartNewCycle(safeField.id, cycleTypeForm.cycleType, cycleTypeForm.cropYear);
                   }
                 }}
@@ -6735,24 +6793,22 @@ export default function FieldOpsScreen({ navigation, route }) {
                 <Text style={s.submitBtnText}>Start & Save Cycle</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Stage Editor Modal ── */}
-      <Modal visible={showStageEditor} transparent animationType="slide">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: '#fff', borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, maxHeight: height * 0.88 }}>
-            <View style={s.sheetHandle} />
-            <View style={s.sheetHeader}>
-              <View>
-                <Text style={s.sheetTitle}>{t('btn_stage_editor', 'Field Stages')}</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>{safeField.id} · {t('stage_reorder_hint', 'tap icons to reorder or remove')}</Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowStageEditor(false)}>
-                <Ionicons name="close" size={22} color={COLORS.text} />
-              </TouchableOpacity>
+      <Modal visible={showStageEditor} animationType="slide" onRequestClose={() => setShowStageEditor(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+            <View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>{t('btn_stage_editor', 'Field Stages')}</Text>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>{safeField.id} · {t('stage_reorder_hint', 'tap icons to reorder or remove')}</Text>
             </View>
+            <TouchableOpacity onPress={() => setShowStageEditor(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
 
             <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 10, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
 
@@ -6927,8 +6983,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
 
             </ScrollView>
-          </View>
-        </View>
+          </SafeAreaView>
       </Modal>
 
       {/* ── Dedicated Full History & Ledger Modal (Full Screen) ── */}
@@ -7022,14 +7077,14 @@ export default function FieldOpsScreen({ navigation, route }) {
             return (
               <View style={[
                 s.historyStatBar,
-                logTab === 'drafts' && { backgroundColor: '#FFFBF0', borderBottomColor: '#FDE68A' },
+                logTab === 'drafts' && { backgroundColor: '#FFFBF0', borderBottomColor: '#FEF0D0' },
                 logTab === 'past' && { backgroundColor: '#F8FAFC', borderBottomColor: '#E2E8F0' },
               ]}>
                 <View style={s.historyStatItem}>
                   <Text style={[s.historyStatLbl, logTab === 'drafts' && { color: '#92400E' }]}>{statCostLabel}</Text>
                   <Text style={[s.historyStatVal, { color: statCostColor }]}>{statCostValue}</Text>
                 </View>
-                <View style={[s.historyStatItem, { borderLeftWidth: 1, borderLeftColor: logTab === 'drafts' ? '#FDE68A' : COLORS.border, paddingLeft: 12 }]}>
+                <View style={[s.historyStatItem, { borderLeftWidth: 1, borderLeftColor: logTab === 'drafts' ? '#FEF0D0' : COLORS.border, paddingLeft: 12 }]}>
                   <Text style={[s.historyStatLbl, logTab === 'drafts' && { color: '#92400E' }]}>{statCountLabel}</Text>
                   <Text style={[s.historyStatVal, { color: statCostColor }]}>{statCountValue}</Text>
                 </View>
@@ -7243,7 +7298,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                           <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.primary }}>{t('verified_sra_badge', 'Verified SRA')}</Text>
                         </View>
                       ) : (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FDE68A' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FEF0D0' }}>
                           <Ionicons name="time-outline" size={13} color="#D97706" />
                           <Text style={{ fontSize: 10, fontWeight: '800', color: '#D97706' }}>{t('pending_sra_badge', 'Pending SRA')}</Text>
                         </View>
@@ -7492,12 +7547,12 @@ const s = StyleSheet.create({
   grantPermissionBtnText: { color: '#FFF', fontSize: 14, fontWeight: '800' },
   cameraWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden' },
   scannerReticle: { width: 260, height: 260, position: 'relative', justifyContent: 'center', alignItems: 'center' },
-  reticleCorner: { position: 'absolute', width: 36, height: 36, borderColor: '#4ADE80', borderWidth: 4 },
+  reticleCorner: { position: 'absolute', width: 36, height: 36, borderColor: '#2D5A1E', borderWidth: 4 },
   reticleTL: { top: 0, left: 0, borderBottomWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 12 },
   reticleTR: { top: 0, right: 0, borderBottomWidth: 0, borderLeftWidth: 0, borderTopRightRadius: 12 },
   reticleBL: { bottom: 0, left: 0, borderTopWidth: 0, borderRightWidth: 0, borderBottomLeftRadius: 12 },
   reticleBR: { bottom: 0, right: 0, borderTopWidth: 0, borderLeftWidth: 0, borderBottomRightRadius: 12 },
-  laserLine: { width: '85%', height: 2, backgroundColor: '#4ADE80', shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 8, elevation: 4 },
+  laserLine: { width: '85%', height: 2, backgroundColor: '#2D5A1E', shadowColor: '#2D5A1E', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 8, elevation: 4 },
   processingBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.85)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: COLORS.success },
   processingText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   viewfinderInstruction: { position: 'absolute', bottom: 32, fontSize: 12, color: '#FFF', fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },

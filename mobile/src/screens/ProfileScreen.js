@@ -166,26 +166,18 @@ export default function ProfileScreen({ navigation }) {
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {!isOnline && (
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            backgroundColor: '#FFFBEB',
-            borderWidth: 1,
-            borderColor: '#FDE68A',
-            paddingHorizontal: 14,
-            paddingVertical: 10,
-            borderRadius: RADIUS.md,
-            marginBottom: 12
-          }}>
+          <View style={s.offlineBanner}>
             <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
-            <Text style={{ flex: 1, fontSize: 11.5, color: '#92400E', fontWeight: '600', lineHeight: 15 }}>
+            <Text style={s.offlineBannerText}>
               Offline Mode Active · Profile credentials and cloud sync settings are read-only until reconnected.
             </Text>
           </View>
         )}
 
-        {/* ── Identity Card ── */}
+        {/* ── 1. Account Section ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>Account</Text>
+        </View>
         <View style={[s.card, s.identityCard]}>
           <View style={s.avatarWrap}>
             <Text style={s.avatarText}>
@@ -203,11 +195,13 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
-        {/* ── Operational Assignment ── */}
-        <View style={s.card}>
-          <Text style={s.cardTitle}>
-            {session?.role === 'SRA Admin' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Operational Assignment')}
+        {/* ── 2. Farm & Field Context ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>
+            {session?.role === 'SRA Admin' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Farm & Field Context')}
           </Text>
+        </View>
+        <View style={s.card}>
           {[
             { 
               key: 'farm_agency',
@@ -229,10 +223,9 @@ export default function ProfileScreen({ navigation }) {
                 }
                 if (session?.role === 'Farm Manager') {
                   const managedFields = fields.filter(field => field.blockFarmId === managedFarm?.id);
-                  const totalHa = managedFields.reduce((s, f) => s + (Number(f.ha) || 0), 0);
+                  const totalHa = managedFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
                   return `${managedFarm?.name || 'Unassigned'} (${managedFields.length} Plots · ${totalHa.toFixed(1)} Ha)`;
                 }
-                // Member Role: Show assigned plots
                 if (memberFields.length > 0) {
                   return memberFields.map(f => `${f.id} (${f.ha} Ha)`).join(', ');
                 }
@@ -240,9 +233,9 @@ export default function ProfileScreen({ navigation }) {
               })()
             },
             { key: 'mobile_contact', icon: 'call', label: t('profile_mobile_contact', 'Mobile Contact'), value: session.mobile || session.contact || '—' },
-          ].map(r => (
+          ].map((r) => (
             <View key={r.key} style={s.infoRow}>
-              <Ionicons name={r.icon} size={16} color={COLORS.primaryLight} style={{ width: 24 }} />
+              <Ionicons name={r.icon} size={18} color={COLORS.primary} style={{ width: 26 }} />
               <Text style={s.infoLabel}>{r.label}</Text>
               <Text style={s.infoValue}>{r.value}</Text>
             </View>
@@ -251,79 +244,81 @@ export default function ProfileScreen({ navigation }) {
 
         {/* ── SRA Regulatory Status (SRA Admin only) ── */}
         {session?.role === 'SRA Admin' && (
-          <View style={s.card}>
-            <View style={s.syncHeader}>
-              <Text style={s.cardTitle}>{t('profile_sra_status', 'SRA Regulatory System Status')}</Text>
-              <View style={[s.syncStatusDot, { backgroundColor: getNetworkStatus() ? COLORS.success : COLORS.accent }]} />
+          <>
+            <View style={s.sectionHeaderWrap}>
+              <Text style={s.sectionHeaderTitle}>{t('profile_sra_status', 'SRA Regulatory System Status')}</Text>
             </View>
-            
-            {/* 1. District Certification & Supervised Compliance */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC', marginTop: 4 }}>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_district_cert', 'District Certification:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.success }}>
-                {(() => {
-                  const district = session?.district || 'District not assigned';
-                  const certCount = (auditReports || []).filter(a => a.status === 'CERTIFIED').length;
-                  const totalAudits = (auditReports || []).length;
-                  const totalHa = (fields || []).reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
-                  if (totalAudits > 0) {
-                    return `${district} · ${certCount}/${totalAudits} Certified (${totalHa.toFixed(1)} Ha)`;
-                  }
-                  if (totalHa > 0) {
-                    return `${district} · ${totalHa.toFixed(1)} Ha Monitored`;
-                  }
-                  return `${district} · 0 Registered Plots`;
-                })()}
-              </Text>
-            </View>
+            <View style={s.card}>
+              <View style={s.syncHeader}>
+                <Text style={s.cardSubTitle}>Compliance & Circular Telemetry</Text>
+                <View style={[s.syncStatusDot, { backgroundColor: getNetworkStatus() ? COLORS.success : COLORS.accent }]} />
+              </View>
+              
+              <View style={s.telemetryRow}>
+                <Text style={s.telemetryLabel}>{t('profile_district_cert', 'District Certification:')}</Text>
+                <Text style={[s.telemetryValue, { color: COLORS.success }]}>
+                  {(() => {
+                    const district = session?.district || 'District not assigned';
+                    const certCount = (auditReports || []).filter(a => a.status === 'CERTIFIED').length;
+                    const totalAudits = (auditReports || []).length;
+                    const totalHa = (fields || []).reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
+                    if (totalAudits > 0) {
+                      return `${district} · ${certCount}/${totalAudits} Certified (${totalHa.toFixed(1)} Ha)`;
+                    }
+                    if (totalHa > 0) {
+                      return `${district} · ${totalHa.toFixed(1)} Ha Monitored`;
+                    }
+                    return `${district} · 0 Registered Plots`;
+                  })()}
+                </Text>
+              </View>
 
-            {/* 2. Active SRA Sugar Order Circular */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_sra_circular', 'SRA Circular Version:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>
-                {(() => {
-                  const sorted = getSortedPrices();
-                  if (sorted.length > 0 && sorted[0].source) {
-                    return `${sorted[0].circularNumber} · ${sorted[0].source} (${sorted[0].weekLabel})`;
-                  }
-                  if (sorted.length > 0 && sorted[0].weekLabel) {
-                    return `${sorted[0].circularNumber} (${sorted[0].weekLabel})`;
-                  }
-                  return 'No Active Circular in Database';
-                })()}
-              </Text>
-            </View>
+              <View style={s.telemetryRow}>
+                <Text style={s.telemetryLabel}>{t('profile_sra_circular', 'SRA Circular Version:')}</Text>
+                <Text style={[s.telemetryValue, { color: COLORS.primary }]}>
+                  {(() => {
+                    const sorted = getSortedPrices();
+                    if (sorted.length > 0 && sorted[0].source) {
+                      return `${sorted[0].circularNumber} · ${sorted[0].source} (${sorted[0].weekLabel})`;
+                    }
+                    if (sorted.length > 0 && sorted[0].weekLabel) {
+                      return `${sorted[0].circularNumber} (${sorted[0].weekLabel})`;
+                    }
+                    return 'No Active Circular in Database';
+                  })()}
+                </Text>
+              </View>
 
-            {/* 3. Cloud Central Node Live Telemetry */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_central_node', 'Cloud Central Node:')}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: getNetworkStatus() ? COLORS.text : COLORS.accent }}>
-                {getNetworkStatus() ? `Firebase & Gateway · ${synced ? 'Synced' : 'Syncing'}` : 'Offline Local Store Active'}
-              </Text>
-            </View>
+              <View style={s.telemetryRow}>
+                <Text style={s.telemetryLabel}>{t('profile_central_node', 'Cloud Central Node:')}</Text>
+                <Text style={[s.telemetryValue, { color: getNetworkStatus() ? COLORS.text : COLORS.accent }]}>
+                  {getNetworkStatus() ? `Firebase & Gateway · ${synced ? 'Synced' : 'Syncing'}` : 'Offline Local Store Active'}
+                </Text>
+              </View>
 
-            {/* 4. Live Ledger Audit Volume */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F2EC' }}>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Audit Ledger Telemetry:</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textSecondary }}>
-                {`${(operationLogs || []).length} Ops Logs · ${(auditReports || []).length} Audit Dossiers`}
-              </Text>
+              <View style={s.telemetryRow}>
+                <Text style={s.telemetryLabel}>Audit Ledger Telemetry:</Text>
+                <Text style={[s.telemetryValue, { color: COLORS.textSecondary }]}>
+                  {`${(operationLogs || []).length} Ops Logs · ${(auditReports || []).length} Audit Dossiers`}
+                </Text>
+              </View>
             </View>
-          </View>
+          </>
         )}
 
-        {/* ── Auto Sync Option (Field Roles only: Member & Farm Manager) ── */}
-        {(session?.role === 'Member Farmer' || session?.role === 'Farm Manager') && (
-          <View style={s.card}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
-                <View style={{ width: 36, height: 36, borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.text }}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Sync records automatically when online</Text>
-                </View>
+        {/* ── 3. Sync & Data Management ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>Sync & Offline Data</Text>
+        </View>
+        <View style={s.card}>
+          {(session?.role === 'Member Farmer' || session?.role === 'Farm Manager') && (
+            <View style={s.settingRow}>
+              <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
+                <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.settingLabel}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
+                <Text style={s.settingSubLabel}>Sync records automatically when connection is active</Text>
               </View>
               <Switch
                 value={autoSync}
@@ -332,74 +327,128 @@ export default function ProfileScreen({ navigation }) {
                 thumbColor={autoSync ? COLORS.primary : '#f4f3f4'}
               />
             </View>
-          </View>
-        )}
+          )}
 
-        {/* ── Language ── */}
-        <TouchableOpacity style={[s.card, s.expandRow]} onPress={() => setLangExpanded(e => !e)}>
-          <Ionicons name="language-outline" size={18} color={COLORS.textSecondary} />
-          <Text style={s.expandLabel}>{t('profile_language', 'Language / Wika')}</Text>
-          <Text style={s.expandCurrent}>{(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.native}</Text>
-          <Ionicons name={langExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.textMuted} />
-        </TouchableOpacity>
-
-        {langExpanded && (
-          <View style={s.card}>
-            {LANGUAGES.map(lang => (
-              <TouchableOpacity key={lang.key} style={s.langRow} onPress={() => { setLanguage(lang.key); setLangExpanded(false); }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.langLabel}>{lang.native}</Text>
-                  <Text style={s.langSub}>{lang.label}</Text>
-                </View>
-                {language === lang.key && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* ── Settings & Security ── */}
-        <View style={s.card}>
-          <Text style={s.cardTitle}>{t('profile_settings_mgmt', 'Settings & Management')}</Text>
-          {[
-            { icon: 'help-buoy-outline', label: t('profile_support', 'Help & Support Desk'), color: COLORS.accent, onPress: () => setShowTicketsModal(true) },
-            { icon: 'document-text-outline', label: t('profile_legal', 'Privacy Policy & Terms (RA 10173)'), color: COLORS.primary, onPress: () => setShowLegalModal(true) },
-            { icon: 'shield-outline', label: t('profile_security', 'Security & Password'), color: COLORS.primary, onPress: () => navigation.navigate('Security') },
-            ...(session?.role === 'Farm Manager' ? [{ 
-              icon: 'cloud-upload-outline', 
-              label: t('profile_sync_monitor', 'Member Sync Telemetry Monitor'), 
-              color: COLORS.blue, 
-              onPress: () => navigation.navigate('SyncMonitor') 
-            }] : (session?.role === 'Member Farmer' ? [{
-              icon: 'cloud-upload-outline', 
-              label: t('action_sync_hub', 'Sync Status & Diagnostics'), 
-              color: COLORS.blue, 
-              onPress: () => navigation.navigate('SyncMonitor') 
-            }] : [])),
-            { icon: 'trash-outline', label: t('profile_cache', 'Clear Local Cache'), color: COLORS.accent, onPress: clearCache },
-          ].map(item => (
-            <TouchableOpacity key={item.label} style={s.settingRow} onPress={item.onPress}>
-              <View style={[s.settingIcon, { backgroundColor: item.color + '18' }]}>
-                <Ionicons name={item.icon} size={17} color={item.color} />
+          {(session?.role === 'Farm Manager' || session?.role === 'Member Farmer') && (
+            <TouchableOpacity 
+              style={s.settingRow} 
+              onPress={() => navigation.navigate('SyncMonitor')}
+            >
+              <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
+                <Ionicons name="pulse-outline" size={18} color={COLORS.primary} />
               </View>
-              <Text style={s.settingLabel}>{item.label}</Text>
-              <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.settingLabel}>
+                  {session?.role === 'Farm Manager' ? t('profile_sync_monitor', 'Member Sync Telemetry Monitor') : t('action_sync_hub', 'Sync Status & Diagnostics')}
+                </Text>
+                <Text style={s.settingSubLabel}>View queue, conflict logs, and connectivity</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
             </TouchableOpacity>
-          ))}
+          )}
+
+          <TouchableOpacity style={s.settingRow} onPress={clearCache}>
+            <View style={[s.settingIcon, { backgroundColor: '#FEE2E2' }]}>
+              <Ionicons name="trash-outline" size={18} color="#DC2626" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.settingLabel, { color: '#DC2626' }]}>{t('profile_cache', 'Clear Local Cache')}</Text>
+              <Text style={s.settingSubLabel}>Reset offline draft buffer and local cache</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
         </View>
 
-        {/* ── Sign Out ── */}
+        {/* ── 4. Preferences & Security ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>Preferences & Security</Text>
+        </View>
+        <View style={s.card}>
+          <TouchableOpacity style={s.settingRow} onPress={() => setLangExpanded(e => !e)}>
+            <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
+              <Ionicons name="language-outline" size={18} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingLabel}>{t('profile_language', 'Language / Wika')}</Text>
+              <Text style={s.settingSubLabel}>{(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.native} ({(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.label})</Text>
+            </View>
+            <Ionicons name={langExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          {langExpanded && (
+            <View style={s.langDropdown}>
+              {LANGUAGES.map(lang => (
+                <TouchableOpacity key={lang.key} style={s.langRow} onPress={() => { setLanguage(lang.key); setLangExpanded(false); }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.langLabel}>{lang.native}</Text>
+                    <Text style={s.langSub}>{lang.label}</Text>
+                  </View>
+                  {language === lang.key && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity style={s.settingRow} onPress={() => navigation.navigate('Security')}>
+            <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingLabel}>{t('profile_security', 'Security & Password')}</Text>
+              <Text style={s.settingSubLabel}>Update account password and authentication</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── 5. Support & Feedback ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>Support</Text>
+        </View>
+        <View style={s.card}>
+          <TouchableOpacity style={s.settingRow} onPress={() => setShowTicketsModal(true)}>
+            <View style={[s.settingIcon, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="help-buoy-outline" size={18} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingLabel}>{t('profile_support', 'Help & Support Desk')}</Text>
+              <Text style={s.settingSubLabel}>Submit issue tickets or request administrator assistance</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── 6. Legal & Compliance ── */}
+        <View style={s.sectionHeaderWrap}>
+          <Text style={s.sectionHeaderTitle}>Legal</Text>
+        </View>
+        <View style={s.card}>
+          <TouchableOpacity style={s.settingRow} onPress={() => setShowLegalModal(true)}>
+            <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
+              <Ionicons name="document-text-outline" size={18} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingLabel}>{t('profile_legal', 'Privacy Policy & Terms (RA 10173)')}</Text>
+              <Text style={s.settingSubLabel}>Philippine Data Privacy Act compliance & rights</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── 7. Sign Out ── */}
         <TouchableOpacity style={s.signOutBtn} onPress={signOut}>
-          <Ionicons name="log-out-outline" size={18} color="#D9534F" />
+          <Ionicons name="log-out-outline" size={20} color="#DC2626" />
           <Text style={s.signOutText}>{t('profile_logout', 'Sign Out')}</Text>
         </TouchableOpacity>
 
-        <Text style={s.footerNote}>{t('profile_footer', 'v1.0.0 · HUGPONG Agricultural Platform\nData is encrypted and stored securely.')}</Text>
+        <Text style={s.footerNote}>
+          {t('profile_footer', 'v1.0.0 · HUGPONG Agricultural Platform\nData is encrypted and stored securely.')}
+        </Text>
       </ScrollView>
 
       {/* ── Support & Tickets Modal ── */}
-      <Modal visible={showTicketsModal} transparent animationType="slide">
-        <View style={s.ticketOverlay}>
-          <SafeAreaView style={s.ticketContainer}>
+      <Modal visible={showTicketsModal} animationType="slide" onRequestClose={() => setShowTicketsModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
             {/* Header */}
             <View style={s.ticketHeader}>
               <View style={{ flex: 1 }}>
@@ -566,13 +615,11 @@ export default function ProfileScreen({ navigation }) {
               )}
             </ScrollView>
           </SafeAreaView>
-        </View>
       </Modal>
 
       {/* ── Legal & Privacy Policy Modal (RA 10173) ── */}
-      <Modal visible={showLegalModal} transparent animationType="slide">
-        <View style={s.ticketOverlay}>
-          <SafeAreaView style={s.ticketContainer}>
+      <Modal visible={showLegalModal} animationType="slide" onRequestClose={() => setShowLegalModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
             {/* Header */}
             <View style={s.ticketHeader}>
               <View style={{ flex: 1 }}>
@@ -587,7 +634,7 @@ export default function ProfileScreen({ navigation }) {
             {/* Scrollable Content */}
             <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
               {/* SRA & DPA Notice Box */}
-              <View style={{ backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', borderRadius: RADIUS.md, padding: 12, gap: 6 }}>
+              <View style={{ backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#E8F5E8', borderRadius: RADIUS.md, padding: 12, gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Ionicons name="shield-checkmark" size={18} color={COLORS.primary} />
                   <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>Philippine Legal Governance</Text>
@@ -647,105 +694,112 @@ export default function ProfileScreen({ navigation }) {
               </TouchableOpacity>
             </ScrollView>
           </SafeAreaView>
-        </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  iconBtn: { padding: 8 },
-  scroll: { padding: SPACING.lg, gap: SPACING.md, paddingBottom: 16 },
-  card: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING.lg, ...SHADOW.card },
+  iconBtn: { padding: 8, minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' },
+  scroll: { padding: SPACING.md, gap: SPACING.md, paddingBottom: 24 },
+  card: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOW.card },
+
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FEF0D0',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+  },
+  offlineBannerText: { flex: 1, fontSize: 12, color: '#92400E', fontWeight: '600', lineHeight: 16 },
+
+  sectionHeaderWrap: { marginTop: 4, marginBottom: -4, paddingHorizontal: 4 },
+  sectionHeaderTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
 
   // Identity
-  identityCard: { flexDirection: 'row', alignItems: 'center', gap: SPACING.lg },
-  avatarWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
-  avatarText: { fontSize: 22, fontWeight: '800', color: '#fff' },
-  identityInfo: { flex: 1, gap: 4 },
-  identityName: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  identityCard: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
+  avatarWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  avatarText: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  identityInfo: { flex: 1, gap: 3 },
+  identityName: { fontSize: 18, fontWeight: '700', color: COLORS.text },
   roleBadge: { backgroundColor: COLORS.primaryBg, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3, alignSelf: 'flex-start' },
-  roleText: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
-  identityId: { fontSize: 11, color: COLORS.textMuted },
+  roleText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+  identityId: { fontSize: 12, color: COLORS.textMuted },
 
   // Info rows
-  cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: SPACING.md },
-  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.sm, paddingVertical: 10, borderTopWidth: 1, borderTopColor: COLORS.border },
-  infoLabel: { fontSize: 12, color: COLORS.textMuted, flex: 1, paddingRight: 8 },
+  cardSubTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.sm, paddingVertical: 10, minHeight: 44 },
+  infoLabel: { fontSize: 13, color: COLORS.textMuted, flex: 1, paddingRight: 8 },
   infoValue: { fontSize: 13, fontWeight: '600', color: COLORS.text, textAlign: 'right', flexShrink: 0 },
-  formInput: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 14, color: COLORS.text, backgroundColor: '#FAFAFA' },
 
-  // Sync
-  syncHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.md },
+  // Telemetry
+  syncHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm },
   syncStatusDot: { width: 10, height: 10, borderRadius: 5 },
-  syncStats: { flexDirection: 'row', backgroundColor: COLORS.background, borderRadius: RADIUS.md, padding: SPACING.md, marginBottom: SPACING.md },
-  syncStat: { flex: 1, alignItems: 'center', gap: 2 },
-  syncStatNum: { fontSize: 22, fontWeight: '800', color: COLORS.text },
-  syncStatLabel: { fontSize: 10, color: COLORS.textMuted },
-  syncStatDivider: { width: 1, backgroundColor: COLORS.border },
-  lastSyncText: { fontSize: 11, color: COLORS.textMuted, marginBottom: SPACING.md },
-  pendingTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 8 },
-  pendingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm, paddingVertical: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
-  pendingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.accent, marginTop: 4, flexShrink: 0 },
-  pendingBody: { flex: 1, gap: 1 },
-  pendingType: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary },
-  pendingDesc: { fontSize: 12, color: COLORS.text },
-  pendingTime: { fontSize: 10, color: COLORS.textMuted },
-  emptySyncState: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, backgroundColor: '#F2FBF2', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E8F5E8', marginTop: 4, marginBottom: SPACING.md },
-  emptySyncText: { fontSize: 13, fontWeight: '600', color: '#267326' },
-  syncBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 13, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: SPACING.md },
-  syncBtnDisabled: { opacity: 0.6 },
-  syncBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: SPACING.sm },
-  toggleLabel: { flex: 1, fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  telemetryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  telemetryLabel: { fontSize: 12, color: COLORS.textMuted },
+  telemetryValue: { fontSize: 13, fontWeight: '700' },
 
-  // Language
-  expandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  expandLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: COLORS.text },
-  expandCurrent: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
-  langRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderTopWidth: 1, borderTopColor: COLORS.border },
-  langLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  langSub: { fontSize: 11, color: COLORS.textMuted },
+  // Settings & Rows
+  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 48 },
+  settingIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  settingLabel: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
+  settingSubLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
 
-  // Settings
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: 11, borderTopWidth: 1, borderTopColor: COLORS.border },
-  settingIcon: { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  settingLabel: { flex: 1, fontSize: 14, color: COLORS.text, fontWeight: '500' },
+  // Language Dropdown
+  langDropdown: { marginTop: 4 },
+  langRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 46 },
+  langLabel: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  langSub: { fontSize: 12, color: COLORS.textMuted },
 
   // Sign Out
-  signOutBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#FFF0F0', borderRadius: RADIUS.md, paddingVertical: 14, borderWidth: 1, borderColor: '#FCCAC8' },
-  signOutText: { fontSize: 14, fontWeight: '700', color: '#D9534F' },
-  footerNote: { fontSize: 10, color: COLORS.textMuted, textAlign: 'center', lineHeight: 16 },
+  signOutBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF2F2',
+    borderRadius: RADIUS.md,
+    paddingVertical: 14,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    marginTop: 4
+  },
+  signOutText: { fontSize: 15, fontWeight: '700', color: '#DC2626' },
+  footerNote: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', lineHeight: 18, marginTop: 8 },
 
   // Tickets Modal Styles
   ticketOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   ticketContainer: { backgroundColor: '#fff', borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, maxHeight: '92%', height: '92%' },
   ticketHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  ticketTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },
-  ticketSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
-  ticketTabBtn: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.md, alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border },
+  ticketTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
+  ticketSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  ticketTabBtn: { flex: 1, paddingVertical: 10, minHeight: 44, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border },
   ticketTabBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  ticketTabText: { fontSize: 12, fontWeight: '700', color: COLORS.text },
+  ticketTabText: { fontSize: 13, fontWeight: '700', color: COLORS.text },
   ticketTabTextActive: { color: '#fff' },
-  formLabel: { fontSize: 12, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
-  categoryChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#F0F2EC', borderWidth: 1, borderColor: '#E2E6DC' },
+  formLabel: { fontSize: 13, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
+  categoryChip: { paddingHorizontal: 14, paddingVertical: 8, minHeight: 36, borderRadius: 18, backgroundColor: '#F0F2EC', borderWidth: 1, borderColor: '#E2E6DC', justifyContent: 'center', alignItems: 'center' },
   categoryChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  categoryChipText: { fontSize: 11, fontWeight: '600', color: COLORS.text },
+  categoryChipText: { fontSize: 12, fontWeight: '600', color: COLORS.text },
   categoryChipTextActive: { color: '#fff' },
-  priorityChip: { flex: 1, paddingVertical: 7, borderRadius: RADIUS.sm, alignItems: 'center', backgroundColor: '#F0F2EC', borderWidth: 1, borderColor: '#E2E6DC' },
+  priorityChip: { flex: 1, paddingVertical: 10, minHeight: 40, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F2EC', borderWidth: 1, borderColor: '#E2E6DC' },
   priorityChipActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  priorityChipText: { fontSize: 11, fontWeight: '700', color: COLORS.text },
+  priorityChipText: { fontSize: 12, fontWeight: '700', color: COLORS.text },
   priorityChipTextActive: { color: '#fff' },
-  ticketInput: { backgroundColor: '#F9FAF7', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.text },
-  ticketSubmitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: RADIUS.md, marginTop: 4, ...SHADOW.card },
-  ticketSubmitBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  ticketInput: { backgroundColor: '#F9FAF7', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: COLORS.text, minHeight: 44 },
+  ticketSubmitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 14, minHeight: 48, borderRadius: RADIUS.md, marginTop: 6, ...SHADOW.card },
+  ticketSubmitBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   ticketCard: { backgroundColor: '#fff', borderRadius: RADIUS.md, padding: SPACING.md, borderWidth: 1, borderColor: COLORS.border, gap: 4 },
-  ticketIdBadge: { backgroundColor: '#F0F2EC', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  ticketIdText: { fontSize: 10, fontWeight: '800', color: COLORS.textSecondary },
-  ticketStatusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  ticketStatusText: { fontSize: 10, fontWeight: '800' },
-  ticketCardTitle: { fontSize: 13, fontWeight: '800', color: COLORS.text, marginTop: 2 },
-  ticketCardDetails: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 16 },
+  ticketIdBadge: { backgroundColor: '#F0F2EC', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  ticketIdText: { fontSize: 11, fontWeight: '800', color: COLORS.textSecondary },
+  ticketStatusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  ticketStatusText: { fontSize: 11, fontWeight: '800' },
+  ticketCardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginTop: 2 },
+  ticketCardDetails: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
 });

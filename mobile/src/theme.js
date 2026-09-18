@@ -127,40 +127,48 @@ export const COLORS = {
 };
 
 // ── Typography Scale ────────────────────────────────────────────
-// Bold hierarchy for outdoor readability
+// Standardized hierarchy: readable for outdoor and 40+ users
+// Minimum metadata size: 12px; Body: 16px; Titles: 22-24px bold; Section: 18-20px semibold
 export const TYPE = {
-  // Display
-  displayLg: { fontSize: 34, fontWeight: '800', letterSpacing: -0.8, lineHeight: 40 },
-  displayMd: { fontSize: 28, fontWeight: '800', letterSpacing: -0.6, lineHeight: 34 },
-  displaySm: { fontSize: 22, fontWeight: '800', letterSpacing: -0.4, lineHeight: 28 },
+  // Screen and Section Titles
+  screenTitle:   { fontSize: 24, fontWeight: '700', lineHeight: 30, letterSpacing: -0.3 },
+  sectionTitle:  { fontSize: 18, fontWeight: '600', lineHeight: 24, letterSpacing: -0.2 },
+  importantValue:{ fontSize: 24, fontWeight: '700', lineHeight: 30 },
 
-  // Headings
-  h1: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3, lineHeight: 26 },
-  h2: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2, lineHeight: 22 },
-  h3: { fontSize: 15, fontWeight: '700', letterSpacing: -0.1, lineHeight: 20 },
+  // Body & Content
+  body:          { fontSize: 16, fontWeight: '400', lineHeight: 24 },
+  bodyLg:        { fontSize: 16, fontWeight: '400', lineHeight: 24 },
+  bodyMd:        { fontSize: 14, fontWeight: '400', lineHeight: 22 },
+  bodySm:        { fontSize: 13, fontWeight: '400', lineHeight: 20 },
 
-  // Body
-  bodyLg: { fontSize: 16, fontWeight: '400', lineHeight: 24 },
-  bodyMd: { fontSize: 14, fontWeight: '400', lineHeight: 22 },
-  bodySm: { fontSize: 13, fontWeight: '400', lineHeight: 20 },
+  // Forms & UI
+  formLabel:     { fontSize: 14, fontWeight: '500', lineHeight: 20 },
+  supporting:    { fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  metadata:      { fontSize: 12, fontWeight: '500', lineHeight: 16 },
 
-  // Labels & UI
-  labelLg: { fontSize: 14, fontWeight: '600', letterSpacing: 0.1 },
-  labelMd: { fontSize: 13, fontWeight: '600', letterSpacing: 0.1 },
-  labelSm: { fontSize: 12, fontWeight: '600', letterSpacing: 0.2 },
-  labelXs: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
+  // Backward compatible display / headings
+  displayLg:     { fontSize: 32, fontWeight: '700', letterSpacing: -0.6, lineHeight: 38 },
+  displayMd:     { fontSize: 26, fontWeight: '700', letterSpacing: -0.4, lineHeight: 32 },
+  displaySm:     { fontSize: 22, fontWeight: '700', letterSpacing: -0.3, lineHeight: 28 },
+  h1:            { fontSize: 20, fontWeight: '600', letterSpacing: -0.2, lineHeight: 26 },
+  h2:            { fontSize: 18, fontWeight: '600', letterSpacing: -0.1, lineHeight: 24 },
+  h3:            { fontSize: 16, fontWeight: '600', lineHeight: 22 },
 
-  // Caption
-  caption: { fontSize: 11, fontWeight: '400', lineHeight: 16 },
-  captionBold: { fontSize: 11, fontWeight: '700', lineHeight: 16 },
+  // Labels
+  labelLg:       { fontSize: 15, fontWeight: '500', letterSpacing: 0.1 },
+  labelMd:       { fontSize: 14, fontWeight: '500', letterSpacing: 0.1 },
+  labelSm:       { fontSize: 13, fontWeight: '500', letterSpacing: 0.1 },
+  labelXs:       { fontSize: 12, fontWeight: '500', letterSpacing: 0.2 },
 
-  // Overline / tag
-  overline: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  // Captions & Metadata (min 12px)
+  caption:       { fontSize: 12, fontWeight: '400', lineHeight: 16 },
+  captionBold:   { fontSize: 12, fontWeight: '600', lineHeight: 16 },
+  overline:      { fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
 
-  // Number / Data
-  dataXl: { fontSize: 36, fontWeight: '800', letterSpacing: -1 },
-  dataMd: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  dataSm: { fontSize: 18, fontWeight: '700', letterSpacing: -0.2 },
+  // Number / Data displays
+  dataXl:        { fontSize: 32, fontWeight: '700', letterSpacing: -0.5 },
+  dataMd:        { fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
+  dataSm:        { fontSize: 18, fontWeight: '700' },
 };
 
 // Keep FONTS for backward compat
@@ -172,17 +180,18 @@ export const FONTS = {
   extraBold: { fontWeight: '800' },
 };
 
-// ── Spacing — 8pt Grid ──────────────────────────────────────────
+// ── Spacing — 4px-based System ──────────────────────────────────
+// 4 / 8 / 12 / 16 / 20 / 24 / 32
 export const SPACING = {
-  xs:  4,   // 4px  — icon gap
-  sm:  8,   // 8px  — tight padding
-  md:  12,  // 12px — compact elements
-  lg:  16,  // 16px — standard padding (most common)
-  xl:  20,  // 20px — generous padding
-  xxl: 24,  // 24px — section gap
-  '3xl': 32,
+  xs:  4,   // 4px  — micro spacing / tight icon gap
+  sm:  8,   // 8px  — compact element padding / label gap
+  md:  12,  // 12px — compact rows / button gaps
+  lg:  16,  // 16px — standard screen padding & card gaps
+  xl:  20,  // 20px — generous section gap
+  xxl: 24,  // 24px — major section spacing
+  '3xl': 32,// 32px — header spacing
   '4xl': 40,
-  '5xl': 56,
+  '5xl': 48,
 };
 
 // ── Border Radii ─────────────────────────────────────────────────
@@ -203,25 +212,25 @@ export const SHADOW = {
   card: {
     shadowColor: PALETTE.forest900,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 2,
   },
   // Elevated — dropdown, active state
   raised: {
     shadowColor: PALETTE.forest900,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
   },
   // Floating — FAB, sheet handle, bottom nav
   float: {
     shadowColor: PALETTE.forest900,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
   },
   // Modal / overlay surfaces
   modal: {
@@ -234,11 +243,12 @@ export const SHADOW = {
 };
 
 // ── Touch / Hit-slop ─────────────────────────────────────────────
-// Large targets for outdoor/gloved-hand use
+// Minimum 44px targets for touch usability
 export const TOUCH = {
-  minHeight: 48,        // WCAG AA minimum
-  minWidth: 48,
-  farmSafe: 56,         // Larger for field use
+  minHeight: 44,        // Minimum touch target
+  minWidth: 44,
+  standard: 48,         // Standard form inputs & buttons
+  farmSafe: 52,         // Larger for outdoor/field use
   hitSlop: { top: 8, bottom: 8, left: 8, right: 8 },
 };
 
@@ -260,21 +270,98 @@ export const ANIM = {
   slide: { duration: 250 },
 };
 
+// ── Approved HUGPONG Analytics Palette ────────────────────────────
+// Consistent tonal green, sage, and neutral shades — NO random rainbow colors!
+export const ANALYTICS_PALETTE = {
+  // Agronomic Categories
+  prep:    PALETTE.forest700, // Land Preparation (Deep forest)
+  plant:   PALETTE.forest600, // Planting & Seedcane
+  fert:    PALETTE.forest500, // Basal Fertilization
+  weed:    PALETTE.sage500,   // Cultivation & Weeding (Sage/Olive)
+  maint:   PALETTE.forest400, // Maintenance & Hilling-Up
+  harvest: PALETTE.forest800, // Harvesting & Transport
+
+  // Stage Tones (1 to 6)
+  stage1:  PALETTE.forest700,
+  stage2:  PALETTE.forest600,
+  stage3:  PALETTE.forest500,
+  stage4:  PALETTE.sage500,
+  stage5:  PALETTE.forest400,
+  stage6:  PALETTE.forest800,
+
+  // Zero-value / Muted states
+  zeroMuted: PALETTE.neutral300,
+  zeroText:  PALETTE.neutral500,
+  zeroBg:    PALETTE.neutral100,
+};
+
 // ── Shared Component Tokens ───────────────────────────────────────
 // Pre-built style objects for commonly repeated patterns
 export const TOKEN = {
   // Card base
   card: {
     backgroundColor: PALETTE.white,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.md,
     padding: SPACING.lg,
-    ...{
-      shadowColor: PALETTE.forest900,
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.06,
-      shadowRadius: 6,
-      elevation: 2,
-    },
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    ...SHADOW.card,
+  },
+
+  // Standard Form Input
+  input: {
+    minHeight: 46,
+    backgroundColor: PALETTE.white,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACING.md,
+    fontSize: 15,
+    color: COLORS.text,
+  },
+
+  // Buttons
+  buttonPrimary: {
+    minHeight: 46,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  buttonSecondary: {
+    minHeight: 46,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryBg,
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryBorder,
+    paddingHorizontal: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  buttonDestructive: {
+    minHeight: 46,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.dangerBg,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    paddingHorizontal: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  buttonGhost: {
+    minHeight: 44,
+    paddingHorizontal: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
   },
 
   // Pill badge
@@ -304,8 +391,10 @@ export const TOKEN = {
   // Section header text
   sectionHeader: {
     fontSize: 14,
-    fontWeight: '700',
-    color: PALETTE.neutral900,
-    marginBottom: 12,
+    fontWeight: '600',
+    color: PALETTE.neutral800,
+    marginBottom: SPACING.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
 };

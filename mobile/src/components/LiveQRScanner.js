@@ -125,7 +125,7 @@ export default function LiveQRScanner({
             onPress={() => setTorch(!torch)}
             activeOpacity={0.7}
           >
-            <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={22} color={torch ? '#4ADE80' : '#FFF'} />
+            <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={22} color={torch ? '#267326' : '#FFF'} />
           </TouchableOpacity>
         </View>
 
@@ -210,7 +210,7 @@ export default function LiveQRScanner({
 
                   {scanned && (
                     <View style={styles.scannedOverlay}>
-                      <Ionicons name="checkmark-circle" size={56} color="#4ADE80" />
+                      <Ionicons name="checkmark-circle" size={56} color='#267326' />
                       <Text style={styles.scannedText}>QR Code Detected</Text>
                     </View>
                   )}
@@ -222,7 +222,7 @@ export default function LiveQRScanner({
               <View style={styles.overlayBottom}>
                 {/* Helper Banner */}
                 <View style={styles.helperPill}>
-                  <Ionicons name="scan-outline" size={16} color="#4ADE80" />
+                  <Ionicons name="scan-outline" size={16} color='#267326' />
                   <Text style={styles.helperText}>
                     Align the QR code within the frame to scan
                   </Text>
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   iconBtnActive: {
     backgroundColor: 'rgba(74, 222, 128, 0.25)',
     borderWidth: 1,
-    borderColor: '#4ADE80',
+    borderColor: '#267326',
   },
   headerTextCol: {
     flex: 1,
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
     borderRadius: 45,
     backgroundColor: 'rgba(74, 222, 128, 0.12)',
     borderWidth: 2,
-    borderColor: '#4ADE80',
+    borderColor: '#267326',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   manualEntryLinkText: {
-    color: '#4ADE80',
+    color: '#267326',
     fontSize: 13,
     fontWeight: '700',
     textDecorationLine: 'underline',
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 32,
     height: 32,
-    borderColor: '#4ADE80',
+    borderColor: '#267326',
     borderWidth: 4,
   },
   cornerTL: {
@@ -451,9 +451,9 @@ const styles = StyleSheet.create({
     left: 8,
     right: 8,
     height: 3,
-    backgroundColor: '#4ADE80',
+    backgroundColor: '#267326',
     borderRadius: 2,
-    shadowColor: '#4ADE80',
+    shadowColor: '#267326',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 6,

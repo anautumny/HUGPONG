@@ -596,7 +596,7 @@ const s = StyleSheet.create({
     gap: 10,
     backgroundColor: '#FFFBEB',
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: '#FEF0D0',
     padding: 12,
     borderRadius: RADIUS.md,
   },
@@ -629,7 +629,7 @@ const s = StyleSheet.create({
   },
   lockoutBanner: {
     backgroundColor: '#FFFBEB',
-    borderColor: '#FDE68A',
+    borderColor: '#FEF0D0',
   },
   lockoutBannerText: {
     color: '#B45309',
@@ -718,7 +718,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#FEF3C7',
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: '#FEF0D0',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 2,

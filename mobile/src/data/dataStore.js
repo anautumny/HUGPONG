@@ -2,7 +2,7 @@ import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage
 import { initSyncEngine, enqueueAndFlushMutation, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
 import { publishTerminalTelemetry } from '../services/telemetryService';
 import { db, auth } from '../firebase/config';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {

@@ -2,18 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Modal, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
+import { COLORS, SPACING, RADIUS, SHADOW, ANALYTICS_PALETTE } from '../theme';
 import { SRA_PRICE_HISTORY, currentPrice, currentMarketObservation, getMemberSyncHealth, subscribe, getCurrentSession, fields, operationLogs, blockFarms, resolveFieldBlockFarm, resolveFieldMember } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 
 // ── 6 SRA Growth Stages Definition ─────────────────────────────
 const SRA_GROWTH_STAGES = [
-  { key: 'stage-1', stageNum: 1, name: 'Soil & Land Prep', short: 'Land Prep', color: '#8F3A8F', icon: 'construct', days: '0–15 Days', ops: 'Ops 1–2', keywords: ['stage 1', 'pre-planting', 'prep', 'soil', 'land', 'furrow', 'plow', 'sampling'] },
-  { key: 'stage-2', stageNum: 2, name: 'Planting & Seeds', short: 'Planting', color: '#4A7C2F', icon: 'leaf', days: '15–30 Days', ops: 'Ops 3–4', keywords: ['stage 2', 'establishment', 'plant', 'patdan', 'seedcane', 'canepoint'] },
-  { key: 'stage-3', stageNum: 3, name: 'Basal Nutrition', short: 'Basal Fert', color: '#1A6B9A', icon: 'flask', days: '30–45 Days', ops: 'Ops 5–6', keywords: ['stage 3', 'nutrition', 'basal', 'dap', 'phosphate', 'fertiliz', 'abono', 'early care'] },
-  { key: 'stage-4', stageNum: 4, name: 'Weeding & Care', short: 'Cultivation', color: '#F5A623', icon: 'git-branch', days: '45–90 Days', ops: 'Ops 7, 10–11', keywords: ['stage 4', 'cultivation', 'weed', 'weeding', 'barring', 'off-barring'] },
-  { key: 'stage-5', stageNum: 5, name: 'Top-Dress Fert', short: 'Top-Dress', color: '#0284C7', icon: 'water', days: '90–120 Days', ops: 'Ops 8–9', keywords: ['stage 5', 'maintenance', 'hilling', 'pasandig', 'top-dress', 'top dress', '2nd dose', 'drainage'] },
-  { key: 'stage-6', stageNum: 6, name: 'Harvest & Milling', short: 'Harvesting', color: '#D9534F', icon: 'bus', days: '10–12 Mos', ops: 'Ops 12–14', keywords: ['stage 6', 'harvest', 'cutting', 'hauling', 'trucking', 'bull cart', 'milling', 'tapas', 'karga', 'transport'] },
+  { key: 'stage-1', stageNum: 1, name: 'Soil & Land Prep', short: 'Land Prep', color: ANALYTICS_PALETTE.stage1, icon: 'construct', days: '0–15 Days', ops: 'Ops 1–2', keywords: ['stage 1', 'pre-planting', 'prep', 'soil', 'land', 'furrow', 'plow', 'sampling'] },
+  { key: 'stage-2', stageNum: 2, name: 'Planting & Seeds', short: 'Planting', color: ANALYTICS_PALETTE.stage2, icon: 'leaf', days: '15–30 Days', ops: 'Ops 3–4', keywords: ['stage 2', 'establishment', 'plant', 'patdan', 'seedcane', 'canepoint'] },
+  { key: 'stage-3', stageNum: 3, name: 'Basal Nutrition', short: 'Basal Fert', color: ANALYTICS_PALETTE.stage3, icon: 'flask', days: '30–45 Days', ops: 'Ops 5–6', keywords: ['stage 3', 'nutrition', 'basal', 'dap', 'phosphate', 'fertiliz', 'abono', 'early care'] },
+  { key: 'stage-4', stageNum: 4, name: 'Weeding & Care', short: 'Cultivation', color: ANALYTICS_PALETTE.stage4, icon: 'git-branch', days: '45–90 Days', ops: 'Ops 7, 10–11', keywords: ['stage 4', 'cultivation', 'weed', 'weeding', 'barring', 'off-barring'] },
+  { key: 'stage-5', stageNum: 5, name: 'Top-Dress Fert', short: 'Top-Dress', color: ANALYTICS_PALETTE.stage5, icon: 'water', days: '90–120 Days', ops: 'Ops 8–9', keywords: ['stage 5', 'maintenance', 'hilling', 'pasandig', 'top-dress', 'top dress', '2nd dose', 'drainage'] },
+  { key: 'stage-6', stageNum: 6, name: 'Harvest & Milling', short: 'Harvesting', color: ANALYTICS_PALETTE.stage6, icon: 'bus', days: '10–12 Mos', ops: 'Ops 12–14', keywords: ['stage 6', 'harvest', 'cutting', 'hauling', 'trucking', 'bull cart', 'milling', 'tapas', 'karga', 'transport'] },
 ];
 
 export default function AnalyticsScreen({ navigation, route }) {
@@ -157,12 +157,12 @@ export default function AnalyticsScreen({ navigation, route }) {
       harvest: 'Harvesting & Transport'
     };
     const catColors = {
-      prep: '#8F3A8F',
-      plant: '#4A7C2F',
-      fert: '#1A6B9A',
-      weed: '#F5A623',
-      maint: '#0284C7',
-      harvest: '#D9534F'
+      prep: ANALYTICS_PALETTE.prep,
+      plant: ANALYTICS_PALETTE.plant,
+      fert: ANALYTICS_PALETTE.fert,
+      weed: ANALYTICS_PALETTE.weed,
+      maint: ANALYTICS_PALETTE.maint,
+      harvest: ANALYTICS_PALETTE.harvest
     };
 
     const sums = { prep: 0, plant: 0, fert: 0, weed: 0, maint: 0, harvest: 0 };
@@ -480,7 +480,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <>
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#DCFCE7' }]}>
+                      <View style={[s.twinIconBox, { backgroundColor: '#E8F5E8' }]}>
                         <Ionicons name="person" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>Selected Member</Text>
@@ -491,8 +491,8 @@ export default function AnalyticsScreen({ navigation, route }) {
 
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#E0F2FE' }]}>
-                        <Ionicons name="leaf" size={13} color="#0284C7" />
+                      <View style={[s.twinIconBox, { backgroundColor: COLORS.primaryBg }]}>
+                        <Ionicons name="leaf" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>Allocated Area</Text>
                     </View>
@@ -504,8 +504,8 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <>
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#F3E8FF' }]}>
-                        <Ionicons name="cube" size={13} color="#7C3AED" />
+                      <View style={[s.twinIconBox, { backgroundColor: COLORS.primaryBg }]}>
+                        <Ionicons name="cube" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>Managed Area</Text>
                     </View>
@@ -515,7 +515,7 @@ export default function AnalyticsScreen({ navigation, route }) {
 
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#DCFCE7' }]}>
+                      <View style={[s.twinIconBox, { backgroundColor: '#E8F5E8' }]}>
                         <Ionicons name="grid" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>Monitored Plots</Text>
@@ -528,7 +528,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <>
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#DCFCE7' }]}>
+                      <View style={[s.twinIconBox, { backgroundColor: '#E8F5E8' }]}>
                         <Ionicons name="grid" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>My Field Plots</Text>
@@ -539,8 +539,8 @@ export default function AnalyticsScreen({ navigation, route }) {
 
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#E0F2FE' }]}>
-                        <Ionicons name="map" size={13} color="#0284C7" />
+                      <View style={[s.twinIconBox, { backgroundColor: COLORS.primaryBg }]}>
+                        <Ionicons name="map" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>Cultivated Area</Text>
                     </View>
@@ -552,7 +552,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <>
                   <View style={s.twinCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={[s.twinIconBox, { backgroundColor: '#DCFCE7' }]}>
+                      <View style={[s.twinIconBox, { backgroundColor: '#E8F5E8' }]}>
                         <Ionicons name="location" size={13} color={COLORS.primary} />
                       </View>
                       <Text style={s.twinLabel}>My Plot</Text>
@@ -628,7 +628,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <TouchableOpacity 
                   onPress={() => setCycleFilter('all')}
                   activeOpacity={0.8}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFBEB', padding: 8, borderRadius: RADIUS.xs, marginVertical: 6, borderWidth: 1, borderColor: '#FDE68A' }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFBEB', padding: 8, borderRadius: RADIUS.xs, marginVertical: 6, borderWidth: 1, borderColor: '#FEF0D0' }}
                 >
                   <Ionicons name="information-circle" size={14} color="#B45309" />
                   <Text style={{ fontSize: 11, color: '#B45309', flex: 1 }}>
@@ -659,25 +659,30 @@ export default function AnalyticsScreen({ navigation, route }) {
                 </View>
               </View>
 
-              <View style={{ gap: 9 }}>
-                {categoryBreakdown.map(item => (
-                  <View key={item.key} style={{ gap: 4 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: item.color }} />
-                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: COLORS.text }}>{item.label}</Text>
+              <View style={{ gap: 8 }}>
+                {categoryBreakdown.map(item => {
+                  const isZero = !item.amount || item.amount === 0;
+                  return (
+                    <View key={item.key} style={{ gap: 4, opacity: isZero ? 0.6 : 1 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isZero ? COLORS.borderStrong : item.color }} />
+                          <Text style={{ fontSize: 13, fontWeight: isZero ? '400' : '600', color: isZero ? COLORS.textMuted : COLORS.text }}>{item.label}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ fontSize: 12, color: COLORS.textMuted }}>{item.count} {item.count === 1 ? 'op' : 'ops'}</Text>
+                          <Text style={{ fontSize: 13, fontWeight: isZero ? '500' : '700', color: isZero ? COLORS.textMuted : COLORS.text }}>
+                            ₱ {Number(item.amount || 0).toLocaleString()}
+                          </Text>
+                          <Text style={{ fontSize: 12, color: COLORS.textMuted }}>({item.costPct}%)</Text>
+                        </View>
                       </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={{ fontSize: 10, color: COLORS.textMuted }}>{item.count} {item.count === 1 ? 'op' : 'ops'}</Text>
-                        <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>₱ {Number(item.amount || 0).toLocaleString()}</Text>
-                        <Text style={{ fontSize: 10, fontWeight: '600', color: COLORS.textSecondary }}>({item.costPct}%)</Text>
+                      <View style={{ height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+                        <View style={{ height: '100%', width: `${Math.max(item.costPct, item.amount > 0 ? 4 : 0)}%`, backgroundColor: isZero ? 'transparent' : item.color, borderRadius: 3 }} />
                       </View>
                     </View>
-                    <View style={{ height: 5, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
-                      <View style={{ height: '100%', width: `${Math.max(item.costPct, item.amount > 0 ? 4 : 0)}%`, backgroundColor: item.color, borderRadius: 3 }} />
-                    </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
           </>
@@ -1455,7 +1460,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#DCFCE7',
+    backgroundColor: '#E8F5E8',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: RADIUS.full,
@@ -1547,7 +1552,7 @@ const s = StyleSheet.create({
     marginTop: 0.5
   },
   activePlotsPill: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: '#E8F5E8',
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: RADIUS.full,

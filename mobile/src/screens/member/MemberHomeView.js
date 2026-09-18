@@ -31,12 +31,12 @@ function MemberHomeView({
       </View>
 
       {!hasPlot ? (
-        <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+        <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FEF0D0' }]}>
           <View style={s.fieldCardHeader}>
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={[s.fieldId, { color: '#92400E' }]}>No Plot Allocated</Text>
-                <View style={[s.memberIdBadge, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
+                <View style={[s.memberIdBadge, { backgroundColor: '#FEF3C7', borderColor: '#FEF0D0' }]}>
                   <Text style={[s.memberIdBadgeText, { color: '#B45309' }]}>ID: {session?.employeeId || session?.contact || '—'}</Text>
                 </View>
               </View>
@@ -47,7 +47,7 @@ function MemberHomeView({
             </View>
           </View>
 
-          <View style={[s.stageBox, { backgroundColor: '#FFF', borderColor: '#FDE68A', borderWidth: 1 }]}>
+          <View style={[s.stageBox, { backgroundColor: '#FFF', borderColor: '#FEF0D0', borderWidth: 1 }]}>
             <Text style={[s.stageLabel, { color: '#B45309' }]}>Plot Allocation Status</Text>
             <Text style={[s.stageValue, { color: '#78350F' }]}>Awaiting Plot Assignment by Farm Manager</Text>
             <Text style={{ fontSize: 11, color: '#92400E', marginTop: 3, lineHeight: 15 }}>

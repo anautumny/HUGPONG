@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
+import { COLORS, SPACING, RADIUS, SHADOW, ANALYTICS_PALETTE } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
@@ -21,7 +21,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '1. Pre-Planting & Land Preparation',
     shortLabel: 'Pre-Planting & Land Prep',
     icon: 'construct',
-    color: '#8F3A8F',
+    color: ANALYTICS_PALETTE.stage1,
     month: 'Month 0–1',
     benchmarkCost: 12100,
     description: 'Soil sampling, mechanical tractor disc plowing, harrowing, and seedbed furrowing (tudling).',
@@ -33,7 +33,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '2. Planting & Crop Establishment',
     shortLabel: 'Planting & Establishment',
     icon: 'leaf',
-    color: '#4A7C2F',
+    color: ANALYTICS_PALETTE.stage2,
     month: 'Month 1–2',
     benchmarkCost: 20000,
     description: 'Cane points acquisition (patdan), hauling, selection, and furrow planting crew.',
@@ -45,7 +45,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '3. Early Vegetative & Cultivation',
     shortLabel: 'Early Vegetative',
     icon: 'flower',
-    color: '#1A6B9A',
+    color: ANALYTICS_PALETTE.stage3,
     month: 'Month 2–4',
     benchmarkCost: 11000,
     description: 'First dose fertilizing (Urea+DAP), inter-row cultivating, off-barring & herbicide application.',
@@ -57,7 +57,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '4. Peak Tillering & Grand Growth',
     shortLabel: 'Tillering & Grand Growth',
     icon: 'water',
-    color: '#F5A623',
+    color: ANALYTICS_PALETTE.stage4,
     month: 'Month 4–8',
     benchmarkCost: 14500,
     description: 'Final hilling-up (closing-in), full fertilizer side-dressing (MOP+Urea), and biological pest monitoring.',
@@ -69,7 +69,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '5. Maturation & Ripening',
     shortLabel: 'Maturation & Ripening',
     icon: 'sunny',
-    color: '#D9534F',
+    color: ANALYTICS_PALETTE.stage5,
     month: 'Month 9–11',
     benchmarkCost: 3500,
     description: 'Withholding irrigation, field drainage, pre-harvest Brix hand-refractometer sugar content sampling.',
@@ -81,7 +81,7 @@ const DEFAULT_GROWTH_STAGES = [
     label: '6. Harvesting & Ratoon Management',
     shortLabel: 'Harvesting & Ratoon',
     icon: 'bag-check',
-    color: '#2D5016',
+    color: ANALYTICS_PALETTE.stage6,
     month: 'Month 12',
     benchmarkCost: 34500,
     description: 'Cane cutting (tapas), field loading, HPCo hauling, trash blanketing or field stubble shaving.',
@@ -198,6 +198,9 @@ export default function PlannerScreen({ navigation }) {
   const [newOpRate, setNewOpRate] = useState('1000');
   const [selectedCatalogOp, setSelectedCatalogOp] = useState(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [isTransferringOps, setIsTransferringOps] = useState(false);
+  const [isLoadingPlanner, setIsLoadingPlanner] = useState(false);
+  const [plannerError, setPlannerError] = useState(null);
 
   // Modal: Add Child Item to a specific operation
   const [showAddChildModal, setShowAddChildModal] = useState(false);
@@ -661,6 +664,7 @@ export default function PlannerScreen({ navigation }) {
 
   // Send entire stage plan to Drafts
   const sendStagePlanToFieldOps = async () => {
+    if (isTransferringOps) return;
     if (area <= 0 || currentOperations.length === 0) {
       Alert.alert('Required', 'Please ensure land area and at least one operation are configured.');
       return;
@@ -669,32 +673,39 @@ export default function PlannerScreen({ navigation }) {
     const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
     const executeSendAll = async (isSupplemental) => {
-      const targetFieldId = (selectedField?.id || '').trim().toUpperCase();
-      const createdIds = [];
-      currentOperations.forEach(op => {
-        const d = createDraftLogForOp(op, isSupplemental);
-        createdIds.push(d.id);
-      });
-      await saveDraftLogs();
+      setIsTransferringOps(true);
+      try {
+        const targetFieldId = (selectedField?.id || '').trim().toUpperCase();
+        const createdIds = [];
+        currentOperations.forEach(op => {
+          const d = createDraftLogForOp(op, isSupplemental);
+          createdIds.push(d.id);
+        });
+        await saveDraftLogs();
 
-      const subtitle = isSupplemental
-        ? `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as SUPPLEMENTAL Drafts. Field stage progression will be preserved.`
-        : `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as Draft Logs to Field Operations.`;
+        const subtitle = isSupplemental
+          ? `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as SUPPLEMENTAL Drafts. Field stage progression will be preserved.`
+          : `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as Draft Logs to Field Operations.`;
 
-      Alert.alert(
-        isSupplemental ? 'Supplemental Stage Plan Saved!' : 'Stage Plan Saved to Drafts!',
-        subtitle,
-        [
-          { text: 'Keep Planning', style: 'cancel' },
-          { 
-            text: 'Go to Drafts', 
-            onPress: () => navigation && navigation.navigate('Field Ops', { 
-              screen: 'SchedMain', 
-              params: { openDrafts: true, initialTab: 'drafts', highlightDraftIds: createdIds, fieldId: targetFieldId } 
-            }) 
-          }
-        ]
-      );
+        Alert.alert(
+          isSupplemental ? 'Supplemental Stage Plan Saved!' : 'Stage Plan Saved to Drafts!',
+          subtitle,
+          [
+            { text: 'Keep Planning', style: 'cancel' },
+            { 
+              text: 'Go to Drafts', 
+              onPress: () => navigation && navigation.navigate('Field Ops', { 
+                screen: 'SchedMain', 
+                params: { openDrafts: true, initialTab: 'drafts', highlightDraftIds: createdIds, fieldId: targetFieldId } 
+              }) 
+            }
+          ]
+        );
+      } catch (err) {
+        Alert.alert('Transfer Failed', err?.message || 'Failed to save stage operations to drafts.');
+      } finally {
+        setIsTransferringOps(false);
+      }
     };
 
     if (isStageDone) {
@@ -858,8 +869,8 @@ export default function PlannerScreen({ navigation }) {
               <Text style={s.sectionLabel}>{t('select_stage_to_open', 'Select Growth Stage to Open (Stages 1–6)')}</Text>
             </View>
 
-            {/* ── 6 STAGE CARDS GRID/LIST ── */}
-            <View style={{ gap: 10 }}>
+            {/* ── 6 STAGE COMPACT GROUPED LIST ── */}
+            <View style={{ gap: 8 }}>
               {DEFAULT_GROWTH_STAGES.map(stg => {
                 const stgOps = stageOperationsMap[stg.stageNum] || [];
                 const stgCost = computeStageCost(stg.stageNum);
@@ -869,52 +880,54 @@ export default function PlannerScreen({ navigation }) {
                 return (
                   <TouchableOpacity
                     key={stg.key}
-                    style={[
-                      s.stageChoiceCard,
-                      isFieldActive && { borderColor: COLORS.primary },
-                      isFieldCompleted && !isFieldActive && { borderColor: '#86EFAC', backgroundColor: '#FAFCF8' }
-                    ]}
+                    style={{
+                      backgroundColor: '#fff',
+                      borderRadius: RADIUS.md,
+                      borderWidth: 1,
+                      borderColor: isFieldActive ? COLORS.primary : (isFieldCompleted ? '#C0D9A8' : COLORS.border),
+                      padding: 12,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      ...SHADOW.card
+                    }}
                     onPress={() => setActiveStageNum(stg.stageNum)}
                     activeOpacity={0.8}
                   >
-                    <View style={s.stageChoiceTop}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, flexShrink: 1 }}>
-                        <View style={[s.stageNumBadge, { backgroundColor: stg.color }]}>
-                          <Text style={s.stageNumText}>{stg.stageNum}</Text>
-                        </View>
-                        <View style={{ flex: 1, flexShrink: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text style={s.stageChoiceTitle} numberOfLines={2}>
-                              {formatStageName ? formatStageName(stg.label, false) : (t(`stage_${stg.stageNum}_short`, stg.shortLabel))}
-                            </Text>
-                            {isFieldActive && (
-                              <View style={s.currentStagePill}>
-                                <Text style={s.currentStagePillText}>{t('current_badge', 'Current')}</Text>
-                              </View>
-                            )}
-                            {isFieldCompleted && !isFieldActive && (
-                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                                <Ionicons name="checkmark-circle" size={10} color="#16A34A" />
-                                <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#16A34A' }}>Completed</Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={s.stageChoiceTimeline}>
-                            {formatPhaseMonth ? formatPhaseMonth(stg.month) : stg.month} · {stgOps.length} {stgOps.length === 1 ? t('operations_count_singular', 'Operation') : t('operations_count_plural', 'Operations')}
-                          </Text>
-                        </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: stg.color, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>{stg.stageNum}</Text>
                       </View>
-
-                      <View style={{ alignItems: 'flex-end', marginLeft: 8, flexShrink: 0 }}>
-                        <Text style={s.stageChoicePrice}>₱ {fmt(Math.round(stgCost))}</Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <Text style={{ fontSize: 14.5, fontWeight: '600', color: COLORS.text }}>
+                            {formatStageName ? formatStageName(stg.label, false) : (t(`stage_${stg.stageNum}_short`, stg.shortLabel))}
+                          </Text>
+                          {isFieldActive && (
+                            <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.primaryBorder }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>Current</Text>
+                            </View>
+                          )}
+                          {isFieldCompleted && !isFieldActive && (
+                            <View style={{ backgroundColor: '#E8F5E8', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#C0D9A8', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                              <Ionicons name="checkmark-circle" size={10} color="#16A34A" />
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>Done</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                          {formatPhaseMonth ? formatPhaseMonth(stg.month) : stg.month} · {stgOps.length} {stgOps.length === 1 ? 'Op' : 'Ops'}
+                        </Text>
                       </View>
                     </View>
 
-                    <Text style={s.stageChoiceDesc} numberOfLines={2}>{t(`stage_${stg.stageNum}_desc`, stg.description)}</Text>
-
-                    <View style={s.stageChoiceFooter}>
-                      <Text style={[s.openStageText, { color: stg.color }]}>{t('open_stage_plan', 'Open Stage Plan')}</Text>
-                      <Ionicons name="arrow-forward-circle" size={18} color={stg.color} />
+                    <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.text }}>₱ {fmt(Math.round(stgCost))}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.primary }}>Inspect</Text>
+                        <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
+                      </View>
                     </View>
                   </TouchableOpacity>
                 );
@@ -968,7 +981,7 @@ export default function PlannerScreen({ navigation }) {
                     style={[
                       s.quickStageChip,
                       isSelected && { backgroundColor: stg.color, borderColor: stg.color },
-                      isDone && !isSelected && { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }
+                      isDone && !isSelected && { borderColor: '#C0D9A8', backgroundColor: '#F0FDF4' }
                     ]}
                     onPress={() => setActiveStageNum(stg.stageNum)}
                     activeOpacity={0.75}
@@ -988,7 +1001,7 @@ export default function PlannerScreen({ navigation }) {
             {/* Active Stage Banner Card */}
             <View style={[
               s.activeStageBanner,
-              isStageCompletedInField(currentStage.stageNum) && { borderColor: '#A7F3D0', backgroundColor: '#F0FDF4' }
+              isStageCompletedInField(currentStage.stageNum) && { borderColor: '#C0D9A8', backgroundColor: '#F0FDF4' }
             ]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -999,7 +1012,7 @@ export default function PlannerScreen({ navigation }) {
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {isStageCompletedInField(currentStage.stageNum) && (
-                    <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#86EFAC', flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <View style={{ backgroundColor: '#E8F5E8', paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#C0D9A8', flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
                       <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>Completed in Field</Text>
                     </View>
@@ -1014,7 +1027,7 @@ export default function PlannerScreen({ navigation }) {
               <Text style={s.activeStageDesc}>{t(`stage_${currentStage.stageNum}_desc`, currentStage.description)}</Text>
 
               {isStageCompletedInField(currentStage.stageNum) && (
-                <View style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#FEF3C7', borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FDE68A', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#FEF3C7', borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FEF0D0', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Ionicons name="information-circle" size={14} color="#92400E" />
                   <Text style={{ fontSize: 11, color: '#92400E', fontWeight: '700', flex: 1 }}>
                     Plot has progressed past this stage. Any operation sent to Field Ops will be recorded as a Supplemental Entry to protect active field progress.
@@ -1261,9 +1274,23 @@ export default function PlannerScreen({ navigation }) {
 
             {/* Stage Action Buttons */}
             <View style={{ gap: 10 }}>
-              <TouchableOpacity style={s.sendDraftBtn} onPress={sendStagePlanToFieldOps} activeOpacity={0.85}>
-                <Ionicons name="paper-plane" size={18} color="#fff" />
-                <Text style={s.sendDraftBtnText} numberOfLines={1} adjustsFontSizeToFit>{t('send_all_ops_btn', 'TRANSFER ALL STAGE OPERATIONS TO DRAFTS')}</Text>
+              <TouchableOpacity
+                style={[s.sendDraftBtn, isTransferringOps && { opacity: 0.7 }]}
+                onPress={sendStagePlanToFieldOps}
+                disabled={isTransferringOps}
+                activeOpacity={0.85}
+              >
+                {isTransferringOps ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={s.sendDraftBtnText}>Transferring to Drafts...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="paper-plane" size={18} color="#fff" />
+                    <Text style={s.sendDraftBtnText} numberOfLines={1} adjustsFontSizeToFit>{t('send_all_ops_btn', 'Transfer All Stage Operations to Drafts')}</Text>
+                  </>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1297,10 +1324,9 @@ export default function PlannerScreen({ navigation }) {
       </ScrollView>
 
       {/* ── Modal: Add Operation to Stage ── */}
-      <Modal visible={showAddOpModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalSheet}>
-            <View style={s.modalHeader}>
+      <Modal visible={showAddOpModal} animationType="slide" onRequestClose={() => setShowAddOpModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <Text style={s.modalTitle}>{t('add_op_modal_title', 'Add Operation to Stage')} {currentStage?.stageNum || ''}</Text>
               <TouchableOpacity onPress={() => setShowAddOpModal(false)}>
                 <Ionicons name="close" size={22} color={COLORS.text} />
@@ -1410,15 +1436,13 @@ export default function PlannerScreen({ navigation }) {
                 <Text style={s.submitBtnText}>{t('add_op_submit_btn', 'Add Operation to Stage')} {currentStage?.stageNum || ''}</Text>
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ── Modal: Add Child Item to Operation ── */}
-      <Modal visible={showAddChildModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalSheet}>
-            <View style={s.modalHeader}>
+      <Modal visible={showAddChildModal} animationType="slide" onRequestClose={() => setShowAddChildModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <Text style={s.modalTitle}>{t('add_child_modal_title', 'Add Material or Labor to Operation')}</Text>
               <TouchableOpacity onPress={() => setShowAddChildModal(false)}>
                 <Ionicons name="close" size={22} color={COLORS.text} />
@@ -1528,15 +1552,13 @@ export default function PlannerScreen({ navigation }) {
                 <Text style={s.submitBtnText}>Add to Operation</Text>
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* Field Picker Modal with Search */}
-      <Modal visible={showFieldPickerModal} animationType="slide" transparent onRequestClose={() => setShowFieldPickerModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={[s.modalSheet, { height: '80%', maxHeight: '80%' }]}>
-            <View style={s.modalHeader}>
+      <Modal visible={showFieldPickerModal} animationType="slide" onRequestClose={() => setShowFieldPickerModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <View>
                 <Text style={s.modalTitle}>Select Farm Plot to Plan</Text>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Choose any block farm field to customize its crop cycle</Text>
@@ -1653,8 +1675,7 @@ export default function PlannerScreen({ navigation }) {
                 </>
               );
             })()}
-          </View>
-        </View>
+        </SafeAreaView>
       </Modal>
 
     </SafeAreaView>

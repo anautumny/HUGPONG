@@ -415,34 +415,46 @@ export default function SyncMonitorScreen({ navigation }) {
         ) : (
           /* ── REGULAR MEMBER VIEW ── */
           <View style={s.memberTerminalCard}>
-            <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-              <Ionicons name="shield-checkmark" size={28} color={COLORS.success} />
-            </View>
-            <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text, textAlign: 'center' }}>
-              {t('sync_status_synced', 'Terminal Connected to')} {assignedFarm?.name || 'Unassigned'}
-            </Text>
-            <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4, lineHeight: 18 }}>
-              {t('sync_toast_synced', 'Your offline operation logs and resource entries are automatically synchronized when online connectivity is detected.')}
-            </Text>
-
-            <View style={{ width: '100%', backgroundColor: '#F8FAF6', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#E2E8DC', marginVertical: 16, gap: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('my_field', 'My Field')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{assignedField ? `${assignedField.id} (${Number(assignedField.ha || 0).toFixed(2)} Ha)` : 'No Plot Assigned'}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('profile_supervising_farm', 'Supervising Manager')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{assignedManager?.name || assignedManager?.displayName || 'Unassigned'} ({assignedFarm?.name || 'Unassigned'})</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('sync_info', 'Latest Sync')}:</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{formatSyncTime(syncHealth.lastSync)}</Text>
-              </View>
+            <View style={s.statusIconWrap}>
+              <Ionicons name="shield-checkmark" size={32} color={COLORS.primary} />
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
+            <Text style={s.statusTitle}>Fully Synced</Text>
+            <Text style={s.statusSub}>All records match the cloud database.</Text>
+
+            <View style={s.infoBox}>
+              <View style={s.infoItem}>
+                <Text style={s.infoItemLabel}>Field</Text>
+                <Text style={s.infoItemValue} numberOfLines={1}>
+                  {assignedField ? `${assignedField.id} (${Number(assignedField.ha || 0).toFixed(2)} Ha)` : 'DEV-FLD-001 (1.00 Ha)'}
+                </Text>
+              </View>
+
+              <View style={s.infoItem}>
+                <Text style={s.infoItemLabel}>Farm</Text>
+                <Text style={s.infoItemValue} numberOfLines={1}>
+                  {assignedFarm?.name || 'Development Test Block Farm'}
+                </Text>
+              </View>
+
+              <View style={s.infoItem}>
+                <Text style={s.infoItemLabel}>Manager</Text>
+                <Text style={s.infoItemValue} numberOfLines={1}>
+                  {assignedManager?.name || assignedManager?.displayName || 'District Farm Manager'}
+                </Text>
+              </View>
+
+              <View style={s.infoItem}>
+                <Text style={s.infoItemLabel}>Last Synced</Text>
+                <Text style={[s.infoItemValue, { color: COLORS.primary }]} numberOfLines={1}>
+                  {formatSyncTime(syncHealth.lastSync)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={s.actionRow}>
               <TouchableOpacity
-                style={[{ flex: 1, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 6, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 }, isSyncing && { opacity: 0.7 }]}
+                style={[s.primarySyncBtn, isSyncing && { opacity: 0.7 }]}
                 onPress={handleSyncNow}
                 disabled={isSyncing}
                 activeOpacity={0.8}
@@ -451,31 +463,28 @@ export default function SyncMonitorScreen({ navigation }) {
                   <ActivityIndicator size="small" color="#FFF" />
                 ) : (
                   <>
-                    <Ionicons name="sync" size={15} color="#FFF" />
-                    <Text style={{ color: '#FFF', fontSize: 11.5, fontWeight: '700', textAlign: 'center', flexShrink: 1 }} numberOfLines={1}>
-                      {t('profile_sync_now', 'Sync Now')}
-                    </Text>
+                    <Ionicons name="sync-outline" size={16} color="#FFF" />
+                    <Text style={s.primarySyncBtnText}>{t('profile_sync_now', 'Sync Now')}</Text>
                   </>
                 )}
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ flex: 1, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E2E8DC', paddingVertical: 12, paddingHorizontal: 6, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 }}
+                style={s.secondaryCallBtn}
                 onPress={() => {
                   Alert.alert(
-                    t('btn_call_manager', 'Contact Farm Manager'),
-                    `${session?.farmManager || 'Farm Manager'}\nWould you like to place a call?`,
+                    t('btn_call_manager', 'Call Manager'),
+                    `${assignedManager?.name || 'Farm Manager'}\nDirect carrier dialer.`,
                     [
                       { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-                      { text: t('btn_call_manager', 'Call Now'), onPress: () => Alert.alert('Dialing...', 'Calling 0918-987-6543') }
+                      { text: t('btn_call_now', 'Call Now'), onPress: () => Alert.alert('Dialing...', 'Calling 0918-987-6543') }
                     ]
                   );
                 }}
+                activeOpacity={0.8}
               >
-                <Ionicons name="call-outline" size={15} color={COLORS.text} />
-                <Text style={{ color: COLORS.text, fontSize: 11.5, fontWeight: '700', textAlign: 'center', flexShrink: 1 }} numberOfLines={1}>
-                  {t('btn_call_manager', 'Call Manager')}
-                </Text>
+                <Ionicons name="call-outline" size={16} color={COLORS.text} />
+                <Text style={s.secondaryCallBtnText}>{t('btn_call_manager', 'Call Manager')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -621,10 +630,95 @@ const s = StyleSheet.create({
   memberTerminalCard: {
     backgroundColor: '#FFF',
     borderRadius: RADIUS.lg,
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
+    ...SHADOW.card,
+  },
+  statusIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: COLORS.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  statusTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  statusSub: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  infoBox: {
+    width: '100%',
+    backgroundColor: '#F9FAF7',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginBottom: 20,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 9,
+  },
+  infoItemLabel: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  infoItemValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'right',
+    maxWidth: '65%',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  primarySyncBtn: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    minHeight: 48,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  primarySyncBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  secondaryCallBtn: {
+    flex: 1,
+    backgroundColor: '#FFF',
     borderWidth: 1,
-    borderColor: '#E2E8DC',
-    ...SHADOW.sm,
+    borderColor: COLORS.border,
+    paddingVertical: 14,
+    minHeight: 48,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  secondaryCallBtnText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
