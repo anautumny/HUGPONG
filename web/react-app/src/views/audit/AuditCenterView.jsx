@@ -142,14 +142,14 @@ export default function AuditCenterView() {
   };
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full pb-10">
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full pb-12">
       {/* Toast Notification */}
       {toastMessage && (
         <div
           role="status"
           className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-xl text-xs font-semibold flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-bottom-3 ${
             toastMessage.type === 'success'
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-success text-white'
               : toastMessage.type === 'error'
               ? 'bg-danger text-white'
               : 'bg-hug-text text-white dark:bg-surface dark:text-hug-text border border-border'

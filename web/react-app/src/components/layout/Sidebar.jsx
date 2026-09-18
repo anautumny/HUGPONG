@@ -34,7 +34,7 @@ export default function Sidebar({
   onCloseMobileDrawer = () => {}
 }) {
   const { user, roleKey, logout } = useAuth();
-  const { theme, setTheme, isDark } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -47,9 +47,29 @@ export default function Sidebar({
         setIsUserMenuOpen(false);
       }
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    if (isUserMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isUserMenuOpen]);
+
+  // Close user popover on Escape key
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setIsUserMenuOpen(false);
+      }
+    }
+    if (isUserMenuOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isUserMenuOpen]);
+
+  // Close user popover on route change
+  useEffect(() => {
+    setIsUserMenuOpen(false);
+  }, [location.pathname]);
 
   // Close mobile drawer on navigation
   const handleNavClick = () => {
@@ -245,13 +265,17 @@ export default function Sidebar({
     <aside
       id="sidebar"
       className={`${
-        collapsed ? 'w-18' : 'w-64'
-      } bg-surface border-r border-border flex-shrink-0 flex flex-col h-full overflow-hidden transition-all duration-200 z-30 select-none`}
+        collapsed ? 'w-16' : 'w-64'
+      } bg-surface border-r border-border flex-shrink-0 flex flex-col h-full overflow-visible transition-all duration-200 z-30 select-none relative`}
       aria-label="Main Navigation"
     >
-      {/* Brand Header (Aligned to h-16 shared header height) */}
-      <div className="h-16 flex items-center justify-between px-4 sm:px-5 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      {/* Brand Header (Aligned to h-16 shared header height, centered when collapsed) */}
+      <div
+        className={`h-16 flex items-center border-b border-border flex-shrink-0 ${
+          collapsed ? 'justify-center px-0' : 'justify-between px-4 sm:px-5'
+        }`}
+      >
+        <div className={`flex items-center gap-3 ${collapsed ? 'justify-center w-full' : 'min-w-0'}`}>
           <div
             className="brand-logo-box w-10 h-10 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center flex-shrink-0 shadow-xs"
             title="HUGPONG Official Emblem"
@@ -296,9 +320,9 @@ export default function Sidebar({
       </div>
 
       {/* Navigation Links (Scrollable) */}
-      <nav className="flex-1 p-2 flex flex-col gap-0.5 overflow-y-auto overflow-x-hidden focus:outline-none">
+      <nav className={`flex-1 ${collapsed ? 'p-2' : 'p-2'} flex flex-col ${collapsed ? 'gap-1.5' : 'gap-0.5'} overflow-y-auto overflow-x-hidden focus:outline-none`}>
         {navSections.map((section, idx) => (
-          <div key={section.header || idx} className="flex flex-col gap-0.5">
+          <div key={section.header || idx} className="flex flex-col gap-1">
             {!collapsed ? (
               <span className="text-hug-muted text-[10px] font-bold uppercase tracking-wider px-3 pt-3 pb-1">
                 {section.header}
@@ -318,11 +342,13 @@ export default function Sidebar({
                   title={collapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     `nav-item flex items-center ${
-                      collapsed ? 'justify-center px-2' : 'gap-2.5 px-3'
-                    } py-2.5 rounded-lg text-sm transition-colors text-left cursor-pointer ${
+                      collapsed
+                        ? 'w-10 h-10 mx-auto justify-center'
+                        : 'gap-2.5 px-3 py-2.5 w-full'
+                    } rounded-xl text-sm transition-colors text-left cursor-pointer ${
                       isActive
-                        ? 'bg-primary-bg text-primary font-semibold border-l-4 border-primary'
-                        : 'text-hug-text2 hover:bg-surface-subtle hover:text-primary font-medium'
+                        ? 'bg-surface-subtle dark:bg-surface-elevated text-hug-text font-semibold border border-border/80 shadow-2xs'
+                        : 'text-hug-muted hover:text-hug-text hover:bg-surface-subtle/80 font-medium border border-transparent'
                     }`
                   }
                   end={item.to === '/dashboard'}
@@ -341,7 +367,7 @@ export default function Sidebar({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="p-2 rounded-lg text-hug-muted hover:text-primary hover:bg-surface-subtle transition-colors"
+              className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl text-hug-muted hover:text-hug-text hover:bg-surface-subtle transition-colors cursor-pointer border border-transparent hover:border-border/60"
               title="Expand sidebar"
               aria-label="Expand sidebar"
             >
@@ -357,7 +383,11 @@ export default function Sidebar({
         {isUserMenuOpen && (
           <div
             id="user-profile-popover"
-            className="absolute bottom-full left-2 right-2 mb-2 bg-surface rounded-2xl border border-border shadow-xl p-2 flex flex-col gap-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150"
+            className={
+              collapsed
+                ? 'absolute left-full bottom-0 w-64 bg-surface border border-l-0 border-border rounded-r-2xl shadow-2xl p-2.5 flex flex-col gap-1 z-50 animate-in fade-in slide-in-from-left-2 duration-150'
+                : 'absolute bottom-full left-0 right-0 mb-0 bg-surface border-t border-border rounded-t-2xl shadow-xl p-2.5 flex flex-col gap-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150'
+            }
             role="menu"
             aria-label="User Account Options"
           >
@@ -397,7 +427,7 @@ export default function Sidebar({
             <div className="px-2 py-1.5 bg-surface-subtle rounded-xl border border-border/60">
               <div className="flex items-center justify-between mb-1 px-0.5">
                 <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Appearance</span>
-                <span className="text-[10px] font-semibold text-primary capitalize">{theme}</span>
+                <span className="text-[10px] font-semibold text-hug-text capitalize">{theme}</span>
               </div>
               <div className="grid grid-cols-3 gap-1">
                 <button
@@ -405,7 +435,7 @@ export default function Sidebar({
                   onClick={() => setTheme('light')}
                   className={`flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
                     theme === 'light'
-                      ? 'bg-surface text-primary shadow-2xs font-bold border border-border/80'
+                      ? 'bg-surface text-hug-text shadow-2xs font-bold border border-border/80'
                       : 'text-hug-muted hover:text-hug-text'
                   }`}
                   title="Light Mode"
@@ -418,7 +448,7 @@ export default function Sidebar({
                   onClick={() => setTheme('dark')}
                   className={`flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
                     theme === 'dark'
-                      ? 'bg-surface text-primary shadow-2xs font-bold border border-border/80'
+                      ? 'bg-surface text-hug-text shadow-2xs font-bold border border-border/80'
                       : 'text-hug-muted hover:text-hug-text'
                   }`}
                   title="Dark Mode"
@@ -431,7 +461,7 @@ export default function Sidebar({
                   onClick={() => setTheme('system')}
                   className={`flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
                     theme === 'system'
-                      ? 'bg-surface text-primary shadow-2xs font-bold border border-border/80'
+                      ? 'bg-surface text-hug-text shadow-2xs font-bold border border-border/80'
                       : 'text-hug-muted hover:text-hug-text'
                   }`}
                   title="System Preference"
@@ -443,9 +473,14 @@ export default function Sidebar({
             </div>
 
             {/* Privacy Policy Link */}
-            <a
-              href="/privacy"
-              onClick={handleNavClick}
+            <button
+              type="button"
+              id="popover-privacy"
+              onClick={() => {
+                setIsUserMenuOpen(false);
+                handleNavClick();
+                navigate('/privacy');
+              }}
               className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-medium text-hug-text hover:bg-surface-subtle hover:text-primary transition-colors cursor-pointer text-left"
               role="menuitem"
             >
@@ -454,13 +489,14 @@ export default function Sidebar({
                 <span>Privacy &amp; Compliance</span>
               </span>
               <span className="text-[10px] text-hug-muted">RA 10173</span>
-            </a>
+            </button>
 
             <div className="h-px bg-border/60 my-0.5" />
 
             {/* Sign Out Button (Restrained Red) */}
             <button
               type="button"
+              id="popover-signout"
               onClick={async () => {
                 setIsUserMenuOpen(false);
                 await logout();
@@ -478,15 +514,18 @@ export default function Sidebar({
         {/* Trigger Card (Bottom of Sidebar) */}
         <button
           type="button"
+          id="sidebar-profile-trigger"
           onClick={() => setIsUserMenuOpen(prev => !prev)}
-          className={`w-full flex items-center ${
-            collapsed ? 'justify-center p-1' : 'justify-between px-2 py-1.5'
+          className={`flex items-center ${
+            collapsed
+              ? 'w-10 h-10 mx-auto justify-center p-0'
+              : 'w-full justify-between px-2 py-1.5'
           } rounded-xl hover:bg-surface-subtle transition-colors cursor-pointer text-left group`}
           aria-haspopup="menu"
           aria-expanded={isUserMenuOpen}
           title={collapsed ? `${userName} (${roleDisplay})` : 'Open User Menu'}
         >
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2.5 min-w-0 flex-1'}`}>
             {/* Neutral Avatar Surface with Forest-Green Accent */}
             <div
               id="sidebar-admin-avatar"

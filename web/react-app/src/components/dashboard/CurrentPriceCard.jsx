@@ -43,15 +43,25 @@ export default function CurrentPriceCard({
         </div>
 
         {showPublishAction && (
-          <div className="pt-3 mt-4 border-t border-border/60 flex items-center justify-between">
+          <div className="pt-3 mt-4 border-t border-border/60 flex items-center justify-between gap-2">
             <span className="text-[11px] text-hug-muted font-medium">SRA Authority</span>
-            <Link
-              to="/prices"
-              className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1"
-            >
-              <span>Manage SRA Prices</span>
-              <span aria-hidden="true">&rarr;</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              {onPublishClick && (
+                <button
+                  type="button"
+                  onClick={onPublishClick}
+                  className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Post Official SRA Price</span>
+                </button>
+              )}
+              <Link
+                to="/prices"
+                className="text-xs font-semibold text-hug-muted hover:text-hug-text inline-flex items-center gap-1"
+              >
+                <span>Price Ledger &rarr;</span>
+              </Link>
+            </div>
           </div>
         )}
       </div>
@@ -171,15 +181,25 @@ export default function CurrentPriceCard({
 
       {/* SRA Admin Action Link */}
       {showPublishAction && (
-        <div className="pt-3 mt-4 border-t border-border/60 flex items-center justify-between">
+        <div className="pt-3 mt-4 border-t border-border/60 flex items-center justify-between gap-2">
           <span className="text-[11px] text-hug-muted font-medium">SRA Authority</span>
-          <Link
-            to="/prices"
-            className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1"
-          >
-            <span>Manage SRA Prices</span>
-            <span aria-hidden="true">&rarr;</span>
-          </Link>
+          <div className="flex items-center gap-3">
+            {onPublishClick && (
+              <button
+                type="button"
+                onClick={onPublishClick}
+                className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>Post Official SRA Price</span>
+              </button>
+            )}
+            <Link
+              to="/prices"
+              className="text-xs font-semibold text-hug-muted hover:text-hug-text inline-flex items-center gap-1"
+            >
+              <span>Price Ledger &rarr;</span>
+            </Link>
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   TrendingUp,
+  PlusCircle,
   ShieldCheck,
   Building2,
   FileCheck2,
@@ -16,9 +17,11 @@ import CurrentPriceCard from '../../components/dashboard/CurrentPriceCard';
 import MetricSummaryRow from '../../components/dashboard/MetricSummaryRow';
 import RecentOperationsTable from '../../components/dashboard/RecentOperationsTable';
 import AttentionItemsCard from '../../components/dashboard/AttentionItemsCard';
+import PublishPriceModal from '../../components/prices/PublishPriceModal';
 import { formatHectares, formatCurrency } from '../../utils/formatters';
 
 export default function SraAdminDashboard({ data = {}, user = {} }) {
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const {
     currentPrice,
     previousPrice,
@@ -81,20 +84,14 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
   const headerActions = [
     {
-      label: 'Manage SRA Prices',
-      to: '/prices',
-      icon: TrendingUp,
-      primary: true
+      label: 'Post Official SRA Price',
+      onClick: () => setIsPublishModalOpen(true),
+      icon: PlusCircle
     },
     {
       label: 'Audit Center',
       to: '/audit',
       icon: ShieldCheck
-    },
-    {
-      label: 'Block Farms',
-      to: '/block-farms',
-      icon: Building2
     }
   ];
 
@@ -143,6 +140,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
             previousPrice={previousPrice}
             isLoading={isLoading}
             showPublishAction={true}
+            onPublishClick={() => setIsPublishModalOpen(true)}
           />
         </div>
 
@@ -274,6 +272,13 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
       <RecentOperationsTable
         operations={recentOperations}
         isLoading={isLoading}
+      />
+
+      {/* 7. Publish Price Modal */}
+      <PublishPriceModal
+        isOpen={isPublishModalOpen}
+        onClose={() => setIsPublishModalOpen(false)}
+        latestPrice={currentPrice}
       />
     </div>
   );

@@ -21,6 +21,14 @@ const SOIL_TYPES = [
   'Sandy Clay Loam'
 ];
 
+const currentYear = new Date().getFullYear();
+const currentStart = new Date().getMonth() >= 8 ? currentYear : currentYear - 1;
+const CROP_YEAR_OPTIONS = [
+  `${currentStart - 1}-${currentStart}`,
+  `${currentStart}-${currentStart + 1}`,
+  `${currentStart + 1}-${currentStart + 2}`
+];
+
 export default function FieldEnrollmentModal({
   isOpen = false,
   onClose,
@@ -35,6 +43,7 @@ export default function FieldEnrollmentModal({
   const [areaHa, setAreaHa] = useState('');
   const [variety, setVariety] = useState(SUGARCANE_VARIETIES[0]);
   const [soilType, setSoilType] = useState(SOIL_TYPES[0]);
+  const [cropYear, setCropYear] = useState(CROP_YEAR_OPTIONS[1]);
   const [initialStage, setInitialStage] = useState('1');
 
   const [errors, setErrors] = useState({});
@@ -82,6 +91,7 @@ export default function FieldEnrollmentModal({
         areaHa: numHa,
         variety,
         soilType,
+        cropYear,
         currentStageNumber: Number(initialStage) || 1
       };
 
@@ -248,27 +258,43 @@ export default function FieldEnrollmentModal({
           </FormField>
         </div>
 
-        {/* 4. Initial Crop Stage */}
-        <FormField
-          id="initial-stage-select"
-          label="Initial Crop Stage"
-          helperText="New crop cycle starts at this stage."
-        >
-          <Select
+        {/* 4. Initial Crop Stage & Crop Year */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <FormField
             id="initial-stage-select"
-            value={initialStage}
-            onChange={(e) => setInitialStage(e.target.value)}
-            disabled={isSubmitting}
-            options={[
-              { value: '1', label: 'Stage 1: Pre-Planting & Land Preparation' },
-              { value: '2', label: 'Stage 2: Planting & Crop Establishment' },
-              { value: '3', label: 'Stage 3: Basal Nutrition & Early Care' },
-              { value: '4', label: 'Stage 4: Cultivation & Weed Management' },
-              { value: '5', label: 'Stage 5: Crop Maintenance & Final Hilling-Up' },
-              { value: '6', label: 'Stage 6: Harvesting & Hauling' }
-            ]}
-          />
-        </FormField>
+            label="Initial Crop Stage"
+            helperText="New crop cycle starts at this stage."
+          >
+            <Select
+              id="initial-stage-select"
+              value={initialStage}
+              onChange={(e) => setInitialStage(e.target.value)}
+              disabled={isSubmitting}
+              options={[
+                { value: '1', label: 'Stage 1: Pre-Planting & Land Preparation' },
+                { value: '2', label: 'Stage 2: Planting & Crop Establishment' },
+                { value: '3', label: 'Stage 3: Basal Nutrition & Early Care' },
+                { value: '4', label: 'Stage 4: Cultivation & Weed Management' },
+                { value: '5', label: 'Stage 5: Crop Maintenance & Final Hilling-Up' },
+                { value: '6', label: 'Stage 6: Harvesting & Hauling' }
+              ]}
+            />
+          </FormField>
+
+          <FormField
+            id="crop-year-select"
+            label="Crop Year (CY)"
+            helperText="Official SRA milling season."
+          >
+            <Select
+              id="crop-year-select"
+              value={cropYear}
+              onChange={(e) => setCropYear(e.target.value)}
+              disabled={isSubmitting}
+              options={CROP_YEAR_OPTIONS.map(cy => ({ value: cy, label: cy }))}
+            />
+          </FormField>
+        </div>
       </form>
     </Modal>
   );

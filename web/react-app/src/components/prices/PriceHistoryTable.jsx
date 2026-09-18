@@ -222,7 +222,7 @@ export default function PriceHistoryTable({
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Sugar:</span>
                           {sugarChange > 0 ? (
-                            <span className="inline-flex items-center font-bold text-emerald-600 dark:text-emerald-400">
+                            <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{sugarChange.toLocaleString()}
                             </span>
@@ -243,7 +243,7 @@ export default function PriceHistoryTable({
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Molasses:</span>
                           {molassesChange > 0 ? (
-                            <span className="inline-flex items-center font-bold text-emerald-600 dark:text-emerald-400">
+                            <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{molassesChange.toLocaleString()}
                             </span>
@@ -272,7 +272,7 @@ export default function PriceHistoryTable({
                     </td>
 
                     <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-success-bg text-success border border-success/30">
                         <CheckCircle2 className="w-3 h-3" />
                         Official SRA
                       </span>

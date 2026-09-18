@@ -60,14 +60,14 @@ export default function SystemHealthSummary({
         {/* Concrete Health Tiles */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* API Server */}
-          <div className="bg-bg/60 dark:bg-gray-800/40 p-3.5 rounded-xl border border-border">
-            <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
+          <div className="bg-surface-subtle p-4 rounded-xl border border-border">
+            <div className="flex items-center justify-between text-xs text-hug-muted mb-1.5">
               <span className="font-bold uppercase tracking-wider text-[10px]">API Server</span>
               <Server className="w-4 h-4 text-hug-muted" />
             </div>
             <div className="flex items-center gap-2">
               {isApiConnected ? (
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-success">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Express API Responsive
                 </span>
               ) : (
@@ -82,15 +82,15 @@ export default function SystemHealthSummary({
           </div>
 
           {/* Database Availability */}
-          <div className="bg-bg/60 dark:bg-gray-800/40 p-3.5 rounded-xl border border-border">
-            <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
+          <div className="bg-surface-subtle p-4 rounded-xl border border-border">
+            <div className="flex items-center justify-between text-xs text-hug-muted mb-1.5">
               <span className="font-bold uppercase tracking-wider text-[10px]">Firestore Database</span>
               <Database className="w-4 h-4 text-hug-muted" />
             </div>
             <div className="flex items-center gap-2">
               {isDbAvailable ? (
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Available & Read/Write Ready
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-success">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Available &amp; Read/Write Ready
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-xs font-bold text-danger">
@@ -104,8 +104,8 @@ export default function SystemHealthSummary({
           </div>
 
           {/* Security Rules Engine */}
-          <div className="bg-bg/60 dark:bg-gray-800/40 p-3.5 rounded-xl border border-border">
-            <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
+          <div className="bg-surface-subtle p-4 rounded-xl border border-border">
+            <div className="flex items-center justify-between text-xs text-hug-muted mb-1.5">
               <span className="font-bold uppercase tracking-wider text-[10px]">Security Engine</span>
               <ShieldCheck className="w-4 h-4 text-primary" />
             </div>
@@ -120,40 +120,91 @@ export default function SystemHealthSummary({
       </div>
 
       {/* Collection Record Volume Inventory */}
-      <div className="bg-white dark:bg-surface rounded-2xl border border-border p-5 shadow-xs">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted mb-3">
-          Authoritative Database Collection Ledger
-        </h4>
+      <div className="bg-white dark:bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted">
+            Authoritative Database Collection Ledger
+          </h4>
+          {!isDbAvailable && healthData !== null && (
+            <span className="text-[11px] font-bold text-danger bg-danger-bg px-2.5 py-0.5 rounded-full">
+              Database Unreachable
+            </span>
+          )}
+        </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <div className="p-3 bg-bg/40 dark:bg-gray-800/30 rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">Users</span>
-            <span className="text-xl font-black text-hug-text">{collectionCounts.users ?? 0}</span>
-            <span className="text-[10px] text-hug-muted block">accounts</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5">
+          {/* 1. Users */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Users</span>
+            <span className="text-xl font-black text-hug-text block">
+              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.users ?? 0)}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'accounts'}
+            </span>
           </div>
 
-          <div className="p-3 bg-bg/40 dark:bg-gray-800/30 rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">Block Farms</span>
-            <span className="text-xl font-black text-hug-text">{collectionCounts.blockFarms ?? 0}</span>
-            <span className="text-[10px] text-hug-muted block">clusters</span>
+          {/* 2. Block Farms */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Block Farms</span>
+            <span className="text-xl font-black text-hug-text block">
+              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.blockFarms ?? 0)}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'clusters'}
+            </span>
           </div>
 
-          <div className="p-3 bg-bg/40 dark:bg-gray-800/30 rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">Fields / Plots</span>
-            <span className="text-xl font-black text-hug-text">{collectionCounts.fields ?? 0}</span>
-            <span className="text-[10px] text-hug-muted block">registries</span>
+          {/* 3. Fields / Plots */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Fields / Plots</span>
+            <span className="text-xl font-black text-hug-text block">
+              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.fields ?? 0)}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'registries'}
+            </span>
           </div>
 
-          <div className="p-3 bg-bg/40 dark:bg-gray-800/30 rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">Operation Logs</span>
-            <span className="text-xl font-black text-primary dark:text-primary-light">{collectionCounts.operations ?? 0}</span>
-            <span className="text-[10px] text-hug-muted block">logged activities</span>
+          {/* 4. Operation Logs */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Operation Logs</span>
+            <span className="text-xl font-black text-primary dark:text-primary-light block">
+              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.operations ?? 0)}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'logged activities'}
+            </span>
           </div>
 
-          <div className="p-3 bg-bg/40 dark:bg-gray-800/30 rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">SRA Circulars</span>
-            <span className="text-xl font-black text-hug-text">{collectionCounts.prices ?? 0}</span>
-            <span className="text-[10px] text-hug-muted block">official prices</span>
+          {/* 5. Crop Cycles */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Crop Cycles</span>
+            <span className="text-xl font-black text-hug-text block">
+              {(!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
+                ? 'Unavailable'
+                : collectionCounts.cropCycles == null
+                  ? 'Loading...'
+                  : collectionCounts.cropCycles}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {(!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
+                ? 'database unreachable'
+                : collectionCounts.cropCycles == null
+                  ? 'reading crop_cycles'
+                  : `${collectionCounts.activeCropCycles ?? 0} active · ${collectionCounts.archivedCropCycles ?? 0} archived`}
+            </span>
+          </div>
+
+          {/* 6. SRA Circulars */}
+          <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">SRA Circulars</span>
+            <span className="text-xl font-black text-hug-text block">
+              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.prices ?? 0)}
+            </span>
+            <span className="text-[10px] text-hug-muted block">
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'official prices'}
+            </span>
           </div>
         </div>
       </div>

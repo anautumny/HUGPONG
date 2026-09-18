@@ -40,7 +40,7 @@ const TEST_FIELD = Object.freeze({
   variety: 'VMC 84-524',
   soilType: 'Loam',
   cropType: 'Sugarcane',
-  cropYear: '2026',
+  cropYear: '2026-2027',
   currentStageNumber: 1,
   elapsedMonths: 0,
   batchNumber: 1

@@ -129,6 +129,28 @@ function reportPeriod(value) {
   return result;
 }
 
+function normalizeCropYear(value) {
+  if (value == null || value === '') {
+    const d = new Date();
+    const startYear = d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1;
+    return `${startYear}-${startYear + 1}`;
+  }
+  const str = String(value).trim();
+  const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
+  if (rangeMatch) {
+    const startYear = parseInt(rangeMatch[1], 10);
+    let endYear = parseInt(rangeMatch[2], 10);
+    if (endYear < 100) endYear = Math.floor(startYear / 100) * 100 + endYear;
+    return `${startYear}-${endYear}`;
+  }
+  const singleMatch = str.match(/(\d{4})/);
+  if (singleMatch) {
+    const year = parseInt(singleMatch[1], 10);
+    return `${year}-${year + 1}`;
+  }
+  return str;
+}
+
 function cleanObject(value) {
   if (Array.isArray(value)) return value.map(cleanObject);
   if (!value || typeof value !== 'object') return value;
@@ -298,6 +320,7 @@ module.exports = {
   isoTimestamp,
   calendarDate,
   reportPeriod,
+  normalizeCropYear,
   cleanObject,
   buildOperationLog,
   buildOperationSnapshot,

@@ -8,8 +8,8 @@ import PublishPriceModal from '../../components/prices/PublishPriceModal';
 import Button from '../../components/ui/Button';
 
 export default function PricesView() {
-  const { user } = useAuth();
-  const isSraAdmin = user?.role === 'SRA_ADMIN';
+  const { roleKey } = useAuth();
+  const isSraAdmin = roleKey === 'admin';
 
   const [prices, setPrices] = useState([]);
   const [currentPrice, setCurrentPrice] = useState(null);
@@ -66,7 +66,7 @@ export default function PricesView() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -82,7 +82,7 @@ export default function PricesView() {
             SRA Price Monitor
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Real-time Sugar Regulatory Administration millsite benchmark rates for Raw Sugar (₱/Lkg) and Cane Molasses (₱/MT).
+            Real-time Sugar Regulatory Administration millsite benchmark rates for Raw Sugar (₱/Lkg) and Industrial Molasses (₱/MT).
           </p>
         </div>
 
@@ -104,7 +104,7 @@ export default function PricesView() {
               onClick={() => setIsPublishModalOpen(true)}
               icon={PlusCircle}
             >
-              Publish Circular
+              Post Official SRA Price
             </Button>
           )}
         </div>

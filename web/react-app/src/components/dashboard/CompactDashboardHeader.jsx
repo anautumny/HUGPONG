@@ -23,20 +23,16 @@ export default function CompactDashboardHeader({
         <div className="flex flex-wrap items-center gap-2">
           {actions.map((act, idx) => {
             const Icon = act.icon;
+            const btnClasses = `px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-2 cursor-pointer bg-surface dark:bg-surface-elevated border border-border hover:border-border-strong hover:bg-surface-subtle active:scale-[0.98] text-hug-text hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary select-none ${act.className || ''}`;
+
             if (act.to) {
               return (
                 <Link
                   key={idx}
                   to={act.to}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer ${
-                    act.primary
-                      ? 'bg-primary hover:bg-primary-dark text-white'
-                      : act.accent
-                      ? 'bg-accent hover:brightness-105 text-hug-text'
-                      : 'bg-surface border border-border hover:bg-bg text-hug-text'
-                  }`}
+                  className={btnClasses}
                 >
-                  {Icon && <Icon className="w-3.5 h-3.5" />}
+                  {Icon && <Icon className="w-3.5 h-3.5 text-hug-muted shrink-0" />}
                   <span>{act.label}</span>
                 </Link>
               );
@@ -46,15 +42,9 @@ export default function CompactDashboardHeader({
                 key={idx}
                 type="button"
                 onClick={act.onClick}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer ${
-                  act.primary
-                    ? 'bg-primary hover:bg-primary-dark text-white'
-                    : act.accent
-                    ? 'bg-accent hover:brightness-105 text-hug-text'
-                    : 'bg-surface border border-border hover:bg-bg text-hug-text'
-                }`}
+                className={btnClasses}
               >
-                {Icon && <Icon className="w-3.5 h-3.5" />}
+                {Icon && <Icon className="w-3.5 h-3.5 text-hug-muted shrink-0" />}
                 <span>{act.label}</span>
               </button>
             );

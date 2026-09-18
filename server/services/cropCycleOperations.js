@@ -10,7 +10,8 @@ const {
   requiredString,
   integer,
   finiteNumber,
-  nowIso
+  nowIso,
+  normalizeCropYear
 } = require('../schema/firestoreSchema');
 const { assertBaseVersion } = require('./mutationContext');
 
@@ -333,7 +334,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       fieldId: normalizedFieldId,
       sequenceNumber: nextSequence,
       cropType: requiredString(input.cropType || oldCycle.cropType, 'cropType', { max: 120 }),
-      cropYear: requiredString(input.cropYear, 'cropYear', { max: 40 }),
+      cropYear: normalizeCropYear(input.cropYear),
       currentStageNumber: 1,
       elapsedMonths: 0,
       batchNumber: integer(input.batchNumber == null ? 1 : input.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
@@ -359,7 +360,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       });
     }
     transaction.create(newCycleRef, newCycle);
-    transaction.update(fieldRef, { currentCycleId: newCycleId, updatedAt: timestamp });
+    transaction.update(fieldRef, { currentCycleId: newCycleId, cropYear: newCycle.cropYear, updatedAt: timestamp });
 
     return {
       oldCycleId: oldCycleSnapshot.id,

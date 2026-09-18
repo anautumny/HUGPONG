@@ -39,7 +39,7 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
         {/* Advisory Body */}
         <div className="flex flex-col gap-3 text-xs text-hug-text2 mt-1">
           {/* Option 1 */}
-          <div className="p-3.5 rounded-2xl bg-[#F0F8EC] dark:bg-emerald-950/20 border border-primary/25 flex flex-col gap-1.5">
+          <div className="p-3.5 rounded-2xl bg-primary-bg/40 dark:bg-surface-subtle border border-primary/25 flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-primary text-white uppercase tracking-wider">
                 Option 1

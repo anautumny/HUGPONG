@@ -90,3 +90,17 @@ export async function checkSystemHealth() {
     };
   }
 }
+
+/**
+ * Read the canonical crop_cycles inventory through the scoped server API.
+ * A failed database read is reported as unavailable rather than as zero records.
+ */
+export async function fetchCropCycleInventory() {
+  const response = await authenticatedRequest('/api/crop-cycles');
+  const cycles = Array.isArray(response.data) ? response.data : [];
+  return {
+    count: cycles.length,
+    active: cycles.filter(cycle => String(cycle.status || '').toUpperCase() === 'ACTIVE').length,
+    archived: cycles.filter(cycle => String(cycle.status || '').toUpperCase() === 'ARCHIVED').length
+  };
+}

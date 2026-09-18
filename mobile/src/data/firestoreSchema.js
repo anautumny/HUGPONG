@@ -120,8 +120,27 @@ export function fromCycleDocument(id, value = {}) {
   return { id, ...value };
 }
 
-export function toCycleDocument(field, cycle = {}) {
+export function formatCropYear(val, fallback = '—') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
+  if (rangeMatch) {
+    const startYear = parseInt(rangeMatch[1], 10);
+    let endYear = parseInt(rangeMatch[2], 10);
+    if (endYear < 100) endYear = Math.floor(startYear / 100) * 100 + endYear;
+    return `${startYear}-${endYear}`;
+  }
+  const singleMatch = str.match(/(\d{4})/);
+  if (singleMatch) {
+    const year = parseInt(singleMatch[1], 10);
+    return `${year}-${year + 1}`;
+  }
+  return str;
+}
+
+export function toCycleDocument(field = {}, cycle = {}) {
   const sequenceNumber = Number(cycle.sequenceNumber || field.cycleNumber || 1);
+  if (!Number.isInteger(sequenceNumber) || sequenceNumber < 1) throw new Error('sequenceNumber must be an integer >= 1.');
   const status = String(cycle.status || 'ACTIVE').toUpperCase();
   if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw new Error('Crop cycle status must be ACTIVE or ARCHIVED.');
   const archivedAt = status === 'ARCHIVED' ? (cycle.archivedAt || null) : null;
@@ -131,7 +150,7 @@ export function toCycleDocument(field, cycle = {}) {
     fieldId: String(field.id || cycle.fieldId || '').trim().toUpperCase(),
     sequenceNumber,
     cropType: cycle.cropType || field.cycleType || 'Plant Cane (New Plant)',
-    cropYear: cycle.cropYear || field.cropYear || '',
+    cropYear: formatCropYear(cycle.cropYear || field.cropYear || ''),
     currentStageNumber: Number(cycle.currentStageNumber || field.stageNumber || 1),
     elapsedMonths: Number(cycle.elapsedMonths ?? field.month ?? 0),
     batchNumber: Number(cycle.batchNumber || field.batchMonth || 1),
@@ -154,7 +173,7 @@ export function fromFieldDocument(id, value = {}, cycle = null) {
     batchMonth: Number(cycle?.batchNumber || 1),
     cycleNumber: Number(cycle?.sequenceNumber || 1),
     cycleType: cycle?.cropType || '',
-    cropYear: cycle?.cropYear || ''
+    cropYear: formatCropYear(cycle?.cropYear || value.cropYear || '')
   };
 }
 

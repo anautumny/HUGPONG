@@ -308,6 +308,14 @@ export async function createOperation(payload) {
   });
 }
 
+export async function updateOperation(operationId, changes, amendment, baseVersion = null) {
+  return authenticatedRequest(`/api/logs/${encodeURIComponent(operationId)}`, {
+    method: 'PATCH',
+    body: { changes, amendment },
+    baseVersion
+  });
+}
+
 export async function archiveOperations(ids) {
   return authenticatedRequest('/api/logs/archive', {
     method: 'POST',

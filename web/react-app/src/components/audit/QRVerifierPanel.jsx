@@ -168,14 +168,14 @@ export default function QRVerifierPanel({
           aria-live="polite"
           className={`p-3 rounded-xl text-xs flex items-start gap-2.5 transition-all ${
             feedback.type === 'success'
-              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+              ? 'bg-success-bg text-success border border-success/30'
               : feedback.type === 'error'
               ? 'bg-danger-bg dark:bg-danger/20 text-danger border border-danger/30'
               : 'bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light border border-primary/20'
           }`}
         >
           {feedback.type === 'success' ? (
-            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-success" />
           ) : (
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           )}

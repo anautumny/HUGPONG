@@ -16,7 +16,7 @@ export default function PendingApprovalsQueue({
   if (pendingUsers.length === 0) {
     return (
       <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-6 shadow-xs text-center text-xs text-hug-muted ${className}`}>
-        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+        <CheckCircle2 className="w-8 h-8 text-success mx-auto mb-2 opacity-80" />
         <h4 className="text-sm font-bold text-hug-text">No Pending Registrations</h4>
         <p className="mt-0.5">All cooperative member and personnel onboarding requests have been reviewed.</p>
       </div>

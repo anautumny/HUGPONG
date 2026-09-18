@@ -154,8 +154,26 @@ export const fromField = (id, value, cycle) => ({
   batchMonth: Number(cycle?.batchNumber || 1),
   cycleNumber: Number(cycle?.sequenceNumber || 1),
   cycleType: cycle?.cropType || '',
-  cropYear: cycle?.cropYear || ''
+  cropYear: formatCropYear(cycle?.cropYear || value.cropYear || '')
 });
+
+export function formatCropYear(val, fallback = '') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
+  if (rangeMatch) {
+    const startYear = parseInt(rangeMatch[1], 10);
+    let endYear = parseInt(rangeMatch[2], 10);
+    if (endYear < 100) endYear = Math.floor(startYear / 100) * 100 + endYear;
+    return `${startYear}-${endYear}`;
+  }
+  const singleMatch = str.match(/(\d{4})/);
+  if (singleMatch) {
+    const year = parseInt(singleMatch[1], 10);
+    return `${year}-${year + 1}`;
+  }
+  return str;
+}
 
 export const toCycle = (field, value) => {
   const status = String(value.status || 'ACTIVE').toUpperCase();
@@ -167,7 +185,7 @@ export const toCycle = (field, value) => {
     fieldId: String(value.fieldId || field.id || '').trim().toUpperCase(),
     sequenceNumber: Number(value.sequenceNumber || field.cycleNumber || 1),
     cropType: value.cropType || field.cycleType || '',
-    cropYear: value.cropYear || field.cropYear || '',
+    cropYear: formatCropYear(value.cropYear || field.cropYear || ''),
     currentStageNumber: Number(value.currentStageNumber || field.stageNumber || 1),
     elapsedMonths: Number(value.elapsedMonths ?? field.month ?? 0),
     batchNumber: Number(value.batchNumber || field.batchMonth || 1),

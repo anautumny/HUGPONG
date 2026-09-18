@@ -106,7 +106,7 @@ export default function PublishPriceModal({
 
       const result = await publishPrice(payload);
       if (result.success) {
-        setSuccessMessage('Official SRA Price Circular successfully broadcasted.');
+        setSuccessMessage('Official SRA price posted successfully.');
         if (typeof onPublished === 'function') {
           onPublished(result.data);
         }
@@ -127,7 +127,7 @@ export default function PublishPriceModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Publish Official SRA Price"
+      title="Post Official SRA Price"
       subtitle="Broadcast weekly domestic millsite sugar and molasses benchmark prices."
       icon={TrendingUp}
       badge="SRA Admin"
@@ -150,8 +150,9 @@ export default function PublishPriceModal({
             size="md"
             onClick={handleSubmit}
             isLoading={isSubmitting}
+            loadingText="Posting official price..."
           >
-            Publish Circular
+            Post Official SRA Price
           </Button>
         </div>
       }
@@ -241,7 +242,7 @@ export default function PublishPriceModal({
 
           <FormField
             id="price-molasses"
-            label="Cane Molasses Price"
+            label="Industrial Molasses Price"
             required
             helperText={
               prevMolasses !== null ? (

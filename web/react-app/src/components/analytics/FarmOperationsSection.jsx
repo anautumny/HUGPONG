@@ -53,7 +53,7 @@ export default function FarmOperationsSection({
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-5">
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
+        <div className="bg-surface-subtle rounded-xl p-4 border border-border">
           <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
             Total Logged Operations
           </span>
@@ -68,7 +68,7 @@ export default function FarmOperationsSection({
           </span>
         </div>
 
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
+        <div className="bg-surface-subtle rounded-xl p-4 border border-border">
           <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
             Total Labor Days / Workers
           </span>
@@ -83,7 +83,7 @@ export default function FarmOperationsSection({
           </span>
         </div>
 
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
+        <div className="bg-surface-subtle rounded-xl p-4 border border-border">
           <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
             Most Frequent Activity
           </span>
@@ -107,48 +107,54 @@ export default function FarmOperationsSection({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-          {/* Frequency Leaderboard */}
+        <div className="space-y-6 mt-5">
+          {/* 1. Activity Frequency Ranking */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted mb-3">
-              Activity Frequency Ranking
-            </h4>
-            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted">
+                Activity Frequency Ranking
+              </h4>
+              <span className="text-xs text-hug-muted font-medium">
+                {frequencyRanking.length} distinct {frequencyRanking.length === 1 ? 'activity' : 'activities'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {frequencyRanking.map((act, idx) => {
                 const widthPercent = Math.max(5, Math.round((act.count / maxFrequency) * 100));
 
                 return (
                   <div
                     key={act.name}
-                    className="p-3 rounded-xl border border-border bg-bg/30 hover:bg-bg/60 transition-colors"
+                    className="p-3.5 rounded-xl border border-border bg-surface-subtle hover:border-primary/40 transition-all flex flex-col justify-between"
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-bg dark:bg-gray-800 border border-border text-[10px] font-bold flex items-center justify-center text-hug-muted">
-                          {idx + 1}
-                        </span>
-                        <span className="text-xs font-bold text-hug-text">
-                          {act.name}
-                        </span>
-                      </div>
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-5 h-5 rounded-full bg-bg dark:bg-surface-elevated border border-border text-[10px] font-bold flex items-center justify-center text-hug-muted shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="text-xs font-bold text-hug-text truncate" title={act.name}>
+                            {act.name}
+                          </span>
+                        </div>
 
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-xs font-black text-hug-text">
+                        <span className="text-xs font-black text-hug-text shrink-0 whitespace-nowrap">
                           {act.count} <span className="text-[10px] font-normal text-hug-muted">times</span>
                         </span>
                       </div>
+
+                      <div className="w-full bg-border/60 h-1.5 rounded-full overflow-hidden mb-2.5">
+                        <div
+                          className="bg-primary h-full rounded-full transition-all duration-300"
+                          style={{ width: `${widthPercent}%` }}
+                        />
+                      </div>
                     </div>
 
-                    <div className="w-full bg-border/60 h-1.5 rounded-full overflow-hidden mb-2">
-                      <div
-                        className="bg-primary h-full rounded-full transition-all duration-300"
-                        style={{ width: `${widthPercent}%` }}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-hug-muted">
-                      <span>Total: ₱{act.totalCost.toLocaleString()}</span>
-                      <span>Avg: ₱{act.avgCost.toLocaleString()} / execution</span>
+                    <div className="flex items-center justify-between text-[11px] text-hug-muted pt-2 border-t border-border/60">
+                      <span>Total: <strong className="text-hug-text font-semibold">₱{act.totalCost.toLocaleString()}</strong></span>
+                      <span>Avg: <strong className="text-hug-text font-semibold">₱{act.avgCost.toLocaleString()}</strong> / execution</span>
                     </div>
                   </div>
                 );
@@ -156,16 +162,19 @@ export default function FarmOperationsSection({
             </div>
           </div>
 
-          {/* Chronological Monthly Cadence */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted mb-3">
-              Monthly Operational Cadence
-            </h4>
+          {/* 2. Monthly Operational Cadence */}
+          {chronologicalActivity.length > 0 && (
+            <div className="pt-5 border-t border-border/70">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted">
+                  Monthly Operational Cadence &amp; Timeline
+                </h4>
+                <span className="text-xs text-hug-muted font-medium">
+                  {chronologicalActivity.length} reporting {chronologicalActivity.length === 1 ? 'period' : 'periods'}
+                </span>
+              </div>
 
-            {chronologicalActivity.length === 0 ? (
-              <p className="text-xs text-hug-muted">No monthly timeline data available.</p>
-            ) : (
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
                 {chronologicalActivity.map((month) => {
                   const [y, m] = month.period.split('-').map(Number);
                   const d = new Date(y, m - 1, 1);
@@ -174,18 +183,21 @@ export default function FarmOperationsSection({
                   return (
                     <div
                       key={month.period}
-                      className="p-3 rounded-xl border border-border bg-bg/30 flex items-center justify-between"
+                      className="p-3.5 rounded-xl border border-border bg-surface-subtle flex items-center justify-between gap-3"
                     >
-                      <div>
-                        <span className="text-xs font-bold text-hug-text block">
-                          {label}
-                        </span>
-                        <span className="text-[10px] text-hug-muted">
-                          {month.count} operations performed
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span className="text-xs font-bold text-hug-text truncate">
+                            {label}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-hug-muted block">
+                          {month.count} operation{month.count === 1 ? '' : 's'} performed
                         </span>
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <span className="text-xs font-black text-primary dark:text-primary-light block">
                           ₱{month.cost.toLocaleString()}
                         </span>
@@ -197,8 +209,8 @@ export default function FarmOperationsSection({
                   );
                 })}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>

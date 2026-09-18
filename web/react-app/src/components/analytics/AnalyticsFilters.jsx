@@ -2,6 +2,7 @@ import React from 'react';
 import { Filter, Calendar, MapPin, Clock, RotateCcw } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
+import { formatCropYear } from '../../utils/formatters';
 
 export default function AnalyticsFilters({
   seasons = [],
@@ -19,7 +20,10 @@ export default function AnalyticsFilters({
 }) {
   const seasonOptions = [
     { value: 'ALL', label: 'All Crop Seasons' },
-    ...seasons.map(s => ({ value: s, label: `Crop Year ${s}` }))
+    ...seasons.map(s => {
+      const formatted = formatCropYear(s);
+      return { value: formatted, label: `Crop Year ${formatted}` };
+    })
   ];
 
   const farmOptions = [

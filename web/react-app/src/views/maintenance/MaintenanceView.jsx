@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Server, RefreshCw, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { checkSystemHealth, subscribeToAuditLogs } from '../../services/maintenanceService';
+import { checkSystemHealth, fetchCropCycleInventory, subscribeToAuditLogs } from '../../services/maintenanceService';
 import { subscribeToUsersData } from '../../services/usersService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import { subscribeToOperationsData } from '../../services/operationsService';
@@ -25,8 +25,37 @@ export default function MaintenanceView() {
     blockFarms: 0,
     fields: 0,
     operations: 0,
-    prices: 0
+    prices: 0,
+    cropCycles: null,
+    activeCropCycles: null,
+    archivedCropCycles: null
   });
+
+  const loadCropCycleInventory = async () => {
+    setCounts(prev => ({
+      ...prev,
+      cropCycles: null,
+      activeCropCycles: null,
+      archivedCropCycles: null
+    }));
+    try {
+      const inventory = await fetchCropCycleInventory();
+      setCounts(prev => ({
+        ...prev,
+        cropCycles: inventory.count,
+        activeCropCycles: inventory.active,
+        archivedCropCycles: inventory.archived
+      }));
+    } catch (err) {
+      console.warn('[MaintenanceView] Crop cycle inventory err:', err.message);
+      setCounts(prev => ({
+        ...prev,
+        cropCycles: 'UNAVAILABLE',
+        activeCropCycles: null,
+        archivedCropCycles: null
+      }));
+    }
+  };
 
   const runHealthCheck = async () => {
     setIsCheckingHealth(true);
@@ -42,6 +71,7 @@ export default function MaintenanceView() {
 
   useEffect(() => {
     runHealthCheck();
+    loadCropCycleInventory();
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({
@@ -67,10 +97,18 @@ export default function MaintenanceView() {
     const unsubFields = subscribeToFieldsData({
       user,
       onUpdate: (data) => {
+        const cycles = Array.isArray(data.cropCycles) ? data.cropCycles : [];
+        const active = cycles.filter(c => String(c.status || '').toUpperCase() === 'ACTIVE').length;
+        const archived = cycles.filter(c => String(c.status || '').toUpperCase() === 'ARCHIVED').length;
         setCounts(prev => ({
           ...prev,
           blockFarms: (data.blockFarms || []).length,
-          fields: (data.fields || []).length
+          fields: (data.fields || []).length,
+          ...(cycles.length > 0 ? {
+            cropCycles: cycles.length,
+            activeCropCycles: active,
+            archivedCropCycles: archived
+          } : {})
         }));
       }
     });

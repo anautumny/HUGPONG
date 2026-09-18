@@ -45,3 +45,21 @@ export function formatNumber(val, fallback = '0') {
   if (!Number.isFinite(num)) return fallback;
   return num.toLocaleString('en-PH');
 }
+
+export function formatCropYear(val, fallback = '—') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
+  if (rangeMatch) {
+    const startYear = parseInt(rangeMatch[1], 10);
+    let endYear = parseInt(rangeMatch[2], 10);
+    if (endYear < 100) endYear = Math.floor(startYear / 100) * 100 + endYear;
+    return `${startYear}-${endYear}`;
+  }
+  const singleMatch = str.match(/(\d{4})/);
+  if (singleMatch) {
+    const year = parseInt(singleMatch[1], 10);
+    return `${year}-${year + 1}`;
+  }
+  return str;
+}

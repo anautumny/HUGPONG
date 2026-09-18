@@ -47,7 +47,7 @@ export default function SyncDiagnosticsSummary({
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
             !isOnline
               ? 'bg-danger/20 text-danger'
-              : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
+              : 'bg-success-bg text-success border border-success/30'
           }`}>
             {isOnline ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
           </div>
@@ -62,7 +62,7 @@ export default function SyncDiagnosticsSummary({
                   ? 'bg-danger text-white'
                   : syncStatus === 'syncing'
                   ? 'bg-blue-500 text-white animate-pulse'
-                  : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200'
+                  : 'bg-success-bg text-success border border-success/30'
               }`}>
                 {!isOnline ? 'OFFLINE' : syncStatus === 'syncing' ? 'SYNCHRONIZING' : 'ONLINE'}
               </span>
@@ -74,7 +74,7 @@ export default function SyncDiagnosticsSummary({
         </div>
 
         {/* Local mutation outbox counter */}
-        <div className="flex items-center gap-2 self-start sm:self-auto bg-bg dark:bg-gray-800/60 px-3.5 py-2 rounded-xl border border-border text-xs">
+        <div className="flex items-center gap-2 self-start sm:self-auto bg-surface-subtle px-3.5 py-2 rounded-xl border border-border text-xs">
           <Database className="w-4 h-4 text-primary shrink-0" />
           <div>
             <span className="text-[10px] text-hug-muted uppercase font-bold block">Local Outbox Queue</span>
@@ -104,10 +104,10 @@ export default function SyncDiagnosticsSummary({
         <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs">
           <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
             <span className="font-bold uppercase tracking-wider text-[10px]">Active & Synced</span>
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="w-2 h-2 rounded-full bg-success" />
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{activeCount}</span>
+            <span className="text-2xl font-black text-success">{activeCount}</span>
             <span className="text-xs text-hug-muted font-medium">nodes (&lt; 24h)</span>
           </div>
           <span className="text-[11px] text-hug-muted mt-1 block">

@@ -64,7 +64,7 @@ export default function TicketList({
       case 'IN_PROGRESS':
         return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200 dark:border-amber-800/60';
       case 'RESOLVED':
-        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60';
+        return 'bg-success-bg text-success border border-success/30';
       case 'CLOSED':
         return 'bg-bg text-hug-muted dark:bg-gray-800 border-border';
       default:
@@ -251,8 +251,8 @@ export default function TicketList({
                     )}
 
                     {t.resolutionNotes && (
-                      <div className="bg-emerald-50/60 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/50">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 block mb-1">
+                      <div className="bg-success-bg/60 p-3 rounded-xl border border-success/30">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-success block mb-1">
                           Official Resolution Notes {t.resolvedAt && `(${formatDate(t.resolvedAt)})`}
                         </span>
                         <p className="text-hug-text whitespace-pre-wrap">{t.resolutionNotes}</p>

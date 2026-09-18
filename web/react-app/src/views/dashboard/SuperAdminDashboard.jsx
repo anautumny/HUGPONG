@@ -72,18 +72,12 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     {
       label: 'User Administration',
       to: '/users',
-      icon: Users,
-      primary: true
+      icon: Users
     },
     {
       label: 'System Health',
       to: '/maintenance',
       icon: Activity
-    },
-    {
-      label: 'Support Desk',
-      to: '/support',
-      icon: LifeBuoy
     }
   ];
 

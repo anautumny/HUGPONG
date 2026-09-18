@@ -32,7 +32,8 @@ import {
   toFieldDocument,
   toOperationLogDocument,
   toPriceDocument,
-  toSupportTicketDocument
+  toSupportTicketDocument,
+  formatCropYear
 } from './firestoreSchema';
 
 const commitExplicitMutation = async (type, payload, options = {}) => {
@@ -1115,7 +1116,7 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   const newCycleId = createCycleId(cleanId, nextSequence);
   const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-  const finalCropYear = options.cropYear || targetField.cropYear || 'CY 2026-2027';
+  const finalCropYear = formatCropYear(options.cropYear || targetField.cropYear || '2026-2027');
   const request = {
     previousCycleId: oldCycleId,
     cropType: finalCycleType,
@@ -1216,7 +1217,7 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
     'operation',
     'Crop Cycle Renewal',
     fieldId,
-    `Archived ${targetLogs.length} current log(s) and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}" (${options?.cropYear || targetField?.cropYear || 'CY 2026-2027'}).`,
+    `Archived ${targetLogs.length} current log(s) and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}" (${formatCropYear(options?.cropYear || targetField?.cropYear || '2026-2027')}).`,
     actorName,
     'Completed'
   );
@@ -1512,6 +1513,10 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     status: 'ACTIVE'
   });
   delete canonicalChanges.amendments;
+  // Operation amendments must preserve the original identity and provenance.
+  // The server owns these immutable fields and keeps the same operation ID.
+  ['fieldId', 'cycleId', 'submittedByUserId', 'submissionSource', 'createdAt', 'status', 'archivedAt', 'archivedByUserId']
+    .forEach(key => delete canonicalChanges[key]);
   try {
     const outcome = await commitExplicitMutation('operation_amendment', {
       id: logId,

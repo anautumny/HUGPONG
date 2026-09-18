@@ -253,6 +253,14 @@ test('canonical Firestore collections deny every client write', () => {
   }
 });
 
+test('official SRA price publication remains SRA-admin-only and writes the audit ledger', () => {
+  const route = fs.readFileSync(path.resolve(__dirname, '../routes/prices.js'), 'utf8');
+  assert.match(route, /router\.post\('\/', requireAuth, requireRole\(\[ROLES\.SRA_ADMIN\]\)/);
+  assert.match(route, /COLLECTIONS\.AUDIT_LOGS/);
+  assert.match(route, /eventType:\s*'SRA_PRICE_PUBLISHED'/);
+  assert.match(route, /ensurePricePublicationAudit\(publication\)/);
+});
+
 test('web and mobile runtime source contain no direct Firestore mutation calls', () => {
   const roots = [path.resolve(__dirname, '../../web'), path.resolve(__dirname, '../../mobile/src')];
   const sourceFiles = [];

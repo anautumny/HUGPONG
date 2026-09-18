@@ -770,7 +770,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     stage: 'Pre-Planting & Land Preparation',
     stageNumber: 1,
     cycleType: 'Plant Cane (New Plant)',
-    cropYear: 'CY 2026-2027',
+    cropYear: '2026-2027',
     synced: false,
     lastSync: 'Never'
   };
@@ -1044,7 +1044,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showCycleModal, setShowCycleModal] = useState(false);
   const [cycleTypeForm, setCycleTypeForm] = useState({
     cycleType: 'Plant Cane (New Plant)',
-    cropYear: 'CY 2025–2026'
+    cropYear: '2026-2027'
   });
   const [showManagerAssignModal, setShowManagerAssignModal] = useState(false);
   const [managerAssignForm, setManagerAssignForm] = useState({
@@ -1649,7 +1649,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
 
     const finalCycleType = customCycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-    const finalCropYear = customCropYear || targetField.cropYear || 'CY 2026–2027';
+    const finalCropYear = customCropYear || targetField.cropYear || '2026-2027';
 
     const baseStages = (CROP_CYCLE_STAGES_BY_TYPE[finalCycleType] || CROP_CYCLE_STAGES_BY_TYPE['Plant Cane (New Plant)']).map((t, idx) => ({
       ...t,
@@ -2239,7 +2239,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    if (!isNaN(parsedDate.getTime()) && parsedDate < thirtyDaysAgo) {
+    if (!logForm.id && !isNaN(parsedDate.getTime()) && parsedDate < thirtyDaysAgo) {
       Alert.alert('Date Too Old', 'Logs cannot be back-dated more than 30 days. Contact your Farm Manager for corrections beyond this period.');
       return;
     }
@@ -2260,7 +2260,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
 
     // Farm Manager Supervisor Takeover Validation
-    if (activeRole === 'Farm Manager') {
+    if (activeRole === 'Farm Manager' && !logForm.id) {
       const session = getCurrentSession();
       const targetField = fields.find(f => (f.id || '').trim().toUpperCase() === submittedFieldId) || selectedField;
       const isMyField = (targetField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
@@ -2452,8 +2452,8 @@ export default function FieldOpsScreen({ navigation, route }) {
             setLogTab('submitted');
             notifyDataUpdate();
             Alert.alert(
-              'Amendment Authorized & Saved',
-              `Operation log "${newLog.activity}" has been successfully updated with an immutable audit entry.\n\nAudit Reason: ${reason}\nAmended by: ${getCurrentSession().name}`
+              'Operation updated successfully.',
+              `The existing operation ID ${logForm.id} was updated without creating a duplicate.\n\nAudit Reason: ${reason}\nAmended by: ${getCurrentSession().name}`
             );
             setLogEditAuth({ password: '', reason: '' });
             setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
@@ -2891,7 +2891,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     );
   };
 
-  const editSubmittedLog = (log) => {
+  const editSubmittedLog = (log, allowNormalManagerEdit = false) => {
     if (isLogLocked(log)) {
       Alert.alert(
         'Archived Historical Record',
@@ -2900,7 +2900,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
-    if (checkTakeOverRequired('amend or modify operation logs')) return;
+    if (!allowNormalManagerEdit && checkTakeOverRequired('amend or modify operation logs')) return;
 
     const session = getCurrentSession();
     const isOwner = selectedField?.member === session.name || log?.authorName === session.name || activeRole === 'Member Farmer';
@@ -3002,15 +3002,16 @@ export default function FieldOpsScreen({ navigation, route }) {
   }, [visibleLogs, activeFieldId, isLogPastCycle]);
 
   const allFarmSubmittedLogs = React.useMemo(() => {
+    const permittedFieldIds = new Set(accessibleFields.map(field => field.id));
     return visibleLogs
-      .filter(l => l.status === 'ACTIVE' && !l.isDraft)
+      .filter(l => l.status === 'ACTIVE' && !l.isDraft && permittedFieldIds.has(l.fieldId))
       .sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
         const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
         if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       });
-  }, [visibleLogs, isLogPastCycle]);
+  }, [visibleLogs, accessibleFields, isLogPastCycle]);
 
   const managerSubmittedLogs = React.useMemo(() => {
     if (managerLedgerScope === 'all') {
@@ -3020,8 +3021,8 @@ export default function FieldOpsScreen({ navigation, route }) {
   }, [managerLedgerScope, allFarmSubmittedLogs, fieldLogs]);
 
   const unsynced = React.useMemo(() => {
-    return fields.filter(f => !f.synced || (typeof f.lastSync === 'string' && f.lastSync.includes('days')));
-  }, [fields, synced]);
+    return accessibleFields.filter(f => !f.synced || (typeof f.lastSync === 'string' && f.lastSync.includes('days')));
+  }, [accessibleFields, synced]);
 
   // Dynamic calculations for month-level QR code compilation
   const { activeCycleLogs, uniqueFieldsCount, totalLogsCount, totalOperationalCost } = React.useMemo(() => {
@@ -4183,10 +4184,24 @@ export default function FieldOpsScreen({ navigation, route }) {
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeRole === 'Farm Manager' && (
           <>
+            <ManagerFieldOpsView
+              fields={accessibleFields}
+              operations={visibleLogs.filter(log => !log.isDraft)}
+              onOpenHistory={() => {
+                setLogTab('submitted');
+                setManagerLedgerScope('all');
+                setShowHistoryModal(true);
+              }}
+              onEditOperation={(field, operation) => {
+                setSelectedField(field);
+                setManagerLedgerScope('selected');
+                editSubmittedLog(operation, true);
+              }}
+            />
             {(() => {
               const session = getCurrentSession();
               const targetFarm = session?.farm || (session?.farm || session?.blockFarm || 'District Central');
-              const farmFields = fields.filter(f => !f.blockFarm || f.blockFarm === targetFarm );
+              const farmFields = accessibleFields;
               const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
               const activeCycleLogs = logs.filter(l => !l.declined && l.status === 'ACTIVE');
               let farmLogs = activeCycleLogs.filter(l => isLogFromMonth(l, compileMonth));
@@ -4433,7 +4448,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             {/* Field Selector & Segmented Scope Switcher */}
             {(() => {
               const sess = getCurrentSession();
-              const myFieldList = fields.filter(f => 
+              const myFieldList = accessibleFields.filter(f =>
                 f.member === sess.name || 
                 f.memberName === sess.name || 
                 f.memberId === sess.employeeId || 
@@ -4442,7 +4457,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               );
               const displayedFields = managerFieldFilter === 'my'
                 ? myFieldList
-                : fields;
+                : accessibleFields;
 
               return (
                 <View style={{ marginBottom: 4 }}>
@@ -5219,7 +5234,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <>
                     <ActivityIndicator size="small" color="#fff" />
                     <Text style={{ fontSize: 14.5, fontWeight: '900', color: '#fff', letterSpacing: 0.5 }}>
-                      {getNetworkStatus() ? 'SYNCHRONIZING TO CLOUD...' : 'SAVING TO DEVICE STORAGE...'}
+                      {logForm.id ? 'Saving changes...' : (getNetworkStatus() ? 'SYNCHRONIZING TO CLOUD...' : 'SAVING TO DEVICE STORAGE...')}
                     </Text>
                   </>
                 ) : (
@@ -6674,7 +6689,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             <Text style={s.formLabel}>Select Crop Year (CY) *</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: SPACING.lg }}>
-              {['CY 2025–2026', 'CY 2026–2027', 'CY 2027–2028'].map(cy => {
+              {['2025-2026', '2026-2027', '2027-2028'].map(cy => {
                 const isSel = cycleTypeForm.cropYear === cy;
                 return (
                   <TouchableOpacity

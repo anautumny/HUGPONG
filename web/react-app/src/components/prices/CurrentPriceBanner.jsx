@@ -76,11 +76,11 @@ export default function CurrentPriceBanner({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-success animate-pulse shrink-0" />
             <span className="text-[11px] font-bold uppercase tracking-wider text-hug-muted">
               Current Official SRA Price
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-success-bg text-success border border-success/30">
               Active Official Circular
             </span>
           </div>
@@ -108,7 +108,7 @@ export default function CurrentPriceBanner({
             icon={PlusCircle}
             className="shrink-0"
           >
-            Post New Weekly Price
+            Post Official SRA Price
           </Button>
         )}
       </div>
@@ -116,7 +116,7 @@ export default function CurrentPriceBanner({
       {/* Dual Price Tiles */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Raw Sugar Tile */}
-        <div className="bg-bg dark:bg-[#0C1015]/60 rounded-xl p-4 border border-border flex items-center justify-between">
+        <div className="bg-surface-subtle rounded-xl p-4 border border-border flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-0.5">
               Raw Sugar (Domestic Millsite)
@@ -131,7 +131,7 @@ export default function CurrentPriceBanner({
 
           <div className="text-right">
             {sugarChange > 0 ? (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-lg">
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-success bg-success-bg px-2 py-1 rounded-lg">
                 <ArrowUpRight className="w-3.5 h-3.5" />
                 +₱{sugarChange.toLocaleString()}
               </span>
@@ -151,10 +151,10 @@ export default function CurrentPriceBanner({
         </div>
 
         {/* Molasses Tile */}
-        <div className="bg-bg dark:bg-[#0C1015]/60 rounded-xl p-4 border border-border flex items-center justify-between">
+        <div className="bg-surface-subtle rounded-xl p-4 border border-border flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-0.5">
-              Cane Molasses (Millsite)
+              Industrial Molasses (Millsite)
             </span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-2xl sm:text-3xl font-black text-hug-text">
@@ -166,7 +166,7 @@ export default function CurrentPriceBanner({
 
           <div className="text-right">
             {molassesChange > 0 ? (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-lg">
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-success bg-success-bg px-2 py-1 rounded-lg">
                 <ArrowUpRight className="w-3.5 h-3.5" />
                 +₱{molassesChange.toLocaleString()}
               </span>

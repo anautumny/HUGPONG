@@ -94,17 +94,17 @@ export default function UserTable({
     { value: 'DISABLED', label: 'Disabled Accounts' }
   ];
 
-  // Role badge styles
+  // Role badge styles — dignified institutional styling
   const getRoleBadgeClass = (canonicalRole) => {
     switch (canonicalRole) {
       case 'SUPER_ADMIN':
-        return 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800/60';
+        return 'bg-indigo-50/70 text-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/40';
       case 'SRA_ADMIN':
-        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60';
+        return 'bg-primary-bg text-primary dark:text-primary-light border-primary/30';
       case 'FARM_MANAGER':
-        return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800/60';
+        return 'bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200 border-slate-200 dark:border-slate-700';
       default:
-        return 'bg-bg text-hug-text dark:bg-gray-800 border-border';
+        return 'bg-surface-subtle text-hug-text border-border';
     }
   };
 
@@ -185,12 +185,12 @@ export default function UserTable({
         <table className="w-full text-left border-collapse text-sm">
           <thead>
             <tr className="bg-bg/60 dark:bg-[#0C1015]/60 border-b border-border/80 text-hug-muted font-bold text-xs uppercase tracking-wider">
-              <th scope="col" className="px-4 py-3.5">User ID</th>
-              <th scope="col" className="px-4 py-3.5">Personnel / Member</th>
-              <th scope="col" className="px-4 py-3.5">Role</th>
-              <th scope="col" className="px-4 py-3.5">Assigned Block Farm / Plot</th>
-              <th scope="col" className="px-4 py-3.5">Status</th>
-              <th scope="col" className="px-4 py-3.5 text-right">Actions</th>
+              <th scope="col" className="px-5 py-3.5">User ID</th>
+              <th scope="col" className="px-5 py-3.5">Personnel / Member</th>
+              <th scope="col" className="px-5 py-3.5">Role</th>
+              <th scope="col" className="px-5 py-3.5">Assigned Block Farm / Plot</th>
+              <th scope="col" className="px-5 py-3.5">Status</th>
+              <th scope="col" className="px-5 py-3.5 text-right">Actions</th>
             </tr>
           </thead>
 
@@ -198,12 +198,12 @@ export default function UserTable({
             {isLoading ? (
               Array.from({ length: 5 }).map((_, idx) => (
                 <tr key={idx} className="animate-pulse">
-                  <td className="px-4 py-4"><div className="h-4 w-16 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4"><div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4"><div className="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4"><div className="h-4 w-28 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4"><div className="h-4 w-16 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4 text-right"><div className="h-4 w-12 bg-gray-200 dark:bg-gray-800 rounded ml-auto" /></td>
+                  <td className="px-5 py-4"><div className="h-4 w-16 bg-surface-subtle rounded" /></td>
+                  <td className="px-5 py-4"><div className="h-4 w-32 bg-surface-subtle rounded" /></td>
+                  <td className="px-5 py-4"><div className="h-4 w-20 bg-surface-subtle rounded" /></td>
+                  <td className="px-5 py-4"><div className="h-4 w-28 bg-surface-subtle rounded" /></td>
+                  <td className="px-5 py-4"><div className="h-4 w-16 bg-surface-subtle rounded" /></td>
+                  <td className="px-5 py-4 text-right"><div className="h-4 w-12 bg-surface-subtle rounded ml-auto" /></td>
                 </tr>
               ))
             ) : pagedUsers.length === 0 ? (
@@ -246,16 +246,16 @@ export default function UserTable({
                 }
 
                 return (
-                  <tr key={u.id} className="hover:bg-bg/40 dark:hover:bg-gray-800/30 transition-colors">
+                  <tr key={u.id} className="hover:bg-bg/40 dark:hover:bg-surface-subtle/40 transition-colors">
                     {/* User ID */}
-                    <td className="px-4 py-3.5 whitespace-nowrap">
-                      <span className="font-mono text-xs font-bold text-primary dark:text-primary-light bg-primary-bg/50 dark:bg-primary/20 px-2 py-0.5 rounded border border-primary/20">
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      <span className="font-mono text-xs font-semibold text-hug-text bg-surface-subtle px-2.5 py-1 rounded border border-border">
                         {u.id}
                       </span>
                     </td>
 
                     {/* Personnel / Member Name & Contact */}
-                    <td className="px-4 py-3.5">
+                    <td className="px-5 py-4">
                       <div className="font-semibold text-hug-text text-sm">
                         {u.displayName || u.name}
                       </div>
@@ -264,7 +264,7 @@ export default function UserTable({
                         <span>{u.phone || 'No mobile linked'}</span>
                         {u.phone && (
                           u.phoneVerified ? (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-success-bg text-success border border-success/30">
                               <CheckCircle2 className="w-2.5 h-2.5" /> Verified
                             </span>
                           ) : (
@@ -277,32 +277,32 @@ export default function UserTable({
                     </td>
 
                     {/* Role */}
-                    <td className="px-4 py-3.5 whitespace-nowrap">
+                    <td className="px-5 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${getRoleBadgeClass(u.canonicalRole)}`}>
                         {u.role || u.canonicalRole}
                       </span>
                     </td>
 
                     {/* Block Farm / Plot */}
-                    <td className="px-4 py-3.5 text-xs text-hug-text2 max-w-[220px] truncate" title={farmPlotDisplay}>
+                    <td className="px-5 py-4 text-xs text-hug-text2 max-w-[220px] truncate" title={farmPlotDisplay}>
                       {farmPlotDisplay}
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-3.5 whitespace-nowrap">
+                    <td className="px-5 py-4 whitespace-nowrap">
                       {isUserActive ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-success-bg text-success border border-success/30">
                           <CheckCircle2 className="w-3 h-3" /> Active
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-danger-bg text-danger border border-danger/20">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-danger-bg text-danger border border-danger/20">
                           <AlertCircle className="w-3 h-3" /> Disabled
                         </span>
                       )}
                     </td>
 
                     {/* Actions */}
-                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                    <td className="px-5 py-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1">
                         {canEdit && (
                           <button
@@ -322,7 +322,7 @@ export default function UserTable({
                             className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                               isUserActive
                                 ? 'text-hug-muted hover:text-danger hover:bg-danger-bg/40'
-                                : 'text-hug-muted hover:text-emerald-600 hover:bg-emerald-50'
+                                : 'text-hug-muted hover:text-success hover:bg-success-bg'
                             }`}
                             title={isUserActive ? 'Disable User Access' : 'Reactivate User Access'}
                           >

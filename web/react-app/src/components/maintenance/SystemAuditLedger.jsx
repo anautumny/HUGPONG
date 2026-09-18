@@ -169,7 +169,7 @@ export default function SystemAuditLedger({
                   <td className="px-4 py-3.5 text-right whitespace-nowrap">
                     <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       l.outcome === 'SUCCESS'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+                        ? 'bg-success-bg text-success border-success/30'
                         : 'bg-danger-bg text-danger border-danger/20'
                     }`}>
                       {l.outcome === 'SUCCESS' ? (

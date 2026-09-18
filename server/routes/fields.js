@@ -15,7 +15,8 @@ const {
   optionalString,
   nullableId,
   finiteNumber,
-  integer
+  integer,
+  normalizeCropYear
 } = require('../schema/firestoreSchema');
 const { assertFieldScope, assertBlockFarmScope } = require('../services/resourceScope');
 const { archiveFieldWithOperations } = require('../services/cropCycleOperations');
@@ -93,12 +94,14 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN
       }
       return res.status(409).json({ success: false, error: 'Field ID already belongs to another field.' });
     }
+    const cropYearVal = normalizeCropYear(req.body.cropYear);
     const field = {
       blockFarmId,
       memberUserId,
       areaHa: finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
       variety: optionalString(req.body.variety, { max: 120 }),
       soilType: optionalString(req.body.soilType, { max: 120 }),
+      cropYear: cropYearVal,
       currentCycleId: cycleId,
       status: 'ACTIVE',
       customStages: Array.isArray(req.body.customStages) ? req.body.customStages : [],
@@ -111,7 +114,7 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN
       fieldId,
       sequenceNumber: 1,
       cropType: optionalString(req.body.cropType, { max: 120 }),
-      cropYear: optionalString(req.body.cropYear, { max: 40 }),
+      cropYear: cropYearVal,
       currentStageNumber: integer(req.body.currentStageNumber == null ? 1 : req.body.currentStageNumber, 'currentStageNumber', { min: 1, max: 6 }),
       elapsedMonths: finiteNumber(req.body.elapsedMonths == null ? 0 : req.body.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 }),
       batchNumber: integer(req.body.batchNumber == null ? 1 : req.body.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
@@ -152,12 +155,14 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_A
       }
       await assertMemberAssignmentScope(memberUserId, blockFarmId, scope.fieldId);
     }
+    const cropYearVal = req.body.cropYear !== undefined ? normalizeCropYear(req.body.cropYear) : existing.cropYear;
     const update = {
       blockFarmId,
       memberUserId,
       areaHa: req.body.areaHa === undefined ? existing.areaHa : finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
       variety: req.body.variety === undefined ? existing.variety : optionalString(req.body.variety, { max: 120 }),
       soilType: req.body.soilType === undefined ? existing.soilType : optionalString(req.body.soilType, { max: 120 }),
+      ...(cropYearVal ? { cropYear: cropYearVal } : {}),
       updatedAt: nowIso()
     };
     const result = await db.runTransaction(async transaction => {
@@ -168,10 +173,15 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_A
         && latest.memberUserId === update.memberUserId
         && latest.areaHa === update.areaHa
         && latest.variety === update.variety
-        && latest.soilType === update.soilType;
+        && latest.soilType === update.soilType
+        && (update.cropYear === undefined || latest.cropYear === update.cropYear);
       if (alreadyApplied) return { replayed: true, record: latest };
       assertBaseVersion(latest.updatedAt, mutationContext, scope.fieldId, { id: scope.fieldId, ...latest });
       transaction.update(scope.snapshot.ref, update);
+      if (update.cropYear && latest.currentCycleId) {
+        const cycleRef = db.collection(COLLECTIONS.CROP_CYCLES).doc(latest.currentCycleId);
+        transaction.update(cycleRef, { cropYear: update.cropYear, updatedAt: update.updatedAt });
+      }
       return { replayed: false, record: { ...latest, ...update } };
     });
     return res.json({ success: true, replayed: result.replayed, data: { id: scope.fieldId, ...result.record } });

@@ -333,7 +333,7 @@ export default function TakeOverView() {
   const currentStageObj = SUGARCANE_STAGES.find(s => s.stageNumber === selectedStageNumber) || SUGARCANE_STAGES[0];
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* 1. Header */}
       <CompactDashboardHeader
         title="Farm Manager Take Over Mode"

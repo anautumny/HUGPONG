@@ -36,8 +36,8 @@ export default function AuditQueue({
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success"></span>
           </span>
           <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-hug-text">
             Cloud Audit Queue
@@ -83,7 +83,7 @@ export default function AuditQueue({
           onClick={() => setFilterStatus('CERTIFIED')}
           className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all cursor-pointer text-center ${
             filterStatus === 'CERTIFIED'
-              ? 'bg-white dark:bg-surface text-emerald-700 dark:text-emerald-400 shadow-2xs'
+              ? 'bg-white dark:bg-surface text-success shadow-2xs'
               : 'text-hug-muted hover:text-hug-text'
           }`}
         >
@@ -151,7 +151,7 @@ export default function AuditQueue({
                   <div className="flex items-center gap-1.5">
                     <span
                       className={`w-2 h-2 rounded-full shrink-0 ${
-                        isCert ? 'bg-emerald-500' : 'bg-amber-500'
+                        isCert ? 'bg-success' : 'bg-warning'
                       }`}
                     />
                     <span className="text-xs font-bold text-hug-text truncate">

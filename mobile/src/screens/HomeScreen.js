@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Platform, ActivityIndicator,
+  Modal, Dimensions, TextInput, Platform, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -140,6 +140,7 @@ export default function HomeScreen({ navigation }) {
   const [inputBag, setInputBag] = useState(() => currentPrice.value ? String(currentPrice.value) : '');
   const [inputMol, setInputMol] = useState(() => currentMarketObservation.value ? String(currentMarketObservation.value) : '');
   const [inputCircular, setInputCircular] = useState('');
+  const [isPostingPrice, setIsPostingPrice] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
@@ -473,7 +474,7 @@ export default function HomeScreen({ navigation }) {
           {session?.role === 'SRA Admin' && (
             <View style={s.sraEditHint}>
               <Ionicons name="create-outline" size={13} color={COLORS.primary} />
-              <Text style={s.sraEditText}>{t('tap_to_broadcast', 'Tap to broadcast new official SRA weekly price')}</Text>
+              <Text style={s.sraEditText}>Post Official SRA Price</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -711,13 +712,13 @@ export default function HomeScreen({ navigation }) {
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                   <Ionicons name="trending-up" size={18} color={COLORS.primary} />
-                  <Text style={s.modalTitle}>{t('sra_publish_title', 'Post Official Weekly Millsite Price')}</Text>
+                  <Text style={s.modalTitle}>Post Official SRA Price</Text>
                 </View>
                 <Text style={s.modalSub}>
                   {t('sra_publish_sub', 'Publish official SRA circular price records to synchronize all block farms & mobile apps.')}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowPriceModal(false)} style={{ padding: 4 }}>
+              <TouchableOpacity onPress={() => setShowPriceModal(false)} style={{ padding: 4 }} disabled={isPostingPrice}>
                 <Ionicons name="close" size={22} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
@@ -738,6 +739,7 @@ export default function HomeScreen({ navigation }) {
                     style={s.input}
                     value={inputWeek}
                     onChangeText={setInputWeek}
+                    editable={!isPostingPrice}
                     placeholder="e.g. Week 1 Sep"
                   />
                 </View>
@@ -755,6 +757,7 @@ export default function HomeScreen({ navigation }) {
                         setInputWeek(calculateSRAWeekLabel(val));
                       }
                     }}
+                    editable={!isPostingPrice}
                     placeholder="YYYY-MM-DD"
                   />
                 </View>
@@ -774,6 +777,7 @@ export default function HomeScreen({ navigation }) {
                       style={s.priceInput}
                       value={inputBag}
                       onChangeText={setInputBag}
+                      editable={!isPostingPrice}
                       keyboardType="numeric"
                       placeholder={currentPrice.value ? String(currentPrice.value) : '0'}
                     />
@@ -793,7 +797,7 @@ export default function HomeScreen({ navigation }) {
                 {/* Molasses */}
                 <View style={s.priceBoxItem}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>{t('sra_molasses_price', 'Molasses Price')}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>Industrial Molasses Price</Text>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.success }}>₱ / MT</Text>
                   </View>
                   <View style={s.priceInputWrap}>
@@ -802,6 +806,7 @@ export default function HomeScreen({ navigation }) {
                       style={s.priceInput}
                       value={inputMol}
                       onChangeText={setInputMol}
+                      editable={!isPostingPrice}
                       keyboardType="numeric"
                       placeholder={currentMarketObservation.value ? String(currentMarketObservation.value) : '0'}
                     />
@@ -827,6 +832,7 @@ export default function HomeScreen({ navigation }) {
                 style={s.input}
                 value={inputCircular}
                 onChangeText={setInputCircular}
+                editable={!isPostingPrice}
                 placeholder="e.g. SRA Circular #105 (Official SRA Millsite Notice)"
               />
 
@@ -844,13 +850,16 @@ export default function HomeScreen({ navigation }) {
               <TouchableOpacity
                 onPress={() => setShowPriceModal(false)}
                 style={s.cancelBtn}
+                disabled={isPostingPrice}
               >
                 <Text style={s.cancelBtnText}>{t('btn_cancel', 'Cancel')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={s.publishBtn}
+                style={[s.publishBtn, isPostingPrice && { opacity: 0.6 }]}
+                disabled={isPostingPrice}
                 onPress={() => {
+                  if (isPostingPrice) return;
                   const b = parseFloat(inputBag);
                   const m = parseFloat(inputMol);
                   const parsedDate = new Date(`${inputEffectiveDate}T00:00:00.000Z`);
@@ -870,6 +879,8 @@ export default function HomeScreen({ navigation }) {
                       {
                         text: 'Publish Official Circular',
                         onPress: async () => {
+                          if (isPostingPrice) return;
+                          setIsPostingPrice(true);
                           try {
                             const newPost = await publishSraPrice({
                               sugarPricePerLkg: b,
@@ -890,12 +901,14 @@ export default function HomeScreen({ navigation }) {
 
                             setShowPriceModal(false);
                             Alert.alert(
-                              'Price Posted ✓',
-                              `Official SRA benchmark for ${inputWeek || 'Current Week'} updated to ₱${b.toLocaleString()}/Lkg and broadcasted to all cooperative portals & mobile apps.`
+                              'Official SRA price posted successfully.',
+                              `Official SRA benchmark for ${inputWeek || 'Current Week'} was posted and broadcast to all dashboards and price-monitoring areas.`
                             );
                           } catch (err) {
                             console.warn('[HomeScreen] Error posting price:', err);
-                            Alert.alert('Broadcast Error', 'Could not broadcast price update.');
+                            Alert.alert('Unable to post official price', err.message || 'Could not broadcast price update.');
+                          } finally {
+                            setIsPostingPrice(false);
                           }
                         }
                       }
@@ -903,8 +916,12 @@ export default function HomeScreen({ navigation }) {
                   );
                 }}
               >
-                <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
-                <Text style={s.publishBtnText}>{t('sra_btn_publish', 'Publish Weekly Price')}</Text>
+                {isPostingPrice ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
+                )}
+                <Text style={s.publishBtnText}>{isPostingPrice ? 'Posting official price...' : 'Post Official SRA Price'}</Text>
               </TouchableOpacity>
             </View>
           </View>

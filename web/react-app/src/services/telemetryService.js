@@ -105,7 +105,7 @@ export function evaluateNodeStatus(updatedAt) {
     return {
       state: 'ACTIVE',
       label: 'Active & Synced',
-      badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+      badgeClass: 'bg-success-bg text-success border border-success/30'
     };
   } else if (diffHours < 72) {
     const days = Math.floor(diffHours / 24);

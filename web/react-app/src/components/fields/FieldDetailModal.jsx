@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, Button, StatusBadge } from '../ui';
 import { Layers, MapPin, User, Calendar, Sprout, Activity, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { formatHectares, formatDate } from '../../utils/formatters';
+import { formatHectares, formatDate, formatCropYear } from '../../utils/formatters';
 import { SUGARCANE_STAGES } from '../../services/operationsService';
 
 export default function FieldDetailModal({
@@ -143,7 +143,7 @@ export default function FieldDetailModal({
               Active Crop Cycle
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white dark:bg-surface text-primary border border-primary/20 font-mono">
-              Cycle {field.cycleNumber || 1} ({field.cycleType || 'Plant Cane'})
+              Cycle {field.cycleNumber || 1} ({field.cycleType || 'Plant Cane'}{field.cropYear || field.cropCycle?.cropYear ? ` · ${formatCropYear(field.cropYear || field.cropCycle?.cropYear)}` : ''})
             </span>
           </div>
           <p className="text-sm font-bold text-hug-text">

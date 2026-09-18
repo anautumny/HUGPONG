@@ -22,6 +22,12 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
     isLoading: true,
     error: null
   };
+  const loaded = {
+    fields: false,
+    cropCycles: false,
+    blockFarms: false,
+    memberUsers: false
+  };
 
   const emit = () => {
     if (!isSubscribed) return;
@@ -35,7 +41,20 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
     });
     const farmMap = new Map(state.blockFarms.map(f => [f.id, f]));
 
-    const enrichedFields = state.fields.map(f => {
+    const userId = String(user?.employeeId || user?.id || user?.userId || '').trim();
+    const normalizedRole = String(user?.canonicalRole || user?.role || user?.roleKey || '').replace(/[\s-]+/g, '_').toUpperCase();
+    const managerFarmIds = new Set(
+      state.blockFarms
+        .filter(farm => farm.managerUserId === userId)
+        .map(farm => farm.id)
+    );
+    const scopedFields = normalizedRole === 'FARM_MANAGER' || normalizedRole === 'MANAGER'
+      ? state.fields.filter(field => managerFarmIds.has(field.blockFarmId))
+      : normalizedRole === 'MEMBER_FARMER' || normalizedRole === 'MEMBER'
+        ? state.fields.filter(field => field.memberUserId === userId)
+        : state.fields;
+
+    const enrichedFields = scopedFields.map(f => {
       const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id) || null;
       const member = memberMap.get(f.memberUserId) || null;
       const farm = farmMap.get(f.blockFarmId) || null;
@@ -53,7 +72,7 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
     onUpdate({
       ...state,
       fields: enrichedFields,
-      isLoading: false
+      isLoading: !Object.values(loaded).every(Boolean)
     });
   };
 
@@ -71,11 +90,13 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
           }
         });
         state.fields = fields;
+        loaded.fields = true;
         emit();
       },
       err => {
         console.warn('[FieldsService] Fields listener note:', err.message);
         state.error = err.message;
+        loaded.fields = true;
         emit();
       }
     );
@@ -90,9 +111,14 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
           cycles.push({ id: docSnap.id, ...docSnap.data() });
         });
         state.cropCycles = cycles;
+        loaded.cropCycles = true;
         emit();
       },
-      () => emit()
+      err => {
+        state.error = state.error || err.message;
+        loaded.cropCycles = true;
+        emit();
+      }
     );
     unsubscribers.push(cyclesUnsub);
 
@@ -107,9 +133,14 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
           } catch (e) {}
         });
         state.blockFarms = farms;
+        loaded.blockFarms = true;
         emit();
       },
-      () => emit()
+      err => {
+        state.error = state.error || err.message;
+        loaded.blockFarms = true;
+        emit();
+      }
     );
     unsubscribers.push(farmsUnsub);
 
@@ -124,9 +155,14 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
           } catch (e) {}
         });
         state.memberUsers = users.filter(u => u.canonicalRole === 'MEMBER_FARMER');
+        loaded.memberUsers = true;
         emit();
       },
-      () => emit()
+      err => {
+        state.error = state.error || err.message;
+        loaded.memberUsers = true;
+        emit();
+      }
     );
     unsubscribers.push(usersUnsub);
 

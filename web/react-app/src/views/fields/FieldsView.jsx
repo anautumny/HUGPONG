@@ -262,7 +262,7 @@ export default function FieldsView() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* 1. Header */}
       <CompactDashboardHeader
         title="Field Plot Registry"

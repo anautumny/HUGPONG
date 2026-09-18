@@ -19,6 +19,7 @@ import CostBreakdownSection from '../../components/analytics/CostBreakdownSectio
 import FarmOperationsSection from '../../components/analytics/FarmOperationsSection';
 import PriceTrendsSection from '../../components/analytics/PriceTrendsSection';
 import Button from '../../components/ui/Button';
+import { formatCropYear } from '../../utils/formatters';
 
 export default function AnalyticsView() {
   const { user } = useAuth();
@@ -95,11 +96,14 @@ export default function AnalyticsView() {
   const availableSeasons = useMemo(() => {
     const seasons = new Set();
     cropCycles.forEach(c => {
-      if (c.cropYear) seasons.add(c.cropYear);
+      if (c.cropYear) seasons.add(formatCropYear(c.cropYear));
     });
     fields.forEach(f => {
-      if (f.cropYear) seasons.add(f.cropYear);
+      if (f.cropYear) seasons.add(formatCropYear(f.cropYear));
     });
+    if (seasons.size === 0) {
+      seasons.add(formatCropYear(new Date().getFullYear()));
+    }
     return Array.from(seasons).sort().reverse();
   }, [cropCycles, fields]);
 

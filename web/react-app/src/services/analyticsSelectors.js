@@ -8,6 +8,7 @@
  */
 
 import { SUGARCANE_STAGES } from './operationsService';
+import { formatCropYear } from '../utils/formatters';
 
 /**
  * 1. Crop & Field Progress Selector
@@ -29,7 +30,7 @@ export function selectCropFieldProgress({
   const scopedFields = fields.filter(f => {
     if (selectedFarmId !== 'ALL' && f.blockFarmId !== selectedFarmId) return false;
     const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id);
-    const cropYear = cycle?.cropYear || f.cropYear || '';
+    const cropYear = formatCropYear(cycle?.cropYear || f.cropYear || '');
     if (selectedSeason !== 'ALL' && cropYear !== selectedSeason) return false;
     return true;
   });

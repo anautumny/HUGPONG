@@ -58,15 +58,15 @@ html.dark {
   --primary-foreground: #FFFFFF;
   --primary-bg: rgba(62, 115, 69, 0.18);
 
-  /* Semantic State Colors */
-  --success: #48BB78;
-  --success-bg: rgba(72, 187, 120, 0.14);
-  --warning: #ECC94B;
-  --warning-bg: rgba(236, 201, 75, 0.14);
-  --danger: #F56565;
-  --danger-bg: rgba(245, 101, 101, 0.14);
-  --info: #63B3ED;
-  --info-bg: rgba(99, 179, 237, 0.14);
+  /* Semantic State Colors — Calm Organic Institutional Palette */
+  --success: #4E8757;
+  --success-bg: rgba(78, 135, 87, 0.16);
+  --warning: #D97706;
+  --warning-bg: rgba(217, 119, 6, 0.16);
+  --danger: #E53E3E;
+  --danger-bg: rgba(229, 62, 62, 0.14);
+  --info: #3B82F6;
+  --info-bg: rgba(59, 130, 246, 0.16);
 }
 
 @theme {

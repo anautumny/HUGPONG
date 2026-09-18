@@ -85,15 +85,9 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
 
   const headerActions = [
     {
-      label: 'Field Registry',
-      to: '/fields',
-      icon: Folder
-    },
-    {
       label: 'Field Operations',
       to: '/operations',
-      icon: ClipboardList,
-      primary: true
+      icon: ClipboardList
     },
     {
       label: 'Take Over Console',
