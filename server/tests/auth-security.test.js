@@ -222,7 +222,11 @@ test('web and mobile runtime source contain no Semaphore credential or provider 
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(fullPath);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && entry.name !== 'dist' && !entry.name.startsWith('.')) {
+          visit(fullPath);
+        }
+      }
       else if (entry.isFile() && /\.(js|jsx|ts|tsx|html)$/.test(entry.name)) {
         const source = fs.readFileSync(fullPath, 'utf8');
         assert.doesNotMatch(source, /\bSEMAPHORE_(?:API_KEY|SENDER_NAME)\b|api\.semaphore\.co/i, `Semaphore material in ${fullPath}`);
@@ -255,7 +259,11 @@ test('web and mobile runtime source contain no direct Firestore mutation calls',
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(fullPath);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && entry.name !== 'dist' && !entry.name.startsWith('.')) {
+          visit(fullPath);
+        }
+      }
       else if (/\.(js|jsx|ts|tsx)$/.test(entry.name)) sourceFiles.push(fullPath);
     }
   };

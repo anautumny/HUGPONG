@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Layout Spacing Tokens */
+  --app-header-height: 64px;
+  --sidebar-width: 256px;
+  --sidebar-collapsed-width: 72px;
+
+  /* Semantic Color Tokens — Light Mode (Warm Ivory & Forest Green) */
+  --background: #F9F9F6;
+  --surface: #FFFFFF;
+  --surface-subtle: #F1F3EE;
+  --surface-elevated: #FFFFFF;
+  --foreground: #1B221C;
+  --foreground-secondary: #505E54;
+  --foreground-muted: #78877E;
+  --border: #DFE3DC;
+  --border-strong: #CBD1C7;
+
+  /* Brand Accent: Forest Green & Muted Sage */
+  --primary: #2D5016;
+  --primary-hover: #223D11;
+  --primary-light: #4A7C2F;
+  --primary-foreground: #FFFFFF;
+  --primary-bg: #EAF2E4;
+
+  /* Semantic State Colors */
+  --success: #2E7D32;
+  --success-bg: #EAF4EB;
+  --warning: #B45309;
+  --warning-bg: #FEF3C7;
+  --danger: #C53030;
+  --danger-bg: #FEE2E2;
+  --info: #2B6CB0;
+  --info-bg: #EBF8FF;
+}
+
+/* ══════════════════════════════════════════════════════════
+   RESTFUL CHARCOAL & FOREST DARK MODE (NO NEON MINT)
+   ══════════════════════════════════════════════════════════ */
+html.dark {
+  --background: #141715;
+  --surface: #1E2320;
+  --surface-subtle: #252B27;
+  --surface-elevated: #2B322E;
+  --foreground: #EFF2F0;
+  --foreground-secondary: #9EABA2;
+  --foreground-muted: #76847B;
+  --border: #2E3631;
+  --border-strong: #3C4740;
+
+  /* Brand Accent in Dark Mode: Restrained Forest Green */
+  --primary: #3E7345;
+  --primary-hover: #4A8552;
+  --primary-light: #56965E;
+  --primary-foreground: #FFFFFF;
+  --primary-bg: rgba(62, 115, 69, 0.18);
+
+  /* Semantic State Colors */
+  --success: #48BB78;
+  --success-bg: rgba(72, 187, 120, 0.14);
+  --warning: #ECC94B;
+  --warning-bg: rgba(236, 201, 75, 0.14);
+  --danger: #F56565;
+  --danger-bg: rgba(245, 101, 101, 0.14);
+  --info: #63B3ED;
+  --info-bg: rgba(99, 179, 237, 0.14);
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-light: var(--primary-light);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-bg: var(--primary-bg);
+
+  --color-bg: var(--background);
+  --color-hug-text: var(--foreground);
+  --color-hug-text2: var(--foreground-secondary);
+  --color-hug-muted: var(--foreground-muted);
+
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+}
+
+/* Base Typography optimized for 40+ demographic readability */
+body {
+  font-family: var(--font-sans);
+  font-size: 1rem; /* 16px default */
+  line-height: 1.5;
+  color: var(--foreground);
+  background-color: var(--background);
+}
+
+html.dark body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Always keep logo container pure white across light & dark mode */
+.brand-logo-box,
+.brand-logo-box img,
+html.dark .brand-logo-box,
+html.dark .brand-logo-box img {
+  background-color: #FFFFFF !important;
+}
+
+/* Single-line sidebar navigation tab prevention */
+.nav-item {
+  white-space: nowrap;
+}
+
+/* Toast Notifications */
+#toast {
+  background-color: #0F172A;
+  color: #F8FAFC;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+}
+
+html.dark #toast {
+  background-color: #1E293B;
+  color: #F8FAFC;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.8), 0 8px 10px -6px rgba(0, 0, 0, 0.8);
+}
+
+/* Print Layout: SRA Audit Certificate & Compliance Dossier (Strictly Monochrome) */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+  body, html {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    overflow: visible !important;
+    font-size: 11px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  aside, header, nav, button, #toast, .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  #printable-audit-container {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}

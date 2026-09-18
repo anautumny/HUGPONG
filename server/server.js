@@ -7,6 +7,7 @@ const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction } = require('./config');
 
 // Initialize Firebase Admin SDK
@@ -82,8 +83,19 @@ app.use('/api/sms', smsRoutes);
 app.use('/api/audit-events', auditEventRoutes);
 app.use('/api/terminal-diagnostics', telemetryRoutes);
 
-// ── Static Web Dashboard Serving ────────────────────────────
-app.use(express.static(path.join(__dirname, '../web')));
+// ── Static Web Serving (React Production SPA + Legacy Web Fallback) ──────
+const reactDistPath = path.join(__dirname, '../web/react-app/dist');
+const legacyWebPath = path.join(__dirname, '../web');
+
+if (fs.existsSync(reactDistPath)) {
+  app.use(express.static(reactDistPath));
+}
+app.use(express.static(legacyWebPath));
+
+// Legacy entry redirect: direct legacy /login.html to website homepage
+app.get('/login.html', (req, res) => {
+  res.redirect(301, '/');
+});
 
 // ── Health Check & System Status ────────────────────────────
 app.get('/health', (req, res) => {
@@ -106,6 +118,16 @@ app.get('/api/data', require('./middleware/auth').requireAuth, (req, res) => {
   });
 });
 
+// SPA Fallback: Serve React index.html for non-API client GET requests
+if (fs.existsSync(reactDistPath)) {
+  app.get('*', (req, res, next) => {
+    if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/auth') || req.originalUrl.startsWith('/health')) {
+      return next();
+    }
+    res.sendFile(path.join(reactDistPath, 'index.html'));
+  });
+}
+
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({
@@ -124,11 +146,22 @@ app.use((err, req, res, next) => {
 });
 
 // Start Server
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('══════════════════════════════════════════════════════════');
   console.log(`  🌾 HUGPONG Security Gateway & Express Backend`);
   console.log(`  🚀 Server running on: http://localhost:${PORT}`);
   console.log(`  🔒 Authentication & Role Protection: ACTIVE`);
   console.log(`  📦 Project: hugpong-ff`);
   console.log('══════════════════════════════════════════════════════════');
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[HUGPONG Server Error] Port ${PORT} is already in use by another process.`);
+    console.error(`To free port ${PORT}, close the conflicting process or run run-web.bat.\n`);
+    process.exit(1);
+  } else {
+    console.error('[HUGPONG Server Error]', err);
+    process.exit(1);
+  }
 });

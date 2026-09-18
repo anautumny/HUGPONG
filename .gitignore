@@ -7,8 +7,15 @@ mobile/npm-debug.log*
 mobile/yarn-debug.log*
 mobile/yarn-error.log*
 
-# Web Client
+# Web Client & React App
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+web/react-dist/
 web/node_modules/
+web/react-app/node_modules/
+web/react-app/dist/
 
 # Backend Server & Secrets
 server/node_modules/
