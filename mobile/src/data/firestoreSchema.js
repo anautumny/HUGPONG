@@ -25,6 +25,22 @@ const ROLE_LABELS = Object.freeze({
   [ROLES.SUPER_ADMIN]: 'Super Admin'
 });
 
+export const ROLE_ALLOWED_PLATFORMS = Object.freeze({
+  [ROLES.MEMBER_FARMER]: Object.freeze(['mobile']),
+  [ROLES.FARM_MANAGER]: Object.freeze(['mobile', 'web']),
+  [ROLES.SRA_ADMIN]: Object.freeze(['mobile', 'web']),
+  [ROLES.SUPER_ADMIN]: Object.freeze(['web'])
+});
+
+export function isRoleAllowedOnPlatform(role, platform) {
+  const canonical = canonicalRole(role);
+  if (!canonical) return false;
+  const plat = String(platform || '').trim().toLowerCase();
+  if (!plat) return true;
+  const allowed = ROLE_ALLOWED_PLATFORMS[canonical];
+  return Boolean(allowed && allowed.includes(plat));
+}
+
 const ROLE_ALIASES = Object.freeze({
   MEMBER: ROLES.MEMBER_FARMER,
   'MEMBER FARMER': ROLES.MEMBER_FARMER,

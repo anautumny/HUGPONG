@@ -1,6 +1,6 @@
 /**
  * AdminOfflineBarrier.js — SRA Regulatory Authority Offline Security Barrier
- * Enforces strict online requirements for SRA Admin & Super Admin to preserve audit compliance.
+ * Enforces strict online requirements for SRA Admin to preserve audit compliance.
  */
 
 import React, { useState } from 'react';

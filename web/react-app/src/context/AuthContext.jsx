@@ -81,8 +81,11 @@ export function AuthProvider({ children }) {
     setSessionExpiredNotice('');
     const res = await fetch('/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactNumber, password }),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-client-platform': 'web'
+      },
+      body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
       credentials: 'include'
     });
     const data = await res.json().catch(() => ({}));

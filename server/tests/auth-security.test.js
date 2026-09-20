@@ -14,7 +14,7 @@ const { issueToken } = require('../security/token');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
-const { ROLES, publicRoleLabel } = require('../schema/firestoreSchema');
+const { ROLES, publicRoleLabel, ROLE_ALLOWED_PLATFORMS, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
 const webAuthRouting = require('../../web/shared/auth-routing');
 
@@ -280,4 +280,31 @@ test('web and mobile runtime source contain no direct Firestore mutation calls',
     const source = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:setDoc|addDoc|updateDoc|deleteDoc|writeBatch)\s*\(/, `direct Firestore mutation in ${file}`);
   }
+});
+
+test('Super Admin role is strictly restricted to web and rejected on mobile platform', () => {
+  assert.equal(isRoleAllowedOnPlatform(ROLES.SUPER_ADMIN, 'web'), true);
+  assert.equal(isRoleAllowedOnPlatform(ROLES.SUPER_ADMIN, 'mobile'), false);
+  assert.deepEqual(ROLE_ALLOWED_PLATFORMS[ROLES.SUPER_ADMIN], ['web']);
+
+  assert.equal(isRoleAllowedOnPlatform(ROLES.MEMBER_FARMER, 'mobile'), true);
+  assert.equal(isRoleAllowedOnPlatform(ROLES.MEMBER_FARMER, 'web'), false);
+
+  assert.equal(isRoleAllowedOnPlatform(ROLES.FARM_MANAGER, 'mobile'), true);
+  assert.equal(isRoleAllowedOnPlatform(ROLES.FARM_MANAGER, 'web'), true);
+
+  assert.equal(isRoleAllowedOnPlatform(ROLES.SRA_ADMIN, 'mobile'), true);
+  assert.equal(isRoleAllowedOnPlatform(ROLES.SRA_ADMIN, 'web'), true);
+
+  const authRouteSource = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
+  assert.match(
+    authRouteSource,
+    /sessionUser\.canonicalRole === ROLES\.SUPER_ADMIN && clientPlatform === 'mobile'/,
+    'auth /login and /session must reject SUPER_ADMIN on mobile platform'
+  );
+  assert.match(
+    authRouteSource,
+    /Super Admin access is restricted to the Web Management Console\./,
+    'auth routes must return the exact restriction message'
+  );
 });

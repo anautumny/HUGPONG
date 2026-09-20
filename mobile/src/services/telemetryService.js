@@ -17,8 +17,7 @@ export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
     const deviceSuffix = cleanContact ? cleanContact.slice(-4) : (session.employeeId ? session.employeeId.slice(-4) : '01');
     const deviceId = session.deviceId || (
       userRole === 'Farm Manager' ? `SM-S23U-${deviceSuffix}` :
-      (userRole === 'SRA Admin' ? `SM-TAB9-${deviceSuffix}` :
-      (userRole === 'Super Admin' ? `SM-N20U-${deviceSuffix}` : `SM-A146P-${deviceSuffix}`))
+      (userRole === 'SRA Admin' ? `SM-TAB9-${deviceSuffix}` : `SM-A146P-${deviceSuffix}`)
     );
 
     // Hardware and OS Model detection

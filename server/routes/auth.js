@@ -10,7 +10,7 @@ const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp } = require('../security/otp');
 const { sendSms } = require('../services/smsGateway');
-const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso } = require('../schema/firestoreSchema');
+const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 
 function normalizeContact(value) {
   const digits = String(value || '').replace(/\D/g, '');
@@ -125,6 +125,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid credentials.' });
     }
     const sessionUser = await buildSessionUser(matchedUser.id, matchedUser);
+    const clientPlatform = String(req.headers['x-client-platform'] || req.body?.clientPlatform || '').trim().toLowerCase();
+    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN && clientPlatform === 'mobile') {
+      return res.status(403).json({
+        success: false,
+        error: 'Super Admin access is restricted to the Web Management Console.'
+      });
+    }
     req.session.user = sessionUser;
     const credentials = await issueCredentials(sessionUser);
     return res.json({
@@ -320,6 +327,14 @@ router.get('/session', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, authenticated: false, error: 'The account is no longer active.' });
     }
     const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
+    const clientPlatform = String(req.headers['x-client-platform'] || '').trim().toLowerCase();
+    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN && clientPlatform === 'mobile') {
+      return res.status(403).json({
+        success: false,
+        authenticated: false,
+        error: 'Super Admin access is restricted to the Web Management Console.'
+      });
+    }
     req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {

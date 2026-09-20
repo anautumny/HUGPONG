@@ -41,10 +41,25 @@ export const ROLE_LABELS = Object.freeze({
   SUPER_ADMIN: 'Super Admin'
 });
 
+export const ROLE_ALLOWED_PLATFORMS = Object.freeze({
+  MEMBER_FARMER: Object.freeze(['mobile']),
+  FARM_MANAGER: Object.freeze(['mobile', 'web']),
+  SRA_ADMIN: Object.freeze(['mobile', 'web']),
+  SUPER_ADMIN: Object.freeze(['web'])
+});
+
 const now = () => new Date().toISOString();
 
 export const role = value => ROLE_ALIASES[String(value || '').trim().toUpperCase()] || null;
 export const roleLabel = value => ROLE_LABELS[role(value)] || '';
+export const isRoleAllowedOnPlatform = (r, platform) => {
+  const canonical = role(r);
+  if (!canonical) return false;
+  const plat = String(platform || '').trim().toLowerCase();
+  if (!plat) return true;
+  const allowed = ROLE_ALLOWED_PLATFORMS[canonical];
+  return Boolean(allowed && allowed.includes(plat));
+};
 export const cycleId = (fieldId, sequenceNumber) =>
   `CYC-${String(fieldId || '').trim().toUpperCase()}-${String(Number(sequenceNumber) || 1).padStart(3, '0')}`;
 

@@ -23,6 +23,13 @@ const ROLES = Object.freeze({
   SUPER_ADMIN: 'SUPER_ADMIN'
 });
 
+const ROLE_ALLOWED_PLATFORMS = Object.freeze({
+  [ROLES.MEMBER_FARMER]: Object.freeze(['mobile']),
+  [ROLES.FARM_MANAGER]: Object.freeze(['mobile', 'web']),
+  [ROLES.SRA_ADMIN]: Object.freeze(['mobile', 'web']),
+  [ROLES.SUPER_ADMIN]: Object.freeze(['web'])
+});
+
 const USER_STATUSES = Object.freeze(['PENDING', 'ACTIVE', 'DISABLED']);
 const ENTITY_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const OPERATION_LOG_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
@@ -62,6 +69,15 @@ function publicRoleLabel(role) {
   if (canonical === ROLES.SRA_ADMIN) return 'SRA Admin';
   if (canonical === ROLES.SUPER_ADMIN) return 'Super Admin';
   return '';
+}
+
+function isRoleAllowedOnPlatform(role, platform) {
+  const canonical = canonicalRole(role);
+  if (!canonical) return false;
+  const plat = String(platform || '').trim().toLowerCase();
+  if (!plat) return true;
+  const allowed = ROLE_ALLOWED_PLATFORMS[canonical];
+  return Boolean(allowed && allowed.includes(plat));
 }
 
 function requiredString(value, fieldName, { max = 500 } = {}) {
@@ -328,5 +344,7 @@ module.exports = {
   createAuditHash,
   createCycleId,
   createOperationLogId,
-  createAuditReportId
+  createAuditReportId,
+  ROLE_ALLOWED_PLATFORMS,
+  isRoleAllowedOnPlatform
 };

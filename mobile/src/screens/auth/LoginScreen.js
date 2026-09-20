@@ -386,7 +386,7 @@ export default function LoginScreen({ navigation }) {
 
               <View style={s.quickGrid}>
                 <TouchableOpacity
-                  style={[s.quickRoleBtn, fastLoggingIn === 'Member Farmer' && s.quickRoleBtnActive]}
+                  style={[s.quickRoleBtn, s.quickRoleBtnFull, fastLoggingIn === 'Member Farmer' && s.quickRoleBtnActive]}
                   onPress={() => handleFastLogin('Member Farmer')}
                   disabled={Boolean(fastLoggingIn)}
                   activeOpacity={0.75}
@@ -398,6 +398,7 @@ export default function LoginScreen({ navigation }) {
                     <Text style={s.quickRoleTitle}>Member Farmer</Text>
                     <Text style={s.quickRoleSub} numberOfLines={1}>Juan · DEV-FLD-001</Text>
                   </View>
+                  <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -427,21 +428,6 @@ export default function LoginScreen({ navigation }) {
                   <View style={{ flex: 1 }}>
                     <Text style={s.quickRoleTitle}>SRA Admin</Text>
                     <Text style={s.quickRoleSub} numberOfLines={1}>Maria · Regulatory</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[s.quickRoleBtn, fastLoggingIn === 'Super Admin' && s.quickRoleBtnActive]}
-                  onPress={() => handleFastLogin('Super Admin')}
-                  disabled={Boolean(fastLoggingIn)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#F3F4F6' }]}>
-                    <Ionicons name="settings-outline" size={14} color="#4B5563" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.quickRoleTitle}>Super Admin</Text>
-                    <Text style={s.quickRoleSub} numberOfLines={1}>System · All Dist</Text>
                   </View>
                 </TouchableOpacity>
               </View>
@@ -815,6 +801,11 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: '#F9FAF7',
+  },
+  quickRoleBtnFull: {
+    width: '100%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   quickRoleBtnActive: {
     borderColor: COLORS.primary,

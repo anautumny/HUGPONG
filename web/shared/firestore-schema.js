@@ -15,9 +15,23 @@
   const ROLE_LABELS = Object.freeze({
     MEMBER_FARMER: 'Member Farmer', FARM_MANAGER: 'Farm Manager', SRA_ADMIN: 'SRA Admin', SUPER_ADMIN: 'Super Admin'
   });
+  const ROLE_ALLOWED_PLATFORMS = Object.freeze({
+    MEMBER_FARMER: Object.freeze(['mobile']),
+    FARM_MANAGER: Object.freeze(['mobile', 'web']),
+    SRA_ADMIN: Object.freeze(['mobile', 'web']),
+    SUPER_ADMIN: Object.freeze(['web'])
+  });
   const now = () => new Date().toISOString();
   const role = value => ROLE_ALIASES[String(value || '').trim().toUpperCase()] || null;
   const roleLabel = value => ROLE_LABELS[role(value)] || '';
+  const isRoleAllowedOnPlatform = (r, platform) => {
+    const canonical = role(r);
+    if (!canonical) return false;
+    const plat = String(platform || '').trim().toLowerCase();
+    if (!plat) return true;
+    const allowed = ROLE_ALLOWED_PLATFORMS[canonical];
+    return Boolean(allowed && allowed.includes(plat));
+  };
   const cycleId = (fieldId, sequenceNumber) => `CYC-${String(fieldId || '').trim().toUpperCase()}-${String(Number(sequenceNumber) || 1).padStart(3, '0')}`;
   const reportPeriod = value => {
     const input = String(value || '').trim();
@@ -198,6 +212,6 @@
     createdAt: value.createdAt || now(), updatedAt: value.updatedAt || now(), resolvedAt: value.resolvedAt || null, resolvedByUserId: value.resolvedByUserId || null });
   const fromTicket = (id, value) => ({ id, ...value, subject: value.title, memberId: value.createdByUserId });
 
-  global.HugpongSchema = Object.freeze({ COLLECTIONS, role, roleLabel, cycleId, reportPeriod, toUser, fromUser, toBlockFarm, fromBlockFarm,
+  global.HugpongSchema = Object.freeze({ COLLECTIONS, role, roleLabel, ROLE_ALLOWED_PLATFORMS, isRoleAllowedOnPlatform, cycleId, reportPeriod, toUser, fromUser, toBlockFarm, fromBlockFarm,
     toField, fromField, toCycle, toOperation, fromOperation, snapshot, toReport, fromReport, toPrice, fromPrice, toTicket, fromTicket });
 })(window);

@@ -139,8 +139,8 @@ function MainTabs() {
     },
   }), [bottomInset]);
 
-  // Strict Offline Barrier for SRA Admin & Super Admin to protect audit integrity
-  if (!isOnline && (role === 'SRA Admin' || role === 'Super Admin')) {
+  // Strict Offline Barrier for SRA Admin to protect audit integrity
+  if (!isOnline && role === 'SRA Admin') {
     return (
       <AdminOfflineBarrier
         session={getCurrentSession()}

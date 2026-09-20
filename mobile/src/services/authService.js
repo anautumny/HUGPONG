@@ -72,7 +72,10 @@ export async function signInToFirebase(customToken) {
 export async function publicAuthRequest(path, body) {
   const response = await fetchWithHostFallback(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-client-platform': 'mobile'
+    },
     body: JSON.stringify(body || {})
   });
   return parseResponse(response);
@@ -85,6 +88,7 @@ export async function authenticatedRequest(path, options = {}) {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
+      'x-client-platform': 'mobile',
       Authorization: `Bearer ${token}`,
       ...(options.headers || {})
     },
@@ -94,7 +98,7 @@ export async function authenticatedRequest(path, options = {}) {
 }
 
 export async function loginWithServer(identifier, password) {
-  const result = await publicAuthRequest('/auth/login', { contactNumber: identifier, password });
+  const result = await publicAuthRequest('/auth/login', { contactNumber: identifier, password, clientPlatform: 'mobile' });
   await signInToFirebase(result.firebaseCustomToken);
   await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
   return result;

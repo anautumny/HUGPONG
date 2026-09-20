@@ -828,7 +828,8 @@ export const logoutUser = async () => {
 export const authenticateUser = async (contactOrId, password) => {
   try {
     const result = await loginWithServer(contactOrId, password);
-    if (result.user?.role === 'Super Admin') {
+    const roleUpper = String(result.user?.canonicalRole || result.user?.role || '').toUpperCase().replace(/ /g, '_');
+    if (roleUpper === 'SUPER_ADMIN' || result.user?.role === 'Super Admin') {
       await logoutFromServer();
       return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
@@ -1055,6 +1056,10 @@ export const notifyDataUpdate = notify;
 export const fastLoginRole = async (role) => {
   const normalized = String(role || '').trim();
 
+  if (normalized.toLowerCase().includes('super') || normalized === 'Super Admin') {
+    return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
+  }
+
   // Canonical role profiles aligned with web Development Role Preview
   const PROFILES = {
     'Member Farmer': {
@@ -1094,16 +1099,6 @@ export const fastLoginRole = async (role) => {
       role: 'SRA Admin',
       roleKey: 'sra',
       canonicalRole: 'SRA_ADMIN',
-    },
-    'Super Admin': {
-      employeeId: '01000001',
-      id: '01000001',
-      name: 'Super Admin',
-      phone: '09170000001',
-      contact: '09170000001',
-      role: 'Super Admin',
-      roleKey: 'super',
-      canonicalRole: 'SUPER_ADMIN',
     },
   };
 

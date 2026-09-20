@@ -40,13 +40,13 @@ export default function UserFormModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 
-  // Available roles for creation
+  // Available roles for creation with platform scope indicators
   const roleOptions = [
-    { value: 'MEMBER_FARMER', label: 'Member Farmer' },
-    ...(!isFarmManager ? [{ value: 'FARM_MANAGER', label: 'Farm Manager' }] : []),
+    { value: 'MEMBER_FARMER', label: 'Member Farmer (Mobile Only)' },
+    ...(!isFarmManager ? [{ value: 'FARM_MANAGER', label: 'Farm Manager (Web & Mobile)' }] : []),
     ...(isSuperAdmin ? [
-      { value: 'SRA_ADMIN', label: 'SRA Admin' },
-      { value: 'SUPER_ADMIN', label: 'Super Admin' }
+      { value: 'SRA_ADMIN', label: 'SRA Admin (Web & Mobile)' },
+      { value: 'SUPER_ADMIN', label: 'Super Admin (Web Console Only)' }
     ] : [])
   ];
 
