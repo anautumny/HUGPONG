@@ -9,7 +9,7 @@ import LoginView from './views/LoginView';
 import { PrivacyPolicyView, TermsView, CookiePolicyView } from './views/LegalViews';
 import DashboardView from './views/dashboard/DashboardView';
 import ComponentShowcaseView from './views/ComponentShowcaseView';
-import FieldsView from './views/fields/FieldsView';
+import FarmFieldRegistryView from './views/fields/FarmFieldRegistryView';
 import OperationsView from './views/operations/OperationsView';
 import TakeOverView from './views/operations/TakeOverView';
 import AuditCenterView from './views/audit/AuditCenterView';
@@ -56,7 +56,9 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/dashboard" element={<DashboardView />} />
                 <Route path="/showcase" element={<ComponentShowcaseView />} />
-                <Route path="/fields" element={<FieldsView />} />
+                <Route path="/fields" element={<FarmFieldRegistryView />} />
+                <Route path="/block-farms" element={<FarmFieldRegistryView />} />
+                <Route path="/registry" element={<FarmFieldRegistryView />} />
                 <Route path="/operations" element={<OperationsView />} />
                 <Route path="/takeover" element={<TakeOverView />} />
                 <Route path="/prices" element={<PricesView />} />

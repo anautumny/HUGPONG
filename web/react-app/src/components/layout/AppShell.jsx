@@ -128,7 +128,7 @@ export default function AppShell() {
         {/* Page Content Outlet without forced card wrapping */}
         <main
           id="page-content"
-          className="flex-1 overflow-y-auto p-4 sm:p-6 focus:outline-none"
+          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 focus:outline-none"
           tabIndex={-1}
         >
           <Outlet />

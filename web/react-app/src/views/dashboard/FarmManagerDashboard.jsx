@@ -87,12 +87,14 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     {
       label: 'Field Operations',
       to: '/operations',
-      icon: ClipboardList
+      icon: ClipboardList,
+      variant: 'primary'
     },
     {
-      label: 'Take Over Console',
-      to: '/takeover',
-      icon: UserCheck
+      label: 'Farm & Field Registry',
+      to: '/fields',
+      icon: Layers,
+      variant: 'primary'
     }
   ];
 
@@ -124,17 +126,19 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
   ];
 
   return (
-    <div className="space-y-6">
-      {/* 1. Compact Working Header */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* 1. Header */}
       <CompactDashboardHeader
+        category="Operational Workspace"
+        badge="Block Farm Control"
         title="Farm Manager Dashboard"
-        contextText={`${farmName} (${farmCode}) · Operational Workspace`}
+        subtitle={`${farmName} (${farmCode}) · Operational monitoring, member plot oversight, and crop progress.`}
         actions={headerActions}
       />
 
       {/* 2. Primary Current Price & Operational Focus (12-col grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-8 flex flex-col">
+        <div className="lg:col-span-8 min-w-0 flex flex-col">
           <CurrentPriceCard
             price={currentPrice}
             previousPrice={previousPrice}
@@ -143,13 +147,13 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
         </div>
 
         {/* Assigned Block Farm Overview (4 cols) */}
-        <div className="lg:col-span-4 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
+        <div className="lg:col-span-4 min-w-0 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider truncate">
                 Assigned Block Farm
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary dark:text-primary-light">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary dark:text-primary-light shrink-0">
                 {farmCode}
               </span>
             </div>

@@ -3,6 +3,8 @@ import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth } from '../firebase/config';
 import { STORAGE_KEYS, getItem, saveItem } from './storageService';
 
+const API_REQUEST_TIMEOUT_MS = 10000;
+
 function resolveDefaultApiUrl() {
   const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
   if (envUrl) {
@@ -18,16 +20,32 @@ function resolveDefaultApiUrl() {
 export const API_BASE_URL = resolveDefaultApiUrl();
 
 async function fetchWithHostFallback(path, options) {
+  const fetchWithTimeout = async (url) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err.name === 'AbortError' || /aborted|canceled|cancelled/i.test(String(err.message || ''))) {
+        throw new Error(`Could not reach the HUGPONG server at ${API_BASE_URL}. Check that the server is running and the phone is on the same Wi-Fi network.`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   try {
-    return await fetch(`${API_BASE_URL}${path}`, options);
+    return await fetchWithTimeout(`${API_BASE_URL}${path}`);
   } catch (err) {
+    if (err.message.startsWith('Could not reach the HUGPONG server')) throw err;
     if (Platform.OS === 'android') {
       const fallbackHost = API_BASE_URL.includes('10.0.2.2')
         ? API_BASE_URL.replace('10.0.2.2', 'localhost')
         : (API_BASE_URL.includes('localhost') ? API_BASE_URL.replace('localhost', '10.0.2.2') : null);
       if (fallbackHost) {
         try {
-          return await fetch(`${fallbackHost}${path}`, options);
+          return await fetchWithTimeout(`${fallbackHost}${path}`);
         } catch (_) {}
       }
     }

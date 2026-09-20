@@ -21,7 +21,8 @@ import {
   Monitor,
   Shield,
   LogOut,
-  X
+  X,
+  Building2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -110,10 +111,10 @@ export default function Sidebar({
         header: 'Manager Workspace',
         items: [
           {
-            label: 'Field Plot Registry',
+            label: 'Farm & Field Registry',
             to: '/fields',
-            icon: MapPin,
-            id: 'nav-mgr-fields'
+            icon: Building2,
+            id: 'nav-farm-field-registry'
           },
           {
             label: 'Field Operations',
@@ -169,10 +170,10 @@ export default function Sidebar({
         header: 'District Cooperative Oversight',
         items: [
           {
-            label: 'Block Farm Registry',
+            label: 'Farm & Field Registry',
             to: '/fields',
-            icon: MapPin,
-            id: 'nav-fields'
+            icon: Building2,
+            id: 'nav-farm-field-registry'
           },
           {
             label: 'User Management',
@@ -187,22 +188,16 @@ export default function Sidebar({
         header: 'District Data Monitoring',
         items: [
           {
-            label: 'District Plot Registry',
+            label: 'Farm & Field Registry',
             to: '/fields',
-            icon: MapPin,
-            id: 'nav-super-fields'
+            icon: Building2,
+            id: 'nav-farm-field-registry'
           },
           {
             label: 'User Directory Monitor',
             to: '/users',
             icon: Users,
             id: 'nav-super-users'
-          },
-          {
-            label: 'System Audit Ledger',
-            to: '/audit',
-            icon: History,
-            id: 'nav-history'
           },
           {
             label: 'SRA Price Monitor',
@@ -333,6 +328,14 @@ export default function Sidebar({
 
             {section.items.map(item => {
               const Icon = item.icon;
+              const currentPathWithSearch = location.pathname + location.search;
+              const isItemActive = (navIsActive) => {
+                if (item.to === '/fields') {
+                  return location.pathname === '/fields' || location.pathname === '/block-farms' || location.pathname === '/registry';
+                }
+                return navIsActive;
+              };
+
               return (
                 <NavLink
                   key={item.to}
@@ -340,17 +343,18 @@ export default function Sidebar({
                   id={item.id}
                   onClick={handleNavClick}
                   title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `nav-item flex items-center ${
+                  className={({ isActive }) => {
+                    const active = isItemActive(isActive);
+                    return `nav-item flex items-center ${
                       collapsed
                         ? 'w-10 h-10 mx-auto justify-center'
                         : 'gap-2.5 px-3 py-2.5 w-full'
                     } rounded-xl text-sm transition-colors text-left cursor-pointer ${
-                      isActive
+                      active
                         ? 'bg-surface-subtle dark:bg-surface-elevated text-hug-text font-semibold border border-border/80 shadow-2xs'
                         : 'text-hug-muted hover:text-hug-text hover:bg-surface-subtle/80 font-medium border border-transparent'
-                    }`
-                  }
+                    }`;
+                  }}
                   end={item.to === '/dashboard'}
                 >
                   <Icon className="w-4 h-4 flex-shrink-0" />

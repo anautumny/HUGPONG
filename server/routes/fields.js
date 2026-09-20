@@ -63,7 +63,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     readMutationContext(req);
@@ -135,17 +135,17 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN
   }
 });
 
-router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const scope = await assertFieldScope(req.params.id, req.session.user, [ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]);
+    const scope = await assertFieldScope(req.params.id, req.session.user, [ROLES.FARM_MANAGER]);
     const existing = scope.field;
     const mutationContext = readMutationContext(req);
     const blockFarmId = req.body.blockFarmId === undefined
       ? existing.blockFarmId
       : requiredString(req.body.blockFarmId, 'blockFarmId', { max: 80 }).toUpperCase();
     if (blockFarmId !== existing.blockFarmId) {
-      await assertBlockFarmScope(blockFarmId, req.session.user, [ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]);
+      await assertBlockFarmScope(blockFarmId, req.session.user, [ROLES.FARM_MANAGER]);
     }
     const memberUserId = req.body.memberUserId === undefined ? existing.memberUserId : nullableId(req.body.memberUserId);
     if (memberUserId) {
@@ -190,7 +190,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_A
   }
 });
 
-router.post('/:id/archive', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.post('/:id/archive', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const result = await archiveFieldWithOperations(db, req.params.id, req.session.user, undefined, readMutationContext(req));
@@ -200,7 +200,7 @@ router.post('/:id/archive', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.
   }
 });
 
-router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     const fieldId = String(req.params.id || '').trim().toUpperCase();
     const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
@@ -230,7 +230,7 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
   }
 });
 
-router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     const fieldId = String(req.params.id || '').trim().toUpperCase();
     const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);

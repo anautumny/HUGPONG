@@ -1052,6 +1052,140 @@ const notify = () => {
 
 export const notifyDataUpdate = notify;
 
+export const fastLoginRole = async (role) => {
+  const normalized = String(role || '').trim();
+
+  // Canonical role profiles aligned with web Development Role Preview
+  const PROFILES = {
+    'Member Farmer': {
+      employeeId: '04000001',
+      id: '04000001',
+      name: 'Juan dela Cruz',
+      phone: '09170000004',
+      contact: '09170000004',
+      role: 'Member Farmer',
+      roleKey: 'member',
+      canonicalRole: 'MEMBER_FARMER',
+      fieldId: 'DEV-FLD-001',
+      blockFarmId: 'DEV-BF-001',
+      blockFarm: 'Hda. Adela Block Farm',
+      farm: 'Hda. Adela Block Farm',
+      memberId: '04000001',
+    },
+    'Farm Manager': {
+      employeeId: '03000001',
+      id: '03000001',
+      name: 'Jose Reyes',
+      phone: '09170000003',
+      contact: '09170000003',
+      role: 'Farm Manager',
+      roleKey: 'manager',
+      canonicalRole: 'FARM_MANAGER',
+      blockFarmId: 'DEV-BF-001',
+      blockFarm: 'Hda. Adela Block Farm',
+      farm: 'Hda. Adela Block Farm',
+    },
+    'SRA Admin': {
+      employeeId: '02000001',
+      id: '02000001',
+      name: 'Maria Santos',
+      phone: '09170000002',
+      contact: '09170000002',
+      role: 'SRA Admin',
+      roleKey: 'sra',
+      canonicalRole: 'SRA_ADMIN',
+    },
+    'Super Admin': {
+      employeeId: '01000001',
+      id: '01000001',
+      name: 'Super Admin',
+      phone: '09170000001',
+      contact: '09170000001',
+      role: 'Super Admin',
+      roleKey: 'super',
+      canonicalRole: 'SUPER_ADMIN',
+    },
+  };
+
+  const defaultProfile = PROFILES[normalized] || PROFILES['Member Farmer'];
+  const existingUser = users.find(u =>
+    u.role === normalized ||
+    u.role === defaultProfile.role ||
+    (u.employeeId && u.employeeId === defaultProfile.employeeId) ||
+    (u.contact && u.contact === defaultProfile.phone)
+  );
+
+  // Seed default block farm and field if store is currently empty
+  if (blockFarms.length === 0) {
+    blockFarms.push({
+      id: 'DEV-BF-001',
+      name: 'Hda. Adela Block Farm',
+      managerUserId: '03000001',
+      managerName: 'Jose Reyes',
+      location: 'Silay City',
+      totalHa: 45.0,
+      activeMembers: 12
+    });
+  }
+
+  if (fields.length === 0) {
+    fields.push({
+      id: 'DEV-FLD-001',
+      blockFarmId: 'DEV-BF-001',
+      blockFarmName: 'Hda. Adela Block Farm',
+      member: 'Juan dela Cruz',
+      memberName: 'Juan dela Cruz',
+      memberUserId: '04000001',
+      ha: 1.5,
+      areaHa: 1.5,
+      stage: 'Land Preparation',
+      stageNumber: 1,
+      cropYear: '2026-2027',
+      cycleType: 'Sugarcane',
+      synced: true,
+      status: 'ACTIVE'
+    });
+  }
+
+  let activeFieldId = defaultProfile.fieldId || '';
+  if (normalized === 'Member Farmer') {
+    const matchedField = fields.find(f =>
+      f.memberUserId === defaultProfile.employeeId ||
+      f.member === defaultProfile.name ||
+      f.memberName === defaultProfile.name
+    ) || fields[0];
+    if (matchedField?.id) {
+      activeFieldId = matchedField.id;
+    }
+  }
+
+  const sessionData = {
+    ...defaultProfile,
+    ...(existingUser || {}),
+    fieldId: activeFieldId,
+    phoneVerified: true,
+    passwordChanged: true,
+    requiresPasswordChange: false,
+    pendingFirstLoginVerification: false,
+    pendingLogs: 0,
+    syncedLogs: operationLogs.filter(l => l.status === 'ACTIVE' && l.synced !== false).length,
+    lastActiveAt: Date.now(),
+  };
+
+  CURRENT_SESSION = sessionData;
+
+  // Ensure user is present in memory directory
+  if (!users.some(u => (u.employeeId || u.id) === sessionData.employeeId)) {
+    users.push(sessionData);
+  }
+
+  await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+  await saveItem(STORAGE_KEYS.AUTH_TOKEN, 'dev-mock-session-token');
+
+  notify();
+  return { success: true, user: CURRENT_SESSION };
+};
+
 export const setSession = (role) => {
   const account = users.find(u => u.role === role);
   if (account) {

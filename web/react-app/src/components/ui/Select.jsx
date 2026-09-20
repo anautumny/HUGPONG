@@ -21,7 +21,7 @@ const Select = forwardRef(function Select(
   ref
 ) {
   return (
-    <div className="relative flex items-center w-full">
+    <div className="relative flex items-center w-full min-w-0">
       <select
         ref={ref}
         id={id}
@@ -35,7 +35,7 @@ const Select = forwardRef(function Select(
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : undefined}
         className={`
-          w-full rounded-xl border text-sm transition-colors appearance-none
+          w-full min-w-0 truncate rounded-xl border text-sm transition-colors appearance-none
           bg-white dark:bg-[#121820] text-hug-text
           outline-none
           py-2.5 pl-3.5 pr-10

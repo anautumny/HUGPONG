@@ -88,7 +88,7 @@ export default function PricesView() {
 
         <div className="flex items-center gap-2 shrink-0">
           <Button
-            variant="outline"
+            variant="primary"
             size="md"
             onClick={handleExportCSV}
             disabled={prices.length === 0}

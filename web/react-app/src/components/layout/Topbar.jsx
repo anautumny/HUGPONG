@@ -7,7 +7,7 @@ import { ROLE_KEYS } from '../../utils/authRouting';
 import SyncIndicator from './SyncIndicator';
 
 export default function Topbar({ onOpenMobileDrawer = () => {} }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const { roleKey, user } = useAuth();
   const { theme, setTheme, isDark } = useTheme();
 
@@ -19,22 +19,12 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
           title: 'Dashboard',
           subtitle: 'Overview of block farm operations & price trends'
         };
+      case '/block-farms':
+      case '/registry':
       case '/fields':
-        if (roleKey === ROLE_KEYS.SRA_ADMIN) {
-          return {
-            title: 'Block Farm Registry',
-            subtitle: 'District-wide cooperative and block farm registry'
-          };
-        }
-        if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-          return {
-            title: 'District Plot Registry',
-            subtitle: 'Comprehensive geospatial plot directory and tenure status'
-          };
-        }
         return {
-          title: 'Field Plot Registry',
-          subtitle: 'Manage and monitor registered block farm plots'
+          title: 'Farm & Field Registry',
+          subtitle: 'Manage and review block farm and member field records'
         };
       case '/operations':
         return {
@@ -48,7 +38,7 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
         };
       case '/audit':
         return {
-          title: roleKey === ROLE_KEYS.SUPER_ADMIN ? 'System Audit Ledger' : 'SRA Audit Center',
+          title: 'SRA Audit Center',
           subtitle: 'Digital validation, QR verification, and compliance certificates'
         };
       case '/users':

@@ -19,9 +19,9 @@ export default function FieldDetailModal({
 
   const stageObj = SUGARCANE_STAGES.find(s => s.stageNumber === Number(field.stageNumber || 1)) || SUGARCANE_STAGES[0];
 
-  const handleTakeOver = () => {
+  const handleViewOperations = () => {
     onClose();
-    navigate(`/takeover?fieldId=${encodeURIComponent(field.id)}`);
+    navigate(`/operations?fieldId=${encodeURIComponent(field.id)}`);
   };
 
   const footer = (
@@ -29,7 +29,7 @@ export default function FieldDetailModal({
       <Button variant="secondary" onClick={onClose}>
         Close
       </Button>
-      {onEdit && (
+      {isManager && onEdit && (
         <Button variant="secondary" onClick={() => { onClose(); onEdit(field); }}>
           Edit Plot
         </Button>
@@ -37,11 +37,11 @@ export default function FieldDetailModal({
       {isManager && field.status === 'ACTIVE' && (
         <Button
           variant="primary"
-          onClick={handleTakeOver}
+          onClick={handleViewOperations}
           icon={ArrowRight}
           iconPosition="right"
         >
-          Take Over Plot
+          Field Operations
         </Button>
       )}
     </>

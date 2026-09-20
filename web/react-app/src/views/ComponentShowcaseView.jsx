@@ -87,18 +87,25 @@ export default function ComponentShowcaseView() {
   };
 
   return (
-    <div className="space-y-10 pb-16 max-w-6xl mx-auto">
-      {/* Page Title */}
-      <div className="border-b border-border pb-4">
-        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-primary-bg text-primary uppercase tracking-wider">
-          Batch 5 Component Library
-        </span>
-        <h1 className="text-2xl sm:text-3xl font-black text-hug-text mt-1.5 tracking-tight">
-          Reusable UI Component Foundation
-        </h1>
-        <p className="text-xs sm:text-sm text-hug-muted mt-1">
-          Standardized primitives conforming to HUGPONG Stage 7 visual design tokens, 4px spacing, and ~14–16px typography.
-        </p>
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider">
+              Design System
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
+              Component Library
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
+            Reusable UI Component Foundation
+          </h1>
+          <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
+            Standardized primitives conforming to HUGPONG visual design tokens, responsive layouts, and accessible UI controls.
+          </p>
+        </div>
       </div>
 
       {/* 1. Buttons Section */}

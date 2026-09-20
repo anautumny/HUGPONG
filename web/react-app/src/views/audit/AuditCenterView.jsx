@@ -142,7 +142,7 @@ export default function AuditCenterView() {
   };
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full pb-12">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -164,21 +164,26 @@ export default function AuditCenterView() {
         </div>
       )}
 
-      {/* Page Header */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-hug-text flex items-center gap-2.5 tracking-tight">
-            <div className="w-9 h-9 rounded-xl bg-primary-bg dark:bg-primary/20 text-primary flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <span>SRA QR Audit Verifier & Compliance Center</span>
-          </h2>
-          <p className="text-xs sm:text-sm text-hug-muted mt-1 leading-relaxed">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider">
+              Regulatory Compliance
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
+              QR Audit Verifier
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
+            SRA QR Audit Verifier & Compliance Center
+          </h1>
+          <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
             Verify encrypted mobile field certificates and generate certified compliance audit reports.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           {/* Farm Manager Compilation Button */}
           {isFarmManager && (
             <Button
@@ -193,7 +198,7 @@ export default function AuditCenterView() {
 
           {/* SRA Audit History Button */}
           <Button
-            variant="secondary"
+            variant="primary"
             size="md"
             onClick={() => setShowHistoryModal(true)}
             icon={History}

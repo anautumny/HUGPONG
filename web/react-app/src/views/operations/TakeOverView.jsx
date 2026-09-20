@@ -336,8 +336,10 @@ export default function TakeOverView() {
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* 1. Header */}
       <CompactDashboardHeader
+        category="Supervisory Intervention"
+        badge="Manager Override"
         title="Farm Manager Take Over Mode"
-        contextText={`Recording supervisory operation for member field · Block Farm Management`}
+        subtitle="Record supervisory operations and stage completions for member parcels in the authoritative SRA audit ledger."
         actions={[
           {
             label: 'Exit Take Over',
@@ -377,7 +379,7 @@ export default function TakeOverView() {
               icon={Lock}
               className="border-amber-300 text-amber-800 dark:text-amber-300"
             >
-              Verify Manager PIN
+              Confirm Password
             </Button>
           ) : (
             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-bold bg-success-bg dark:bg-success/20 text-success border border-success/30">
@@ -392,7 +394,7 @@ export default function TakeOverView() {
       <div className="bg-white dark:bg-surface p-4 rounded-2xl border border-border shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex-1 max-w-lg">
           <label htmlFor="takeover-field-selector" className="text-xs font-bold text-hug-text mb-1.5 block">
-            Select Member Plot to Supervise
+            Target Field Plot
           </label>
           <Select
             id="takeover-field-selector"

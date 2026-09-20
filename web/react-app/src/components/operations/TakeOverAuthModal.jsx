@@ -49,7 +49,7 @@ export default function TakeOverAuthModal({
       onClose={onClose}
       size="sm"
       title="Authorize Field Take Over"
-      subtitle="Administrative intervention &amp; security gate"
+      subtitle="Enter manager password to supervise this field"
       badge="Supervisor Override"
       icon={Lock}
       preventBackdropClose={isVerifying}
@@ -63,7 +63,7 @@ export default function TakeOverAuthModal({
             variant="primary"
             onClick={handleVerify}
             isLoading={isVerifying}
-            loadingText="Verifying PIN..."
+            loadingText="Verifying password..."
           >
             Authorize Take Over
           </Button>

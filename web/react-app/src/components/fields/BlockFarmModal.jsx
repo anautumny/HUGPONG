@@ -1,0 +1,238 @@
+import React, { useState, useEffect } from 'react';
+import { Modal, FormField, Input, Select, Button } from '../ui';
+import { Building2, MapPin, User, Hash, AlertCircle } from 'lucide-react';
+import { createBlockFarm, updateBlockFarm } from '../../services/blockFarmsService';
+
+export default function BlockFarmModal({
+  isOpen = false,
+  onClose,
+  farm = null, // null for create, object for edit
+  farmManagers = [],
+  onSuccess
+}) {
+  const isEditing = Boolean(farm?.id);
+
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [location, setLocation] = useState('');
+  const [declaredAreaHa, setDeclaredAreaHa] = useState('');
+  const [managerUserId, setManagerUserId] = useState('');
+
+  const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [serverError, setServerError] = useState(null);
+
+  // Sync state when opening or when farm changes
+  useEffect(() => {
+    if (farm) {
+      setCode(farm.code || farm.id || '');
+      setName(farm.name || '');
+      setLocation(farm.location || '');
+      setDeclaredAreaHa(farm.declaredAreaHa ?? farm.declaredHa ?? '');
+      setManagerUserId(farm.managerUserId || farm.farmManagerId || '');
+    } else {
+      setCode('');
+      setName('');
+      setLocation('');
+      setDeclaredAreaHa('');
+      setManagerUserId('');
+    }
+    setErrors({});
+    setServerError(null);
+  }, [farm, isOpen]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setServerError(null);
+
+    const newErrors = {};
+    const cleanCode = code.trim().toUpperCase();
+    const cleanName = name.trim();
+    const cleanLocation = location.trim();
+    const parsedArea = parseFloat(declaredAreaHa);
+
+    if (!cleanCode) {
+      newErrors.code = 'Block Farm Code is required.';
+    } else if (cleanCode.length > 40) {
+      newErrors.code = 'Code must be at most 40 characters.';
+    }
+
+    if (!cleanName) {
+      newErrors.name = 'Block Farm Name is required.';
+    } else if (cleanName.length > 200) {
+      newErrors.name = 'Name must be at most 200 characters.';
+    }
+
+    if (!cleanLocation) {
+      newErrors.location = 'Geographic location is required.';
+    }
+
+    if (!declaredAreaHa || isNaN(parsedArea) || parsedArea <= 0) {
+      newErrors.declaredAreaHa = 'Enter a valid declared area in hectares greater than 0.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      if (isEditing) {
+        await updateBlockFarm(farm.id, {
+          code: cleanCode,
+          name: cleanName,
+          location: cleanLocation,
+          declaredAreaHa: parsedArea,
+          managerUserId: managerUserId.trim() || null
+        });
+      } else {
+        await createBlockFarm({
+          id: cleanCode,
+          code: cleanCode,
+          name: cleanName,
+          location: cleanLocation,
+          declaredAreaHa: parsedArea,
+          managerUserId: managerUserId.trim() || null
+        });
+      }
+
+      setIsSubmitting(false);
+      if (onSuccess) onSuccess();
+      onClose();
+    } catch (err) {
+      console.error('[BlockFarmModal] Save error:', err);
+      setServerError(err.message || 'Failed to save block farm record.');
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isEditing ? `Edit Block Farm: ${farm?.code || farm?.id}` : 'Register New Block Farm'}
+      maxWidth="max-w-lg"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+        {serverError && (
+          <div className="p-3 bg-danger-bg/50 border border-danger/30 rounded-xl flex items-start gap-2 text-xs font-semibold text-danger">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{serverError}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Farm Code */}
+          <FormField
+            label="Block Farm Code"
+            required
+            error={errors.code}
+            hint="Unique identifier, e.g. BF-01 or BF-LA-CARLOTA"
+          >
+            <Input
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase())}
+              placeholder="e.g. BF-01"
+              disabled={isSubmitting}
+              className="font-mono uppercase font-bold"
+            />
+          </FormField>
+
+          {/* Declared Area */}
+          <FormField
+            label="Declared Area (Hectares)"
+            required
+            error={errors.declaredAreaHa}
+            hint="Total certified cooperative landholding"
+          >
+            <Input
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={declaredAreaHa}
+              onChange={e => setDeclaredAreaHa(e.target.value)}
+              placeholder="e.g. 45.50"
+              disabled={isSubmitting}
+              className="font-mono font-bold"
+            />
+          </FormField>
+        </div>
+
+        {/* Farm Name */}
+        <FormField
+          label="Block Farm Name"
+          required
+          error={errors.name}
+          hint="Official Agrarian Reform Beneficiary or Cooperative entity name"
+        >
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g. La Carlota Pioneer Block Farm Cooperative"
+            disabled={isSubmitting}
+          />
+        </FormField>
+
+        {/* Location */}
+        <FormField
+          label="Geographic Location"
+          required
+          error={errors.location}
+          hint="Barangay, Municipality / City, Province"
+        >
+          <Input
+            value={location}
+            onChange={e => setLocation(e.target.value)}
+            placeholder="e.g. Brgy. RSB, La Carlota City, Negros Occidental"
+            disabled={isSubmitting}
+          />
+        </FormField>
+
+        {/* Assigned Farm Manager */}
+        <FormField
+          label="Assigned Farm Manager"
+          error={errors.managerUserId}
+          hint="Select authorized manager to supervise field operations"
+        >
+          <Select
+            value={managerUserId}
+            onChange={e => setManagerUserId(e.target.value)}
+            disabled={isSubmitting}
+          >
+            <option value="">-- Unassigned (No Manager Assigned) --</option>
+            {farmManagers.map(mgr => (
+              <option key={mgr.id || mgr.employeeId} value={mgr.id || mgr.employeeId}>
+                {mgr.displayName || mgr.name || mgr.employeeId} ({mgr.employeeId || mgr.id})
+                {mgr.phone ? ` · ${mgr.phone}` : ''}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        {/* Modal Action Buttons */}
+        <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-border/80">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            isLoading={isSubmitting}
+            loadingText={isEditing ? 'Updating...' : 'Registering...'}
+            icon={Building2}
+          >
+            {isEditing ? 'Update Block Farm' : 'Register Block Farm'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

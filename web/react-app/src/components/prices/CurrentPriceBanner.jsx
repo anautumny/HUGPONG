@@ -99,18 +99,6 @@ export default function CurrentPriceBanner({
             </span>
           </div>
         </div>
-
-        {isSraAdmin && (
-          <Button
-            variant="primary"
-            size="md"
-            onClick={onPublishClick}
-            icon={PlusCircle}
-            className="shrink-0"
-          >
-            Post Official SRA Price
-          </Button>
-        )}
       </div>
 
       {/* Dual Price Tiles */}

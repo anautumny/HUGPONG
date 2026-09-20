@@ -8,7 +8,8 @@ import {
   isValidUserIdentifier,
   requestCurrentPhoneVerification,
   updateUserPassword,
-  verifyCurrentPhone
+  verifyCurrentPhone,
+  fastLoginRole
 } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { isOnline, addNetworkListener } from '../../services/networkService';
@@ -44,6 +45,24 @@ export default function LoginScreen({ navigation }) {
   const [phoneVerificationError, setPhoneVerificationError] = useState('');
   const [phoneVerificationSaving, setPhoneVerificationSaving] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
+  const [fastLoggingIn, setFastLoggingIn] = useState('');
+
+  const handleFastLogin = async (roleName) => {
+    setFastLoggingIn(roleName);
+    setAuthError('');
+    try {
+      const res = await fastLoginRole(roleName);
+      if (res.success) {
+        navigation.replace('MainTabs');
+      } else {
+        setAuthError(res.error || 'Failed to fast sign in.');
+      }
+    } catch (err) {
+      setAuthError('An error occurred during fast sign in.');
+    } finally {
+      setFastLoggingIn('');
+    }
+  };
 
   useEffect(() => {
     const unsubNet = addNetworkListener((status) => {
@@ -355,6 +374,77 @@ export default function LoginScreen({ navigation }) {
             <View style={s.securityNotice}>
               <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.primary} />
               <Text style={s.securityNoticeText}>Encrypted &amp; SRA Certified Agricultural Gateway</Text>
+            </View>
+
+            {/* Quick Shell Preview Switcher for Development / Fast Log In */}
+            <View style={s.quickLoginWrap}>
+              <View style={s.quickLoginHeaderRow}>
+                <View style={s.quickDivider} />
+                <Text style={s.quickLoginTitle}>Development Role Preview</Text>
+                <View style={s.quickDivider} />
+              </View>
+
+              <View style={s.quickGrid}>
+                <TouchableOpacity
+                  style={[s.quickRoleBtn, fastLoggingIn === 'Member Farmer' && s.quickRoleBtnActive]}
+                  onPress={() => handleFastLogin('Member Farmer')}
+                  disabled={Boolean(fastLoggingIn)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#EBF7EE' }]}>
+                    <Ionicons name="leaf-outline" size={14} color="#15803D" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.quickRoleTitle}>Member Farmer</Text>
+                    <Text style={s.quickRoleSub} numberOfLines={1}>Juan · DEV-FLD-001</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.quickRoleBtn, fastLoggingIn === 'Farm Manager' && s.quickRoleBtnActive]}
+                  onPress={() => handleFastLogin('Farm Manager')}
+                  disabled={Boolean(fastLoggingIn)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.quickRoleIconWrap, { backgroundColor: COLORS.primaryBg }]}>
+                    <Ionicons name="business-outline" size={14} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.quickRoleTitle}>Farm Manager</Text>
+                    <Text style={s.quickRoleSub} numberOfLines={1}>Jose · DEV-BF-001</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.quickRoleBtn, fastLoggingIn === 'SRA Admin' && s.quickRoleBtnActive]}
+                  onPress={() => handleFastLogin('SRA Admin')}
+                  disabled={Boolean(fastLoggingIn)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#EFF6FF' }]}>
+                    <Ionicons name="shield-checkmark-outline" size={14} color="#2563EB" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.quickRoleTitle}>SRA Admin</Text>
+                    <Text style={s.quickRoleSub} numberOfLines={1}>Maria · Regulatory</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.quickRoleBtn, fastLoggingIn === 'Super Admin' && s.quickRoleBtnActive]}
+                  onPress={() => handleFastLogin('Super Admin')}
+                  disabled={Boolean(fastLoggingIn)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#F3F4F6' }]}>
+                    <Ionicons name="settings-outline" size={14} color="#4B5563" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.quickRoleTitle}>Super Admin</Text>
+                    <Text style={s.quickRoleSub} numberOfLines={1}>System · All Dist</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -682,6 +772,71 @@ const s = StyleSheet.create({
     fontSize: 10.5,
     color: COLORS.textMuted,
     fontWeight: '600',
+  },
+
+  quickLoginWrap: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  quickLoginHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  quickDivider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  quickLoginTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  quickRoleBtn: {
+    width: '48.5%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 8,
+    paddingHorizontal: 9,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#F9FAF7',
+  },
+  quickRoleBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#EBF7EE',
+  },
+  quickRoleIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickRoleTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  quickRoleSub: {
+    fontSize: 9.5,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    marginTop: 1,
   },
 
   registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },

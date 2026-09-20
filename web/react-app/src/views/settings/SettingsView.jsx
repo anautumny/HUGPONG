@@ -9,8 +9,8 @@ export default function SettingsView() {
   const { user } = useAuth();
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-16">
-      {/* Header */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* Top Header */}
       <div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider">

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Smartphone, Battery, Clock, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Search, Smartphone, Battery, Clock, CheckCircle2, AlertTriangle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import Input from '../ui/Input';
 import { evaluateNodeStatus } from '../../services/telemetryService';
 
@@ -10,6 +10,8 @@ export default function SyncTelemetryTable({
   className = ''
 }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const userMap = useMemo(() => {
     const map = new Map();
@@ -35,6 +37,13 @@ export default function SyncTelemetryTable({
 
     return result;
   }, [diagnostics, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredDiagnostics.length / pageSize));
+  const validPage = Math.min(currentPage, totalPages);
+  const pagedDiagnostics = useMemo(() => {
+    const start = (validPage - 1) * pageSize;
+    return filteredDiagnostics.slice(start, start + pageSize);
+  }, [filteredDiagnostics, validPage, pageSize]);
 
   const formatDate = (isoString) => {
     if (!isoString) return 'Never';
@@ -72,7 +81,10 @@ export default function SyncTelemetryTable({
             type="text"
             placeholder="Search device, user, model..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
             icon={Search}
           />
         </div>
@@ -117,7 +129,7 @@ export default function SyncTelemetryTable({
                 </td>
               </tr>
             ) : (
-              filteredDiagnostics.map((d) => {
+              pagedDiagnostics.map((d) => {
                 const evaluated = evaluateNodeStatus(d.updatedAt);
                 const userObj = userMap.get(d.userId);
                 const userName = userObj?.displayName || userObj?.name || d.userId || 'Unlinked Device';
@@ -185,6 +197,43 @@ export default function SyncTelemetryTable({
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination Footer */}
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-xs">
+        <div className="text-hug-muted font-medium">
+          <span>
+            Showing page <strong className="text-hug-text">{validPage}</strong> of{' '}
+            <strong className="text-hug-text">{totalPages}</strong>{' '}
+            <span className="text-hug-muted">({filteredDiagnostics.length} nodes)</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={validPage === 1}
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            aria-label="Previous page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Prev</span>
+          </button>
+          <button
+            type="button"
+            disabled={validPage === totalPages}
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            aria-label="Next page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span>Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

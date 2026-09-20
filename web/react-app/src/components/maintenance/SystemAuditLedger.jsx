@@ -187,42 +187,42 @@ export default function SystemAuditLedger({
         </table>
       </div>
 
-      {/* Pagination Bar */}
-      {totalPages > 1 && (
-        <div className="px-4 sm:px-5 py-3 border-t border-border/80 flex items-center justify-between gap-3 text-xs">
-          <span className="text-hug-muted font-medium">
-            Showing {(validPage - 1) * pageSize + 1} to{' '}
-            {Math.min(validPage * pageSize, filteredLogs.length)} of {filteredLogs.length} events
+      {/* Pagination Footer — always rendered, matches Table card footer */}
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-xs">
+        <div className="text-hug-muted font-medium">
+          <span>
+            Showing page <strong className="text-hug-text">{validPage}</strong> of{' '}
+            <strong className="text-hug-text">{totalPages}</strong>{' '}
+            <span className="text-hug-muted">({filteredLogs.length} events)</span>
           </span>
-
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={validPage === 1}
-              icon={ChevronLeft}
-            >
-              Prev
-            </Button>
-
-            <span className="px-2 py-1 font-semibold text-hug-text">
-              {validPage} / {totalPages}
-            </span>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={validPage === totalPages}
-              icon={ChevronRight}
-              iconPosition="right"
-            >
-              Next
-            </Button>
-          </div>
         </div>
-      )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={validPage === 1}
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            aria-label="Previous page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Prev</span>
+          </button>
+          <button
+            type="button"
+            disabled={validPage === totalPages}
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            aria-label="Next page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span>Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -13,19 +13,19 @@ import {
   Select,
   Button,
   StatusBadge,
-  ConfirmDialog,
-  Badge
+  ConfirmDialog
 } from '../../components/ui';
 import FieldEnrollmentModal from '../../components/fields/FieldEnrollmentModal';
 import FieldEditModal from '../../components/fields/FieldEditModal';
 import FieldDetailModal from '../../components/fields/FieldDetailModal';
 import { formatHectares } from '../../utils/formatters';
-import { Plus, Search, Filter, Layers, ArrowRight, Eye, Edit3, Archive } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Filter, Layers, Eye, Edit3, Archive, Building2, MapPin, X } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 export default function FieldsView() {
   const { user, roleKey } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const isManager = roleKey === ROLE_KEYS.FARM_MANAGER;
   const isSuper = roleKey === ROLE_KEYS.SUPER_ADMIN;
@@ -41,12 +41,21 @@ export default function FieldsView() {
     error: null
   });
 
-  // Filter & search state
+  // Fields filter & search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFarm, setSelectedFarm] = useState('ALL');
+  const initialFarmId = searchParams.get('farmId') || 'ALL';
+  const [selectedFarm, setSelectedFarm] = useState(initialFarmId);
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+
+  // Sync farmId if searchParams changes
+  useEffect(() => {
+    const qFarmId = searchParams.get('farmId');
+    if (qFarmId) {
+      setSelectedFarm(qFarmId);
+    }
+  }, [searchParams]);
 
   // Modal states
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -77,7 +86,7 @@ export default function FieldsView() {
     };
   }, [user?.id, user?.employeeId]);
 
-  // Filter fields
+  // Filter field plots
   const filteredFields = useMemo(() => {
     return data.fields.filter(f => {
       // Status filter
@@ -104,7 +113,7 @@ export default function FieldsView() {
     });
   }, [data.fields, statusFilter, selectedFarm, searchQuery]);
 
-  // Paginated slice
+  // Paginated fields slice
   const paginatedFields = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredFields.slice(start, start + pageSize);
@@ -112,7 +121,7 @@ export default function FieldsView() {
 
   const totalPages = Math.max(1, Math.ceil(filteredFields.length / pageSize));
 
-  // Total cultivated area
+  // Total cultivated area of filtered fields
   const totalArea = useMemo(() => {
     return filteredFields.reduce((sum, f) => sum + Number(f.areaHa || f.ha || 0), 0);
   }, [filteredFields]);
@@ -132,28 +141,21 @@ export default function FieldsView() {
     }
   };
 
-  // Header Actions
+  // Header Actions (strictly HUGPONG green)
   const headerActions = useMemo(() => {
     const actions = [];
     if (canModify) {
       actions.push({
         label: 'Enroll Field Plot',
         icon: Plus,
-        primary: true,
+        variant: 'primary',
         onClick: () => setEnrollModalOpen(true)
       });
     }
-    if (isManager) {
-      actions.push({
-        label: 'Take Over Console',
-        to: '/takeover',
-        icon: ArrowRight
-      });
-    }
     return actions;
-  }, [canModify, isManager]);
+  }, [canModify]);
 
-  // Table Columns
+  // Field Plot Table Columns
   const columns = [
     {
       key: 'id',
@@ -238,11 +240,11 @@ export default function FieldsView() {
           {isManager && row.status === 'ACTIVE' && (
             <button
               type="button"
-              onClick={() => navigate(`/takeover?fieldId=${encodeURIComponent(row.id)}`)}
-              title="Take Over Field Plot"
+              onClick={() => navigate(`/operations?fieldId=${encodeURIComponent(row.id)}`)}
+              title="View Field Operations"
               className="px-2 py-1 rounded-lg text-xs font-bold text-primary dark:text-primary-light hover:bg-primary-bg dark:hover:bg-primary/20 transition-colors cursor-pointer"
             >
-              Take Over
+              Operations
             </button>
           )}
 
@@ -261,16 +263,44 @@ export default function FieldsView() {
     }
   ];
 
+  const pageTitle = isSuper ? 'District Plot Registry' : 'Field Plot Registry';
+  const selectedFarmObj = data.blockFarms.find(bf => bf.id === selectedFarm);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* 1. Header */}
       <CompactDashboardHeader
-        title="Field Plot Registry"
-        contextText={`Spatial Aggregation & Cooperative Plot Directory · ${filteredFields.length} plots (${formatHectares(totalArea)})`}
+        category="Spatial Directory"
+        badge="Land Parcels"
+        title={pageTitle}
+        subtitle={`Spatial Aggregation & Cooperative Plot Directory · ${filteredFields.length} plots (${formatHectares(totalArea)})`}
         actions={headerActions}
       />
 
-      {/* 2. Filter & Search Bar */}
+      {/* 2. Active Block Farm Scope Pill (if scoped from Block Farm Registry) */}
+      {selectedFarm !== 'ALL' && selectedFarmObj && (
+        <div className="p-3 bg-primary-bg dark:bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold text-primary dark:text-primary-light">
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            <span>
+              Filtered to Block Farm: <strong>{selectedFarmObj.name || selectedFarmObj.code || selectedFarmObj.id}</strong> ({filteredFields.length} plots)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedFarm('ALL');
+              setSearchParams({});
+            }}
+            className="flex items-center gap-1 text-[11px] font-bold hover:underline cursor-pointer"
+          >
+            <span>Clear Scope</span>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* 3. Field Plots Filter & Search Bar */}
       <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[240px]">
           <div className="relative flex-1">
@@ -289,23 +319,30 @@ export default function FieldsView() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Parent Block Farm Filter */}
-          <div className="w-44">
-            <Select
-              value={selectedFarm}
-              onChange={(e) => {
-                setSelectedFarm(e.target.value);
-                setCurrentPage(1);
-              }}
-              options={[
-                { value: 'ALL', label: 'All Block Farms' },
-                ...data.blockFarms.map(bf => ({
-                  value: bf.id,
-                  label: bf.name
-                }))
-              ]}
-            />
-          </div>
+          {/* Parent Block Farm Filter (if more than 1 farm available) */}
+          {!isManager && data.blockFarms.length > 0 && (
+            <div className="w-48">
+              <Select
+                value={selectedFarm}
+                onChange={(e) => {
+                  setSelectedFarm(e.target.value);
+                  setCurrentPage(1);
+                  if (e.target.value === 'ALL') {
+                    setSearchParams({});
+                  } else {
+                    setSearchParams({ farmId: e.target.value });
+                  }
+                }}
+                options={[
+                  { value: 'ALL', label: 'All Block Farms' },
+                  ...data.blockFarms.map(bf => ({
+                    value: bf.id,
+                    label: bf.name || bf.code || bf.id
+                  }))
+                ]}
+              />
+            </div>
+          )}
 
           {/* Status Filter */}
           <div className="w-36">
@@ -325,34 +362,29 @@ export default function FieldsView() {
         </div>
       </div>
 
-      {/* 3. Fields Table */}
-      <div className="space-y-2">
-        <Table
-          columns={columns}
-          data={paginatedFields}
-          isLoading={data.isLoading}
-          error={data.error}
-          onRowClick={(row) => setDetailField(row)}
-          emptyMessage="No registered field plots found."
-          emptySubtext="Enrolled parcels will appear here with crop cycle progress and member farmer assignments."
-          emptyAction={
-            canModify && (
-              <Button size="sm" onClick={() => setEnrollModalOpen(true)} icon={Plus}>
-                Enroll First Field Plot
-              </Button>
-            )
-          }
-        />
+      {/* 4. Fields Table */}
+      <Table
+        columns={columns}
+        data={paginatedFields}
+        isLoading={data.isLoading}
+        error={data.error}
+        onRowClick={(row) => setDetailField(row)}
+        emptyMessage="No registered field plots found."
+        emptySubtext="Enrolled parcels will appear here with crop cycle progress and member farmer assignments."
+        emptyAction={
+          canModify && (
+            <Button size="sm" onClick={() => setEnrollModalOpen(true)} icon={Plus}>
+              Enroll First Field Plot
+            </Button>
+          )
+        }
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredFields.length}
+        onPageChange={setCurrentPage}
+      />
 
-        <TablePagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={filteredFields.length}
-          onPageChange={setCurrentPage}
-        />
-      </div>
-
-      {/* 4. Modals */}
+      {/* 5. Modals */}
       <FieldEnrollmentModal
         isOpen={enrollModalOpen}
         onClose={() => setEnrollModalOpen(false)}
@@ -376,7 +408,7 @@ export default function FieldsView() {
         onClose={() => setDetailField(null)}
         field={detailField}
         isManager={isManager}
-        onEdit={(f) => setEditField(f)}
+        onEdit={isManager ? (f) => setEditField(f) : undefined}
       />
 
       <ConfirmDialog

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { UserCheck, CheckCircle2, Clock, Phone, MapPin, AlertCircle, Check, X } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { UserCheck, CheckCircle2, Clock, Phone, MapPin, AlertCircle, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import Button from '../ui/Button';
 
 export default function PendingApprovalsQueue({
@@ -10,8 +10,17 @@ export default function PendingApprovalsQueue({
   className = ''
 }) {
   const [processingId, setProcessingId] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 8;
 
   const farmMap = new Map(blockFarms.map(f => [f.id, f.name || f.id]));
+
+  const totalPages = Math.max(1, Math.ceil(pendingUsers.length / pageSize));
+  const validPage = Math.min(currentPage, totalPages);
+  const pagedUsers = useMemo(() => {
+    const start = (validPage - 1) * pageSize;
+    return pendingUsers.slice(start, start + pageSize);
+  }, [pendingUsers, validPage, pageSize]);
 
   if (pendingUsers.length === 0) {
     return (
@@ -58,7 +67,7 @@ export default function PendingApprovalsQueue({
       </div>
 
       <div className="divide-y divide-border/50">
-        {pendingUsers.map((p) => {
+        {pagedUsers.map((p) => {
           const farmName = farmMap.get(p.requestedBlockFarmId) || p.requestedBlockFarmId || 'Unassigned Farm';
           const isProcessing = processingId === p.id;
 
@@ -122,6 +131,43 @@ export default function PendingApprovalsQueue({
             </div>
           );
         })}
+      </div>
+
+      {/* Pagination Footer */}
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-xs">
+        <div className="text-hug-muted font-medium">
+          <span>
+            Showing page <strong className="text-hug-text">{validPage}</strong> of{' '}
+            <strong className="text-hug-text">{totalPages}</strong>{' '}
+            <span className="text-hug-muted">({pendingUsers.length} pending)</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={validPage === 1}
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            aria-label="Previous page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Prev</span>
+          </button>
+          <button
+            type="button"
+            disabled={validPage === totalPages}
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            aria-label="Next page"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
+              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span>Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

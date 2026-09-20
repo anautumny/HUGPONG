@@ -27,5 +27,7 @@ To run the complete HUGPONG ecosystem locally, utilize the provided batch script
 3.  **Start the Admin Web Dashboard**
     Run `run-admin.bat` to open the local administrative console in your default web browser.
 
+For Expo Go on a physical phone, keep the phone and computer on the same Wi-Fi network and set `mobile/.env` to the computer's LAN address, for example `EXPO_PUBLIC_API_BASE_URL=http://10.253.28.161:3000`. Use `http://10.0.2.2:3000` only with an Android emulator. Restart Expo after changing this value.
+
 ---
 Developed as a Capstone Project for Agricultural Information Systems.

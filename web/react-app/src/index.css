@@ -81,6 +81,7 @@ html.dark {
   --color-border-strong: var(--border-strong);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-dark: var(--primary-hover);
   --color-primary-light: var(--primary-light);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-bg: var(--primary-bg);
@@ -128,6 +129,79 @@ html.dark .brand-logo-box img {
 /* Single-line sidebar navigation tab prevention */
 .nav-item {
   white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════
+   GLOBAL SCROLLBAR STYLING (ACCESSIBLE 7px NEUTRAL PILL)
+   ══════════════════════════════════════════════════════════ */
+
+/* Firefox Standard Properties */
+html, body, * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+html.dark, html.dark body, html.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+/* WebKit (Chromium, Edge, Chrome, Safari) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.15s ease-in-out;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.32);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* WebKit Dark Mode */
+html.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.30);
+}
+
+html.dark ::-webkit-scrollbar-thumb:active {
+  background-color: #728377;
+}
+
+html.dark ::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Toast Notifications */

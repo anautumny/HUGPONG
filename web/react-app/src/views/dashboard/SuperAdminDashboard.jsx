@@ -72,12 +72,14 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     {
       label: 'User Administration',
       to: '/users',
-      icon: Users
+      icon: Users,
+      variant: 'primary'
     },
     {
       label: 'System Health',
       to: '/maintenance',
-      icon: Activity
+      icon: Activity,
+      variant: 'primary'
     }
   ];
 
@@ -110,17 +112,19 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
   ];
 
   return (
-    <div className="space-y-6">
-      {/* 1. Compact Working Header */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* 1. Header */}
       <CompactDashboardHeader
+        category="Platform Administration"
+        badge="System Governance"
         title="Super Admin Dashboard"
-        contextText="System Governance, Platform Infrastructure & Support Operations"
+        subtitle="System governance, platform infrastructure, terminal synchronization, and technical support."
         actions={headerActions}
       />
 
       {/* 2. Platform Infrastructure & Reference SRA Price (12-col grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-8 flex flex-col">
+        <div className="lg:col-span-8 min-w-0 flex flex-col">
           <CurrentPriceCard
             price={currentPrice}
             previousPrice={previousPrice}
@@ -129,13 +133,13 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
         </div>
 
         {/* System Health Card (4 cols) */}
-        <div className="lg:col-span-4 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
+        <div className="lg:col-span-4 min-w-0 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider truncate">
                 System Pulse
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
                 Live Cloud Sync
               </span>

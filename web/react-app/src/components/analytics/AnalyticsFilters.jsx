@@ -68,9 +68,9 @@ export default function AnalyticsFilters({
         </div>
 
         {/* Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto lg:min-w-[620px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto min-w-0">
           {/* Season Filter */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
               Crop Season
             </label>
@@ -82,7 +82,7 @@ export default function AnalyticsFilters({
           </div>
 
           {/* Farm Filter */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
               {isFarmManager ? 'Block Farm / Area' : 'Block Farm Scope'}
             </label>
@@ -94,7 +94,7 @@ export default function AnalyticsFilters({
           </div>
 
           {/* Period Filter */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
               Reporting Period
             </label>

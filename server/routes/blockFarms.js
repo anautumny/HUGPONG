@@ -40,7 +40,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const name = requiredString(req.body.name, 'name', { max: 200 });
@@ -72,7 +72,7 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]),
   }
 });
 
-router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const blockFarmId = String(req.params.id || '').trim().toUpperCase();

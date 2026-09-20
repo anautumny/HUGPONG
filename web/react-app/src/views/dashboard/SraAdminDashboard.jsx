@@ -74,7 +74,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
         title: 'No Block Farms Registered',
         description: 'Register sugarcane block farms to establish district management boundaries.',
         type: 'info',
-        to: '/block-farms',
+        to: '/fields',
         actionLabel: 'Register Farm'
       });
     }
@@ -86,12 +86,14 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
     {
       label: 'Post Official SRA Price',
       onClick: () => setIsPublishModalOpen(true),
-      icon: PlusCircle
+      icon: PlusCircle,
+      variant: 'primary'
     },
     {
       label: 'Audit Center',
       to: '/audit',
-      icon: ShieldCheck
+      icon: ShieldCheck,
+      variant: 'primary'
     }
   ];
 
@@ -124,34 +126,34 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
   ];
 
   return (
-    <div className="space-y-6">
-      {/* 1. Compact Working Header */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* 1. Header */}
       <CompactDashboardHeader
+        category="Regulatory Oversight"
+        badge="District Administration"
         title="SRA Admin Dashboard"
-        contextText="Sugar Regulatory Administration · District Regulatory & Monitoring Workspace"
+        subtitle="Sugar Regulatory Administration · District regulatory compliance, millsite benchmarks, and audit verification."
         actions={headerActions}
       />
 
       {/* 2. Primary Official Price Section (12-col grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-8 flex flex-col">
+        <div className="lg:col-span-8 min-w-0 flex flex-col">
           <CurrentPriceCard
             price={currentPrice}
             previousPrice={previousPrice}
             isLoading={isLoading}
-            showPublishAction={true}
-            onPublishClick={() => setIsPublishModalOpen(true)}
           />
         </div>
 
         {/* Regulatory Governance Overview (4 cols) */}
-        <div className="lg:col-span-4 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
+        <div className="lg:col-span-4 min-w-0 bg-surface rounded-2xl p-5 sm:p-6 border border-border shadow-xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <span className="text-xs font-bold text-hug-muted uppercase tracking-wider truncate">
                 District Regulatory Scope
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary dark:text-primary-light">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-bg text-primary dark:text-primary-light shrink-0">
                 SRA Authority
               </span>
             </div>

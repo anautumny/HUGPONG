@@ -13,9 +13,6 @@ import { saveItem, STORAGE_KEYS } from '../services/storageService';
 import { enqueueAndFlushMutation, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus } from '../services/networkService';
 import { useTranslation } from '../services/i18n';
-import MemberFieldOpsView from './member/MemberFieldOpsView';
-import ManagerFieldOpsView from './manager/ManagerFieldOpsView';
-import SRAFieldOpsView from './sra/SRAFieldOpsView';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
@@ -991,11 +988,18 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [takeOverAuthPassword, setTakeOverAuthPassword] = useState('');
   const [takeOverAuthError, setTakeOverAuthError] = useState('');
   const [showTakeOverPassword, setShowTakeOverPassword] = useState(false);
+  const [pendingTakeOverAction, setPendingTakeOverAction] = useState(null);
 
-  const handleInitiateTakeOver = () => {
+  const handleInitiateTakeOver = (onAuthorizedAction = null) => {
     if (isTakeOver) {
       setIsTakeOver(false);
+      setPendingTakeOverAction(null);
       return;
+    }
+    if (typeof onAuthorizedAction === 'function') {
+      setPendingTakeOverAction(() => onAuthorizedAction);
+    } else {
+      setPendingTakeOverAction(null);
     }
     setTakeOverAuthPassword('');
     setTakeOverAuthError('');
@@ -1015,9 +1019,17 @@ export default function FieldOpsScreen({ navigation, route }) {
     setTakeOverAuthError('');
     setShowTakeOverAuthModal(false);
     setIsTakeOver(true);
+
+    if (typeof pendingTakeOverAction === 'function') {
+      const pendingCallback = pendingTakeOverAction;
+      setPendingTakeOverAction(null);
+      setTimeout(() => {
+        pendingCallback();
+      }, 150);
+    }
   };
 
-  const checkTakeOverRequired = (actionDesc = 'record stage work or log operations') => {
+  const checkTakeOverRequired = (actionDesc = 'record stage work or log operations', onAuthorizedAction = null) => {
     const session = getCurrentSession();
     const isMyField = (selectedField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
     if (activeRole === 'Farm Manager' && !isMyField && !isTakeOver) {
@@ -1025,8 +1037,8 @@ export default function FieldOpsScreen({ navigation, route }) {
         'Supervisor Takeover Required',
         `This field is managed by ${selectedField?.member || 'the assigned Member'}. To ${actionDesc}, please authorize Supervisor Take Over first.`,
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Take Over Field', onPress: handleInitiateTakeOver }
+          { text: 'Cancel', style: 'cancel', onPress: () => setPendingTakeOverAction(null) },
+          { text: 'Take Over Field', onPress: () => handleInitiateTakeOver(onAuthorizedAction) }
         ]
       );
       return true;
@@ -2921,7 +2933,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
-    if (!allowNormalManagerEdit && checkTakeOverRequired('amend or modify operation logs')) return;
+    if (!allowNormalManagerEdit && checkTakeOverRequired('amend or modify operation logs', () => editSubmittedLog(log, true))) return;
 
     const session = getCurrentSession();
     const isOwner = selectedField?.member === session.name || log?.authorName === session.name || activeRole === 'Member Farmer';
@@ -4211,20 +4223,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeRole === 'Farm Manager' && (
           <>
-            <ManagerFieldOpsView
-              fields={accessibleFields}
-              operations={visibleLogs.filter(log => !log.isDraft)}
-              onOpenHistory={() => {
-                setLogTab('submitted');
-                setManagerLedgerScope('all');
-                setShowHistoryModal(true);
-              }}
-              onEditOperation={(field, operation) => {
-                setSelectedField(field);
-                setManagerLedgerScope('selected');
-                editSubmittedLog(operation, true);
-              }}
-            />
             {(() => {
               const session = getCurrentSession();
               const targetFarm = session?.farm || (session?.farm || session?.blockFarm || 'District Central');
