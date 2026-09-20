@@ -87,15 +87,15 @@ app.use('/api/terminal-diagnostics', telemetryRoutes);
 const reactDistPath = path.join(__dirname, '../web/react-app/dist');
 const legacyWebPath = path.join(__dirname, '../web');
 
+// Legacy entry redirect: direct legacy HTML routes to modern React SPA
+app.get(['/login.html', '/index.html'], (req, res) => {
+  res.redirect(301, '/login');
+});
+
 if (fs.existsSync(reactDistPath)) {
   app.use(express.static(reactDistPath));
 }
 app.use(express.static(legacyWebPath));
-
-// Legacy entry redirect: direct legacy /login.html to website homepage
-app.get('/login.html', (req, res) => {
-  res.redirect(301, '/');
-});
 
 // ── Health Check & System Status ────────────────────────────
 app.get('/health', (req, res) => {

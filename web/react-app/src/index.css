@@ -219,36 +219,115 @@ html.dark #toast {
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.8), 0 8px 10px -6px rgba(0, 0, 0, 0.8);
 }
 
-/* Print Layout: SRA Audit Certificate & Compliance Dossier (Strictly Monochrome) */
+/* ══════════════════════════════════════════════════════════
+   PRINT LAYOUT: OFFICIAL SRA AUDIT CERTIFICATE & REGULATORY DOSSIER
+   ══════════════════════════════════════════════════════════ */
 @media print {
   @page {
-    size: A4 portrait;
-    margin: 12mm 15mm;
+    size: A4 landscape;
+    margin: 5mm 8mm;
   }
-  body, html {
+
+  html,
+  body,
+  #root,
+  #root > div,
+  main,
+  #page-content {
     background: #ffffff !important;
     background-color: #ffffff !important;
     color: #000000 !important;
     height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
     font-size: 11px !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  aside, header, nav, button, #toast, .no-print {
+
+  /* Completely strip out all website UI chrome */
+  aside,
+  header,
+  nav,
+  button,
+  input,
+  select,
+  textarea,
+  #toast,
+  .no-print,
+  .print\:hidden,
+  [role="status"],
+  ::-webkit-scrollbar {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
+  /* Ensure modal backdrop behaves as transparent inline block during print */
+  #printable-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Document sheet occupies full A4 page width cleanly */
   #printable-audit-container {
     box-shadow: none !important;
     border-radius: 0 !important;
+    border: none !important;
     padding: 0 !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     max-width: 100% !important;
     width: 100% !important;
     background: #ffffff !important;
     color: #000000 !important;
+    display: block !important;
+  }
+
+  /* Ensure formal table borders and rows print sharply without breaking across lines */
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  th,
+  td {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }
+

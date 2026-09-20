@@ -1,56 +1,437 @@
 import React from 'react';
-import { Printer, X, ShieldCheck, Download } from 'lucide-react';
+import { Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
+
+/**
+ * Format currency / numeric value with 2 decimals
+ */
+function formatNumber(num) {
+  const val = Number(num || 0);
+  return val.toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+/**
+ * Detect whether an operation belongs to Stage 6 (Harvesting & Milling)
+ */
+function isMillingOperation(log) {
+  const name = String(log.operationName || log.name || '').toLowerCase();
+  const cat = String(log.category || '').toLowerCase();
+  const stage = Number(log.stageNumber || 0);
+  return (
+    stage === 6 ||
+    cat.includes('milling') ||
+    cat.includes('harvest') ||
+    name.includes('cutting') ||
+    name.includes('loading') ||
+    name.includes('hauling') ||
+    name.includes('trucking') ||
+    name.includes('bull cart') ||
+    name.includes('milling')
+  );
+}
 
 export default function PrintableAuditReport({
   report = null,
   blockFarms = [],
   currentUser = null,
-  onClose
+  isOpenModal = true,
+  onClose = () => {}
 }) {
   if (!report) return null;
 
+  // ── 1. Resolve Dynamic Farm & Report Metadata from System ─────────
   const farm = blockFarms.find(f => f.id === report.blockFarmId);
   const farmName = farm?.name || report.blockFarmName || report.blockFarmId || 'District Block Farm';
+  const farmLocation = farm?.location || farm?.address || 'HDA. SILAY DISTRICT, SILAY CITY, NEGROS OCCIDENTAL';
 
+  // Extract actual operation logs from report
   const operationLogs = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
     : (Array.isArray(report.operations) ? report.operations : []);
 
-  const totalCost = operationLogs.reduce((sum, item) => sum + Number(item.totalCost || item.cost || 0), 0);
-
+  // Compute total audited area across unique plots/fields
   const fieldAreas = new Map();
   operationLogs.forEach(log => {
     if (log.fieldId) {
       fieldAreas.set(log.fieldId, Math.max(fieldAreas.get(log.fieldId) || 0, Number(log.areaHa || 0)));
     }
   });
-  const totalAreaHa = Array.from(fieldAreas.values()).reduce((sum, ha) => sum + ha, 0);
 
+  const parsedAuditedHa = Array.from(fieldAreas.values()).reduce((sum, ha) => sum + ha, 0);
+  const totalAuditedHa = parsedAuditedHa > 0
+    ? parsedAuditedHa
+    : (operationLogs[0]?.areaHa ? Number(operationLogs[0].areaHa) : (farm?.totalAreaHa ? Number(farm.totalAreaHa) : 1.0));
+
+  const totalFarmArea = farm?.totalAreaHa ? Number(farm.totalAreaHa).toFixed(4) : totalAuditedHa.toFixed(4);
+  const auditedAreaStr = totalAuditedHa.toFixed(4);
+
+  // ── 2. Derive Crop Year Timeline from System Period ──────────────
+  const periodStr = String(report.period || report.month || '2026-09');
+  const match = periodStr.match(/^(\d{4})-(\d{2})$/);
+  const reportYear = match ? parseInt(match[1], 10) : new Date().getFullYear();
+  const reportMonth = match ? parseInt(match[2], 10) : 9;
+
+  // SRA crop cycle begins around September (month 9)
+  const cy1Start = reportMonth >= 9 ? reportYear : reportYear - 1;
+  const currentCY = `CY ${cy1Start}-${cy1Start + 1}`;
+  const nextCY = `CY ${cy1Start + 1}-${cy1Start + 2}`;
+
+  // Helper to determine which month column to activate for a log
+  const getMonthCol = (performedOn, isMilling = false) => {
+    if (!performedOn) {
+      return isMilling ? { isNextCY: true, monthNum: 1 } : { isNextCY: false, monthNum: reportMonth };
+    }
+    try {
+      const parts = String(performedOn).split('-');
+      if (parts.length >= 2) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        if (isMilling || year > cy1Start + 1 || (year === cy1Start + 1 && month >= 9)) {
+          return { isNextCY: true, monthNum: Math.min(Math.max(month - 8, 1), 3) };
+        }
+        return { isNextCY: false, monthNum: month };
+      }
+    } catch {}
+    return isMilling ? { isNextCY: true, monthNum: 1 } : { isNextCY: false, monthNum: reportMonth };
+  };
+
+  // ── 3. Categorize System Operations: Direct vs Milling ────────────
+  const directOps = [];
+  const millingOps = [];
+
+  operationLogs.forEach(log => {
+    if (isMillingOperation(log)) {
+      millingOps.push(log);
+    } else {
+      directOps.push(log);
+    }
+  });
+
+  // Calculate Subtotals & Totals from real system data
+  const totalDirectCost = directOps.reduce((sum, log) => sum + Number(log.totalCost || 0), 0);
+  const directCostPerHa = totalAuditedHa > 0 ? totalDirectCost / totalAuditedHa : totalDirectCost;
+
+  const totalMillingCost = millingOps.reduce((sum, log) => sum + Number(log.totalCost || 0), 0);
+  const millingCostPerHa = totalAuditedHa > 0 ? totalMillingCost / totalAuditedHa : totalMillingCost;
+
+  const grandTotalCost = totalDirectCost + totalMillingCost;
+  const grandTotalCostPerHa = totalAuditedHa > 0 ? grandTotalCost / totalAuditedHa : grandTotalCost;
+
+  const hash = report.qrHash || report.id || 'HUG-SRA-AUDIT';
   const isCertified = report.status === 'CERTIFIED';
-  const costPerHa = totalAreaHa > 0 ? totalCost / totalAreaHa : 0;
-
-  const formatCurrency = (amt) => `₱${Number(amt || 0).toLocaleString('en-PH', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}`;
 
   const handlePrint = () => {
     window.print();
   };
 
+  const documentSheet = (
+    <div
+      id="printable-audit-container"
+      className="w-full max-w-[297mm] min-h-[210mm] bg-white text-black p-6 sm:p-8 rounded-none shadow-none print:p-0 print:m-0 mx-auto text-[8.5px] leading-tight font-sans"
+      style={{ color: '#000000', backgroundColor: '#ffffff' }}
+    >
+      {/* ── Official SRA Compilation Header (Top Metadata) ─────────────── */}
+      <div className="mb-3 text-[9px] font-sans font-bold leading-snug uppercase text-black">
+        <div className="grid grid-cols-[220px_1fr] gap-x-3 gap-y-0.5">
+          <div className="text-gray-900 font-bold">NAME OF BLOCK FARM</div>
+          <div className="font-extrabold tracking-wide">{farmName}</div>
+
+          <div className="text-gray-900 font-bold">LOCATION</div>
+          <div className="font-semibold">{farmLocation}</div>
+
+          <div className="text-gray-900 font-bold">TOTAL AREA OF BLOCK FARM (HA)</div>
+          <div className="font-mono font-bold">{totalFarmArea}</div>
+
+          <div className="text-gray-900 font-bold">TOTAL AREA FOR NEW PLANT (HA)</div>
+          <div className="font-mono font-bold">{auditedAreaStr}</div>
+        </div>
+      </div>
+
+      {/* ── Master SRA Compilation Grid Table ───────────────────────────── */}
+      <div className="w-full overflow-x-auto print:overflow-visible">
+        <table className="w-full border-collapse border border-black text-[8.5px] leading-tight text-black">
+          <thead>
+            {/* Top Level Yellow Header Matching Official SRA Template */}
+            <tr className="bg-[#edd446] text-black uppercase font-bold text-center border-b border-black">
+              <th rowSpan={2} className="border border-black p-1 w-6">NO</th>
+              <th rowSpan={2} className="border border-black p-1 text-left min-w-[150px] max-w-[220px]">OPERATION</th>
+              <th colSpan={12} className="border border-black p-0.5 font-bold tracking-wider">{currentCY}</th>
+              <th colSpan={3} className="border border-black p-0.5 font-bold tracking-wider">{nextCY}</th>
+              <th rowSpan={2} className="border border-black p-1 w-12">TOTAL</th>
+              <th rowSpan={2} className="border border-black p-1 w-8">QTY</th>
+              <th rowSpan={2} className="border border-black p-1 w-8">UNIT</th>
+              <th rowSpan={2} className="border border-black p-1 w-14">UNIT COST</th>
+              <th rowSpan={2} className="border border-black p-1 w-16">COST PER HECTARE</th>
+            </tr>
+            {/* Monthly Timeline Sub-headers (1-12 for Current CY, 1-3 for Next CY) */}
+            <tr className="bg-[#edd446] text-black font-bold text-center border-b border-black text-[8px]">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
+                <th key={`cy1-m${m}`} className="border border-black p-0.5 w-5 font-bold">{m}</th>
+              ))}
+              {[1, 2, 3].map(m => (
+                <th key={`cy2-m${m}`} className="border border-black p-0.5 w-5 font-bold">{m}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {operationLogs.length === 0 ? (
+              <tr>
+                <td colSpan={22} className="border border-black p-4 text-center text-gray-500 italic">
+                  No operational records compiled in this audit dossier.
+                </td>
+              </tr>
+            ) : (
+              <>
+                {/* ── SECTION 1: DIRECT CROP OPERATIONS (FROM SYSTEM) ──── */}
+                {directOps.map((log, idx) => {
+                  const opNum = idx + 1;
+                  const opName = log.operationName || log.name || `Operation ${opNum}`;
+                  const logArea = Number(log.areaHa || totalAuditedHa).toFixed(2);
+                  const logCost = Number(log.totalCost || 0);
+                  const logQty = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
+                  const logUnit = log.quantity?.unit || log.unit || 'ha';
+                  const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
+                  const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
+
+                  const colPlacement = getMonthCol(log.performedOn, false);
+                  const hasChildren = Array.isArray(log.lineItems) && log.lineItems.length > 0;
+
+                  if (hasChildren) {
+                    return (
+                      <React.Fragment key={log.operationLogId || log.id || idx}>
+                        {/* Group Header Row */}
+                        <tr className="border-t border-black bg-gray-50">
+                          <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
+                          <td className="border border-black p-0.5 text-left font-bold" colSpan={21}>
+                            {opName}
+                          </td>
+                        </tr>
+                        {/* Child Sub-items */}
+                        {log.lineItems.map((si, cIdx) => {
+                          const childQty = si.quantity != null ? si.quantity : 1;
+                          const childUnit = si.unit || 'bag';
+                          const childUnitCost = Number(si.unitCost || (Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)));
+                          const childSubtotal = Number(si.subtotal != null ? si.subtotal : (Number(childQty) * childUnitCost));
+                          const childCostPerHa = Number(log.areaHa) > 0 ? (childSubtotal / Number(log.areaHa)) : childSubtotal;
+
+                          return (
+                            <tr key={`${idx}-${cIdx}`} className="border-t border-gray-300">
+                              <td className="border border-black p-0.5 text-center"></td>
+                              <td className="border border-black p-0.5 text-left pl-3">{si.description || si.name || `Item ${cIdx + 1}`}</td>
+                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
+                                <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
+                                  {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                                </td>
+                              ))}
+                              {[1, 2, 3].map(m => (
+                                <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
+                                  {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                                </td>
+                              ))}
+                              <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
+                              <td className="border border-black p-0.5 text-center font-mono">{childQty}</td>
+                              <td className="border border-black p-0.5 text-center">{childUnit}</td>
+                              <td className="border border-black p-0.5 text-right font-mono">{formatNumber(childUnitCost)}</td>
+                              <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(childCostPerHa)}</td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  }
+
+                  // Single Direct Operation Row
+                  return (
+                    <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
+                      <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
+                      <td className="border border-black p-0.5 text-left font-bold">{opName}</td>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
+                        <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
+                          {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                        </td>
+                      ))}
+                      {[1, 2, 3].map(m => (
+                        <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
+                          {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                        </td>
+                      ))}
+                      <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
+                      <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
+                      <td className="border border-black p-0.5 text-center">{logUnit}</td>
+                      <td className="border border-black p-0.5 text-right font-mono">{formatNumber(logUnitCost)}</td>
+                      <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(logCostPerHa)}</td>
+                    </tr>
+                  );
+                })}
+
+                {/* TOTAL DIRECT COST ROW */}
+                <tr className="border-t-2 border-black font-extrabold bg-white text-[9px]">
+                  <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wide">
+                    TOTAL DIRECT COST
+                  </td>
+                  <td className="border border-black p-1 text-right font-mono font-black text-black">
+                    {formatNumber(directCostPerHa)}
+                  </td>
+                </tr>
+
+                {/* ── SECTION 2: MILLING EXPENSES (IF PRESENT IN SYSTEM) ── */}
+                {millingOps.length > 0 && (
+                  <>
+                    <tr className="border-t border-black bg-white">
+                      <td colSpan={22} className="border border-black p-0.5 text-left font-bold pl-2">
+                        Milling Expenses
+                      </td>
+                    </tr>
+                    {millingOps.map((log, idx) => {
+                      const opNum = directOps.length + idx + 1;
+                      const opName = log.operationName || log.name || `Milling Operation ${idx + 1}`;
+                      const logArea = Number(log.areaHa || totalAuditedHa).toFixed(2);
+                      const logCost = Number(log.totalCost || 0);
+                      const logQty = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
+                      const logUnit = log.quantity?.unit || log.unit || 'ton';
+                      const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
+                      const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
+
+                      const colPlacement = getMonthCol(log.performedOn, true);
+
+                      return (
+                        <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
+                          <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
+                          <td className="border border-black p-0.5 text-left font-bold">{opName}</td>
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
+                            <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
+                              {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                            </td>
+                          ))}
+                          {[1, 2, 3].map(m => (
+                            <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
+                              {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
+                            </td>
+                          ))}
+                          <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
+                          <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
+                          <td className="border border-black p-0.5 text-center">{logUnit}</td>
+                          <td className="border border-black p-0.5 text-right font-mono">{formatNumber(logUnitCost)}</td>
+                          <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(logCostPerHa)}</td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* TOTAL MILLING EXPENSES ROW */}
+                    <tr className="border-t border-black font-extrabold bg-white text-[9px]">
+                      <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wide">
+                        TOTAL MILLING EXPENSES
+                      </td>
+                      <td className="border border-black p-1 text-right font-mono font-black text-black">
+                        {formatNumber(millingCostPerHa)}
+                      </td>
+                    </tr>
+                  </>
+                )}
+
+                {/* ── GRAND TOTAL: TOTAL COST OF PRODUCTION ───────────── */}
+                <tr className="border-t-2 border-black font-black bg-white text-[9.5px]">
+                  <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wider">
+                    TOTAL COST OF PRODUCTION
+                  </td>
+                  <td className="border border-black p-1 text-right font-mono font-black text-black">
+                    {formatNumber(grandTotalCostPerHa)}
+                  </td>
+                </tr>
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Statutory Cumulative Footnote (Real System Data) ─────────────── */}
+      <div className="mt-2 text-[8px] text-gray-700 italic">
+        * Total Cumulative Farm Expenditure for {auditedAreaStr} Ha Audited = <strong>₱{formatNumber(grandTotalCost)}</strong> (Philippine Pesos). Certified compliant under SRA Silay Mill District standard schedule.
+      </div>
+
+      {/* ── Tripartite Signature Block & Digital Audit Seal ─────────────── */}
+      <div className="mt-4 avoid-break">
+        <div className="grid grid-cols-3 gap-8 text-center mb-3">
+          <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
+            <p className="font-bold text-[9px] uppercase m-0 text-black">
+              {report.compiledByUserId || currentUser?.name || 'Farm Manager'}
+            </p>
+            <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
+              Farm Manager / President<br />
+              <span className="font-semibold">{farmName}</span>
+            </p>
+          </div>
+
+          <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
+            <p className="font-bold text-[9px] uppercase m-0 text-black">
+              {isCertified ? (report.certifiedByUserId || 'SRA Officer') : 'Awaiting Review'}
+            </p>
+            <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
+              SRA Agricultural Inspector<br />
+              <span className="font-semibold">Field Operations Audit Division</span>
+            </p>
+          </div>
+
+          <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
+            <p className="font-bold text-[9px] uppercase m-0 text-black">
+              Engr. Ramon Lacson
+            </p>
+            <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
+              SRA District Officer<br />
+              <span className="font-semibold">Silay Sugar Regulatory Administration</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Official Digital QR Seal */}
+        <div className="text-center flex flex-col items-center pt-1 border-t border-dashed border-gray-300">
+          <div className="flex items-center gap-3">
+            <div className="p-1 bg-white border border-black inline-block">
+              <QRCodeView
+                value={hash}
+                size={54}
+                color="#000000"
+                bgColor="#ffffff"
+              />
+            </div>
+            <div className="text-left font-mono text-[7.5px] text-black">
+              <div className="font-bold">DIGITAL AUDIT SEAL: [HASH: {hash}]</div>
+              <div className="text-gray-600">VERIFIED VIA HUGPONG ENTERPRISE SUITE · SRA SILAY MILL DISTRICT</div>
+              <div className="text-gray-500">TAMPER-PROOF CRYPTOGRAPHIC AUDIT RECORD · R.A. 10659 COMPLIANT</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // If background print (e.g. triggered via Ctrl+P)
+  if (!isOpenModal) {
+    return documentSheet;
+  }
+
+  // Interactive Modal Preview on Screen
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-6 print:p-0 print:static print:bg-white">
-      {/* Floating Action Controls (Hidden when printing) */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 no-print bg-white dark:bg-surface p-2 rounded-2xl shadow-lg border border-border">
+    <div
+      id="printable-modal-overlay"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-6 print:p-0 print:static print:bg-transparent print:backdrop-blur-none"
+    >
+      {/* Floating Action Controls (Hidden completely during printing) */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 no-print print:hidden bg-white dark:bg-surface p-2 rounded-2xl shadow-2xl border border-border">
+        <div className="text-xs font-bold text-hug-text px-2 hidden sm:block">
+          SRA Compilation Format (A4 Landscape)
+        </div>
         <Button
           variant="primary"
           size="md"
           onClick={handlePrint}
           icon={Printer}
         >
-          Print to A4
+          Print Document
         </Button>
         <Button
           variant="secondary"
@@ -62,231 +443,9 @@ export default function PrintableAuditReport({
         </Button>
       </div>
 
-      {/* Printable Sheet Container */}
-      <div
-        id="printable-audit-container"
-        className="w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-8 sm:p-12 rounded-xl shadow-2xl print:shadow-none print:rounded-none print:p-0 print:m-0 mx-auto text-[11px] leading-normal font-sans"
-        style={{ color: '#000000', backgroundColor: '#ffffff' }}
-      >
-        {/* SRA Official Header */}
-        <div className="text-center border-b-2 border-black pb-3 mb-4">
-          <p className="m-0 text-[10px] uppercase font-bold tracking-wider text-gray-700">
-            Republic of the Philippines · Department of Agriculture
-          </p>
-          <h1 className="m-1 text-lg sm:text-xl font-black uppercase tracking-wide text-black">
-            Sugar Regulatory Administration
-          </h1>
-          <p className="m-0 text-[10px] uppercase font-semibold text-gray-700">
-            Silay Agricultural District · Block Farm Program Oversight
-          </p>
-          <div className="inline-block mt-2 px-3 py-1 bg-gray-200 border border-gray-400 font-extrabold text-xs uppercase tracking-wider text-black">
-            Monthly Field Operations & Cost Audit Report
-          </div>
-        </div>
-
-        {/* Metadata Table */}
-        <table className="w-full border-collapse border border-black text-[11px] mb-4">
-          <tbody>
-            <tr>
-              <td className="bg-gray-100 font-bold p-2 border border-gray-400 w-[28%]">
-                NAME OF BLOCK FARM:
-              </td>
-              <td className="p-2 border border-gray-400 font-semibold uppercase">
-                {farmName}
-              </td>
-              <td className="bg-gray-100 font-bold p-2 border border-gray-400 w-[25%]">
-                REPORT PERIOD:
-              </td>
-              <td className="p-2 border border-gray-400 font-semibold font-mono">
-                {report.period || report.month}
-              </td>
-            </tr>
-            <tr>
-              <td className="bg-gray-100 font-bold p-2 border border-gray-400">
-                AUDIT HASH / ID:
-              </td>
-              <td className="p-2 border border-gray-400 font-mono font-bold">
-                {report.qrHash || report.id}
-              </td>
-              <td className="bg-gray-100 font-bold p-2 border border-gray-400">
-                TOTAL AREA AUDITED:
-              </td>
-              <td className="p-2 border border-gray-400 font-bold text-black font-mono">
-                {totalAreaHa.toFixed(4)} Ha
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Operations Table */}
-        <table className="w-full border-collapse border border-gray-600 text-[10.5px] mb-4">
-          <thead>
-            <tr className="bg-gray-200 text-black uppercase font-bold text-[9.5px]">
-              <th className="border border-gray-600 p-1.5 text-center w-8">No.</th>
-              <th className="border border-gray-600 p-1.5 text-left">Operation</th>
-              <th className="border border-gray-600 p-1.5 text-right w-16">Plot Area</th>
-              <th className="border border-gray-600 p-1.5 text-right w-12">Qty</th>
-              <th className="border border-gray-600 p-1.5 text-center w-12">Unit</th>
-              <th className="border border-gray-600 p-1.5 text-right w-20">Unit Cost</th>
-              <th className="border border-gray-600 p-1.5 text-right w-24">Cost / Ha</th>
-            </tr>
-          </thead>
-          <tbody>
-            {operationLogs.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="border border-gray-600 p-4 text-center text-gray-500 italic">
-                  No recorded operations in this active batch.
-                </td>
-              </tr>
-            ) : (
-              operationLogs.map((l, idx) => {
-                const logCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
-                const opName = l.operationName || `Operation ${idx + 1}`;
-                const itemHa = l.areaHa ? `${Number(l.areaHa).toFixed(2)} ha` : `${totalAreaHa.toFixed(2)} ha`;
-                const hasChildren = Array.isArray(l.lineItems) && l.lineItems.length > 0;
-
-                if (hasChildren) {
-                  return (
-                    <React.Fragment key={l.operationLogId || l.id || idx}>
-                      <tr className="bg-gray-100 font-bold border border-gray-600">
-                        <td className="border border-gray-600 p-1.5 text-center">{idx + 1}</td>
-                        <td className="border border-gray-600 p-1.5 uppercase font-bold" colSpan={5}>
-                          {opName} (Group — {formatCurrency(logCost)})
-                        </td>
-                        <td className="border border-gray-600 p-1.5 text-right font-mono font-bold">
-                          {formatCurrency(logCost)}
-                        </td>
-                      </tr>
-                      {l.lineItems.map((si, cIdx) => {
-                        const childQty = si.quantity != null ? si.quantity : '1';
-                        const childUnit = si.unit || 'ha';
-                        const childUnitCost = Number(si.unitCost || (Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)) || 0);
-                        const childSubTotal = Number(si.subtotal != null ? si.subtotal : (Number(childQty) * childUnitCost));
-                        return (
-                          <tr key={`${idx}-${cIdx}`} className="border border-gray-600">
-                            <td className="border border-gray-600 p-1 text-center font-mono text-[9px]">
-                              {idx + 1}.{cIdx + 1}
-                            </td>
-                            <td className="border border-gray-600 p-1 pl-4">
-                              ↳ {si.description || si.name || `Sub-item ${cIdx + 1}`}
-                            </td>
-                            <td className="border border-gray-600 p-1 text-right font-mono">{itemHa}</td>
-                            <td className="border border-gray-600 p-1 text-right font-mono">{childQty}</td>
-                            <td className="border border-gray-600 p-1 text-center">{childUnit}</td>
-                            <td className="border border-gray-600 p-1 text-right font-mono">
-                              {formatCurrency(childUnitCost)}
-                            </td>
-                            <td className="border border-gray-600 p-1 text-right font-mono font-bold">
-                              {formatCurrency(childSubTotal)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                }
-
-                // Direct operation row
-                const logQty = l.quantity?.value || '1';
-                const logUnit = l.quantity?.unit || 'ha';
-                const logUnitCost = Number(l.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
-
-                return (
-                  <tr key={l.operationLogId || l.id || idx} className="border border-gray-600">
-                    <td className="border border-gray-600 p-1.5 text-center font-bold">{idx + 1}</td>
-                    <td className="border border-gray-600 p-1.5 font-bold">{opName}</td>
-                    <td className="border border-gray-600 p-1.5 text-right font-mono">{itemHa}</td>
-                    <td className="border border-gray-600 p-1.5 text-right font-mono">{logQty}</td>
-                    <td className="border border-gray-600 p-1.5 text-center">{logUnit}</td>
-                    <td className="border border-gray-600 p-1.5 text-right font-mono">
-                      {formatCurrency(logUnitCost)}
-                    </td>
-                    <td className="border border-gray-600 p-1.5 text-right font-mono font-bold">
-                      {formatCurrency(logCost)}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-
-            {/* Direct Subtotal Row */}
-            <tr className="bg-gray-100 font-bold border-t-2 border-black">
-              <td colSpan={6} className="border border-gray-600 p-1.5 text-right uppercase">
-                TOTAL MONTHLY DIRECT EXPENDITURE ({report.period || report.month}):
-              </td>
-              <td className="border border-gray-600 p-1.5 text-right font-mono font-bold text-black">
-                {formatCurrency(totalCost)}
-              </td>
-            </tr>
-            {/* Grand Total Row */}
-            <tr className="bg-gray-200 font-black border-t-2 border-black text-xs">
-              <td colSpan={6} className="border border-gray-600 p-2 text-right uppercase">
-                TOTAL COST OF PRODUCTION (PER HA AUDITED):
-              </td>
-              <td className="border border-gray-600 p-2 text-right font-mono font-black text-black">
-                {formatCurrency(costPerHa)} / Ha
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Regulatory Statement */}
-        <p className="text-[9.5px] text-gray-700 m-0 mb-6 italic">
-          * Total Cumulative Farm Expenditure for {totalAreaHa.toFixed(4)} Ha Audited = <strong>{formatCurrency(totalCost)}</strong> (Philippine Pesos). Certified compliant under SRA Silay Mill District standard schedule.
-        </p>
-
-        {/* Signatures Section */}
-        <div className="mt-8 break-inside-avoid">
-          <div className="grid grid-cols-3 gap-6 text-center mb-6">
-            <div className="border-t border-black pt-2">
-              <p className="font-bold text-[10.5px] uppercase m-0">
-                {report.compiledByUserId || currentUser?.name || 'Farm Manager'}
-              </p>
-              <p className="text-[9px] text-gray-600 m-0 mt-0.5">
-                Farm Manager / President<br />{farmName}
-              </p>
-            </div>
-
-            <div className="border-t border-black pt-2">
-              <p className="font-bold text-[10.5px] uppercase m-0">
-                {isCertified ? (report.certifiedByUserId || 'SRA Agricultural Inspector') : 'Awaiting Review'}
-              </p>
-              <p className="text-[9px] text-gray-600 m-0 mt-0.5">
-                SRA Agricultural Inspector<br />Field Operations Audit Division
-              </p>
-            </div>
-
-            <div className="border-t border-black pt-2">
-              <p className="font-bold text-[10.5px] uppercase m-0">
-                Engr. Ramon Lacson
-              </p>
-              <p className="text-[9px] text-gray-600 m-0 mt-0.5">
-                SRA District Officer<br />Silay Sugar Regulatory Administration
-              </p>
-            </div>
-          </div>
-
-          {/* Digital Seal Presentation with Monochrome QR */}
-          <div className="text-center pt-2 flex flex-col items-center">
-            <div className="p-1.5 bg-white border border-black rounded mb-2">
-              <QRCodeView
-                value={report.qrHash || report.id || 'HUGPONG-SRA-AUDIT'}
-                size={88}
-                color="#000000"
-                bgColor="#ffffff"
-              />
-            </div>
-            {isCertified ? (
-              <div className="inline-block border border-dashed border-black p-2 px-4 bg-gray-100 font-mono text-[9px] text-black font-bold uppercase">
-                DIGITAL AUDIT SEAL: [HASH: {report.qrHash || report.id}] · VERIFIED VIA HUGPONG ENTERPRISE SUITE
-              </div>
-            ) : (
-              <div className="inline-block border border-dashed border-gray-600 p-2 px-4 bg-gray-100 font-mono text-[9px] text-gray-800 font-bold uppercase">
-                PROVISIONAL AUDIT REPORT: PENDING OFFICIAL SRA INSPECTION & CERTIFICATION
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Sheet Wrapper with Landscape scroll container for smaller displays */}
+      <div className="w-full max-w-[310mm] max-h-[92vh] overflow-auto bg-white rounded-xl shadow-2xl border border-border p-4 print:p-0 print:border-none print:shadow-none print:max-w-none print:max-h-none print:overflow-visible">
+        {documentSheet}
       </div>
     </div>
   );

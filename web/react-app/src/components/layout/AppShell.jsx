@@ -86,9 +86,9 @@ export default function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg text-hug-text font-sans">
+    <div className="flex h-screen overflow-hidden bg-bg text-hug-text font-sans print:h-auto print:overflow-visible print:bg-white print:block">
       {/* Desktop Persistent Sidebar */}
-      <div className="hidden lg:block h-full flex-shrink-0">
+      <div className="hidden lg:block h-full flex-shrink-0 print:hidden no-print">
         <Sidebar
           isCollapsed={isCollapsed}
           onToggleCollapse={handleToggleCollapse}
@@ -98,7 +98,7 @@ export default function AppShell() {
       {/* Mobile Drawer (<= 1024px) */}
       {isMobileDrawerOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 flex"
+          className="lg:hidden fixed inset-0 z-50 flex print:hidden no-print"
           role="dialog"
           aria-modal="true"
           aria-label="Mobile Navigation"
@@ -122,13 +122,15 @@ export default function AppShell() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        <Topbar onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden print:h-auto print:overflow-visible print:block">
+        <div className="print:hidden no-print">
+          <Topbar onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
+        </div>
 
         {/* Page Content Outlet without forced card wrapping */}
         <main
           id="page-content"
-          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 focus:outline-none"
+          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
           tabIndex={-1}
         >
           <Outlet />

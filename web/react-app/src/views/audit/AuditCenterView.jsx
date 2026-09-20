@@ -142,12 +142,12 @@ export default function AuditCenterView() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Toast Notification */}
+    <div className="w-full">
+      {/* Toast Notification (Hidden when printing) */}
       {toastMessage && (
         <div
           role="status"
-          className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-xl text-xs font-semibold flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-bottom-3 ${
+          className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-xl text-xs font-semibold flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-bottom-3 print:hidden no-print ${
             toastMessage.type === 'success'
               ? 'bg-success text-white'
               : toastMessage.type === 'error'
@@ -164,117 +164,134 @@ export default function AuditCenterView() {
         </div>
       )}
 
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider">
-              Regulatory Compliance
-            </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
-              QR Audit Verifier
-            </span>
+      {/* Interactive Website Dashboard UI — STRICTLY HIDDEN DURING PRINT */}
+      <div className="space-y-6 max-w-7xl mx-auto pb-12 print:hidden no-print">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider">
+                Regulatory Compliance
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
+                QR Audit Verifier
+              </span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
+              SRA QR Audit Verifier & Compliance Center
+            </h1>
+            <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
+              Verify encrypted mobile field certificates and generate certified compliance audit reports.
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
-            SRA QR Audit Verifier & Compliance Center
-          </h1>
-          <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Verify encrypted mobile field certificates and generate certified compliance audit reports.
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {/* Farm Manager Compilation Button */}
-          {isFarmManager && (
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {/* Farm Manager Compilation Button */}
+            {isFarmManager && (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => setShowCompileModal(true)}
+                icon={FileCheck2}
+              >
+                Compile Monthly Audit
+              </Button>
+            )}
+
+            {/* SRA Audit History Button */}
             <Button
               variant="primary"
               size="md"
-              onClick={() => setShowCompileModal(true)}
-              icon={FileCheck2}
+              onClick={() => setShowHistoryModal(true)}
+              icon={History}
             >
-              Compile Monthly Audit
+              SRA Audit History
             </Button>
-          )}
+          </div>
+        </div>
 
-          {/* SRA Audit History Button */}
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => setShowHistoryModal(true)}
-            icon={History}
-          >
-            SRA Audit History
-          </Button>
+        {/* Main Content: 2-Column Responsive Layout */}
+        <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-start">
+          {/* Left Column: QR Verifier & Cloud Audit Queue */}
+          <div className="flex flex-col gap-6 w-full">
+            <QRVerifierPanel
+              reports={reports}
+              onSelectReport={(report) => setSelectedReport(report)}
+            />
+
+            <AuditQueue
+              reports={reports}
+              selectedReportId={selectedReport?.id || selectedReport?.reportId}
+              onSelectReport={(report) => setSelectedReport(report)}
+              isLoading={isLoadingReports}
+              error={reportsError}
+              onRetry={() => {
+                setIsLoadingReports(true);
+                setReportsError(null);
+              }}
+              blockFarms={blockFarms}
+            />
+          </div>
+
+          {/* Right Column: Detailed Audit Dossier Card */}
+          <div className="w-full">
+            <AuditDossierCard
+              report={selectedReport}
+              blockFarms={blockFarms}
+              currentUser={user}
+              onCertify={handleCertifyReport}
+              onPrint={(report) => setPrintReport(report)}
+              isCertifying={isCertifying}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Main Content: 2-Column Responsive Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-start">
-        {/* Left Column: QR Verifier & Cloud Audit Queue */}
-        <div className="flex flex-col gap-6 w-full">
-          <QRVerifierPanel
-            reports={reports}
-            onSelectReport={(report) => setSelectedReport(report)}
-          />
-
-          <AuditQueue
-            reports={reports}
-            selectedReportId={selectedReport?.id || selectedReport?.reportId}
-            onSelectReport={(report) => setSelectedReport(report)}
-            isLoading={isLoadingReports}
-            error={reportsError}
-            onRetry={() => {
-              setIsLoadingReports(true);
-              setReportsError(null);
-            }}
-            blockFarms={blockFarms}
-          />
-        </div>
-
-        {/* Right Column: Detailed Audit Dossier Card */}
-        <div className="w-full">
-          <AuditDossierCard
-            report={selectedReport}
-            blockFarms={blockFarms}
-            currentUser={user}
-            onCertify={handleCertifyReport}
-            onPrint={(report) => setPrintReport(report)}
-            isCertifying={isCertifying}
-          />
-        </div>
-      </div>
-
-      {/* Farm Manager Compilation Modal */}
+      {/* Farm Manager Compilation Modal (Hidden during print) */}
       {isFarmManager && (
-        <AuditCompilationModal
-          isOpen={showCompileModal}
-          onClose={() => setShowCompileModal(false)}
-          blockFarm={assignedBlockFarm}
-          fields={fields}
-          operations={operations}
-          existingReports={reports}
-          onSuccess={handleCompileSuccess}
-        />
+        <div className="print:hidden no-print">
+          <AuditCompilationModal
+            isOpen={showCompileModal}
+            onClose={() => setShowCompileModal(false)}
+            blockFarm={assignedBlockFarm}
+            fields={fields}
+            operations={operations}
+            existingReports={reports}
+            onSuccess={handleCompileSuccess}
+          />
+        </div>
       )}
 
-      {/* Audit History Modal */}
-      <AuditHistoryModal
-        isOpen={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        reports={reports}
-        blockFarms={blockFarms}
-        onSelectReport={(report) => setSelectedReport(report)}
-      />
+      {/* Audit History Modal (Hidden during print) */}
+      <div className="print:hidden no-print">
+        <AuditHistoryModal
+          isOpen={showHistoryModal}
+          onClose={() => setShowHistoryModal(false)}
+          reports={reports}
+          blockFarms={blockFarms}
+          onSelectReport={(report) => setSelectedReport(report)}
+        />
+      </div>
 
-      {/* A4 Printable Document View */}
-      {printReport && (
+      {/* Official SRA A4 Printable Document View */}
+      {printReport ? (
         <PrintableAuditReport
           report={printReport}
           blockFarms={blockFarms}
           currentUser={user}
+          isOpenModal={true}
           onClose={() => setPrintReport(null)}
         />
-      )}
+      ) : selectedReport ? (
+        <div className="hidden print:block">
+          <PrintableAuditReport
+            report={selectedReport}
+            blockFarms={blockFarms}
+            currentUser={user}
+            isOpenModal={false}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

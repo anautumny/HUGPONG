@@ -1,30 +1,139 @@
-# Expo / React Native
-mobile/node_modules/
-mobile/.expo/
-mobile/web-build/
-mobile/dist/
-mobile/npm-debug.log*
-mobile/yarn-debug.log*
-mobile/yarn-error.log*
+# ==============================================================================
+# HUGPONG FULL-STACK MONOREPO GITIGNORE
+# Covers: Backend Server (Node/Express), Web App (React/Vite), Mobile (Expo/React Native)
+# ==============================================================================
 
-# Web Client & React App
+# ------------------------------------------------------------------------------
+# Dependencies & Package Managers
+# ------------------------------------------------------------------------------
 node_modules/
 **/node_modules/
+.pnp/
+.pnp.js
+package-lock.json.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ------------------------------------------------------------------------------
+# Build Artifacts & Compiled Bundles
+# ------------------------------------------------------------------------------
 dist/
 **/dist/
+dist-ssr/
+**/dist-ssr/
+build/
+**/build/
+web-build/
+**/web-build/
 web/react-dist/
-web/node_modules/
-web/react-app/node_modules/
 web/react-app/dist/
+out/
+.next/
 
-# Backend Server & Secrets
-server/node_modules/
+# ------------------------------------------------------------------------------
+# Mobile Client (Expo & React Native)
+# ------------------------------------------------------------------------------
+.expo/
+**/.expo/
+expo-env.d.ts
+.metro-health-check*
+.kotlin/
+**/.kotlin/
+*.orig.*
+
+# Android & iOS Native Build Outputs & Keystores
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+*.jks
+*.p8
+*.p12
+*.key
+*.keystore
+*.mobileprovision
+
+# ------------------------------------------------------------------------------
+# Backend Server, Firebase & Security Credentials
+# ------------------------------------------------------------------------------
+*serviceAccountKey*.json
+**/serviceAccountKey*.json
 server/serviceAccountKey.json
-*.serviceAccountKey.json
+*.pem
+*.cert
+*.crt
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
 
-# Environment & OS Files
-.DS_Store
-Thumbs.db
+# ------------------------------------------------------------------------------
+# Environment Variables & Local Configs
+# ------------------------------------------------------------------------------
 .env
+.env.*
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+!.env.template
+
+# ------------------------------------------------------------------------------
+# Caches, Test Coverage & Diagnostics
+# ------------------------------------------------------------------------------
+.cache/
+**/.cache/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+coverage/
+**/.nyc_output/
+.rpt2_cache/
+*.log
+logs/
+
+# ------------------------------------------------------------------------------
+# IDE & Code Editor Files
+# ------------------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.sublime-*
+.project
+.classpath
+.settings/
+
+# ------------------------------------------------------------------------------
+# Operating System & Filesystem Artifacts
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# ------------------------------------------------------------------------------
+# Temporary Files & Scratches
+# ------------------------------------------------------------------------------
+tmp/
+temp/
+scratch/
+*.tmp
+*.bak
