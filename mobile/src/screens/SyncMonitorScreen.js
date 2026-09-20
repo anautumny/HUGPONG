@@ -200,19 +200,17 @@ export default function SyncMonitorScreen({ navigation }) {
 
             {/* Overdue Warning Alert Banner */}
             {attentionCount > 0 && (
-              <View style={[s.alertBanner, { backgroundColor: '#FDF2F2', borderColor: '#F8B4B4' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#FDE8E8', alignItems: 'center', justifyContent: 'center' }}>
-                    <Ionicons name="alert-circle" size={20} color="#E02424" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#E02424' }}>
-                      {t('sync_critical_title', 'Sync Action Required')}: {attentionCount} Member(s) Offline
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#9B1C1C', marginTop: 1 }}>
-                      Follow up with lagging members before monthly district report compile.
-                    </Text>
-                  </View>
+              <View style={s.alertBanner}>
+                <View style={s.alertIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color="#DC2626" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.alertTitle}>
+                    {t('sync_critical_title', 'Sync Action Required')}: {attentionCount} Member(s) Offline
+                  </Text>
+                  <Text style={s.alertSub}>
+                    Follow up with lagging members before monthly district report compile.
+                  </Text>
                 </View>
               </View>
             )}
@@ -241,7 +239,7 @@ export default function SyncMonitorScreen({ navigation }) {
 
             {/* Search Input */}
             <View style={s.searchContainer}>
-              <Ionicons name="search-outline" size={16} color={COLORS.textMuted} />
+              <Ionicons name="search-outline" size={17} color={COLORS.textMuted} />
               <TextInput
                 style={s.searchInput}
                 placeholder={t('search_members_placeholder', 'Search members or field ID...')}
@@ -254,7 +252,7 @@ export default function SyncMonitorScreen({ navigation }) {
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => { setSearchQuery(''); setMemberPage(1); }}>
-                  <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
+                  <Ionicons name="close-circle" size={17} color={COLORS.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
@@ -290,32 +288,45 @@ export default function SyncMonitorScreen({ navigation }) {
                     const badgeBg = isCritical ? '#FDF2F2' : (isWarn ? '#FFFBF0' : '#F0F9F0');
                     const badgeBorder = isCritical ? '#F8B4B4' : (isWarn ? '#FEF0D0' : '#D1F2D1');
                     const badgeColor = isCritical ? '#E02424' : (isWarn ? '#C97A00' : COLORS.success);
+                    const badgeIcon = isCritical ? 'alert-circle' : (isWarn ? 'time' : 'checkmark-circle');
                     const badgeLabel = isCritical ? `${m.lagDays}d Offline (Critical)` : (isWarn ? `${m.lagDays}d Lag Warning` : 'Active / Synced');
 
                     return (
-                      <View key={m.id} style={[s.memberCard, { borderColor: isCritical ? '#F8B4B4' : '#E2E8DC' }]}>
+                      <View key={m.id} style={[s.memberCard, isCritical ? s.memberCardCritical : (isWarn ? s.memberCardWarn : s.memberCardActive)]}>
                         <View style={s.memberTopRow}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                            <View style={s.memberAvatar}>
-                              <Text style={s.memberAvatarText}>{m.name.charAt(0)}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                            <View style={[s.memberAvatar, isCritical ? { backgroundColor: '#FEE2E2' } : (isWarn ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#E8F5E4' })]}>
+                              <Text style={[s.memberAvatarText, isCritical ? { color: '#DC2626' } : (isWarn ? { color: '#D97706' } : { color: COLORS.primary })]}>
+                                {m.name.charAt(0).toUpperCase()}
+                              </Text>
                             </View>
-                            <View>
-                              <Text style={s.memberName}>{m.name}</Text>
-                              <Text style={s.memberFieldId}>{m.id} <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>({m.ha} Ha)</Text></Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.memberName} numberOfLines={1}>{m.name}</Text>
+                              <View style={s.plotRow}>
+                                <Ionicons name="grid-outline" size={11} color={COLORS.primary} />
+                                <Text style={s.memberFieldId}>{m.id}</Text>
+                                <Text style={s.memberHa}>· {m.ha} Ha</Text>
+                              </View>
                             </View>
                           </View>
                           <View style={[s.healthBadge, { backgroundColor: badgeBg, borderColor: badgeBorder }]}>
-                            <View style={[s.healthDot, { backgroundColor: badgeColor }]} />
+                            <Ionicons name={badgeIcon} size={12} color={badgeColor} />
                             <Text style={[s.healthBadgeText, { color: badgeColor }]}>{badgeLabel}</Text>
                           </View>
                         </View>
 
                         <View style={s.memberDetailsRow}>
-                          <View>
-                            <Text style={s.detailLabel}>{t('stage', 'Current Stage')}</Text>
-                            <Text style={s.detailValue}>{m.stage}</Text>
+                          <View style={{ flex: 1.2 }}>
+                            <Text style={s.detailLabel}>{t('stage', 'Stage')}</Text>
+                            <Text style={s.detailValue} numberOfLines={1}>{m.stage}</Text>
                           </View>
-                          <View style={{ alignItems: 'flex-end' }}>
+                          <View style={{ flex: 1, alignItems: 'center' }}>
+                            <Text style={s.detailLabel}>Offline Buffer</Text>
+                            <Text style={[s.detailValue, { color: m.offlineLogsCount > 0 ? '#D97706' : COLORS.textSecondary }]}>
+                              {m.offlineLogsCount > 0 ? `${m.offlineLogsCount} pending` : '0 queued'}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
                             <Text style={s.detailLabel}>{t('sync_info', 'Latest Sync')}</Text>
                             <Text style={[s.detailValue, { color: badgeColor }]}>{formatSyncTime(m.lastSync)}</Text>
                           </View>
@@ -327,7 +338,7 @@ export default function SyncMonitorScreen({ navigation }) {
                             onPress={() => handleContactMember(m)}
                             activeOpacity={0.8}
                           >
-                            <Ionicons name="call-outline" size={14} color={COLORS.text} />
+                            <Ionicons name="call-outline" size={16} color={COLORS.text} />
                             <Text style={s.contactBtnText} numberOfLines={1}>{t('btn_call_member', 'Call Member')}</Text>
                           </TouchableOpacity>
 
@@ -336,7 +347,7 @@ export default function SyncMonitorScreen({ navigation }) {
                             onPress={() => handleTakeOver(m)}
                             activeOpacity={0.8}
                           >
-                            <Ionicons name="navigate-outline" size={14} color={COLORS.primary} />
+                            <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.primary} />
                             <Text style={s.takeOverBtnText} numberOfLines={1}>{t('btn_take_over', 'Take Over Plot')}</Text>
                           </TouchableOpacity>
                         </View>
@@ -507,34 +518,59 @@ const s = StyleSheet.create({
     borderBottomColor: '#E2E8DC',
     backgroundColor: '#FFF',
   },
-  backBtn: { width: 36, height: 36, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F2EC' },
-  headerTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  headerSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+  backBtn: { width: 40, height: 40, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F4EC', borderWidth: 1, borderColor: '#DEEBD8' },
+  headerTitle: { fontSize: 16.5, fontWeight: '800', color: COLORS.text },
+  headerSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
   scroll: { padding: SPACING.lg, gap: 12 },
 
   // Stats Bar
   statsBar: {
     flexDirection: 'row',
     backgroundColor: '#FFF',
-    borderRadius: RADIUS.lg,
-    paddingVertical: 12,
+    borderRadius: RADIUS.xl,
+    paddingVertical: 10,
     paddingHorizontal: 8,
-    borderWidth: 1,
+    borderWidth: 1.2,
     borderColor: '#E2E8DC',
     alignItems: 'center',
-    ...SHADOW.sm,
+    ...SHADOW.card,
   },
-  statItem: { flex: 1, alignItems: 'center', paddingVertical: 4, borderRadius: RADIUS.md },
-  statItemActive: { backgroundColor: '#F0F4EC' },
-  statNum: { fontSize: 18, fontWeight: '800' },
-  statLabel: { fontSize: 10, color: COLORS.textMuted, marginTop: 2, fontWeight: '600' },
-  statDiv: { width: 1, height: 26, backgroundColor: '#E2E8DC' },
+  statItem: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: RADIUS.md, minHeight: 52 },
+  statItemActive: { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: '#C8E6C9' },
+  statNum: { fontSize: 20, fontWeight: '900' },
+  statLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 3, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.2 },
+  statDiv: { width: 1, height: 28, backgroundColor: '#E2E8DC' },
 
   // Alert Banner
   alertBanner: {
-    borderRadius: RADIUS.lg,
-    padding: 12,
-    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+    borderWidth: 1.2,
+    borderRadius: RADIUS.xl,
+    padding: 13,
+    ...SHADOW.sm,
+  },
+  alertIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertTitle: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: '#B91C1C',
+  },
+  alertSub: {
+    fontSize: 12,
+    color: '#991B1B',
+    marginTop: 2,
+    lineHeight: 16,
   },
 
   // Search
@@ -542,89 +578,113 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFF',
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8DC',
-    gap: 8,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1.2,
+    borderColor: '#DCE7D8',
+    minHeight: 48,
+    gap: 10,
+    ...SHADOW.sm,
   },
-  searchInput: { flex: 1, fontSize: 12, color: COLORS.text, padding: 0 },
+  searchInput: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0 },
 
-  sectionTitle: { fontSize: 13, fontWeight: '800', color: COLORS.text, marginTop: 4 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text, marginTop: 4 },
 
   emptyBox: {
     backgroundColor: '#FFF',
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.xl,
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.2,
     borderColor: '#E2E8DC',
     gap: 6,
+    ...SHADOW.card,
   },
-  emptyText: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
+  emptyText: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center', lineHeight: 18 },
 
   // Member Telemetry Card
   memberCard: {
     backgroundColor: '#FFF',
-    borderRadius: RADIUS.lg,
-    padding: 14,
-    borderWidth: 1,
+    borderRadius: RADIUS.xl,
+    padding: 15,
+    borderWidth: 1.2,
+    borderColor: '#E2E8DC',
     gap: 10,
-    ...SHADOW.sm,
+    ...SHADOW.card,
+  },
+  memberCardActive: {
+    borderColor: '#DEEAD8',
+  },
+  memberCardWarn: {
+    borderColor: '#FCD34D',
+    backgroundColor: '#FFFEFA',
+  },
+  memberCardCritical: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FFF9F9',
   },
   memberTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
-  memberAvatarText: { fontSize: 14, fontWeight: '800', color: COLORS.primary },
-  memberName: { fontSize: 13, fontWeight: '700', color: COLORS.text },
-  memberFieldId: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
+  memberAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
+  memberAvatarText: { fontSize: 17, fontWeight: '900', color: COLORS.primary },
+  memberName: { fontSize: 15.5, fontWeight: '800', color: COLORS.text },
+  plotRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  memberFieldId: { fontSize: 12.5, fontWeight: '800', color: COLORS.primary },
+  memberHa: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
 
-  healthBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
-  healthDot: { width: 6, height: 6, borderRadius: 3 },
-  healthBadgeText: { fontSize: 10, fontWeight: '700' },
+  healthBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4.5, borderRadius: RADIUS.full, borderWidth: 1 },
+  healthBadgeText: { fontSize: 11.5, fontWeight: '800' },
 
   memberDetailsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 8,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#F0F2EC',
+    borderTopColor: '#F0F4EC',
   },
-  detailLabel: { fontSize: 10, color: COLORS.textMuted, textTransform: 'uppercase', fontWeight: '700' },
-  detailValue: { fontSize: 12, fontWeight: '600', color: COLORS.text, marginTop: 2 },
+  detailLabel: { fontSize: 11, color: COLORS.textMuted, textTransform: 'uppercase', fontWeight: '800', letterSpacing: 0.3 },
+  detailValue: { fontSize: 13.5, fontWeight: '700', color: COLORS.text, marginTop: 2 },
 
-  memberActionRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  memberActionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   contactBtn: {
     flex: 1,
     backgroundColor: '#F8FAF6',
-    borderWidth: 1,
-    borderColor: '#E2E8DC',
-    paddingVertical: 8,
+    borderWidth: 1.2,
+    borderColor: '#D0DBC9',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: RADIUS.md,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+    ...SHADOW.sm,
   },
-  contactBtnText: { fontSize: 11, fontWeight: '700', color: COLORS.text },
+  contactBtnText: { fontSize: 13.5, fontWeight: '800', color: COLORS.text },
   takeOverBtn: {
     flex: 1,
-    backgroundColor: COLORS.primaryBg,
-    paddingVertical: 8,
+    backgroundColor: '#F0F8EC',
+    borderWidth: 1.2,
+    borderColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: RADIUS.md,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+    ...SHADOW.sm,
   },
-  takeOverBtnText: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
+  takeOverBtnText: { fontSize: 13.5, fontWeight: '900', color: COLORS.primary },
 
   // Filter Pills
-  filterPill: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8DC', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
-  filterPillActive: { backgroundColor: COLORS.primaryBg, borderColor: COLORS.primary },
-  filterPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary },
-  filterPillTextActive: { color: COLORS.primary, fontWeight: '800' },
+  filterPill: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#E2E8DC', borderRadius: RADIUS.full, paddingHorizontal: 14, paddingVertical: 9, minHeight: 38, justifyContent: 'center' },
+  filterPillActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  filterPillText: { fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary },
+  filterPillTextActive: { color: '#fff', fontWeight: '900' },
 
   // Member Terminal View
   memberTerminalCard: {

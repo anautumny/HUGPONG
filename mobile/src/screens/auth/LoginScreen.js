@@ -13,6 +13,7 @@ import {
 } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { isOnline, addNetworkListener } from '../../services/networkService';
+import CirclingRetryButton from '../../components/CirclingRetryButton';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
@@ -25,6 +26,7 @@ export default function LoginScreen({ navigation }) {
   const [errors, setErrors] = useState({});
   const [authError, setAuthError] = useState('');
   const [deviceOnline, setDeviceOnline] = useState(isOnline());
+  const [showOfflineGateModal, setShowOfflineGateModal] = useState(!isOnline());
 
   // Security: Brute-Force Rate Limiting & Account Lockout
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -48,6 +50,10 @@ export default function LoginScreen({ navigation }) {
   const [fastLoggingIn, setFastLoggingIn] = useState('');
 
   const handleFastLogin = async (roleName) => {
+    if (!deviceOnline && !isOnline()) {
+      setShowOfflineGateModal(true);
+      return;
+    }
     setFastLoggingIn(roleName);
     setAuthError('');
     try {
@@ -67,6 +73,9 @@ export default function LoginScreen({ navigation }) {
   useEffect(() => {
     const unsubNet = addNetworkListener((status) => {
       setDeviceOnline(status);
+      if (status) {
+        setShowOfflineGateModal(false);
+      }
     });
     return () => {
       if (typeof unsubNet === 'function') unsubNet();
@@ -103,6 +112,11 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleLogin = async () => {
+    if (!deviceOnline && !isOnline()) {
+      setShowOfflineGateModal(true);
+      return;
+    }
+
     if (lockoutSeconds > 0) {
       Alert.alert(
         'Account Temporarily Locked',
@@ -651,6 +665,63 @@ export default function LoginScreen({ navigation }) {
               </View>
             </View>
           </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Offline Connection Required Barrier Modal */}
+      <Modal
+        visible={showOfflineGateModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOfflineGateModal(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={[s.modalContent, { maxWidth: 380, alignItems: 'center', paddingVertical: 24, paddingHorizontal: 20 }]}>
+            <View style={{
+              width: 58,
+              height: 58,
+              borderRadius: 29,
+              backgroundColor: '#FEF3C7',
+              borderWidth: 1.5,
+              borderColor: '#FDE68A',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+            }}>
+              <Ionicons name="cloud-offline" size={30} color="#D97706" />
+            </View>
+
+            <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text, textAlign: 'center', marginBottom: 8 }}>
+              No Internet Connection
+            </Text>
+
+            <Text style={{ fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 19, marginBottom: 20 }}>
+              Internet connection is needed when logging in. Offline mode is only available if you are already logged in.
+            </Text>
+
+            <CirclingRetryButton
+              label="Scan for Internet"
+              scanningLabel="Scanning Connection..."
+              theme="primary"
+              style={{ width: '100%', minHeight: 46 }}
+              onResult={(online) => {
+                setDeviceOnline(online);
+                if (online) {
+                  setShowOfflineGateModal(false);
+                }
+              }}
+            />
+
+            <TouchableOpacity
+              onPress={() => setShowOfflineGateModal(false)}
+              style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 }}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted }}>
+                Dismiss
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>

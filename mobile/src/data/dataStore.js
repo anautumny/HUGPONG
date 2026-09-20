@@ -1099,6 +1099,8 @@ export const fastLoginRole = async (role) => {
       role: 'SRA Admin',
       roleKey: 'sra',
       canonicalRole: 'SRA_ADMIN',
+      district: 'District 3 · Silay',
+      location: 'Silay Mill District, Negros Occidental',
     },
   };
 

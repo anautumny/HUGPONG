@@ -9,6 +9,7 @@ import { COLORS, SPACING, RADIUS, SHADOW, ANALYTICS_PALETTE } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldFullPlan, getDefaultStageOperations, saveDraftLogs } from '../data/dataStore';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
+import { getNetworkStatus } from '../services/networkService';
 import { db } from '../firebase/config';
 import { useTranslation } from '../services/i18n';
 
@@ -135,24 +136,76 @@ export default function PlannerScreen({ navigation }) {
   const displayedFields = useMemo(() => {
     const userId = session?.employeeId || session?.id || '';
     if (isMember) {
-      return allFields.filter(field => field.memberUserId === userId);
+      return allFields.filter(field => 
+        field.memberUserId === userId ||
+        field.memberId === userId ||
+        field.member === session?.name ||
+        field.memberName === session?.name ||
+        (session?.fieldId && field.id === session?.fieldId)
+      );
     }
     if (session?.role === 'Farm Manager') {
-      const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
-      return allFields.filter(field => managedFarmIds.has(field.blockFarmId));
+      if (!getNetworkStatus()) {
+        return allFields.filter(field => 
+          field.memberUserId === userId ||
+          field.memberId === userId ||
+          field.member === session?.name ||
+          field.memberName === session?.name ||
+          (session?.fieldId && field.id === session?.fieldId)
+        );
+      }
+      const managedFarmIds = new Set(
+        blockFarms
+          .filter(farm => 
+            farm.managerUserId === userId ||
+            farm.managerName === session?.name ||
+            farm.id === session?.blockFarmId ||
+            farm.name === session?.blockFarm ||
+            farm.name === session?.farm
+          )
+          .map(farm => farm.id)
+      );
+      if (session?.blockFarmId) managedFarmIds.add(session.blockFarmId);
+      return allFields.filter(field => 
+        managedFarmIds.has(field.blockFarmId) ||
+        field.managerUserId === userId ||
+        (session?.farm && (field.blockFarm === session.farm || field.blockFarmName === session.farm)) ||
+        (session?.blockFarm && (field.blockFarm === session.blockFarm || field.blockFarmName === session.blockFarm))
+      );
     }
     return allFields;
   }, [session, isMember, fieldScope, allFields]);
 
   const [selectedField, setSelectedField] = useState(() => {
-    const cur = getCurrentSession();
-    if (cur.role === 'Member Farmer') {
-      return fieldsStore.find(field => field.memberUserId === (cur.employeeId || cur.id)) || null;
+    const cur = getCurrentSession() || {};
+    const userId = cur.employeeId || cur.id || '';
+    if (cur.role === 'Member Farmer' || !getNetworkStatus()) {
+      return fieldsStore.find(field => 
+        field.memberUserId === userId ||
+        field.memberId === userId ||
+        field.member === cur.name ||
+        field.memberName === cur.name ||
+        (cur.fieldId && field.id === cur.fieldId)
+      ) || null;
     }
     if (cur.role === 'Farm Manager') {
-      const userId = cur.employeeId || cur.id;
-      const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
-      return fieldsStore.find(field => managedFarmIds.has(field.blockFarmId)) || null;
+      const managedFarmIds = new Set(
+        blockFarms
+          .filter(farm => 
+            farm.managerUserId === userId ||
+            farm.managerName === cur.name ||
+            farm.id === cur.blockFarmId ||
+            farm.name === cur.blockFarm ||
+            farm.name === cur.farm
+          )
+          .map(farm => farm.id)
+      );
+      if (cur.blockFarmId) managedFarmIds.add(cur.blockFarmId);
+      return fieldsStore.find(field => 
+        managedFarmIds.has(field.blockFarmId) ||
+        field.managerUserId === userId ||
+        (cur.farm && (field.blockFarm === cur.farm || field.blockFarmName === cur.farm))
+      ) || null;
     }
     return fieldsStore.length > 0 ? fieldsStore[0] : null;
   });
@@ -201,6 +254,8 @@ export default function PlannerScreen({ navigation }) {
   const [isTransferringOps, setIsTransferringOps] = useState(false);
   const [isLoadingPlanner, setIsLoadingPlanner] = useState(false);
   const [plannerError, setPlannerError] = useState(null);
+  const [expandedOpId, setExpandedOpId] = useState(null);
+  const [areaUnit, setAreaUnit] = useState('ha'); // 'ha' | 'sqm'
 
   // Modal: Add Child Item to a specific operation
   const [showAddChildModal, setShowAddChildModal] = useState(false);
@@ -216,7 +271,14 @@ export default function PlannerScreen({ navigation }) {
       const cur = getCurrentSession();
       setSession({ ...cur });
       if (cur.role === 'Member Farmer') {
-        const defaultField = fields.find(field => field.memberUserId === (cur.employeeId || cur.id)) || null;
+        const uId = cur.employeeId || cur.id || '';
+        const defaultField = fields.find(field => 
+          field.memberUserId === uId ||
+          field.memberId === uId ||
+          field.member === cur.name ||
+          field.memberName === cur.name ||
+          (cur.fieldId && field.id === cur.fieldId)
+        ) || null;
         setSelectedField(defaultField);
         setLandArea(defaultField?.ha ? String(defaultField.ha) : '');
       }
@@ -246,7 +308,12 @@ export default function PlannerScreen({ navigation }) {
     return stageOperationsMap[activeStageNum] || [];
   }, [stageOperationsMap, activeStageNum]);
 
-  const area = parseFloat(landArea) || 0;
+  // Scaled area in Hectares (1 Ha = 10,000 sqm)
+  const area = useMemo(() => {
+    const raw = parseFloat(landArea) || 0;
+    if (areaUnit === 'sqm') return raw / 10000;
+    return raw;
+  }, [landArea, areaUnit]);
 
   // Active Stage Detection
   const isActiveFieldStage = useMemo(() => {
@@ -377,6 +444,7 @@ export default function PlannerScreen({ navigation }) {
           if (idx !== childIndex) return si;
           const newSi = { ...si };
           if (field === 'qty') newSi.qty = isNaN(valNum) ? 0 : valNum;
+          if (field === 'unit') newSi.unit = value;
           if (field === 'unitCost') newSi.unitCost = isNaN(valNum) ? 0 : valNum;
           newSi.subTotal = Math.round((newSi.qty || 0) * (newSi.unitCost || 0));
           return newSi;
@@ -830,7 +898,7 @@ export default function PlannerScreen({ navigation }) {
                   <Text style={s.fieldMemberText}>{t('assigned_lbl', 'Assigned')}: {selectedField?.member || session.name}</Text>
                 </View>
 
-                {/* Clean Land Area Editor Pill */}
+                {/* Clean Land Area Editor Pill with Unit Choice */}
                 <View style={s.areaPill}>
                   <Text style={s.areaPillLabel}>{t('lbl_area', 'Area')}</Text>
                   <View style={s.areaInputRow}>
@@ -841,7 +909,25 @@ export default function PlannerScreen({ navigation }) {
                       keyboardType="decimal-pad"
                       selectTextOnFocus
                     />
-                    <Text style={s.areaUnitText}>Ha</Text>
+                    <TouchableOpacity
+                      onPress={() => setAreaUnit(prev => prev === 'ha' ? 'sqm' : 'ha')}
+                      style={{
+                        backgroundColor: '#fff',
+                        borderWidth: 1,
+                        borderColor: COLORS.primary + '50',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: RADIUS.xs,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 3,
+                        minHeight: 26
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.areaUnitText}>{areaUnit === 'sqm' ? 'sqm' : 'Ha'}</Text>
+                      <Ionicons name="swap-vertical" size={12} color={COLORS.primary} />
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
@@ -1044,12 +1130,12 @@ export default function PlannerScreen({ navigation }) {
                   <Text style={s.cardSub} numberOfLines={1}>{currentOperations.length} {currentOperations.length === 1 ? t('operations_count_singular', 'Operation') : t('operations_count_plural', 'Operations')} {t('planned_for_area', 'planned for')} {landArea} Ha</Text>
                 </View>
                 <TouchableOpacity
-                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.sm, flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 }}
+                  style={{ backgroundColor: COLORS.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADIUS.md, flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0, minHeight: 44 }}
                   onPress={() => setShowAddOpModal(true)}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="add" size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{t('btn_add_op', 'Add Op')}</Text>
+                  <Ionicons name="add" size={18} color="#fff" />
+                  <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '900' }}>{t('btn_add_op', 'Add Op')}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1058,10 +1144,10 @@ export default function PlannerScreen({ navigation }) {
                   <Ionicons name="construct-outline" size={32} color={COLORS.border} />
                   <Text style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: '600' }}>{t('no_ops_in_stage', 'No operations planned for this stage yet.')}</Text>
                   <TouchableOpacity
-                    style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.sm, marginTop: 4 }}
+                    style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.md, marginTop: 4, minHeight: 44, justifyContent: 'center' }}
                     onPress={() => setShowAddOpModal(true)}
                   >
-                    <Text style={{ color: COLORS.primary, fontSize: 12, fontWeight: '800' }}>{t('choose_cat_or_custom', 'Choose from Catalogue or Add Custom')}</Text>
+                    <Text style={{ color: COLORS.primary, fontSize: 13.5, fontWeight: '800' }}>{t('choose_cat_or_custom', 'Choose from Catalogue or Add Custom')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1071,11 +1157,16 @@ export default function PlannerScreen({ navigation }) {
                 const totalCostForArea = op.isGroup
                   ? ((op.subItems || []).reduce((s, si) => s + (si.qty * area * si.unitCost), 0) || Math.round((op.costPerHa || 0) * area))
                   : Math.round(((op.perHa || 1) * area) * (op.rate || 0));
+                const isExpanded = expandedOpId === op.id;
 
                 return (
                   <View key={op.id || idx} style={s.opCard}>
-                    {/* Operation Header */}
-                    <View style={s.opHeader}>
+                    {/* Operation Summary Header (Tap to expand/collapse) */}
+                    <TouchableOpacity
+                      style={s.opHeader}
+                      onPress={() => setExpandedOpId(prev => prev === op.id ? null : op.id)}
+                      activeOpacity={0.7}
+                    >
                       <View style={{ flex: 1, marginRight: 8 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <View style={s.opBadge}>
@@ -1083,193 +1174,344 @@ export default function PlannerScreen({ navigation }) {
                           </View>
                           <Text style={s.opNameText}>{formatOperationName ? formatOperationName(op.name) : op.name}</Text>
                         </View>
-                        <Text style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>
-                          {op.isGroup ? t('bundle_label', 'Structured Bundle (Line items below)') : `${t('direct_rate_prefix', 'Direct:')} ${op.perHa} ${op.unit}/ha @ ₱${fmt(op.rate)}`}
+                        <Text style={{ fontSize: 13.5, color: COLORS.textMuted, marginTop: 4 }}>
+                          {op.isGroup 
+                            ? `${(op.subItems || []).length} Line Items · Structured Bundle` 
+                            : `Direct: ${op.perHa} ${op.unit}/ha @ ₱${fmt(op.rate)}`}
                         </Text>
                       </View>
 
-                      {/* Operation Actions */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <TouchableOpacity
-                          style={s.sendOpBtn}
-                          onPress={() => sendSingleOperationToFieldOps(op)}
-                          activeOpacity={0.8}
-                        >
-                          <Ionicons name="paper-plane-outline" size={13} color="#fff" />
-                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit>{t('send_to_drafts_btn', 'Save to Drafts')}</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          onPress={() => removeOperation(op.id)}
-                          style={{ padding: 4 }}
-                        >
-                          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                        </TouchableOpacity>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontSize: 17, fontWeight: '900', color: COLORS.primaryDark }}>
+                          ₱{fmt(totalCostForArea)}
+                        </Text>
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginTop: 6,
+                          backgroundColor: isExpanded ? COLORS.primary : '#F0F8EC',
+                          paddingHorizontal: 14,
+                          paddingVertical: 7,
+                          borderRadius: RADIUS.md,
+                          borderWidth: 1.5,
+                          borderColor: COLORS.primary,
+                          minHeight: 38,
+                          ...SHADOW.sm
+                        }}>
+                          <Ionicons
+                            name={isExpanded ? "checkmark-circle" : "create-outline"}
+                            size={16}
+                            color={isExpanded ? "#fff" : COLORS.primary}
+                          />
+                          <Text style={{ fontSize: 13, fontWeight: '900', color: isExpanded ? '#fff' : COLORS.primary }}>
+                            {isExpanded ? t('btn_done', 'Done') : t('btn_edit', 'Edit')}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
+                    </TouchableOpacity>
 
-                    {/* Operation Mode Segmented Switcher */}
-                    <View style={s.structureSegmentWrap}>
+                    {/* Operation Action Row */}
+                    <View style={s.opActionBar}>
                       <TouchableOpacity
-                        style={[
-                          s.structureSegmentBtn,
-                          op.isGroup && s.structureSegmentBtnActive
-                        ]}
-                        onPress={() => {
-                          if (!op.isGroup) toggleOpStructure(op.id);
-                        }}
+                        style={s.sendOpBtnClean}
+                        onPress={() => sendSingleOperationToFieldOps(op)}
                         activeOpacity={0.8}
                       >
-                        <Ionicons name="layers-outline" size={14} color={op.isGroup ? COLORS.primary : COLORS.textMuted} />
-                        <Text style={[s.structureSegmentText, op.isGroup && s.structureSegmentTextActive]} numberOfLines={1} adjustsFontSizeToFit>{t('mode_title_child', 'Title with Child Items')}</Text>
+                        <Ionicons name="paper-plane-outline" size={16} color={COLORS.primary} />
+                        <Text style={s.sendOpBtnTextClean} numberOfLines={1} adjustsFontSizeToFit>
+                          {t('send_to_drafts_btn', 'Save to Drafts')}
+                        </Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={[
-                          s.structureSegmentBtn,
-                          !op.isGroup && s.structureSegmentBtnActive
-                        ]}
-                        onPress={() => {
-                          if (op.isGroup) toggleOpStructure(op.id);
-                        }}
-                        activeOpacity={0.8}
+                        onPress={() => removeOperation(op.id)}
+                        style={s.trashBtnClean}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityLabel="Delete operation"
                       >
-                        <Ionicons name="create-outline" size={14} color={!op.isGroup ? COLORS.primary : COLORS.textMuted} />
-                        <Text style={[s.structureSegmentText, !op.isGroup && s.structureSegmentTextActive]} numberOfLines={1} adjustsFontSizeToFit>{t('mode_direct_input', 'Direct Input')}</Text>
+                        <Ionicons name="trash-outline" size={20} color={COLORS.danger} />
                       </TouchableOpacity>
                     </View>
 
-                    {/* CASE A: Group Operation -> Child Sub-Items */}
-                    {op.isGroup ? (
-                      <View style={s.childListWrap}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase' }}>{t('line_items_label', 'Line Items')}</Text>
+                    {/* Expanded Configuration Panel */}
+                    {isExpanded && (
+                      <View style={s.opExpandedPanel}>
+                        {/* Operation Mode Segmented Switcher */}
+                        <View style={s.structureSegmentWrap}>
                           <TouchableOpacity
+                            style={[
+                              s.structureSegmentBtn,
+                              op.isGroup && s.structureSegmentBtnActive
+                            ]}
                             onPress={() => {
-                              setTargetOpIdForChild(op.id);
-                              setShowAddChildModal(true);
+                              if (!op.isGroup) toggleOpStructure(op.id);
                             }}
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderWidth: 1.5, borderColor: COLORS.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.xs, flexShrink: 0 }}
-                            activeOpacity={0.75}
+                            activeOpacity={0.8}
                           >
-                            <Ionicons name="add-circle" size={13} color={COLORS.primary} />
-                            <Text style={{ fontSize: 11, fontWeight: '900', color: COLORS.primary }}>{t('add_item_btn', 'Add Item')}</Text>
+                            <Ionicons name="layers-outline" size={14} color={op.isGroup ? COLORS.primary : COLORS.textMuted} />
+                            <Text style={[s.structureSegmentText, op.isGroup && s.structureSegmentTextActive]} numberOfLines={1} adjustsFontSizeToFit>{t('mode_title_child', 'Title with Child Items')}</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              s.structureSegmentBtn,
+                              !op.isGroup && s.structureSegmentBtnActive
+                            ]}
+                            onPress={() => {
+                              if (op.isGroup) toggleOpStructure(op.id);
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="create-outline" size={14} color={!op.isGroup ? COLORS.primary : COLORS.textMuted} />
+                            <Text style={[s.structureSegmentText, !op.isGroup && s.structureSegmentTextActive]} numberOfLines={1} adjustsFontSizeToFit>{t('mode_direct_input', 'Direct Input')}</Text>
                           </TouchableOpacity>
                         </View>
 
-                        {(!op.subItems || op.subItems.length === 0) && (
-                          <View style={{ paddingVertical: 12, alignItems: 'center', gap: 4 }}>
-                            <Text style={{ fontSize: 11.5, color: COLORS.textMuted, fontStyle: 'italic' }}>{t('no_child_items_yet', 'No child items added yet.')}</Text>
-                            <TouchableOpacity
-                              onPress={() => {
-                                setTargetOpIdForChild(op.id);
-                                setShowAddChildModal(true);
-                              }}
-                            >
-                              <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.primary }}>{t('add_materials_sample', 'Add 46-00-00, 18-46-00, or Labor')}</Text>
-                            </TouchableOpacity>
-                          </View>
-                        )}
-
-                        {(op.subItems || []).map((child, cIdx) => (
-                          <View key={child.id || cIdx} style={s.childItemRow}>
-                            <View style={{ flex: 1, marginRight: 6 }}>
-                              <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.text }}>{child.description || child.name}</Text>
-                              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                                Total: {fmt(Number((child.qty * area).toFixed(1)))} {child.unit} @ ₱{fmt(child.unitCost || child.rate)} = ₱{fmt(Math.round((child.qty * area) * (child.unitCost || child.rate)))}
+                        {/* CASE A: Group Operation -> Child Sub-Items */}
+                        {op.isGroup ? (
+                          <View style={s.childListWrap}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                                {t('line_items_label', 'Line Items')}
                               </Text>
-                            </View>
-
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <View style={s.inlineInputWrap}>
-                                <TextInput
-                                  style={s.inlineInput}
-                                  defaultValue={String(child.qty || 1)}
-                                  onChangeText={v => updateChildItem(op.id, cIdx, 'qty', v)}
-                                  keyboardType="decimal-pad"
-                                />
-                                <Text style={s.inlineUnitText}>{child.unit}/ha</Text>
-                              </View>
-
-                              <View style={s.inlineInputWrap}>
-                                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>₱</Text>
-                                <TextInput
-                                  style={s.inlineInput}
-                                  defaultValue={String(child.unitCost || child.rate || 0)}
-                                  onChangeText={v => updateChildItem(op.id, cIdx, 'unitCost', v)}
-                                  keyboardType="decimal-pad"
-                                />
-                              </View>
-
-                              <TouchableOpacity onPress={() => removeChildItem(op.id, cIdx)} style={{ padding: 2 }}>
-                                <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setTargetOpIdForChild(op.id);
+                                  setShowAddChildModal(true);
+                                }}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primaryBg, borderWidth: 1.5, borderColor: COLORS.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADIUS.md, minHeight: 44 }}
+                                activeOpacity={0.75}
+                              >
+                                <Ionicons name="add-circle" size={18} color={COLORS.primary} />
+                                <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>
+                                  {t('add_item_btn', 'Add Item')}
+                                </Text>
                               </TouchableOpacity>
                             </View>
+
+                            {(!op.subItems || op.subItems.length === 0) && (
+                              <View style={{ paddingVertical: 18, alignItems: 'center', gap: 8, backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E2EBDC' }}>
+                                <Ionicons name="receipt-outline" size={26} color={COLORS.textMuted} />
+                                <Text style={{ fontSize: 13, color: COLORS.textMuted, fontStyle: 'italic' }}>
+                                  {t('no_child_items_yet', 'No child line items added yet.')}
+                                </Text>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setTargetOpIdForChild(op.id);
+                                    setShowAddChildModal(true);
+                                  }}
+                                  style={{ paddingVertical: 8, paddingHorizontal: 16, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primary + '60', borderRadius: RADIUS.sm }}
+                                >
+                                  <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.primary }}>
+                                    {t('add_materials_sample', '+ Add Fertilizers, Materials, or Labor')}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+
+                            {(op.subItems || []).map((child, cIdx) => {
+                              const childTotalQty = Number(((child.qty || 1) * area).toFixed(1));
+                              const childRate = child.unitCost || child.rate || 0;
+                              const childLineTotal = Math.round(childTotalQty * childRate);
+
+                              return (
+                                <View key={child.id || cIdx} style={s.childItemRow}>
+                                  {/* Child Header: Name & Delete */}
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{ fontSize: 15, fontWeight: '800', color: COLORS.text }}>
+                                        {child.description || child.name}
+                                      </Text>
+                                      <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 3 }}>
+                                        Total: <Text style={{ fontWeight: '700', color: COLORS.text }}>{fmt(childTotalQty)} {child.unit}</Text> @ ₱{fmt(childRate)} = <Text style={{ fontWeight: '900', color: COLORS.primaryDark }}>₱{fmt(childLineTotal)}</Text>
+                                      </Text>
+                                    </View>
+
+                                    <TouchableOpacity
+                                      onPress={() => removeChildItem(op.id, cIdx)}
+                                      style={s.removeChildBtn}
+                                      activeOpacity={0.7}
+                                      accessibilityLabel="Remove item"
+                                    >
+                                      <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                                    </TouchableOpacity>
+                                  </View>
+
+                                  {/* Child Inputs: Two distinct, clearly visible boxes */}
+                                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                                    {/* Qty / Ha Input */}
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={s.childInputLabel}>{t('dosage_per_ha_short', 'Qty / Ha')}</Text>
+                                      <View style={s.childInputBox}>
+                                        <TextInput
+                                          style={s.childInputField}
+                                          defaultValue={String(child.qty ?? 1)}
+                                          onChangeText={v => updateChildItem(op.id, cIdx, 'qty', v)}
+                                          keyboardType="decimal-pad"
+                                          placeholder="1"
+                                          placeholderTextColor={COLORS.textMuted}
+                                        />
+                                        <Text style={s.childInputUnit}>{child.unit || 'ha'}</Text>
+                                      </View>
+                                    </View>
+
+                                    {/* Rate / Unit Input */}
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={s.childInputLabel}>{t('unit_cost_short', 'Cost / Unit')}</Text>
+                                      <View style={s.childInputBox}>
+                                        <Text style={s.childInputCurrency}>₱</Text>
+                                        <TextInput
+                                          style={s.childInputField}
+                                          defaultValue={String(child.unitCost ?? child.rate ?? 0)}
+                                          onChangeText={v => updateChildItem(op.id, cIdx, 'unitCost', v)}
+                                          keyboardType="decimal-pad"
+                                          placeholder="0"
+                                          placeholderTextColor={COLORS.textMuted}
+                                        />
+                                      </View>
+                                    </View>
+                                  </View>
+
+                                  {/* Quick Unit Selector for Child Item */}
+                                  <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F0F4EC' }}>
+                                    <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 5 }}>
+                                      {t('unit_choice_prompt', 'Unit')}: <Text style={{ fontWeight: '900', color: COLORS.primary }}>{child.unit || 'ha'}</Text>
+                                    </Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                                      {['ha', 'bag', 'ton', 'lacsa', 'day', 'kg', 'L', 'trip', 'sqm'].map(u => {
+                                        const isSel = (child.unit || 'ha').toLowerCase() === u.toLowerCase();
+                                        return (
+                                          <TouchableOpacity
+                                            key={u}
+                                            onPress={() => updateChildItem(op.id, cIdx, 'unit', u)}
+                                            style={{
+                                              paddingHorizontal: 10,
+                                              paddingVertical: 5,
+                                              borderRadius: RADIUS.xs,
+                                              borderWidth: 1.5,
+                                              borderColor: isSel ? COLORS.primary : COLORS.border,
+                                              backgroundColor: isSel ? COLORS.primaryBg : '#fff',
+                                              minHeight: 32,
+                                              justifyContent: 'center'
+                                            }}
+                                            activeOpacity={0.75}
+                                          >
+                                            <Text style={{ fontSize: 12, fontWeight: isSel ? '900' : '700', color: isSel ? COLORS.primary : COLORS.textSecondary }}>
+                                              {u}
+                                            </Text>
+                                          </TouchableOpacity>
+                                        );
+                                      })}
+                                    </ScrollView>
+                                  </View>
+                                </View>
+                              );
+                            })}
                           </View>
-                        ))}
-                      </View>
-                    ) : (
-                      /* CASE B: Direct Single Operation -> Direct Inputs */
-                      <View style={s.directInputWrap}>
-                        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, marginBottom: 2 }}>{t('dosage_per_ha_lbl', 'Dosage / Ha')}</Text>
-                            <View style={s.directInputBox}>
-                              <TextInput
-                                style={s.inlineInput}
-                                defaultValue={String(op.perHa || 1)}
-                                onChangeText={v => updateDirectOp(op.id, 'perHa', v)}
-                                keyboardType="decimal-pad"
-                              />
-                              <Text style={s.inlineUnitText}>{op.unit || 'ha'}</Text>
+                        ) : (
+                          /* CASE B: Direct Single Operation -> Direct Inputs */
+                          <View style={s.directInputWrap}>
+                            <View style={{ gap: 10 }}>
+                              {/* Dosage & Quantity */}
+                              <View>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                                  {t('dosage_per_ha_lbl', 'Dosage & Quantity')}
+                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FAFCF8', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, minHeight: 48 }}>
+                                  <TextInput
+                                    style={{ flex: 1, fontSize: 16, fontWeight: '700', color: COLORS.text, padding: 0 }}
+                                    defaultValue={String(op.perHa || 1)}
+                                    onChangeText={v => updateDirectOp(op.id, 'perHa', v)}
+                                    keyboardType="decimal-pad"
+                                    placeholder="e.g. 1"
+                                    placeholderTextColor={COLORS.textMuted}
+                                  />
+                                  <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.primary + '40' }}>
+                                    <Text style={{ fontSize: 13.5, fontWeight: '900', color: COLORS.primary }}>{op.unit || 'ha'}</Text>
+                                  </View>
+                                </View>
+
+                                {/* Quick Unit Choices */}
+                                <View style={{ marginTop: 8 }}>
+                                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.textSecondary, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                                    {t('choose_unit_lbl', 'Choose Unit:')}
+                                  </Text>
+                                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                                    {['ha', 'bag', 'ton', 'lacsa', 'day', 'kg', 'L', 'trip', 'sqm'].map(u => {
+                                      const isSel = (op.unit || 'ha').toLowerCase() === u.toLowerCase();
+                                      return (
+                                        <TouchableOpacity
+                                          key={u}
+                                          onPress={() => updateDirectOp(op.id, 'unit', u)}
+                                          style={{
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 6,
+                                            borderRadius: RADIUS.sm,
+                                            borderWidth: 1.5,
+                                            borderColor: isSel ? COLORS.primary : COLORS.border,
+                                            backgroundColor: isSel ? COLORS.primaryBg : '#FAFCF8',
+                                            minHeight: 36,
+                                            justifyContent: 'center'
+                                          }}
+                                          activeOpacity={0.75}
+                                        >
+                                          <Text style={{ fontSize: 12.5, fontWeight: isSel ? '900' : '700', color: isSel ? COLORS.primary : COLORS.textSecondary }}>
+                                            {u}
+                                          </Text>
+                                        </TouchableOpacity>
+                                      );
+                                    })}
+                                  </ScrollView>
+                                </View>
+                              </View>
+
+                              {/* Rate / Unit */}
+                              <View>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 }}>{t('rate_per_unit_lbl', 'Rate / Unit')}</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FAFCF8', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, minHeight: 48 }}>
+                                  <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMuted }}>₱</Text>
+                                  <TextInput
+                                    style={{ flex: 1, fontSize: 16, fontWeight: '700', color: COLORS.text, padding: 0 }}
+                                    defaultValue={String(op.rate || 0)}
+                                    onChangeText={v => updateDirectOp(op.id, 'rate', v)}
+                                    keyboardType="decimal-pad"
+                                    placeholder="0"
+                                    placeholderTextColor={COLORS.textMuted}
+                                  />
+                                </View>
+                              </View>
+
+                              {/* Total Needed (read-only computed) */}
+                              <View style={{ backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: COLORS.primary + '40' }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.3 }}>{t('total_needed_lbl', 'Total Needed')}</Text>
+                                <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text }}>
+                                  {fmt(Number(((op.perHa || 1) * area).toFixed(1)))} {op.unit || 'ha'}
+                                </Text>
+                              </View>
                             </View>
                           </View>
-
-                          <View style={{ flex: 1.2 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, marginBottom: 2 }}>{t('rate_per_unit_lbl', 'Rate / Unit')}</Text>
-                            <View style={s.directInputBox}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>₱</Text>
-                              <TextInput
-                                style={s.inlineInput}
-                                defaultValue={String(op.rate || 0)}
-                                onChangeText={v => updateDirectOp(op.id, 'rate', v)}
-                                keyboardType="decimal-pad"
-                              />
-                            </View>
-                          </View>
-
-                          <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, marginBottom: 2 }}>{t('total_needed_lbl', 'Total Needed')}</Text>
-                            <Text style={{ fontSize: 13, fontWeight: '900', color: COLORS.primary }}>
-                              {fmt(Number(((op.perHa || 1) * area).toFixed(1)))} {op.unit || 'ha'}
-                            </Text>
-                          </View>
-                        </View>
+                        )}
                       </View>
                     )}
-
-                    {/* Operation Subtotal Footer */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#EEEEEE' }}>
-                      <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '700' }}>
-                        {op.isGroup ? `${(op.subItems || []).length} ${t('line_items_count_label', 'Line Items')}` : `Rate: ₱${fmt(op.rate || 0)} / ${op.unit || 'ha'}`}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{t('est_price_prefix', 'Est:')}</Text>
-                        <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>
-                          ₱ {fmt(totalCostForArea)}
-                        </Text>
-                      </View>
-                    </View>
                   </View>
                 );
               })}
             </View>
 
-            {/* Stage Planned Budget Summary Card */}
-            <View style={[s.budgetCard, { backgroundColor: currentStage.color }]}>
-              <Text style={s.budgetLabel}>{t('planned_budget_stage', 'PLANNED BUDGET · STAGE')} {currentStage.stageNum}</Text>
-              <Text style={s.budgetValue}>Php {fmt(Math.round(computeStageCost(currentStage.stageNum)))}</Text>
-              <Text style={s.budgetSub}>{t('for_area_label', 'For')} {landArea} Ha · {currentOperations.length} {currentOperations.length === 1 ? t('operations_count_singular', 'Operation') : t('operations_count_plural', 'Operations')}</Text>
+            {/* Stage Planned Budget Summary Card (Clean & Consistent Forest Green Theme) */}
+            <View style={s.budgetCardClean}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={s.budgetLabelClean}>
+                  {t('planned_budget_stage', 'PLANNED BUDGET · STAGE')} {currentStage.stageNum}
+                </Text>
+                <Text style={s.budgetSubClean}>
+                  {t('for_area_label', 'For')} {landArea} Ha · {currentOperations.length} {currentOperations.length === 1 ? t('operations_count_singular', 'Operation') : t('operations_count_plural', 'Operations')}
+                </Text>
+              </View>
+              <Text style={s.budgetValueClean}>
+                ₱{fmt(Math.round(computeStageCost(currentStage.stageNum)))}
+              </Text>
             </View>
 
             {/* Stage Action Buttons */}
@@ -1398,32 +1640,68 @@ export default function PlannerScreen({ navigation }) {
                     </View>
 
                     {newOpType === 'direct' && (
-                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted }}>{t('qty_per_ha_lbl', 'Qty / Ha')}</Text>
-                          <TextInput
-                            style={s.formInput}
-                            value={newOpPerHa}
-                            onChangeText={setNewOpPerHa}
-                            keyboardType="decimal-pad"
-                          />
+                      <View style={{ gap: 10, marginTop: 6 }}>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <View style={{ flex: 1, gap: 4 }}>
+                            <Text style={s.formLabel}>{t('qty_per_ha_lbl', 'Qty / Ha')}</Text>
+                            <TextInput
+                              style={s.formInput}
+                              value={newOpPerHa}
+                              onChangeText={setNewOpPerHa}
+                              keyboardType="decimal-pad"
+                            />
+                          </View>
+                          <View style={{ flex: 1, gap: 4 }}>
+                            <Text style={s.formLabel}>{t('unit_lbl', 'Unit')}</Text>
+                            <TextInput
+                              style={s.formInput}
+                              value={newOpUnit}
+                              onChangeText={setNewOpUnit}
+                              placeholder="ha, bag, ton"
+                            />
+                          </View>
+                          <View style={{ flex: 1.2, gap: 4 }}>
+                            <Text style={s.formLabel}>{t('rate_peso_lbl', 'Rate (₱)')}</Text>
+                            <TextInput
+                              style={s.formInput}
+                              value={newOpRate}
+                              onChangeText={setNewOpRate}
+                              keyboardType="decimal-pad"
+                            />
+                          </View>
                         </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted }}>{t('unit_lbl', 'Unit')}</Text>
-                          <TextInput
-                            style={s.formInput}
-                            value={newOpUnit}
-                            onChangeText={setNewOpUnit}
-                          />
-                        </View>
-                        <View style={{ flex: 1.2 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted }}>{t('rate_peso_lbl', 'Rate (₱)')}</Text>
-                          <TextInput
-                            style={s.formInput}
-                            value={newOpRate}
-                            onChangeText={setNewOpRate}
-                            keyboardType="decimal-pad"
-                          />
+
+                        {/* Quick Unit Choices for Direct Op Modal */}
+                        <View style={{ gap: 4 }}>
+                          <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                            {t('choose_unit_lbl', 'Choose Unit:')} <Text style={{ color: COLORS.primary, fontWeight: '900' }}>{newOpUnit || 'ha'}</Text>
+                          </Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                            {['ha', 'bag', 'ton', 'lacsa', 'day', 'kg', 'L', 'trip', 'sqm'].map(u => {
+                              const isSel = (newOpUnit || 'ha').toLowerCase() === u.toLowerCase();
+                              return (
+                                <TouchableOpacity
+                                  key={u}
+                                  onPress={() => setNewOpUnit(u)}
+                                  style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 7,
+                                    borderRadius: RADIUS.sm,
+                                    borderWidth: 1.5,
+                                    borderColor: isSel ? COLORS.primary : COLORS.border,
+                                    backgroundColor: isSel ? COLORS.primaryBg : '#FAFCF8',
+                                    minHeight: 38,
+                                    justifyContent: 'center'
+                                  }}
+                                  activeOpacity={0.75}
+                                >
+                                  <Text style={{ fontSize: 13, fontWeight: isSel ? '900' : '700', color: isSel ? COLORS.primary : COLORS.textSecondary }}>
+                                    {u}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
                         </View>
                       </View>
                     )}
@@ -1451,18 +1729,18 @@ export default function PlannerScreen({ navigation }) {
 
             <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 12 }}>
               {/* Category Filter */}
-              <View style={{ flexDirection: 'row', gap: 6 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
                 {ITEM_TYPES.map(it => (
                   <TouchableOpacity
                     key={it.key}
                     style={[
-                      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border },
+                      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, minHeight: 44 },
                       newChildCategory === it.key && { backgroundColor: it.color, borderColor: it.color }
                     ]}
                     onPress={() => setNewChildCategory(it.key)}
                   >
-                    <Ionicons name={it.icon} size={13} color={newChildCategory === it.key ? '#fff' : it.color} />
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: newChildCategory === it.key ? '#fff' : COLORS.textSecondary }}>
+                    <Ionicons name={it.icon} size={16} color={newChildCategory === it.key ? '#fff' : it.color} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: newChildCategory === it.key ? '#fff' : COLORS.textSecondary }}>
                       {it.label.split(' ')[0]}
                     </Text>
                   </TouchableOpacity>
@@ -1471,13 +1749,13 @@ export default function PlannerScreen({ navigation }) {
 
               {/* SRA Recommended Presets */}
               <Text style={s.formLabel}>Quick SRA Standard Presets</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                 {SRA_CHILD_PRESETS
                   .filter(pr => pr.category === newChildCategory)
                   .map(preset => (
                     <TouchableOpacity
                       key={preset.name}
-                      style={{ backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.sm }}
+                      style={{ backgroundColor: '#F8FAF5', borderWidth: 1.5, borderColor: COLORS.border, paddingHorizontal: 14, paddingVertical: 10, borderRadius: RADIUS.md, minHeight: 48, justifyContent: 'center' }}
                       onPress={() => {
                         setNewChildName(preset.name);
                         setNewChildQty(preset.qty);
@@ -1485,8 +1763,8 @@ export default function PlannerScreen({ navigation }) {
                         setNewChildRate(preset.rate);
                       }}
                     >
-                      <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{preset.name}</Text>
-                      <Text style={{ fontSize: 10, color: COLORS.textMuted }}>{preset.qty} {preset.unit}/ha @ ₱{fmt(Number(preset.rate))}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{preset.name}</Text>
+                      <Text style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>{preset.qty} {preset.unit}/ha @ ₱{fmt(Number(preset.rate))}</Text>
                     </TouchableOpacity>
                   ))}
               </ScrollView>
@@ -1534,15 +1812,48 @@ export default function PlannerScreen({ navigation }) {
                 </View>
               </View>
 
+              {/* Quick Unit Selector for Child Item Modal */}
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                  {t('unit_choice_prompt', 'Unit Choice')}: <Text style={{ color: COLORS.primary, fontWeight: '900' }}>{newChildUnit || 'bag'}</Text>
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {['bag', 'ha', 'ton', 'lacsa', 'day', 'kg', 'L', 'trip', 'sqm'].map(u => {
+                    const isSel = (newChildUnit || 'bag').toLowerCase() === u.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={u}
+                        onPress={() => setNewChildUnit(u)}
+                        style={{
+                          paddingHorizontal: 12,
+                          paddingVertical: 7,
+                          borderRadius: RADIUS.sm,
+                          borderWidth: 1.5,
+                          borderColor: isSel ? COLORS.primary : COLORS.border,
+                          backgroundColor: isSel ? COLORS.primaryBg : '#FAFCF8',
+                          minHeight: 38,
+                          justifyContent: 'center'
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={{ fontSize: 13, fontWeight: isSel ? '900' : '700', color: isSel ? COLORS.primary : COLORS.textSecondary }}>
+                          {u}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
               {/* Computed Preview */}
               {(() => {
                 const q = parseFloat(newChildQty) || 0;
                 const r = parseFloat(newChildRate) || 0;
                 const tot = Math.round((q * area) * r);
                 return (
-                  <View style={{ backgroundColor: '#F8FAF5', padding: 10, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textSecondary }}>Computed Total for {landArea} Ha:</Text>
-                    <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>₱ {fmt(tot)}</Text>
+                  <View style={{ backgroundColor: '#F4F9F1', padding: 12, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: '#D4E7CC', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }}>Computed Total for {landArea} Ha:</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.primaryDark }}>₱ {fmt(tot)}</Text>
                   </View>
                 );
               })()}
@@ -1561,7 +1872,7 @@ export default function PlannerScreen({ navigation }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <View>
                 <Text style={s.modalTitle}>Select Farm Plot to Plan</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Choose any block farm field to customize its crop cycle</Text>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>Choose any block farm field to customize its crop cycle</Text>
               </View>
               <TouchableOpacity onPress={() => setShowFieldPickerModal(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={24} color={COLORS.text} />
@@ -1814,27 +2125,27 @@ const s = StyleSheet.create({
   stageChoiceTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   stageNumBadge: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   stageNumText: { color: '#fff', fontSize: 14, fontWeight: '900' },
-  stageChoiceTitle: { fontSize: 13.5, fontWeight: '800', color: COLORS.text, flexShrink: 1 },
-  stageChoiceTimeline: { fontSize: 11.5, color: COLORS.textMuted, marginTop: 1 },
-  stageChoicePrice: { fontSize: 15, fontWeight: '900', color: COLORS.primary },
-  stageChoiceHaRate: { fontSize: 10.5, color: COLORS.textMuted, marginTop: 1 },
-  stageChoiceDesc: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 16 },
-  stageChoiceFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 8, marginTop: 2 },
-  openStageText: { fontSize: 12.5, fontWeight: '800' },
-  currentStagePill: { backgroundColor: '#E2EED9', paddingHorizontal: 6, paddingVertical: 1, borderRadius: RADIUS.xs },
-  currentStagePillText: { fontSize: 9.5, fontWeight: '800', color: COLORS.primary },
+  stageChoiceTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text, flexShrink: 1 },
+  stageChoiceTimeline: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
+  stageChoicePrice: { fontSize: 16.5, fontWeight: '900', color: COLORS.primary },
+  stageChoiceHaRate: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
+  stageChoiceDesc: { fontSize: 13.5, color: COLORS.textSecondary, lineHeight: 18 },
+  stageChoiceFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 10, marginTop: 4 },
+  openStageText: { fontSize: 13.5, fontWeight: '800' },
+  currentStagePill: { backgroundColor: '#E2EED9', paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.xs },
+  currentStagePillText: { fontSize: 11, fontWeight: '800', color: COLORS.primary },
 
   // Global Hub Action Buttons
-  saveFullPlanBtn: { backgroundColor: '#F0F8EC', borderWidth: 1.5, borderColor: COLORS.primary, paddingVertical: 13, paddingHorizontal: 12, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, minHeight: 44 },
-  saveFullPlanBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 },
-  resetAllBtn: { paddingVertical: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 4 },
-  resetAllBtnText: { fontSize: 11.5, fontWeight: '700', color: COLORS.textMuted },
+  saveFullPlanBtn: { backgroundColor: '#F0F8EC', borderWidth: 1.5, borderColor: COLORS.primary, paddingVertical: 14, paddingHorizontal: 16, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, minHeight: 48 },
+  saveFullPlanBtnText: { fontSize: 14, fontWeight: '800', color: COLORS.primary, textAlign: 'center', flexShrink: 1 },
+  resetAllBtn: { paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, minHeight: 44 },
+  resetAllBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted },
 
   // Back Navigation & Quick Chips
-  backToStagesBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, alignSelf: 'flex-start' },
-  backToStagesText: { fontSize: 13.5, fontWeight: '800', color: COLORS.primary },
-  quickStageChip: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff' },
-  quickStageChipText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
+  backToStagesBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#F0F8EC', borderWidth: 1.5, borderColor: '#C8E6C9', borderRadius: RADIUS.md, alignSelf: 'flex-start', minHeight: 44, marginBottom: 8 },
+  backToStagesText: { fontSize: 14, fontWeight: '800', color: COLORS.primary },
+  quickStageChip: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff', minHeight: 38, justifyContent: 'center' },
+  quickStageChipText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary },
 
   // Active Stage Banner
   activeStageBanner: {
@@ -1846,40 +2157,41 @@ const s = StyleSheet.create({
     ...SHADOW.card,
     gap: 6
   },
-  activeStageTitle: { fontSize: 15, fontWeight: '900', color: COLORS.text },
-  activeStageTimeline: { fontSize: 12, fontWeight: '800', color: COLORS.textSecondary },
-  activeStageDesc: { fontSize: 12, color: COLORS.textMuted, lineHeight: 17 },
+  activeStageTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text },
+  activeStageTimeline: { fontSize: 13, fontWeight: '800', color: COLORS.textSecondary },
+  activeStageDesc: { fontSize: 13, color: COLORS.textMuted, lineHeight: 19 },
 
   // Standard Card
-  card: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: 12, gap: 10, ...SHADOW.card, borderWidth: 1.5, borderColor: COLORS.border },
-  cardTitle: { fontSize: 14.5, fontWeight: '900', color: COLORS.text },
-  cardSub: { fontSize: 11.5, color: COLORS.textMuted, marginTop: 1 },
+  card: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: 14, gap: 12, ...SHADOW.card, borderWidth: 1.5, borderColor: COLORS.border },
+  cardTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text },
+  cardSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
 
   // Operation Structure Segmented Control
   structureSegmentWrap: {
     flexDirection: 'row',
     backgroundColor: '#EEF2E6',
     borderRadius: RADIUS.md,
-    padding: 3,
-    marginVertical: 4
+    padding: 4,
+    marginVertical: 6
   },
   structureSegmentBtn: {
     flex: 1,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    borderRadius: RADIUS.xs,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.sm,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 6
+    gap: 6,
+    minHeight: 46
   },
   structureSegmentBtnActive: {
     backgroundColor: '#fff',
     ...SHADOW.card
   },
   structureSegmentText: {
-    fontSize: 11.5,
-    fontWeight: '700',
+    fontSize: 13.5,
+    fontWeight: '800',
     color: COLORS.textMuted
   },
   structureSegmentTextActive: {
@@ -1888,33 +2200,191 @@ const s = StyleSheet.create({
   },
 
   // Operation Card
-  opCard: { backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, padding: 10, borderWidth: 1.5, borderColor: COLORS.border, gap: 8 },
-  opHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  opBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs },
-  opBadgeText: { fontSize: 10.5, fontWeight: '900', color: COLORS.primary },
-  opNameText: { fontSize: 14, fontWeight: '800', color: COLORS.text },
-  sendOpBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 10, paddingVertical: 5, borderRadius: RADIUS.sm, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  opCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    borderWidth: 1.5,
+    borderColor: '#E2EBDC',
+    ...SHADOW.card,
+    gap: 10,
+    marginBottom: 10
+  },
+  opHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start'
+  },
+  opBadge: {
+    backgroundColor: COLORS.primaryBg,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: RADIUS.xs
+  },
+  opBadgeText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: COLORS.primary
+  },
+  opNameText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text
+  },
+  opActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F4EC',
+    paddingTop: 10,
+    marginTop: 4
+  },
+  // "Save to Drafts" button — clearly looks tappable
+  sendOpBtnClean: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F0F8EC',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: RADIUS.md,
+    minHeight: 46,
+    ...SHADOW.card
+  },
+  sendOpBtnTextClean: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: COLORS.primary
+  },
+  // Delete button — bigger tap target & soft red styling
+  trashBtnClean: {
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.md,
+    backgroundColor: '#FEF2F2'
+  },
+  opExpandedPanel: {
+    borderTopWidth: 1,
+    borderTopColor: '#EEF2E6',
+    paddingTop: 10,
+    gap: 10
+  },
 
-  // Child Line Items
-  childListWrap: { backgroundColor: '#fff', borderRadius: RADIUS.sm, padding: 8, borderWidth: 1, borderColor: COLORS.border, gap: 6 },
-  childItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingVertical: 4 },
-  inlineInputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 6, paddingVertical: 3 },
-  inlineInput: { fontSize: 12, fontWeight: '800', color: COLORS.text, padding: 0, minWidth: 24, textAlign: 'center' },
-  inlineUnitText: { fontSize: 10.5, color: COLORS.textMuted, fontWeight: '700', marginLeft: 2 },
+  // Child item cards inside group operations
+  childListWrap: { gap: 10 },
+  childItemRow: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.md,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#D8E5D2',
+    gap: 8,
+    ...SHADOW.sm
+  },
+  childInputLabel: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 5
+  },
+  childInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAFCF8',
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 48,
+    gap: 6
+  },
+  childInputField: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+    padding: 0
+  },
+  childInputUnit: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: COLORS.primary
+  },
+  childInputCurrency: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.textMuted
+  },
+  removeChildBtn: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.md
+  },
 
-  // Direct Input Styles
-  directInputWrap: { backgroundColor: '#fff', borderRadius: RADIUS.sm, padding: 8, borderWidth: 1, borderColor: COLORS.border, gap: 4 },
-  directInputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAF5', borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 4 },
-
-  // Budget Card
-  budgetCard: { borderRadius: RADIUS.lg, padding: SPACING.lg, alignItems: 'center', gap: 4, ...SHADOW.card },
-  budgetLabel: { fontSize: 11.5, color: 'rgba(255,255,255,0.85)', fontWeight: '900', letterSpacing: 0.5 },
-  budgetValue: { fontSize: 30, fontWeight: '900', color: '#fff' },
-  budgetSub: { fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: '700' },
+  // Direct input panel
+  directInputWrap: { gap: 8 },
+  directInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAFCF8',
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 48,
+    gap: 6
+  },
+  // Legacy fallbacks (kept for safety)
+  inlineInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  inlineInput: { fontSize: 14, fontWeight: '700', color: COLORS.text, minWidth: 36, padding: 2 },
+  inlineUnitText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
+  budgetCardClean: {
+    backgroundColor: '#F4F9F1',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1.5,
+    borderColor: '#D4E7CC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...SHADOW.card
+  },
+  budgetLabelClean: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.primary,
+    letterSpacing: 0.5
+  },
+  budgetSubClean: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 3
+  },
+  budgetValueClean: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: COLORS.primaryDark
+  },
 
   // Send to Field Ops Button
-  sendDraftBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 16, paddingHorizontal: 16, borderRadius: RADIUS.md, ...SHADOW.card },
-  sendDraftBtnText: { fontSize: 13.5, fontWeight: '900', color: '#fff', letterSpacing: 0.3, textAlign: 'center' },
+  sendDraftBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 18, paddingHorizontal: 16, borderRadius: RADIUS.md, ...SHADOW.card, minHeight: 56 },
+  sendDraftBtnText: { fontSize: 15, fontWeight: '900', color: '#fff', letterSpacing: 0.5, textAlign: 'center' },
 
   disclaimerWrap: {
     flexDirection: 'row',
@@ -1941,9 +2411,9 @@ const s = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#fff', borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: SPACING.lg, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  modalTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text },
-  formLabel: { fontSize: 11, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase' },
-  formInput: { backgroundColor: COLORS.background, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, fontWeight: '700', color: COLORS.text },
-  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 14, paddingHorizontal: 16, borderRadius: RADIUS.md, marginTop: 6 },
-  submitBtnText: { fontSize: 14, fontWeight: '800', color: '#fff', textAlign: 'center', flexShrink: 1 },
+  modalTitle: { fontSize: 17, fontWeight: '900', color: COLORS.text },
+  formLabel: { fontSize: 13, fontWeight: '800', color: COLORS.textSecondary, textTransform: 'uppercase', marginBottom: 4 },
+  formInput: { backgroundColor: '#FAFCF8', borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, fontWeight: '700', color: COLORS.text, minHeight: 50 },
+  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 16, paddingHorizontal: 16, borderRadius: RADIUS.md, marginTop: 6, minHeight: 52 },
+  submitBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', textAlign: 'center', flexShrink: 1 },
 });

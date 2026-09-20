@@ -1,35 +1,21 @@
-/**
- * AdminOfflineBarrier.js — SRA Regulatory Authority Offline Security Barrier
- * Enforces strict online requirements for SRA Admin to preserve audit compliance.
- */
-
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { checkConnectivity } from '../services/networkService';
+import CirclingRetryButton from './CirclingRetryButton';
 
 const { width } = Dimensions.get('window');
 
 export default function AdminOfflineBarrier({ onRetry, session = {} }) {
-  const [isChecking, setIsChecking] = useState(false);
   const [lastCheckFailed, setLastCheckFailed] = useState(false);
 
-  const handleRetry = async () => {
-    if (isChecking) return;
-    setIsChecking(true);
-    setLastCheckFailed(false);
-    try {
-      const isOnline = await checkConnectivity(3500);
-      if (!isOnline) {
-        setLastCheckFailed(true);
-      }
-      if (typeof onRetry === 'function') onRetry(isOnline);
-    } catch (e) {
+  const handleResult = (online) => {
+    if (!online) {
       setLastCheckFailed(true);
-    } finally {
-      setIsChecking(false);
+    } else {
+      setLastCheckFailed(false);
+      if (typeof onRetry === 'function') onRetry(true);
     }
   };
 
@@ -40,7 +26,7 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
         <View style={s.badgeWrap}>
           <View style={s.badge}>
             <Ionicons name="shield-checkmark" size={14} color={COLORS.primary} />
-            <Text style={s.badgeText}>SRA REGULATORY AUTHORITY</Text>
+            <Text style={s.badgeText}>SRA REGULATORY DESK</Text>
           </View>
         </View>
 
@@ -53,9 +39,9 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
         </View>
 
         {/* Title & Subtitle */}
-        <Text style={s.title}>Regulatory Terminal Offline</Text>
+        <Text style={s.title}>No Internet Connection</Text>
         <Text style={s.subtitle}>
-          The SRA Administrative & Regulatory Desk requires an active internet connection to ensure certified records, member approvals, and price broadcasts are validated in real time.
+          Internet access is required for SRA Admin operations. Official sugar price circular broadcasts, regulatory compliance certificates, and district audit approvals must be certified with central servers in real time.
         </Text>
 
         {/* Compliance Guarantees Card */}
@@ -66,7 +52,7 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
             <Ionicons name="lock-closed" size={16} color={COLORS.primary} style={s.featIcon} />
             <View style={{ flex: 1 }}>
               <Text style={s.featTitle}>Regulatory Audit Certification</Text>
-              <Text style={s.featDesc}>Prevents unverified offline certification seals to preserve audit compliance.</Text>
+              <Text style={s.featDesc}>Requires real-time cryptographic validation for QR certificates.</Text>
             </View>
           </View>
 
@@ -74,14 +60,14 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
             <Ionicons name="trending-up" size={16} color={COLORS.primary} style={s.featIcon} />
             <View style={{ flex: 1 }}>
               <Text style={s.featTitle}>Weekly Benchmark Broadcast</Text>
-              <Text style={s.featDesc}>Official price circulars must synchronize immediately across all block farms.</Text>
+              <Text style={s.featDesc}>Official price circulars synchronize across all district block farms.</Text>
             </View>
           </View>
 
           <View style={s.featureRow}>
             <Ionicons name="people" size={16} color={COLORS.primary} style={s.featIcon} />
             <View style={{ flex: 1 }}>
-              <Text style={s.featTitle}>Member Farmer Registration</Text>
+              <Text style={s.featTitle}>Member Registration Approval</Text>
               <Text style={s.featDesc}>Validates 8-digit identification codes against central database.</Text>
             </View>
           </View>
@@ -90,26 +76,19 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
         {lastCheckFailed && (
           <View style={s.errorPill}>
             <Ionicons name="alert-circle" size={14} color="#B91C1C" />
-            <Text style={s.errorText}>No internet connection detected. Please check Wi-Fi or cellular data.</Text>
+            <Text style={s.errorText}>No internet connection detected. Please check Wi-Fi or mobile data.</Text>
           </View>
         )}
 
-        {/* Retry Button */}
-        <TouchableOpacity
-          style={[s.retryBtn, isChecking && { opacity: 0.7 }]}
-          onPress={handleRetry}
-          disabled={isChecking}
-          activeOpacity={0.8}
-        >
-          {isChecking ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <>
-              <Ionicons name="refresh" size={18} color="#fff" />
-              <Text style={s.retryBtnText}>Retry Connection</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {/* Circling Retry Button */}
+        <View style={{ width: '100%', maxWidth: 320, marginTop: 10 }}>
+          <CirclingRetryButton
+            label="Scan for Internet"
+            scanningLabel="Scanning for Internet..."
+            onResult={handleResult}
+            style={{ width: '100%' }}
+          />
+        </View>
 
         {/* Footer Note for Field Roles */}
         <Text style={s.footerText}>

@@ -59,8 +59,8 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             <Text style={s.adminTag}>{t('profile_admin_role', 'Administrator')}: {session?.name || 'Administrator'}</Text>
           </View>
           <View style={s.totalBadge}>
+            <Ionicons name="leaf" size={13} color={COLORS.primary} style={{ marginRight: 5 }} />
             <Text style={s.totalHa}>{totalDistrictHa.toFixed(2)} Ha</Text>
-            <Text style={s.totalPlots}>{totalPlots} {t('member_plots_count', 'Member Plots')}</Text>
           </View>
         </View>
 
@@ -141,8 +141,8 @@ const s = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: RADIUS.lg,
     padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderWidth: 1.2,
+    borderColor: '#E2EBDC',
     marginBottom: SPACING.md,
     ...SHADOW.card,
   },
@@ -152,27 +152,32 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: SPACING.md,
   },
-  districtName:  { fontSize: 16, fontWeight: '800', color: COLORS.text },
-  adminTag:      { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  districtName:  { fontSize: 18, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 },
+  adminTag:      { fontSize: 13, color: COLORS.textMuted, marginTop: 3 },
   totalBadge: {
-    alignItems: 'flex-end',
-    backgroundColor: COLORS.primaryBg,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F8EC',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
   },
-  totalHa:    { fontSize: 13, fontWeight: '800', color: COLORS.primary },
-  totalPlots: { fontSize: 10, fontWeight: '600', color: COLORS.primaryLight },
+  totalHa:    { fontSize: 14.5, fontWeight: '900', color: COLORS.primary },
 
   quickStatsRow: {
     flexDirection: 'row',
-    backgroundColor: '#F8FAF5',
+    backgroundColor: '#F7FAF5',
     borderRadius: RADIUS.lg,
-    padding: SPACING.sm,
+    padding: SPACING.sm + 2,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E5EDE0',
   },
-  statBox:    { flex: 1, alignItems: 'center' },
-  statNumber: { fontSize: 18, fontWeight: '800', color: COLORS.text },
-  statLabel:  { fontSize: 10, color: COLORS.textMuted, fontWeight: '600', marginTop: 2 },
+  statBox:    { flex: 1, alignItems: 'center', paddingVertical: 4 },
+  statNumber: { fontSize: 20, fontWeight: '900', color: COLORS.text },
+  statLabel:  { fontSize: 11, color: COLORS.textMuted, fontWeight: '700', marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.3 },
 
   // ── Section Header ──
   sectionHeader: {
@@ -180,10 +185,11 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: SPACING.sm,
+    marginTop: 4,
   },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text },
-  sectionSub:   { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
-  seeAllText:   { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+  sectionTitle: { fontSize: 15.5, fontWeight: '800', color: COLORS.text },
+  sectionSub:   { fontSize: 12.5, color: COLORS.textMuted, marginTop: 2 },
+  seeAllText:   { fontSize: 13.5, fontWeight: '800', color: COLORS.primary },
 
   // ── Farm / Plot Items ──
   plotItem: {
@@ -191,18 +197,18 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFF',
-    padding: SPACING.md,
+    padding: SPACING.md + 2,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderWidth: 1.2,
+    borderColor: '#E2EBDC',
     ...SHADOW.card,
   },
-  plotTopRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  plotName:     { fontSize: 14, fontWeight: '800', color: COLORS.text, flex: 1, marginRight: 8 },
-  statusBadge:  { backgroundColor: COLORS.primaryBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs },
-  statusText:   { fontSize: 10, fontWeight: '800', color: COLORS.primary },
-  plotManager:  { fontSize: 12, color: COLORS.textSecondary, marginTop: 1, fontWeight: '600' },
-  plotMeta:     { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  plotTopRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  plotName:     { fontSize: 15.5, fontWeight: '900', color: COLORS.text, flex: 1, marginRight: 8 },
+  statusBadge:  { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: '#D7ECD1', paddingHorizontal: 8, paddingVertical: 3.5, borderRadius: RADIUS.xs },
+  statusText:   { fontSize: 11.5, fontWeight: '900', color: COLORS.primary },
+  plotManager:  { fontSize: 13, color: COLORS.textSecondary, marginTop: 2, fontWeight: '700' },
+  plotMeta:     { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
 
   // ── Compliance Banner ──
   complianceCard: {
@@ -211,12 +217,12 @@ const s = StyleSheet.create({
     gap: SPACING.md,
     backgroundColor: '#F0F8EC',
     borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    borderWidth: 1,
+    padding: SPACING.md + 2,
+    borderWidth: 1.2,
     borderColor: '#C2E0B4',
   },
-  complianceTitle: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
-  complianceBody:  { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
+  complianceTitle: { fontSize: 14.5, fontWeight: '900', color: COLORS.primary },
+  complianceBody:  { fontSize: 12.5, color: COLORS.textSecondary, marginTop: 3, lineHeight: 18 },
 });
 
 export default React.memo(SRAHomeView);
