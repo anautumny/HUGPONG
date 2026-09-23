@@ -28,13 +28,14 @@ export default function TakeOverAuthModal({
 
     try {
       // Authenticate with manager credentials
-      await verifySupervisorAuth({
-        password: password.trim()
+      const authorization = await verifySupervisorAuth({
+        password: password.trim(),
+        fieldId: field.id
       });
 
       setIsVerifying(false);
       setPassword('');
-      onAuthorized(field);
+      onAuthorized(field, authorization.takeoverGrant, authorization.takeoverGrantExpiresAt);
     } catch (err) {
       console.warn('[TakeOverAuth] Auth note:', err.message);
       // If offline or password check fails

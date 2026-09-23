@@ -3,7 +3,7 @@ import { Modal, Button, StatusBadge } from '../ui';
 import { Layers, MapPin, User, Calendar, Sprout, Activity, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { formatHectares, formatDate, formatCropYear } from '../../utils/formatters';
-import { SUGARCANE_STAGES } from '../../services/operationsService';
+import { SUGARCANE_STAGES } from '../../constants/cropStages';
 
 export default function FieldDetailModal({
   isOpen = false,
@@ -17,7 +17,7 @@ export default function FieldDetailModal({
 
   if (!field) return null;
 
-  const stageObj = SUGARCANE_STAGES.find(s => s.stageNumber === Number(field.stageNumber || 1)) || SUGARCANE_STAGES[0];
+  const stageObj = SUGARCANE_STAGES.find(s => s.stageNumber === Number(field.stageNumber)) || null;
 
   const handleViewOperations = () => {
     onClose();
@@ -75,7 +75,7 @@ export default function FieldDetailModal({
               Current Stage
             </span>
             <span className="text-base sm:text-lg font-black text-primary mt-0.5 block">
-              Stage {field.stageNumber || 1}
+              {stageObj ? `Stage ${stageObj.stageNumber}` : 'Not set'}
             </span>
           </div>
 
@@ -103,7 +103,7 @@ export default function FieldDetailModal({
           <div className="p-4 rounded-xl border border-border bg-white dark:bg-surface space-y-2">
             <div className="flex items-center gap-2 text-xs font-bold text-hug-text uppercase tracking-wider">
               <User className="w-4 h-4 text-primary" />
-              <span>Assigned Member Farmer</span>
+              <span>Assigned Farm Member</span>
             </div>
             <p className="text-sm font-extrabold text-hug-text">
               {field.memberName || 'Unassigned'}
@@ -147,10 +147,12 @@ export default function FieldDetailModal({
             </span>
           </div>
           <p className="text-sm font-bold text-hug-text">
-            {stageObj.name}
+            {stageObj?.name || 'Current stage not set'}
           </p>
           <p className="text-xs text-hug-muted">
-            {stageObj.description} · Timeline: <strong>{stageObj.months}</strong>
+            {stageObj
+              ? <>{stageObj.description} · Timeline: <strong>{stageObj.months}</strong></>
+              : 'No canonical crop-cycle stage is currently available.'}
           </p>
         </div>
 

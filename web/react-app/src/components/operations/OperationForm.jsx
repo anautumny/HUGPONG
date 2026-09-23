@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FormField, Input, Select, Button } from '../ui';
-import {
-  SRA_OPERATIONS_CATALOGUE,
-  SUGARCANE_STAGES,
-  createOperation
-} from '../../services/operationsService';
+import { createOperation } from '../../services/operationsService';
+import { SUGARCANE_STAGES } from '../../constants/cropStages';
+import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
 import { formatCurrency } from '../../utils/formatters';
 import { Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 

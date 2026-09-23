@@ -12,6 +12,7 @@ const {
 } = require('../schema/firestoreSchema');
 const { updateCycleStage, rolloverFieldCycle } = require('../services/cropCycleOperations');
 const { readMutationContext } = require('../services/mutationContext');
+const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthorization');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -28,7 +29,7 @@ router.get('/', requireAuth, async (req, res) => {
       const farmIds = new Set(farms.docs.map(doc => doc.id));
       const fields = await db.collection(COLLECTIONS.FIELDS).get();
       permittedFieldIds = new Set(fields.docs.filter(doc => farmIds.has(doc.data().blockFarmId)).map(doc => doc.id));
-    } else if (actorRole !== ROLES.SRA_ADMIN && actorRole !== ROLES.SUPER_ADMIN) {
+    } else if (actorRole !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not permitted to view crop cycles.' });
     }
     const data = snapshot.docs
@@ -44,7 +45,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.patch('/:id/stage', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
+router.patch('/:id/stage', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), attachTakeoverAuthorization, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const result = await updateCycleStage(db, req.params.id, req.body, req.session.user, undefined, readMutationContext(req));
@@ -54,7 +55,7 @@ router.patch('/:id/stage', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.
   }
 });
 
-router.post('/:fieldId/rollover', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), async (req, res) => {
+router.post('/:fieldId/rollover', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), attachTakeoverAuthorization, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const result = await rolloverFieldCycle(db, req.params.fieldId, req.body, req.session.user, undefined, readMutationContext(req));

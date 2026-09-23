@@ -163,7 +163,9 @@ function database() {
         updatedAt: '2026-09-16T08:00:00.000Z'
       }
     },
-    [COLLECTIONS.BLOCK_FARMS]: {},
+    [COLLECTIONS.BLOCK_FARMS]: {
+      'BLK-TEST-001': { managerUserId: '03000001', status: 'ACTIVE' }
+    },
     [COLLECTIONS.CROP_CYCLES]: {
       [OLD_CYCLE_ID]: {
         fieldId: FIELD_ID,
@@ -324,6 +326,63 @@ test('stale stage updates cannot modify an archived cycle', async () => {
   assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).currentStageNumber, 6);
 });
 
+test('Farm Member may advance only the canonical cycle for their own field without takeover', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).currentStageNumber = 1;
+
+  const result = await updateCycleStage(
+    db,
+    OLD_CYCLE_ID,
+    { currentStageNumber: 2, elapsedMonths: 1 },
+    USER,
+    '2026-09-17T08:03:00.000Z'
+  );
+
+  assert.equal(result.currentStageNumber, 2);
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).currentStageNumber, 2);
+  assert.equal(USER.takeoverGrant, undefined);
+});
+
+test('Farm Member cannot advance another member field in another block farm', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.FIELDS).set('FLD-OTHER-001', {
+    blockFarmId: 'BLK-OTHER-001',
+    memberUserId: '04000002',
+    currentCycleId: 'CYC-FLD-OTHER-001-001',
+    status: 'ACTIVE',
+    updatedAt: '2026-09-16T08:00:00.000Z'
+  });
+  db.collections.get(COLLECTIONS.BLOCK_FARMS).set('BLK-OTHER-001', {
+    managerUserId: '03000002', status: 'ACTIVE'
+  });
+  db.collections.get(COLLECTIONS.CROP_CYCLES).set('CYC-FLD-OTHER-001-001', {
+    fieldId: 'FLD-OTHER-001',
+    sequenceNumber: 1,
+    cropType: 'Plant Cane (New Plant)',
+    cropYear: '2025-2026',
+    currentStageNumber: 1,
+    elapsedMonths: 0,
+    batchNumber: 1,
+    status: 'ACTIVE',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-09-16T08:00:00.000Z',
+    archivedAt: null,
+    archivedByUserId: null
+  });
+
+  await assert.rejects(
+    updateCycleStage(
+      db,
+      'CYC-FLD-OTHER-001-001',
+      { currentStageNumber: 2, elapsedMonths: 1 },
+      USER,
+      '2026-09-17T08:03:00.000Z'
+    ),
+    error => error.status === 403 && /assigned field/.test(error.message)
+  );
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, 'CYC-FLD-OTHER-001-001').currentStageNumber, 1);
+});
+
 test('an archived operation ID cannot be recreated as ACTIVE', async () => {
   const db = database();
   await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, NOW);
@@ -347,7 +406,7 @@ test('field archival is atomic with cycle and submitted-operation archival', asy
   const result = await archiveFieldWithOperations(
     db,
     FIELD_ID,
-    { employeeId: '01000001', role: 'SUPER_ADMIN' },
+    { employeeId: '03000001', role: 'FARM_MANAGER' },
     NOW
   );
 

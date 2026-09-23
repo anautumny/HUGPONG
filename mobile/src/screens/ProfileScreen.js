@@ -74,9 +74,14 @@ export default function ProfileScreen({ navigation }) {
               try {
                 const online = await checkConnectivity(3500);
                 if (online) {
-                  await performMobileSync();
-                  setSyncedState(true);
-                  Alert.alert(t('sync_complete_title', 'Online & Synced'), t('sync_complete_msg', 'Your records have been synchronized with the cloud server.'));
+                  const result = await performMobileSync('MANUAL_SYNC');
+                  setSyncedState(result.remainingCount === 0);
+                  Alert.alert(
+                    result.remainingCount === 0 ? t('sync_complete_title', 'Online & Synced') : 'Sync Incomplete',
+                    result.remainingCount === 0
+                      ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
+                      : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+                  );
                 } else {
                   Alert.alert('Still Offline', 'Could not establish internet connection. Local storage remains active.');
                 }
@@ -94,9 +99,14 @@ export default function ProfileScreen({ navigation }) {
     }
     setSyncing(true);
     try {
-      await performMobileSync();
-      setSyncedState(true);
-      Alert.alert(t('sync_complete_title', 'Sync Complete'), t('sync_complete_msg', 'Your records have been synchronized with the cloud server.'));
+      const result = await performMobileSync('MANUAL_SYNC');
+      setSyncedState(result.remainingCount === 0);
+      Alert.alert(
+        result.remainingCount === 0 ? t('sync_complete_title', 'Sync Complete') : 'Sync Incomplete',
+        result.remainingCount === 0
+          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
+          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+      );
     } catch (e) {
       Alert.alert(t('sync_error_title', 'Sync Failed'), e.message || 'Unable to complete sync.');
     } finally {

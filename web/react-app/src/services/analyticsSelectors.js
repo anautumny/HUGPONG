@@ -7,8 +7,8 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { SUGARCANE_STAGES } from './operationsService';
-import { formatCropYear } from '../utils/formatters';
+import { CROP_STAGE_MAX, CROP_STAGE_MIN, SUGARCANE_STAGES } from '../constants/cropStages.js';
+import { formatCropYear } from '../utils/formatters.js';
 
 /**
  * 1. Crop & Field Progress Selector
@@ -57,7 +57,7 @@ export function selectCropFieldProgress({
   scopedFields.forEach(f => {
     const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id);
     const rawStage = Number(cycle?.currentStageNumber || f.stageNumber || f.currentStageNumber || 1);
-    const validStage = Math.max(1, Math.min(6, rawStage));
+    const validStage = Math.max(CROP_STAGE_MIN, Math.min(CROP_STAGE_MAX, rawStage));
     const ha = Number(f.areaHa || f.hectares || 0);
 
     const st = stageStats[validStage];

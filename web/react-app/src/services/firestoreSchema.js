@@ -5,6 +5,8 @@
  * ══════════════════════════════════════════════════════════════
  */
 
+import { formatCropYear as formatCropYearValue } from '../utils/formatters.js';
+
 export const COLLECTIONS = Object.freeze({
   USERS: 'users',
   BLOCK_FARMS: 'block_farms',
@@ -159,35 +161,24 @@ export const toField = value => {
   };
 };
 
-export const fromField = (id, value, cycle) => ({
-  id,
-  ...value,
-  memberId: value.memberUserId || '',
-  ha: Number(value.areaHa || 0),
-  stageNumber: Number(cycle?.currentStageNumber || 1),
-  month: Number(cycle?.elapsedMonths || 0),
-  batchMonth: Number(cycle?.batchNumber || 1),
-  cycleNumber: Number(cycle?.sequenceNumber || 1),
-  cycleType: cycle?.cropType || '',
-  cropYear: formatCropYear(cycle?.cropYear || value.cropYear || '')
-});
+export const fromField = (id, value, cycle) => {
+  const stageNumber = Number(cycle?.currentStageNumber);
+  return {
+    id,
+    ...value,
+    memberId: value.memberUserId || '',
+    ha: Number(value.areaHa || 0),
+    stageNumber: Number.isInteger(stageNumber) && stageNumber >= 1 && stageNumber <= 6 ? stageNumber : null,
+    month: Number(cycle?.elapsedMonths || 0),
+    batchMonth: Number(cycle?.batchNumber || 1),
+    cycleNumber: Number(cycle?.sequenceNumber || 1),
+    cycleType: cycle?.cropType || '',
+    cropYear: formatCropYear(cycle?.cropYear || value.cropYear || '')
+  };
+};
 
 export function formatCropYear(val, fallback = '') {
-  if (!val) return fallback;
-  const str = String(val).trim();
-  const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
-  if (rangeMatch) {
-    const startYear = parseInt(rangeMatch[1], 10);
-    let endYear = parseInt(rangeMatch[2], 10);
-    if (endYear < 100) endYear = Math.floor(startYear / 100) * 100 + endYear;
-    return `${startYear}-${endYear}`;
-  }
-  const singleMatch = str.match(/(\d{4})/);
-  if (singleMatch) {
-    const year = parseInt(singleMatch[1], 10);
-    return `${year}-${year + 1}`;
-  }
-  return str;
+  return formatCropYearValue(val, fallback);
 }
 
 export const toCycle = (field, value) => {

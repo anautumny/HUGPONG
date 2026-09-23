@@ -6,7 +6,7 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot } from './firebaseClient';
+import { db, collection, onSnapshot, query, where } from './firebaseClient';
 import { COLLECTIONS, fromReport } from './firestoreSchema';
 import { authenticatedRequest } from './apiClient';
 
@@ -40,7 +40,9 @@ export function subscribeToAuditReports({ onUpdate, onError, blockFarmId = null 
   // Real-time Firestore snapshot listener
   let unsub = null;
   try {
-    const reportsRef = collection(db, COLLECTIONS.AUDIT_REPORTS);
+    const reportsRef = blockFarmId
+      ? query(collection(db, COLLECTIONS.AUDIT_REPORTS), where('blockFarmId', '==', blockFarmId))
+      : collection(db, COLLECTIONS.AUDIT_REPORTS);
     unsub = onSnapshot(
       reportsRef,
       snapshot => {

@@ -1,0 +1,44 @@
+[
+  {
+    "stageNumber": 1,
+    "name": "Stage 1: Pre-Planting & Land Preparation",
+    "shortName": "Pre-Planting",
+    "months": "Month 0",
+    "description": "Soil sampling, plowing, harrowing, and furrowing"
+  },
+  {
+    "stageNumber": 2,
+    "name": "Stage 2: Planting & Crop Establishment",
+    "shortName": "Planting",
+    "months": "Month 1",
+    "description": "Seedcane acquisition, cutting, treating, and planting in furrows"
+  },
+  {
+    "stageNumber": 3,
+    "name": "Stage 3: Basal Nutrition & Early Care",
+    "shortName": "Basal Nutrition",
+    "months": "Months 2\u20133",
+    "description": "Basal fertilizer distribution (Urea/DAP/MOP) and lime application"
+  },
+  {
+    "stageNumber": 4,
+    "name": "Stage 4: Cultivation & Weed Management",
+    "shortName": "Cultivation",
+    "months": "Months 4\u20135",
+    "description": "Off-barring, manual weeding, and inter-row cultivation"
+  },
+  {
+    "stageNumber": 5,
+    "name": "Stage 5: Crop Maintenance & Final Hilling-Up",
+    "shortName": "Maintenance",
+    "months": "Months 6\u20138",
+    "description": "Top-dress fertilization, pest control, and final hilling-up (pasungkal)"
+  },
+  {
+    "stageNumber": 6,
+    "name": "Stage 6: Harvesting & Hauling",
+    "shortName": "Harvest & Mill",
+    "months": "Months 10\u201312",
+    "description": "Manual cane cutting, loading, hauling to mill, and post-harvest clearing"
+  }
+]

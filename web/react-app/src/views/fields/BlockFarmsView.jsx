@@ -33,8 +33,7 @@ export default function BlockFarmsView() {
   const navigate = useNavigate();
 
   const isSraAdmin = roleKey === ROLE_KEYS.SRA_ADMIN;
-  const isSuperAdmin = roleKey === ROLE_KEYS.SUPER_ADMIN;
-  const isAuthorized = isSraAdmin || isSuperAdmin;
+  const isAuthorized = isSraAdmin;
 
   // Real-time block farms data state
   const [data, setData] = useState({
@@ -60,6 +59,7 @@ export default function BlockFarmsView() {
     let active = true;
 
     const unsubscribe = subscribeToBlockFarmsData({
+      user,
       onUpdate: (updatedState) => {
         if (!active) return;
         setData(updatedState);
@@ -74,7 +74,7 @@ export default function BlockFarmsView() {
       active = false;
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, []);
+  }, [user]);
 
   // Filter block farms
   const filteredFarms = useMemo(() => {
@@ -131,7 +131,7 @@ export default function BlockFarmsView() {
         </div>
         <h2 className="text-xl font-bold text-hug-text">Access Restricted</h2>
         <p className="text-sm text-hug-muted leading-relaxed">
-          The Block Farm Registry is reserved for SRA Administrators and Super Administrators overseeing district-level cooperative jurisdictions.
+          The Block Farm Registry is reserved for SRA Administrators overseeing district-level cooperative jurisdictions.
         </p>
         <Button variant="primary" size="md" onClick={() => navigate('/fields')}>
           Return to Field Plot Registry

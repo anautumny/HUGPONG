@@ -20,6 +20,7 @@ import SyncView from './views/sync/SyncView';
 import TicketsView from './views/support/TicketsView';
 import MaintenanceView from './views/maintenance/MaintenanceView';
 import SettingsView from './views/settings/SettingsView';
+import { ROLE_KEYS } from './utils/authRouting';
 
 function RootRoute() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -37,6 +38,16 @@ function RootRoute() {
   }
   return <LandingView />;
 }
+
+function RoleRoute({ allowed, children }) {
+  const { roleKey, isLoading } = useAuth();
+  if (isLoading) return null;
+  return allowed.includes(roleKey) ? children : <Navigate to="/dashboard" replace />;
+}
+
+const AGRICULTURAL_ROLES = [ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SRA_ADMIN];
+const GOVERNANCE_ROLES = [ROLE_KEYS.SUPER_ADMIN];
+const MANAGEMENT_ROLES = [ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SRA_ADMIN, ROLE_KEYS.SUPER_ADMIN];
 
 export default function App() {
   return (
@@ -56,19 +67,19 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/dashboard" element={<DashboardView />} />
                 <Route path="/showcase" element={<ComponentShowcaseView />} />
-                <Route path="/fields" element={<FarmFieldRegistryView />} />
-                <Route path="/block-farms" element={<FarmFieldRegistryView />} />
-                <Route path="/registry" element={<FarmFieldRegistryView />} />
-                <Route path="/operations" element={<OperationsView />} />
-                <Route path="/takeover" element={<TakeOverView />} />
-                <Route path="/prices" element={<PricesView />} />
-                <Route path="/audit" element={<AuditCenterView />} />
-                <Route path="/users" element={<UsersView />} />
-                <Route path="/sync" element={<SyncView />} />
-                <Route path="/support" element={<TicketsView />} />
-                <Route path="/maintenance" element={<MaintenanceView />} />
+                <Route path="/fields" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
+                <Route path="/block-farms" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
+                <Route path="/registry" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
+                <Route path="/operations" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><OperationsView /></RoleRoute>} />
+                <Route path="/takeover" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><TakeOverView /></RoleRoute>} />
+                <Route path="/prices" element={<RoleRoute allowed={[ROLE_KEYS.SRA_ADMIN]}><PricesView /></RoleRoute>} />
+                <Route path="/audit" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AuditCenterView /></RoleRoute>} />
+                <Route path="/users" element={<RoleRoute allowed={MANAGEMENT_ROLES}><UsersView /></RoleRoute>} />
+                <Route path="/sync" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SUPER_ADMIN]}><SyncView /></RoleRoute>} />
+                <Route path="/support" element={<RoleRoute allowed={MANAGEMENT_ROLES}><TicketsView /></RoleRoute>} />
+                <Route path="/maintenance" element={<RoleRoute allowed={GOVERNANCE_ROLES}><MaintenanceView /></RoleRoute>} />
                 <Route path="/settings" element={<SettingsView />} />
-                <Route path="/analytics" element={<AnalyticsView />} />
+                <Route path="/analytics" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AnalyticsView /></RoleRoute>} />
               </Route>
 
               {/* Catch-all fallback */}

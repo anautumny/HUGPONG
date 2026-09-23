@@ -5,7 +5,7 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot } from './firebaseClient';
+import { db, collection, onSnapshot, query, where } from './firebaseClient';
 import { COLLECTIONS, fromTicket } from './firestoreSchema';
 import { authenticatedRequest } from './apiClient';
 
@@ -48,22 +48,20 @@ export function subscribeToTicketsData({ user, onUpdate, onError }) {
   // Real-time Firestore snapshot listener
   let unsub = null;
   try {
-    const ticketsRef = collection(db, COLLECTIONS.SUPPORT_TICKETS);
+    const actorId = String(user?.id || user?.employeeId || '').trim();
+    const isSuperAdmin = String(user?.canonicalRole || user?.role || user?.roleKey || '').toUpperCase().replace(/[ -]/g, '_') === 'SUPER_ADMIN';
+    const ticketsRef = isSuperAdmin
+      ? collection(db, COLLECTIONS.SUPPORT_TICKETS)
+      : query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', actorId));
     unsub = onSnapshot(
       ticketsRef,
       snapshot => {
         if (!isSubscribed) return;
-        const actorId = String(user?.id || user?.employeeId || '').trim();
-        const isSuperAdmin = String(user?.role || user?.roleKey || '').toUpperCase().replace(/ /g, '_') === 'SUPER_ADMIN';
-
         const list = [];
         snapshot.forEach(docSnap => {
           try {
             const data = docSnap.data();
-            // Scoping: Super Admin sees all; others see their own
-            if (isSuperAdmin || data.createdByUserId === actorId) {
-              list.push(fromTicket(docSnap.id, data));
-            }
+            list.push(fromTicket(docSnap.id, data));
           } catch (e) {
             console.warn('[TicketsService] Skip ticket doc:', docSnap.id, e.message);
           }

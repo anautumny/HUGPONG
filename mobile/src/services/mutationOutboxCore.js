@@ -1,6 +1,6 @@
 'use strict';
 
-const RETRYABLE_STATUSES = new Set(['queued', 'retryable', 'failed']);
+const RETRYABLE_STATUSES = new Set(['queued', 'retryable', 'failed', 'server_failure']);
 const PENDING_STATUSES = new Set(['queued', 'retryable', 'failed', 'syncing']);
 
 function randomToken() {
@@ -45,6 +45,8 @@ function createMutationEnvelope(type, payload, options = {}, existingQueue = [])
     type,
     entityKey,
     baseVersion: options.baseVersion === undefined ? null : options.baseVersion,
+    // Takeover grants are deliberately never serialized into the durable queue.
+    takeoverGrant: null,
     dependsOnMutationId: predecessor?.mutationId || null,
     payload: { ...payload },
     status: 'queued',
@@ -69,6 +71,7 @@ function migrateOutbox(savedQueue = []) {
       idempotencyKey: stableId,
       entityKey: item?.entityKey || inferEntityKey(item?.type, item?.payload || {}),
       baseVersion: item?.baseVersion === undefined ? null : item.baseVersion,
+      takeoverGrant: null,
       dependsOnMutationId: item?.dependsOnMutationId || null,
       payload: { ...(item?.payload || {}) },
       status: item?.status === 'syncing' ? 'retryable' : (item?.status || 'queued'),
@@ -86,8 +89,12 @@ function appendUniqueMutation(queue, envelope) {
 
 function classifyMutationError(error) {
   const status = Number(error?.status || 0);
+  if (status === 401) return 'authentication';
+  if (status === 403) return 'authorization';
   if (status === 409) return 'conflict';
+  if (status === 400 || status === 422) return 'validation';
   if (status >= 400 && status < 500) return 'rejected';
+  if (status >= 500) return 'server_failure';
   return 'retryable';
 }
 
@@ -97,6 +104,19 @@ function isRetryableMutation(item) {
 
 function isPendingMutation(item) {
   return PENDING_STATUSES.has(item?.status);
+}
+
+function createSingleFlightRunner() {
+  let activePromise = null;
+  return async task => {
+    if (activePromise) return activePromise;
+    activePromise = Promise.resolve().then(task);
+    try {
+      return await activePromise;
+    } finally {
+      activePromise = null;
+    }
+  };
 }
 
 function getPendingOperationPayloads(queue = []) {
@@ -118,6 +138,7 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
   let failedCount = 0;
   const responses = {};
   const candidates = workingQueue.filter(isRetryableMutation);
+  let attemptedCount = 0;
 
   for (const item of candidates) {
     if (item.dependsOnMutationId && workingQueue.some(queued => queued.mutationId === item.dependsOnMutationId)) {
@@ -125,11 +146,12 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
     }
     item.status = 'syncing';
     item.lastAttempt = new Date().toISOString();
-    onStateChange(workingQueue);
+    attemptedCount += 1;
+    await onStateChange(workingQueue);
 
     try {
       const response = await remoteHandler(item);
-      if (response === false) throw new Error('Remote rejected or network unavailable');
+      if (!response || response.success !== true) throw new Error('The server did not return an explicit successful persistence acknowledgement.');
       responses[item.mutationId] = response;
       const serverVersion = responseVersion(response);
       workingQueue.forEach(dependent => {
@@ -147,12 +169,13 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
       item.conflict = item.status === 'conflict' ? (error?.data || { message: item.lastError }) : null;
       failedCount += 1;
     }
-    onStateChange(workingQueue);
+    await onStateChange(workingQueue);
   }
 
   return {
     queue: workingQueue,
     success: failedCount === 0,
+    attemptedCount,
     processedCount,
     failedCount,
     remainingCount: workingQueue.length,
@@ -171,6 +194,7 @@ module.exports = {
   classifyMutationError,
   isRetryableMutation,
   isPendingMutation,
+  createSingleFlightRunner,
   getPendingOperationPayloads,
   drainMutationQueue
 };

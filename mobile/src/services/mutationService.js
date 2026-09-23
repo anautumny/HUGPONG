@@ -1,7 +1,8 @@
 import { authenticatedRequest } from './authService';
 
-const api = (path, method, body, mutation = null) => authenticatedRequest(path, {
+const api = (path, method, body, mutation = null, takeoverGrant = null) => authenticatedRequest(path, {
   method,
+  headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {},
   body: mutation ? {
     ...body,
     _mutation: {
@@ -16,14 +17,14 @@ const api = (path, method, body, mutation = null) => authenticatedRequest(path, 
 export const createField = (payload, mutation) => api('/api/fields', 'POST', payload, mutation);
 export const updateField = (id, payload, mutation) => api(`/api/fields/${encodeURIComponent(id)}`, 'PATCH', payload, mutation);
 export const archiveField = (id, mutation) => api(`/api/fields/${encodeURIComponent(id)}/archive`, 'POST', {}, mutation);
-export const updateCycleStage = (cycleId, payload, mutation) => api(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, 'PATCH', payload, mutation);
-export const rolloverCycle = (fieldId, payload, mutation) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, 'POST', payload, mutation);
+export const updateCycleStage = (cycleId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, 'PATCH', payload, mutation, takeoverGrant);
+export const rolloverCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, 'POST', payload, mutation, takeoverGrant);
 export const saveCustomStages = (fieldId, customStages, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-stages`, 'PUT', { customStages }, mutation);
 export const saveCustomOperations = (fieldId, customOperations, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-operations`, 'PUT', { customOperations }, mutation);
 
-export const createOperation = (payload, mutation) => api('/api/logs', 'POST', payload, mutation);
-export const amendOperation = (id, changes, amendment, mutation) => api(`/api/logs/${encodeURIComponent(id)}`, 'PATCH', { changes, amendment }, mutation);
-export const archiveOperations = (operationLogIds, mutation) => api('/api/logs/archive', 'POST', { ids: operationLogIds }, mutation);
+export const createOperation = (payload, mutation, takeoverGrant) => api('/api/logs', 'POST', payload, mutation, takeoverGrant);
+export const amendOperation = (id, changes, amendment, mutation, takeoverGrant) => api(`/api/logs/${encodeURIComponent(id)}`, 'PATCH', { changes, amendment }, mutation, takeoverGrant);
+export const archiveOperations = (operationLogIds, mutation, takeoverGrant) => api('/api/logs/archive', 'POST', { ids: operationLogIds }, mutation, takeoverGrant);
 
 export const publishPrice = (payload, mutation) => api('/api/prices', 'POST', payload, mutation);
 export const createTicket = (payload, mutation) => api('/api/tickets', 'POST', payload, mutation);

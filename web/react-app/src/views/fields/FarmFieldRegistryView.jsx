@@ -134,6 +134,7 @@ export default function FarmFieldRegistryView() {
   useEffect(() => {
     let active = true;
     const unsubscribe = subscribeToBlockFarmsData({
+      user,
       onUpdate: (data) => {
         if (!active) return;
         setBlockFarmsState(data);
@@ -148,7 +149,7 @@ export default function FarmFieldRegistryView() {
       active = false;
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, []);
+  }, [user]);
 
   // Assigned Block Farm for Farm Manager
   const currentActorId = String(user?.employeeId || user?.id || user?.userId || '').trim();
@@ -620,6 +621,16 @@ export default function FarmFieldRegistryView() {
     : isSraAdmin
       ? 'District Jurisdictions'
       : 'Governance Oversight';
+
+  if (isSuperAdmin) {
+    return (
+      <div className="p-8 max-w-md mx-auto text-center space-y-3">
+        <ShieldCheck className="w-10 h-10 text-hug-muted mx-auto" />
+        <h1 className="text-lg font-black text-hug-text">Agricultural Registry Restricted</h1>
+        <p className="text-sm text-hug-muted">Super Admin access is limited to platform governance, accounts, support, telemetry, and system health.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">

@@ -1,22 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Alert, Platform, Image, Share,
+  Modal, Dimensions, TextInput, Alert, Image, Share,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { formatDisplayDate, toISODateString, cleanupDuplicateLogs, subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, SRA_OPERATIONS_CATALOGUE, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, logSystemEvent, generateNextFieldId, cleanDataForFirestore, verifyCurrentPassword } from '../data/dataStore';
+import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, logSystemEvent, generateNextFieldId, verifyCurrentPassword } from '../data/dataStore';
 import { saveItem, STORAGE_KEYS } from '../services/storageService';
-import { enqueueAndFlushMutation, generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
+import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
 import { safeAlert } from '../utils/dialogs';
+import { cleanDataForFirestore, cleanupDuplicateLogs, formatDisplayDate, toISODateString } from '../utils/dataHelpers';
 import {
   canonicalRole,
   fromAuditReportDocument,
@@ -24,30 +25,14 @@ import {
   toOperationLogDocument,
   toReportPeriod
 } from '../data/firestoreSchema';
-
-const commitExplicitMutation = async (type, payload, options = {}) => {
-  const outcome = await enqueueAndFlushMutation(type, payload, options);
-  if (outcome.queued && (outcome.item?.status === 'conflict' || outcome.item?.status === 'rejected')) {
-    const error = new Error(outcome.item.lastError || 'The server rejected this mutation.');
-    error.status = outcome.item.status === 'conflict' ? 409 : 400;
-    error.data = outcome.item.conflict || null;
-    throw error;
-  }
-  return outcome;
-};
+import { INITIAL_CROP_STAGES } from '../constants/cropStages';
+import { SRA_OPERATIONS_CATALOGUE } from '../domain/operationCatalogue';
 
 const { height, width } = Dimensions.get('window');
 // Cane Varieties, Soil Types, and Growth Stages for Field Plot Registration (Web & Mobile Parity)
 const CANE_VARIETIES = ['VMC 84-524', 'Phil 99-1793', 'Phil 2006-2289', 'Phil 58-260', 'Phil 80-13'];
 const SOIL_TYPES = ['Clay Loam', 'Sandy Loam', 'Loam', 'Clay', 'Silt Loam'];
-const INITIAL_STAGES = [
-  { number: 1, name: 'Pre-Planting & Land Preparation', label: 'Stage 1: Pre-Planting & Land Preparation' },
-  { number: 2, name: 'Planting & Crop Establishment', label: 'Stage 2: Planting & Crop Establishment' },
-  { number: 3, name: 'Basal Nutrition & Early Care', label: 'Stage 3: Basal Nutrition & Early Care' },
-  { number: 4, name: 'Cultivation & Weed Management', label: 'Stage 4: Cultivation & Weed Management' },
-  { number: 5, name: 'Crop Maintenance & Final Hilling-Up', label: 'Stage 5: Crop Maintenance & Final Hilling-Up' },
-  { number: 6, name: 'Harvesting & Hauling', label: 'Stage 6: Harvesting & Hauling' }
-];
+const INITIAL_STAGES = INITIAL_CROP_STAGES;
 
 // Official SRA Sugarcane 6 Growth Stages Templates
 const CROP_CYCLE_STAGES_BY_TYPE = {
@@ -388,8 +373,6 @@ const getFieldStages = (fieldId) => {
   });
 };
 
-const STATUS_COLORS = { approved: COLORS.success, pending: '#F5A623', flagged: '#D9534F' };
-
 // Memoized Log Item Card to prevent re-rendering the entire list on expand/edit
 const CompactLogItem = React.memo(function CompactLogItem({
   log,
@@ -621,7 +604,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
           {/* Subtle Technical Reference ID (Moved down away from primary line of sight) */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 4, marginTop: 2, paddingHorizontal: 2 }}>
             <Ionicons name="receipt-outline" size={11} color={COLORS.textMuted} />
-            <Text style={{ fontSize: 10.5, color: COLORS.textMuted, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }} numberOfLines={1} ellipsizeMode="middle">
+            <Text style={{ fontSize: 10.5, color: COLORS.textMuted, fontFamily: 'monospace' }} numberOfLines={1} ellipsizeMode="middle">
               Ref #{log.id}
             </Text>
           </View>
@@ -918,6 +901,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         if (route?.params?.requestTakeOver || route?.params?.isTakeOver || route?.params?.takeOverFieldId) {
           // Strictly require manager password verification — no unauthenticated bypass!
           setIsTakeOver(false);
+          setTakeoverGrant(null);
           setTakeOverAuthPassword('');
           setTakeOverAuthError('');
           setShowTakeOverPassword(false);
@@ -999,6 +983,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   });
   const [draftLogs, setDraftLogs] = useState(draftLogsStore);
   const [isSavingLog, setIsSavingLog] = useState(false);
+  const submissionLockRef = React.useRef(false);
   const [editingSubItemIdx, setEditingSubItemIdx] = useState(null);
   const [isArchivingCycle, setIsArchivingCycle] = useState(false);
   const [highlightedDraftIds, setHighlightedDraftIds] = useState(new Set());
@@ -1085,10 +1070,12 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [calDate, setCalDate] = useState(new Date(2026, 4, 21));
   const [showAddField, setShowAddField] = useState(false);
   const [isTakeOver, setIsTakeOver] = useState(false);
+  const [takeoverGrant, setTakeoverGrant] = useState(null);
   const prevFieldIdRef = React.useRef(selectedField?.id);
   useEffect(() => {
     if (prevFieldIdRef.current && prevFieldIdRef.current !== selectedField?.id) {
       setIsTakeOver(false);
+      setTakeoverGrant(null);
     }
     prevFieldIdRef.current = selectedField?.id;
   }, [selectedField?.id]);
@@ -1108,6 +1095,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
     if (isTakeOver) {
       setIsTakeOver(false);
+      setTakeoverGrant(null);
       setPendingTakeOverAction(null);
       return;
     }
@@ -1124,9 +1112,9 @@ export default function FieldOpsScreen({ navigation, route }) {
 
   const handleConfirmTakeOverAuth = async () => {
     const cleanPass = String(takeOverAuthPassword || '').trim();
-    const isUserPassValid = cleanPass ? await verifyCurrentPassword(cleanPass) : false;
+    const authorization = cleanPass ? await verifyCurrentPassword(cleanPass, selectedField?.id || safeField.id) : false;
 
-    if (!cleanPass || !isUserPassValid) {
+    if (!cleanPass || !authorization?.takeoverGrant) {
       setTakeOverAuthError('Incorrect password. Enter your manager account password to authorize take over.');
       return;
     }
@@ -1134,6 +1122,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     setTakeOverAuthError('');
     setShowTakeOverAuthModal(false);
     setIsTakeOver(true);
+    setTakeoverGrant(authorization.takeoverGrant);
 
     if (typeof pendingTakeOverAction === 'function') {
       const pendingCallback = pendingTakeOverAction;
@@ -1145,13 +1134,11 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const checkTakeOverRequired = (actionDesc = 'record stage work or log operations', onAuthorizedAction = null) => {
-    const session = getCurrentSession();
-    const isMyField = (selectedField?.member || '').trim().toLowerCase() === (session?.name || '').trim().toLowerCase();
-    if (activeRole === 'Farm Manager' && !isMyField && !isTakeOver) {
+    if (activeRole === 'Farm Manager' && !isTakeOver) {
       if (!deviceOnline && !getNetworkStatus()) {
         Alert.alert(
           'Offline Access Restricted',
-          'In offline mode, you can only view and manage your own personal field plot. Managed member fields cannot be accessed or taken over without internet connectivity.'
+          'Manager field changes require a fresh server-verified takeover authorization and cannot be performed offline.'
         );
         return true;
       }
@@ -1680,7 +1667,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const handleCertifyReport = async (report) => {
     if (!report) return;
     const session = getCurrentSession();
-    const auditorName = session?.name || 'SRA Officer';
+    const auditorName = session?.name || 'SRA Admin';
     const certifiedAt = new Date().toISOString();
     const auditorUserId = session?.employeeId || session?.id || '';
     if (canonicalRole(session?.role) !== 'SRA_ADMIN' || report.status !== 'PENDING') {
@@ -1739,7 +1726,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (activeRole === 'Farm Manager' && !isTakeOver) {
       Alert.alert(
         'Supervisor Takeover Required',
-        'Crop cycle renewal / restart must be initiated by the Member (Plot Owner), SRA Administrator, or authorized via Supervisor Takeover.'
+        'Crop cycle renewal / restart must be initiated by the Member (Plot Owner) or authorized through Farm Manager takeover.'
       );
       return;
     }
@@ -1803,6 +1790,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       cycleType: finalCycleType,
       cropYear: finalCropYear,
       stage: stage1Name,
+      takeoverGrant,
       customStages: baseStages.map(s => ({ ...s, done: false, active: s.stageNumber === 1 }))
     });
     if (!rolloverResult.success) {
@@ -1923,8 +1911,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       (d.stageNumber === completedStageNum || d.taskId === targetTask.id)
     );
 
-    const applyToggle = () => {
-      // Discard unsubmitted drafts belonging to this completed stage
+    const discardCompletedStageDrafts = async () => {
       if ((forceComplete || targetTask.active) && stageDrafts.length > 0) {
         const remainingDrafts = draftLogsStore.filter(d =>
           !(d.fieldId === safeField.id && (d.stageNumber === completedStageNum || d.taskId === targetTask.id))
@@ -1932,17 +1919,34 @@ export default function FieldOpsScreen({ navigation, route }) {
         draftLogsStore.length = 0;
         draftLogsStore.push(...remainingDrafts);
         setDraftLogs([...remainingDrafts]);
+        await saveDraftLogs();
         notifyDataUpdate();
       }
+    };
+
+    const applyToggle = async () => {
 
       if (forceComplete) {
         if (completedStageNum >= 6) {
           // Stage 6 completion -> Crop cycle finished!
           const nextStageLabel = 'Harvesting & Milling (Completed)';
           const updated = rawTasks.map(t => ({ ...t, done: true, active: false }));
+          const mf = fields.find(f => f.id === safeField.id);
+          const stageResult = await updateFieldStageAndCycle(safeField.id, {
+            stage: nextStageLabel,
+            stageNumber: 6,
+            isCompleted: true,
+            customStages: updated,
+            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+            lastUpdated: new Date().toISOString()
+          }, takeoverGrant);
+          if (!stageResult.success) {
+            Alert.alert('Stage Update Failed', stageResult.message || 'The stage could not be completed.');
+            return;
+          }
+          await discardCompletedStageDrafts();
           setCycleTasksByField(p => ({ ...p, [safeField.id]: updated }));
           setSelectedField(prevF => ({ ...prevF, stage: nextStageLabel, stageNumber: 6, isCompleted: true, customStages: updated }));
-          const mf = fields.find(f => f.id === safeField.id);
           if (mf) {
             mf.stage = nextStageLabel;
             mf.stageNumber = 6;
@@ -1952,19 +1956,10 @@ export default function FieldOpsScreen({ navigation, route }) {
               mf.synced = true;
               mf.lastSync = 'Just now (Manager Take Over)';
             }
-            saveFieldPlot(mf, false);
           }
-          updateFieldStageAndCycle(safeField.id, {
-            stage: nextStageLabel,
-            stageNumber: 6,
-            isCompleted: true,
-            customStages: updated,
-            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
-            lastUpdated: new Date().toISOString()
-          });
 
           const session = getCurrentSession();
-          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Farm Manager';
+          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Member'})` : 'Farm Member';
           logSystemEvent(
             'operation',
             'Crop Cycle Completed',
@@ -1978,7 +1973,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             if (activeRole === 'Farm Manager') {
               Alert.alert(
                 'Crop Cycle Completed!',
-                'All 6 stages for this field crop cycle are complete. Cycle renewal / restart must be initiated by the Member (Plot Owner) or SRA Administrator.'
+                'All 6 stages for this field crop cycle are complete. Cycle renewal / restart must be initiated by the Member (Plot Owner).'
               );
             } else {
               Alert.alert(
@@ -2009,9 +2004,21 @@ export default function FieldOpsScreen({ navigation, route }) {
             return { ...t, done: false, active: false };
           });
 
+          const mf = fields.find(f => f.id === safeField.id);
+          const stageResult = await updateFieldStageAndCycle(safeField.id, {
+            stage: nextStageLabel,
+            stageNumber: nextStageNum,
+            customStages: updated,
+            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+            lastUpdated: new Date().toISOString()
+          }, takeoverGrant);
+          if (!stageResult.success) {
+            Alert.alert('Stage Update Failed', stageResult.message || 'The stage could not be advanced.');
+            return;
+          }
+          await discardCompletedStageDrafts();
           setCycleTasksByField(p => ({ ...p, [safeField.id]: updated }));
           setSelectedField(prevF => ({ ...prevF, stage: nextStageLabel, stageNumber: nextStageNum }));
-          const mf = fields.find(f => f.id === safeField.id);
           if (mf) {
             mf.stage = nextStageLabel;
             mf.stageNumber = nextStageNum;
@@ -2019,17 +2026,10 @@ export default function FieldOpsScreen({ navigation, route }) {
               mf.synced = true;
               mf.lastSync = 'Just now (Manager Take Over)';
             }
-            saveFieldPlot(mf, false);
           }
-          updateFieldStageAndCycle(safeField.id, {
-            stage: nextStageLabel,
-            stageNumber: nextStageNum,
-            cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
-            lastUpdated: new Date().toISOString()
-          });
 
           const session = getCurrentSession();
-          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Farm Manager';
+          const actorName = session?.name ? `${session.name} (${session.role || 'Farm Member'})` : 'Farm Member';
           logSystemEvent(
             'operation',
             isTakeOver ? 'Stage Advanced via Takeover' : 'Field Stage Advance',
@@ -2053,9 +2053,21 @@ export default function FieldOpsScreen({ navigation, route }) {
           return { ...t, done: false, active: false };
         });
 
+        const mf = fields.find(f => f.id === safeField.id);
+        const stageResult = await updateFieldStageAndCycle(safeField.id, {
+          stage: targetLabel,
+          stageNumber: targetNum,
+          customStages: updated,
+          cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
+          lastUpdated: new Date().toISOString()
+        }, takeoverGrant);
+        if (!stageResult.success) {
+          Alert.alert('Stage Update Failed', stageResult.message || 'The stage could not be updated.');
+          return;
+        }
+        await discardCompletedStageDrafts();
         setCycleTasksByField(p => ({ ...p, [safeField.id]: updated }));
         setSelectedField(prevF => ({ ...prevF, stage: targetLabel, stageNumber: targetNum }));
-        const mf = fields.find(f => f.id === safeField.id);
         if (mf) {
           mf.stage = targetLabel;
           mf.stageNumber = targetNum;
@@ -2063,14 +2075,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             mf.synced = true;
             mf.lastSync = 'Just now (Manager Take Over)';
           }
-          saveFieldPlot(mf, false);
         }
-        updateFieldStageAndCycle(safeField.id, {
-          stage: targetLabel,
-          stageNumber: targetNum,
-          cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
-          lastUpdated: new Date().toISOString()
-        });
       }
     };
 
@@ -2380,7 +2385,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const handleSaveLog = async (asSubmit = true, forceCostConfirm = false, forceDuplicateConfirm = false) => {
-    if (isSavingLog) return;
+    if (isSavingLog || submissionLockRef.current) return;
 
     const effectiveActivity = logForm.operationName || logForm.activity || 'Field Operation';
     let computedCost = parseFloat(logForm.cost) || 0;
@@ -2434,7 +2439,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       if (myPlot && submittedFieldId !== myPlot) {
         Alert.alert(
           'Action Denied',
-          `As a Member farmer, you may only record operations for your assigned plot (${session.fieldId}). To request an additional plot, please use Field Requests.`
+          `As a Farm Member, you may only record operations for your assigned plot (${session.fieldId}). To request an additional plot, please use Field Requests.`
         );
         return;
       }
@@ -2532,7 +2537,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       : (logForm.id || (asSubmit ? generateLogId(submittedFieldId) : generateDraftId(submittedFieldId)));
     const finalActivityName = (logForm.operationName || logForm.activity || matchedOp.name || logForm.subItems?.[0]?.description || 'Custom Operation').trim();
 
-    const isNetOnline = getNetworkStatus();
+    let isNetOnline = getNetworkStatus();
     const activeField = fields.find(field => field.id === submittedFieldId) || selectedField || safeField;
     const activeCycleId = activeField?.currentCycleId;
     if (asSubmit && !activeCycleId) {
@@ -2588,7 +2593,9 @@ export default function FieldOpsScreen({ navigation, route }) {
       amendments: []
     };
 
+    submissionLockRef.current = true;
     setIsSavingLog(true);
+    let submissionSynced = false;
 
     try {
       if (!fields.find(f => f.id === submittedFieldId)) {
@@ -2623,7 +2630,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 result.error || 'Could not update operation log.'
               );
               if (result.noChanges) {
-                closeLog();
+                setShowLog(false);
                 setLogEditAuth({ password: '', reason: '' });
               }
               return;
@@ -2638,7 +2645,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             );
             setLogEditAuth({ password: '', reason: '' });
             setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
-            closeLog();
+            setShowLog(false);
             return;
           }
 
@@ -2657,7 +2664,9 @@ export default function FieldOpsScreen({ navigation, route }) {
         });
 
         try {
-          const outcome = await commitExplicitMutation('operation_log', { id: newLog.id, ...cleanNewLog });
+          const outcome = await commitExplicitMutation('operation_log', { id: newLog.id, ...cleanNewLog }, { takeoverGrant });
+          submissionSynced = !outcome.queued && Boolean(outcome.response?.success);
+          isNetOnline = submissionSynced;
           if (outcome.response?.data) {
             Object.assign(newLog, outcome.response.data, { id: outcome.response.data.id || newLog.id });
           }
@@ -2665,6 +2674,12 @@ export default function FieldOpsScreen({ navigation, route }) {
             newLog.synced = false;
             newLog.isOffline = true;
             newLog.cloudQueueStatus = 'offline_queued';
+          }
+          if (submissionSynced) {
+            newLog.synced = true;
+            newLog.isOffline = false;
+            newLog.cloudQueueStatus = 'synced';
+            newLog.syncedAt = new Date().toISOString();
           }
         }
         catch (err) {
@@ -2678,7 +2693,13 @@ export default function FieldOpsScreen({ navigation, route }) {
         } else {
           operationLogs.unshift(newLog);
         }
-        await saveItem(STORAGE_KEYS.LOGS, operationLogs);
+        const localSaveSucceeded = await saveItem(STORAGE_KEYS.LOGS, operationLogs);
+        if (!localSaveSucceeded) {
+          setLogForm(previous => ({ ...previous, id: newLog.id }));
+          Alert.alert('Local Save Failed', 'The device cache could not be persisted. The form remains open and keeps the same operation ID for a safe retry.');
+          return;
+        }
+        console.info(`[OPERATION] Local save success: ${newLog.id}`);
         if (logForm.id) {
           const draftIdx = draftLogsStore.findIndex(d => d.id === logForm.id);
           if (draftIdx >= 0) draftLogsStore.splice(draftIdx, 1);
@@ -2692,7 +2713,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         setLogSearch('');
         setLogCurrentPage(1);
         notifyDataUpdate();
-        if (isNetOnline) {
+        if (submissionSynced) {
           setSynced(true);
         }
 
@@ -2709,7 +2730,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         }
 
         // Close form modal smoothly before showing confirmation
-        closeLog();
+        setShowLog(false);
         
         // Keep stage active and allow multiple operations per stage
         if (logForm.taskId && logForm.taskId !== 'Emergency') {
@@ -2721,7 +2742,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           if (targetTask?.done || logForm.isSupplemental || newLog.isSupplemental) {
             Alert.alert(
               isNetOnline ? 'Supplemental Operation Recorded' : '💾 Saved Offline (Supplemental)',
-              isNetOnline
+              submissionSynced
                 ? `"${newLog.activity}" recorded to field history as a supplemental entry. Stage progress was kept intact.`
                 : `"${newLog.activity}" stored in local device storage. It will synchronize to Cloud Firestore when internet connection is restored.`,
               [
@@ -2732,7 +2753,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           } else {
             Alert.alert(
               isNetOnline ? '✅ Operation Recorded & Synced' : '💾 Saved Offline to Device',
-              isNetOnline
+              submissionSynced
                 ? `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been synchronized to Cloud Firestore.\n\nStage ${stageNum} remains active (${stageLoggedOps.length} operations logged). Tap "Mark Stage as Complete" on the field card once all stage tasks are finished.`
                 : `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been saved to your device local storage (${stageLoggedOps.length} operations for Stage ${stageNum}).\n\n🟡 Status: Queued for Cloud Sync\nIt will automatically upload to Cloud Firestore when your internet connection is restored.`,
               [
@@ -2744,7 +2765,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         } else {
           Alert.alert(
             isNetOnline ? '✅ Operation Recorded & Synced' : '💾 Saved Offline to Device',
-            isNetOnline
+            submissionSynced
               ? `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been recorded and synchronized to Cloud Firestore.`
               : `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been saved to device local storage and queued for cloud sync.`,
             [
@@ -2766,7 +2787,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           setDraftLogs([...draftLogsStore]);
         }
         setLogTab('drafts');
-        closeLog();
+        setShowLog(false);
         Alert.alert('Draft Saved', 'Your log has been saved as a draft.');
       }
       
@@ -2778,6 +2799,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
       setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
     } finally {
+      submissionLockRef.current = false;
       setIsSavingLog(false);
     }
   };
@@ -2819,7 +2841,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     });
 
     try {
-      const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanSubmitted });
+      const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanSubmitted }, { takeoverGrant });
       if (outcome.response?.data) {
         Object.assign(submittedLog, outcome.response.data, { id: outcome.response.data.id || submittedId });
       }
@@ -2992,7 +3014,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               });
 
               try {
-                const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanBatchLog });
+                const outcome = await commitExplicitMutation('operation_log', { id: submittedId, ...cleanBatchLog }, { takeoverGrant });
                 if (outcome.response?.data) {
                   Object.assign(submittedLog, outcome.response.data, { id: outcome.response.data.id || submittedId });
                 }
@@ -3845,29 +3867,29 @@ export default function FieldOpsScreen({ navigation, route }) {
                             {
                               text: t('yes_skip_ahead', 'Yes, Skip Ahead'),
                               style: 'destructive',
-                              onPress: () => {
+                              onPress: async () => {
                                 const currentTasks = cycleTasksByField[safeField.id] || getFieldStages(safeField.id);
                                 const updated = currentTasks.map((tItem, idx) => {
                                   if (idx < i) return { ...tItem, done: true, active: false };
                                   if (tItem.id === task.id) return { ...tItem, done: false, active: true };
                                   return { ...tItem, done: false, active: false };
                                 });
-                                setCycleTasksByField(p => ({ ...p, [safeField.id]: updated }));
                                 const newStageLabel = task.name || task.label;
                                 const stageNum = task.stageNumber || i + 1;
-                                setSelectedField(prevF => ({ ...prevF, stage: newStageLabel, stageNumber: stageNum }));
                                 const mf = fields.find(f => f.id === safeField.id);
-                                if (mf) {
-                                  mf.stage = newStageLabel;
-                                  mf.stageNumber = stageNum;
-                                  saveFieldPlot(mf, false);
-                                }
-                                updateFieldStageAndCycle(safeField.id, {
+                                const stageResult = await updateFieldStageAndCycle(safeField.id, {
                                   stage: newStageLabel,
                                   stageNumber: stageNum,
+                                  customStages: updated,
                                   cycleType: mf?.cycleType || 'Plant Cane (New Plant)',
                                   lastUpdated: new Date().toISOString()
-                                });
+                                }, takeoverGrant);
+                                if (!stageResult.success) {
+                                  Alert.alert('Stage Update Failed', stageResult.message || 'The stage could not be advanced.');
+                                  return;
+                                }
+                                setCycleTasksByField(p => ({ ...p, [safeField.id]: updated }));
+                                setSelectedField(prevF => ({ ...prevF, stage: newStageLabel, stageNumber: stageNum }));
                               }
                             }
                           ]
@@ -4161,7 +4183,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             })}
           </View>
 
-          {isFullyCompleted && activeRole !== 'Farm Manager' && (
+          {isFullyCompleted && activeRole === 'Member Farmer' && (
             <TouchableOpacity
               style={{ marginTop: 8, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
               onPress={() => {
@@ -4188,7 +4210,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             <View style={{ marginTop: 8, backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#C0D9A8', paddingVertical: 13, paddingHorizontal: 16, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
               <Ionicons name="checkmark-circle" size={19} color="#16A34A" />
               <Text style={{ color: '#166534', fontSize: 13, fontWeight: '800' }}>
-                Crop Cycle Completed (Awaiting Member / SRA Admin Cycle Renewal)
+                Crop Cycle Completed (Awaiting Member Cycle Renewal)
               </Text>
             </View>
           )}
@@ -5118,7 +5140,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <Text style={{ fontSize: 13, fontWeight: '500', color: COLORS.textSecondary }}>{safeField.ha} Ha</Text>
                 </View>
                 <Text style={{ fontSize: 13, color: COLORS.textSecondary }}>
-                  {safeField.member || safeField.memberName || session?.name || 'Member Farmer'}
+                  {safeField.member || safeField.memberName || session?.name || 'Farm Member'}
                 </Text>
                 <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600', marginTop: 2 }}>
                   Current Stage: {formatStageName ? formatStageName(safeField.stage) : safeField.stage}
@@ -5957,7 +5979,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                         <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>
                           Member: <Text style={{ color: COLORS.text, fontWeight: '700' }}>{field.member}</Text>
                           {field.memberId ? (
-                            <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {field.memberId}</Text>
+                            <Text style={{ fontFamily: 'monospace', fontSize: 11, color: COLORS.primary, fontWeight: '700' }}> · ID: {field.memberId}</Text>
                           ) : null}
                         </Text>
                         <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>Stage: <Text style={{ color: COLORS.text }}>{field.stage}</Text></Text>
@@ -6448,7 +6470,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 <Text style={s.formLabel}>Field Plot ID <Text style={{ color: '#DC2626' }}>*</Text></Text>
                 {managerAssignForm.isEditing ? (
                   <View style={[s.formInput, { backgroundColor: '#F4F7F2', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: COLORS.primary }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', fontFamily: 'monospace', color: COLORS.primary }}>
                       {managerAssignForm.fieldId}
                     </Text>
                     <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.sm }}>
@@ -6458,7 +6480,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 ) : (
                   <View style={[s.formInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                     <TextInput
-                      style={{ flex: 1, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontWeight: '800', color: COLORS.primary, fontSize: 14, padding: 0 }}
+                      style={{ flex: 1, fontFamily: 'monospace', fontWeight: '800', color: COLORS.primary, fontSize: 14, padding: 0 }}
                       placeholder="e.g. FLD-NCY-006"
                       value={managerAssignForm.fieldId}
                       onChangeText={t => setManagerAssignForm({ ...managerAssignForm, fieldId: t.trim().toUpperCase() })}
@@ -7596,7 +7618,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('qr_payload_id', 'QR Payload ID:')}</Text>
-                        <Text style={{ fontSize: 10.5, fontWeight: '800', color: COLORS.primary, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '800', color: COLORS.primary, fontFamily: 'monospace' }}>
                           {audit.qrSignature}
                         </Text>
                       </View>
@@ -7609,7 +7631,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('inspector_verifier', 'Inspector Verifier:')}</Text>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: audit.status === 'CERTIFIED' ? COLORS.textSecondary : '#D97706', fontStyle: audit.status === 'CERTIFIED' ? 'normal' : 'italic' }}>
-                          {audit.verifiedBy || (audit.status === 'CERTIFIED' ? 'SRA Officer' : 'Pending SRA Inspector Review')}
+                          {audit.verifiedBy || (audit.status === 'CERTIFIED' ? 'SRA Admin' : 'Pending SRA Admin Review')}
                         </Text>
                       </View>
                     </View>
@@ -7716,7 +7738,7 @@ const s = StyleSheet.create({
 
   receiptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   receiptTitle: { fontSize: 11, fontWeight: '800', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.5 },
-  receiptId: { fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: COLORS.textMuted, fontWeight: '600' },
+  receiptId: { fontSize: 11, fontFamily: 'monospace', color: COLORS.textMuted, fontWeight: '600' },
   receiptDivider: { height: 1, borderStyle: 'dashed', borderWidth: 1, borderColor: '#DCE8CC', borderRadius: 1, marginVertical: 4 },
   receiptBody: { gap: 8 },
   receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 4, gap: 8 },
@@ -7842,7 +7864,7 @@ const s = StyleSheet.create({
   manualScanDrawer: { padding: SPACING.md, backgroundColor: '#181818', borderTopWidth: 1, borderTopColor: '#333' },
   manualScanTitle: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },
   manualScanInputRow: { flexDirection: 'row', gap: 8 },
-  manualScanTextInput: { flex: 1, height: 44, backgroundColor: '#262626', borderWidth: 1, borderColor: '#444', borderRadius: RADIUS.md, paddingHorizontal: 12, color: '#FFF', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontWeight: '700' },
+  manualScanTextInput: { flex: 1, height: 44, backgroundColor: '#262626', borderWidth: 1, borderColor: '#444', borderRadius: RADIUS.md, paddingHorizontal: 12, color: '#FFF', fontSize: 13, fontFamily: 'monospace', fontWeight: '700' },
   manualScanSubmitBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primary, paddingHorizontal: 18, height: 44, borderRadius: RADIUS.md, justifyContent: 'center' },
   manualScanSubmitText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
 

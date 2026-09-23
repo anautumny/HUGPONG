@@ -13,6 +13,7 @@ const {
   nowIso,
   normalizeCropYear
 } = require('../schema/firestoreSchema');
+const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { assertBaseVersion } = require('./mutationContext');
 
 const MAX_ATOMIC_ROLLOVER_LOGS = 497;
@@ -47,6 +48,9 @@ async function readAuthorizedField(transaction, database, fieldId, user, action)
     throw serviceError(`Member Farmers may ${action} only for their assigned field.`, 403);
   }
   if (identity.actorRole === ROLES.FARM_MANAGER) {
+    if (!user?.takeoverGrant || user.takeoverGrant.fieldId !== normalizedFieldId || user.takeoverGrant.actorId !== identity.actorId) {
+      throw serviceError('A recent password verification for this field is required for manager takeover changes.', 403);
+    }
     const farmRef = database.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId);
     const farmSnapshot = await transaction.get(farmRef);
     if (!farmSnapshot.exists || farmSnapshot.data().managerUserId !== identity.actorId) {
@@ -245,7 +249,10 @@ async function updateCycleStage(database, cycleId, input, user, timestamp = nowI
     if (access.field.currentCycleId !== normalizedCycleId) {
       throw serviceError('The crop cycle is not the field current cycle.', 409);
     }
-    const requestedStage = integer(input.currentStageNumber, 'currentStageNumber', { min: 1, max: 6 });
+    const requestedStage = integer(input.currentStageNumber, 'currentStageNumber', {
+      min: CROP_STAGE_MIN,
+      max: CROP_STAGE_MAX
+    });
     const requestedElapsed = finiteNumber(input.elapsedMonths == null ? cycle.elapsedMonths : input.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 });
     if (cycle.currentStageNumber === requestedStage && cycle.elapsedMonths === requestedElapsed) {
       return { id: cycleSnapshot.id, ...cycle, replayed: true };
@@ -335,7 +342,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       sequenceNumber: nextSequence,
       cropType: requiredString(input.cropType || oldCycle.cropType, 'cropType', { max: 120 }),
       cropYear: normalizeCropYear(input.cropYear),
-      currentStageNumber: 1,
+      currentStageNumber: CROP_STAGE_MIN,
       elapsedMonths: 0,
       batchNumber: integer(input.batchNumber == null ? 1 : input.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
       status: 'ACTIVE',
@@ -378,18 +385,16 @@ async function archiveFieldWithOperations(database, fieldId, user, timestamp = n
   const normalizedFieldId = String(fieldId || '').trim().toUpperCase();
   return database.runTransaction(async transaction => {
     const identity = actor(user);
-    if (![ROLES.FARM_MANAGER, ROLES.SUPER_ADMIN].includes(identity.actorRole)) {
+    if (identity.actorRole !== ROLES.FARM_MANAGER) {
       throw serviceError('Role is not authorized to archive fields.', 403);
     }
     const fieldRef = database.collection(COLLECTIONS.FIELDS).doc(normalizedFieldId);
     const fieldSnapshot = await transaction.get(fieldRef);
     if (!fieldSnapshot.exists) throw serviceError('Field not found.', 404);
     const field = fieldSnapshot.data();
-    if (identity.actorRole === ROLES.FARM_MANAGER) {
-      const farmSnapshot = await transaction.get(database.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId));
-      if (!farmSnapshot.exists || farmSnapshot.data().managerUserId !== identity.actorId) {
-        throw serviceError('Farm Managers may archive only fields in their assigned block farm.', 403);
-      }
+    const farmSnapshot = await transaction.get(database.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId));
+    if (!farmSnapshot.exists || farmSnapshot.data().managerUserId !== identity.actorId) {
+      throw serviceError('Farm Managers may archive only fields in their assigned block farm.', 403);
     }
     if (field.status === 'ARCHIVED') {
       return { replayed: true, field: { id: fieldSnapshot.id, ...field }, archivedLogCount: 0 };

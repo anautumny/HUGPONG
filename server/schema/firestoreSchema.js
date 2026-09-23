@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 
 const COLLECTIONS = Object.freeze({
   USERS: 'users',
@@ -230,7 +231,7 @@ function buildOperationLog(input, context = {}) {
     operationDefinitionId: requiredString(input.operationDefinitionId, 'operationDefinitionId', { max: 120 }),
     operationName: requiredString(input.operationName, 'operationName', { max: 300 }),
     category: requiredString(input.category, 'category', { max: 80 }),
-    stageNumber: integer(input.stageNumber, 'stageNumber', { min: 1, max: 6 }),
+    stageNumber: integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
     performedOn: calendarDate(input.performedOn, 'performedOn'),
     areaHa: finiteNumber(input.areaHa, 'areaHa', { min: 0.01, max: 500 }),
     peopleCount: integer(input.peopleCount, 'peopleCount', { min: 0, max: 10000 }),

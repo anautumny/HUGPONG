@@ -6,12 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/HUGPONG LOGO.png",
     "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSCameraUsageDescription": "HUGPONG needs camera access to scan and verify SRA compliance QR codes."
-      }
-    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/HUGPONG LOGO.png",

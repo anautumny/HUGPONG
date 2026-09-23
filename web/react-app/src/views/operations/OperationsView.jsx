@@ -68,6 +68,7 @@ export default function OperationsView() {
 
   // Take Over Mode state: null by default (Manager does NOT automatically enter Take Over Mode)
   const [activeTakeOverFieldId, setActiveTakeOverFieldId] = useState(null);
+  const [takeoverGrant, setTakeoverGrant] = useState(null);
   const [authModalField, setAuthModalField] = useState(null);
   const [pendingAction, setPendingAction] = useState(null); // { type: 'ADD_OPERATION', field } | { type: 'EDIT_OPERATION', operation, field }
 
@@ -99,6 +100,7 @@ export default function OperationsView() {
     let active = true;
 
     const unsubOps = subscribeToOperationsData({
+      user,
       onUpdate: (data) => {
         if (!active) return;
         setOpsData(data);
@@ -157,6 +159,7 @@ export default function OperationsView() {
   // Exit Take Over Mode
   const handleExitTakeOver = () => {
     setActiveTakeOverFieldId(null);
+    setTakeoverGrant(null);
     setUpdateSuccess('Exited Take Over Mode.');
   };
 
@@ -198,9 +201,21 @@ export default function OperationsView() {
     setEditTarget(operation);
   };
 
+  const handleArchiveOperationClick = (operation, field) => {
+    setUpdateSuccess('');
+    if (operation.status === 'ARCHIVED') return;
+    if (isManager && activeTakeOverFieldId !== field?.id) {
+      setPendingAction({ type: 'ARCHIVE_OPERATION', operation, field });
+      setAuthModalField(field);
+      return;
+    }
+    setArchiveTarget(operation);
+  };
+
   // Successful password confirmation handler
-  const handleAuthSuccess = (field) => {
+  const handleAuthSuccess = (field, grant) => {
     setActiveTakeOverFieldId(field.id);
+    setTakeoverGrant(grant);
     setAuthModalField(null);
 
     // Proceed to pending action if requested
@@ -209,6 +224,8 @@ export default function OperationsView() {
         setAddOperationField(field);
       } else if (pendingAction.type === 'EDIT_OPERATION') {
         setEditTarget(pendingAction.operation);
+      } else if (pendingAction.type === 'ARCHIVE_OPERATION') {
+        setArchiveTarget(pendingAction.operation);
       }
       setPendingAction(null);
     }
@@ -245,7 +262,7 @@ export default function OperationsView() {
     if (!archiveTarget) return;
     setIsArchiving(true);
     try {
-      await archiveOperations([archiveTarget.id]);
+      await archiveOperations([archiveTarget.id], takeoverGrant);
       setIsArchiving(false);
       setArchiveTarget(null);
       setUpdateSuccess('Operation record archived successfully.');
@@ -351,7 +368,7 @@ export default function OperationsView() {
         canArchive && row.status !== 'ARCHIVED' ? (
           <button
             type="button"
-            onClick={() => setArchiveTarget(row)}
+            onClick={() => handleArchiveOperationClick(row, fieldsData.fields.find(field => field.id === row.fieldId))}
             title="Archive Operation Record"
             className="p-1.5 rounded-lg text-hug-muted hover:text-danger hover:bg-danger-bg dark:hover:bg-danger/20 transition-colors cursor-pointer"
           >
@@ -649,10 +666,6 @@ export default function OperationsView() {
                                         <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-zinc-200 dark:bg-zinc-800 text-hug-muted">
                                           Archived
                                         </span>
-                                      ) : operation.status === 'PENDING' ? (
-                                        <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-warning-bg text-warning border border-warning/30">
-                                          Pending Verification
-                                        </span>
                                       ) : (
                                         <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-success-bg text-success border border-success/30">
                                           Verified Active
@@ -714,7 +727,7 @@ export default function OperationsView() {
                                     {canArchive && !isArchived && (
                                       <button
                                         type="button"
-                                        onClick={() => setArchiveTarget(operation)}
+                                        onClick={() => handleArchiveOperationClick(operation, field)}
                                         title="Archive Operation Record"
                                         className="p-2 rounded-xl text-hug-muted hover:text-danger hover:bg-danger-bg dark:hover:bg-danger/20 border border-transparent hover:border-danger/30 transition-colors cursor-pointer"
                                       >
@@ -804,6 +817,7 @@ export default function OperationsView() {
         isOpen={Boolean(addOperationField)}
         field={addOperationField}
         isTakeOver={isManager && activeTakeOverFieldId === addOperationField?.id}
+        takeoverGrant={takeoverGrant}
         onClose={() => setAddOperationField(null)}
         onSuccess={() => {
           setAddOperationField(null);
@@ -814,6 +828,7 @@ export default function OperationsView() {
       {/* 3. Edit Operation Modal */}
       <EditOperationModal
         operation={editTarget}
+        takeoverGrant={takeoverGrant}
         isOpen={Boolean(editTarget)}
         onClose={() => setEditTarget(null)}
         onUpdated={() => {

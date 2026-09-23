@@ -10,6 +10,7 @@ const {
   appendUniqueMutation,
   classifyMutationError,
   getPendingOperationPayloads,
+  createSingleFlightRunner,
   drainMutationQueue
 } = require('../../mobile/src/services/mutationOutboxCore');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
@@ -70,8 +71,79 @@ test('a stale cached record cannot manufacture an upload', () => {
 
 test('conflicts are terminal and retained distinctly from network retries', () => {
   assert.equal(classifyMutationError({ status: 409 }), 'conflict');
-  assert.equal(classifyMutationError({ status: 403 }), 'rejected');
+  assert.equal(classifyMutationError({ status: 401 }), 'authentication');
+  assert.equal(classifyMutationError({ status: 403 }), 'authorization');
+  assert.equal(classifyMutationError({ status: 422 }), 'validation');
+  assert.equal(classifyMutationError({ status: 500 }), 'server_failure');
   assert.equal(classifyMutationError(new Error('offline')), 'retryable');
+});
+
+test('malformed server acknowledgement remains queued', async () => {
+  const mutation = createMutationEnvelope('operation_log', {
+    id: 'LOG-MALFORMED-1', fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE'
+  }, { mutationId: 'MUT-MALFORMED-1' });
+  const result = await drainMutationQueue([mutation], async () => ({ data: { id: 'LOG-MALFORMED-1' } }));
+
+  assert.equal(result.processedCount, 0);
+  assert.equal(result.failedCount, 1);
+  assert.equal(result.remainingCount, 1);
+  assert.equal(result.queue[0].status, 'retryable');
+});
+
+test('partial queue failure removes only acknowledged items', async () => {
+  const first = createMutationEnvelope('operation_log', {
+    id: 'LOG-PARTIAL-1', fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE'
+  }, { mutationId: 'MUT-PARTIAL-1' });
+  const second = createMutationEnvelope('operation_log', {
+    id: 'LOG-PARTIAL-2', fieldId: 'FLD-2', cycleId: 'CYC-2', status: 'ACTIVE'
+  }, { mutationId: 'MUT-PARTIAL-2' });
+  const result = await drainMutationQueue([first, second], async item => {
+    if (item.mutationId === 'MUT-PARTIAL-2') throw Object.assign(new Error('Forbidden'), { status: 403 });
+    return { success: true, data: { id: item.payload.id } };
+  });
+
+  assert.equal(result.attemptedCount, 2);
+  assert.equal(result.processedCount, 1);
+  assert.equal(result.failedCount, 1);
+  assert.equal(result.remainingCount, 1);
+  assert.equal(result.queue[0].mutationId, 'MUT-PARTIAL-2');
+  assert.equal(result.queue[0].status, 'authorization');
+});
+
+test('takeover credentials are never serialized into a durable mutation envelope', () => {
+  const item = createMutationEnvelope('takeover_log', {
+    id: 'LOG-TAKEOVER-1', fieldId: 'FLD-1', cycleId: 'CYC-1'
+  }, { mutationId: 'MUT-TAKEOVER-1', takeoverGrant: 'sensitive-grant' });
+  assert.equal(item.takeoverGrant, null);
+  assert.doesNotMatch(JSON.stringify(item), /sensitive-grant/);
+});
+
+test('concurrent sync triggers execute one processor and share its result', async () => {
+  const runSingleFlight = createSingleFlightRunner();
+  let executions = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const task = async () => {
+    executions += 1;
+    await gate;
+    return { processedCount: 1 };
+  };
+
+  const manual = runSingleFlight(task);
+  const reconnect = runSingleFlight(task);
+  const foreground = runSingleFlight(task);
+  release();
+
+  const results = await Promise.all([manual, reconnect, foreground]);
+  assert.equal(executions, 1);
+  assert.deepEqual(results, [{ processedCount: 1 }, { processedCount: 1 }, { processedCount: 1 }]);
+});
+
+test('single-flight lock releases after an exception', async () => {
+  const runSingleFlight = createSingleFlightRunner();
+  await assert.rejects(runSingleFlight(async () => { throw new Error('boom'); }), /boom/);
+  const recovered = await runSingleFlight(async () => 'recovered');
+  assert.equal(recovered, 'recovered');
 });
 
 test('failed mutation remains retryable across restart and reconnect then clears on success', async () => {

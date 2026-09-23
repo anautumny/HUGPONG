@@ -67,21 +67,8 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
       });
     }
 
-    // Check for any operations needing follow-up
-    const pendingOps = recentOperations.filter(op => (op.status || '').toUpperCase() === 'PENDING');
-    if (pendingOps.length > 0) {
-      items.push({
-        id: 'pending-ops',
-        title: `${pendingOps.length} Pending Operation Record${pendingOps.length > 1 ? 's' : ''}`,
-        description: 'Recent field logs submitted require status review in the Operations Console.',
-        type: 'warning',
-        to: '/operations',
-        actionLabel: 'Review Ops'
-      });
-    }
-
     return items;
-  }, [assignedBlockFarm, scopedFields, recentOperations, farmName]);
+  }, [assignedBlockFarm, scopedFields, farmName]);
 
   const headerActions = [
     {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { MapPin, Layers } from 'lucide-react';
 import { createField } from '../../services/fieldsService';
+import { INITIAL_CROP_STAGE_OPTIONS } from '../../constants/cropStages';
 
 const SUGARCANE_VARIETIES = [
   'VMC 84-524',
@@ -270,14 +271,7 @@ export default function FieldEnrollmentModal({
               value={initialStage}
               onChange={(e) => setInitialStage(e.target.value)}
               disabled={isSubmitting}
-              options={[
-                { value: '1', label: 'Stage 1: Pre-Planting & Land Preparation' },
-                { value: '2', label: 'Stage 2: Planting & Crop Establishment' },
-                { value: '3', label: 'Stage 3: Basal Nutrition & Early Care' },
-                { value: '4', label: 'Stage 4: Cultivation & Weed Management' },
-                { value: '5', label: 'Stage 5: Crop Maintenance & Final Hilling-Up' },
-                { value: '6', label: 'Stage 6: Harvesting & Hauling' }
-              ]}
+              options={INITIAL_CROP_STAGE_OPTIONS}
             />
           </FormField>
 

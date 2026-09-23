@@ -8,10 +8,10 @@ import {
   Checkbox
 } from '../ui';
 import {
-  SUGARCANE_STAGES,
-  SRA_OPERATIONS_CATALOGUE,
   createOperation
 } from '../../services/operationsService';
+import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
+import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
 import { authenticatedRequest } from '../../services/apiClient';
 import { formatCurrency, formatHectares } from '../../utils/formatters';
 import {
@@ -28,7 +28,8 @@ export default function AddOperationModal({
   isOpen,
   onClose,
   onSuccess,
-  isTakeOver = true
+  isTakeOver = true,
+  takeoverGrant = null
 }) {
   const [selectedStageNumber, setSelectedStageNumber] = useState(1);
   const [selectedOpId, setSelectedOpId] = useState('SRA-02');
@@ -239,15 +240,16 @@ export default function AddOperationModal({
         } : null
       };
 
-      await createOperation(payload);
+      await createOperation(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
       if (advanceStage) {
         try {
-          const nextStage = Math.min(6, Number(selectedStageNumber) + 1);
+          const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
-            body: { currentStageNumber: nextStage }
+            body: { currentStageNumber: nextStage },
+            headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
           console.warn('[AddOperationModal] Crop cycle stage advancement note:', stageErr.message);
@@ -591,7 +593,7 @@ export default function AddOperationModal({
               onChange={(e) => setAdvanceStage(e.target.checked)}
               className="rounded text-primary focus:ring-primary h-4 w-4"
             />
-            <span>Advance to Stage {Math.min(6, selectedStageNumber + 1)} upon completion</span>
+            <span>Advance to Stage {Math.min(CROP_STAGE_MAX, selectedStageNumber + 1)} upon completion</span>
           </label>
         </div>
       </form>

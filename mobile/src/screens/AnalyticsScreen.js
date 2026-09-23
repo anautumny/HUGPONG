@@ -72,6 +72,10 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [newSugarPrice, setNewSugarPrice] = useState('');
   const [newMolassesPrice, setNewMolassesPrice] = useState('');
+  const [newEffectiveDate, setNewEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newWeekLabel, setNewWeekLabel] = useState(() => calculateSRAWeekLabel(new Date()));
+  const [newCircularNumber, setNewCircularNumber] = useState('');
+  const [newPriceSource, setNewPriceSource] = useState('');
 
   // Subscribe to live data updates
   useEffect(() => {
@@ -112,7 +116,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     const validFieldIds = new Set(scopedFields.map(f => f.id));
     return allOps.filter(op => {
       if (!validFieldIds.has(op.fieldId)) return false;
-      return op.status === 'ACTIVE' || op.status === 'submitted' || op.status == null;
+      return op.status === 'ACTIVE';
     });
   }, [scopedFields, allOps]);
 
@@ -216,24 +220,32 @@ export default function AnalyticsScreen({ navigation, route }) {
   const handlePublishPrice = async () => {
     const s = parseFloat(newSugarPrice);
     const m = parseFloat(newMolassesPrice);
-    if (isNaN(s) || s <= 0) {
-      Alert.alert('Invalid Price', 'Please enter a valid raw sugar price per Lkg.');
+    const parsedDate = new Date(`${newEffectiveDate}T00:00:00.000Z`);
+    const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(newEffectiveDate)
+      && !Number.isNaN(parsedDate.getTime())
+      && parsedDate.toISOString().slice(0, 10) === newEffectiveDate;
+    if (!Number.isFinite(s) || s <= 0 || !Number.isFinite(m) || m <= 0) {
+      Alert.alert('Invalid Price', 'Both official price values must be greater than zero.');
       return;
     }
-    const today = new Date();
-    const isoDate = today.toISOString().split('T')[0];
+    if (!canonicalDate || !newWeekLabel.trim() || !newCircularNumber.trim() || !newPriceSource.trim()) {
+      Alert.alert('Incomplete Circular', 'Effective date, week label, circular number, and official source are required.');
+      return;
+    }
     const record = {
       sugarPricePerLkg: s,
-      molassesPricePerMetricTon: isNaN(m) ? 0 : m,
-      effectiveDate: isoDate,
-      circularNumber: calculateSRAWeekLabel(today),
-      source: 'SRA Silay Benchmark',
-      publishedBy: session?.name || 'SRA Admin'
+      molassesPricePerMetricTon: m,
+      effectiveDate: newEffectiveDate,
+      weekLabel: newWeekLabel.trim(),
+      circularNumber: newCircularNumber.trim(),
+      source: newPriceSource.trim()
     };
     await publishSraPrice(record);
     setShowPriceModal(false);
     setNewSugarPrice('');
     setNewMolassesPrice('');
+    setNewCircularNumber('');
+    setNewPriceSource('');
     Alert.alert('Published', 'Official SRA benchmark published successfully to all devices.');
   };
 
@@ -565,6 +577,24 @@ export default function AnalyticsScreen({ navigation, route }) {
 
             <View style={{ gap: 12, marginVertical: 16 }}>
               <View>
+                <Text style={s.inputLabel}>Effective Date (YYYY-MM-DD) *</Text>
+                <TextInput
+                  style={s.input}
+                  placeholder="2026-09-23"
+                  value={newEffectiveDate}
+                  onChangeText={value => {
+                    setNewEffectiveDate(value);
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) setNewWeekLabel(calculateSRAWeekLabel(value));
+                  }}
+                />
+              </View>
+
+              <View>
+                <Text style={s.inputLabel}>Week Label *</Text>
+                <TextInput style={s.input} placeholder="Week 4 Sep" value={newWeekLabel} onChangeText={setNewWeekLabel} />
+              </View>
+
+              <View>
                 <Text style={s.inputLabel}>Raw Sugar (Class B) Price / Lkg (50-kg bag) *</Text>
                 <TextInput
                   style={s.input}
@@ -584,6 +614,16 @@ export default function AnalyticsScreen({ navigation, route }) {
                   value={newMolassesPrice}
                   onChangeText={setNewMolassesPrice}
                 />
+              </View>
+
+              <View>
+                <Text style={s.inputLabel}>Official Circular Number *</Text>
+                <TextInput style={s.input} placeholder="e.g. SRA Circular #105" value={newCircularNumber} onChangeText={setNewCircularNumber} />
+              </View>
+
+              <View>
+                <Text style={s.inputLabel}>Official Source *</Text>
+                <TextInput style={s.input} placeholder="e.g. SRA Millsite Notice" value={newPriceSource} onChangeText={setNewPriceSource} />
               </View>
             </View>
 

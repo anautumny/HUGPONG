@@ -12,7 +12,7 @@ const newLineItem = () => ({
   subtotal: 0
 });
 
-export default function EditOperationModal({ operation, isOpen, onClose, onUpdated }) {
+export default function EditOperationModal({ operation, isOpen, onClose, onUpdated, takeoverGrant = null }) {
   const [form, setForm] = useState(null);
   const [reason, setReason] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -121,7 +121,7 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
 
     setIsSaving(true);
     try {
-      const result = await updateOperation(operation.id, changes, amendment, operation.updatedAt || null);
+      const result = await updateOperation(operation.id, changes, amendment, operation.updatedAt || null, takeoverGrant);
       setSuccess('Operation updated successfully.');
       if (typeof onUpdated === 'function') onUpdated(result.data);
     } catch (saveError) {

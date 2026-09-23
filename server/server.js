@@ -9,6 +9,10 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction } = require('./config');
+const {
+  LEGACY_ROLE_DASHBOARD_REDIRECTS,
+  LEGACY_LEGAL_PAGE_REDIRECTS
+} = require('./domain/legacyWebRoutes');
 
 // Initialize Firebase Admin SDK
 const { isInitialized } = require('./firebase-admin');
@@ -90,6 +94,17 @@ const legacyWebPath = path.join(__dirname, '../web');
 // Legacy entry redirect: direct legacy HTML routes to modern React SPA
 app.get(['/login.html', '/index.html'], (req, res) => {
   res.redirect(301, '/login');
+});
+
+// Phase 4 compatibility bridge: keep old bookmarks working while React owns
+// the active role dashboards. Temporary redirects avoid permanently caching
+// this migration until the legacy deletion gate is complete.
+app.get(Object.keys(LEGACY_ROLE_DASHBOARD_REDIRECTS), (req, res) => {
+  res.redirect(302, LEGACY_ROLE_DASHBOARD_REDIRECTS[req.path]);
+});
+
+app.get(Object.keys(LEGACY_LEGAL_PAGE_REDIRECTS), (req, res) => {
+  res.redirect(302, LEGACY_LEGAL_PAGE_REDIRECTS[req.path]);
 });
 
 if (fs.existsSync(reactDistPath)) {

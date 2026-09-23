@@ -16,11 +16,16 @@ export default function SyncMonitorScreen({ navigation }) {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSyncNow = async () => {
+    if (isSyncing) return;
     setIsSyncing(true);
     try {
-      await performMobileSync();
-      await new Promise(res => setTimeout(res, 500));
-      Alert.alert(t('sync_status_synced', 'Sync Successful'), `Your local logs are now fully synchronized with ${session?.farm || (session?.farm || session?.blockFarm || 'District Central')}.`);
+      const result = await performMobileSync('MANUAL_SYNC');
+      Alert.alert(
+        result.remainingCount === 0 ? t('sync_status_synced', 'Sync Successful') : 'Sync Incomplete',
+        result.remainingCount === 0
+          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
+          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+      );
     } finally {
       setIsSyncing(false);
     }

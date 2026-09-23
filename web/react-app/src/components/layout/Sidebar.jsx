@@ -185,31 +185,13 @@ export default function Sidebar({
       });
     } else if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
       sections.push({
-        header: 'District Data Monitoring',
+        header: 'Platform Governance',
         items: [
-          {
-            label: 'Farm & Field Registry',
-            to: '/fields',
-            icon: Building2,
-            id: 'nav-farm-field-registry'
-          },
           {
             label: 'User Directory Monitor',
             to: '/users',
             icon: Users,
             id: 'nav-super-users'
-          },
-          {
-            label: 'SRA Price Monitor',
-            to: '/prices',
-            icon: TrendingUp,
-            id: 'nav-super-prices'
-          },
-          {
-            label: 'District Analytics',
-            to: '/analytics',
-            icon: BarChart3,
-            id: 'nav-super-analytics'
           }
         ]
       });

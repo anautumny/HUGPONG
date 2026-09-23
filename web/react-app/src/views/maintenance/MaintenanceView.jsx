@@ -10,7 +10,7 @@ import SystemHealthSummary from '../../components/maintenance/SystemHealthSummar
 import SystemAuditLedger from '../../components/maintenance/SystemAuditLedger';
 
 export default function MaintenanceView() {
-  const { user } = useAuth();
+  const { user, roleKey } = useAuth();
 
   const [healthData, setHealthData] = useState(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
@@ -71,7 +71,7 @@ export default function MaintenanceView() {
 
   useEffect(() => {
     runHealthCheck();
-    loadCropCycleInventory();
+    if (roleKey !== 'superadmin') loadCropCycleInventory();
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({
@@ -94,7 +94,7 @@ export default function MaintenanceView() {
       }
     });
 
-    const unsubFields = subscribeToFieldsData({
+    const unsubFields = roleKey === 'superadmin' ? null : subscribeToFieldsData({
       user,
       onUpdate: (data) => {
         const cycles = Array.isArray(data.cropCycles) ? data.cropCycles : [];
@@ -113,13 +113,14 @@ export default function MaintenanceView() {
       }
     });
 
-    const unsubOps = subscribeToOperationsData({
+    const unsubOps = roleKey === 'superadmin' ? null : subscribeToOperationsData({
+      user,
       onUpdate: (data) => {
         setCounts(prev => ({ ...prev, operations: (data.operations || []).length }));
       }
     });
 
-    const unsubPrices = subscribeToPrices({
+    const unsubPrices = roleKey === 'superadmin' ? null : subscribeToPrices({
       onUpdate: (data) => {
         setCounts(prev => ({ ...prev, prices: (data.prices || []).length }));
       }
@@ -132,7 +133,7 @@ export default function MaintenanceView() {
       if (typeof unsubOps === 'function') unsubOps();
       if (typeof unsubPrices === 'function') unsubPrices();
     };
-  }, [user]);
+  }, [user, roleKey]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">

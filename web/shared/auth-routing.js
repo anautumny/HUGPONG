@@ -27,9 +27,9 @@
   });
 
   const DASHBOARD_PATHS = Object.freeze({
-    [ROLE_KEYS.SUPER_ADMIN]: '/roles/super-admin/dashboard.html',
-    [ROLE_KEYS.SRA_ADMIN]: '/roles/sra-admin/dashboard.html',
-    [ROLE_KEYS.FARM_MANAGER]: '/roles/farm-manager/dashboard.html',
+    [ROLE_KEYS.SUPER_ADMIN]: '/dashboard',
+    [ROLE_KEYS.SRA_ADMIN]: '/dashboard',
+    [ROLE_KEYS.FARM_MANAGER]: '/dashboard',
     // Member Farmer is mobile-only in the approved workflow.
     [ROLE_KEYS.MEMBER_FARMER]: null
   });

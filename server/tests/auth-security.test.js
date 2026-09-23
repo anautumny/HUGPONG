@@ -130,9 +130,9 @@ test('web role routing uses exact canonical mappings without substring collision
     assert.equal(webAuthRouting.normalizeRole(input), expected);
   }
   assert.equal(webAuthRouting.roleKeyFromUser({ canonicalRole: 'SUPER_ADMIN', role: 'SRA Admin' }), 'superadmin');
-  assert.equal(webAuthRouting.dashboardPath('superadmin'), '/roles/super-admin/dashboard.html');
-  assert.equal(webAuthRouting.dashboardPath('admin'), '/roles/sra-admin/dashboard.html');
-  assert.equal(webAuthRouting.dashboardPath('manager'), '/roles/farm-manager/dashboard.html');
+  assert.equal(webAuthRouting.dashboardPath('superadmin'), '/dashboard');
+  assert.equal(webAuthRouting.dashboardPath('admin'), '/dashboard');
+  assert.equal(webAuthRouting.dashboardPath('manager'), '/dashboard');
   assert.equal(webAuthRouting.dashboardPath('member'), null);
 });
 
@@ -240,8 +240,8 @@ test('Firestore rules deny all client access to credentials and deny unmatched c
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
   assert.match(rules, /match \/user_credentials\/\{userId\}[\s\S]*?allow read, write: if false;/);
   assert.match(rules, /request\.auth\.token\.accountReady == true/);
-  assert.match(rules, /request\.auth\.uid == userId \|\| staff\(\)/);
-  assert.match(rules, /resource\.data\.memberUserId == request\.auth\.uid/);
+  assert.match(rules, /request\.auth\.uid == userId/);
+  assert.match(rules, /fieldData\.memberUserId == request\.auth\.uid/);
   assert.match(rules, /match \/\{document=\*\*\}[\s\S]*?allow read, write: if false;/);
 });
 

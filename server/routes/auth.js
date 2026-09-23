@@ -8,8 +8,10 @@ const { issueToken } = require('../security/token');
 const { hashPassword, verifyPassword, validatePassword } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
+const { issueTakeoverGrant, TAKEOVER_GRANT_TTL_MS, TAKEOVER_GRANT_PURPOSE } = require('../security/takeoverGrant');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp } = require('../security/otp');
 const { sendSms } = require('../services/smsGateway');
+const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 
 function normalizeContact(value) {
@@ -95,6 +97,31 @@ async function verifyCurrentPassword(userId, password) {
   const credential = await db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId).get();
   return credential.exists && verifyPassword(password, credential.data().passwordHash);
 }
+
+router.post('/mobile-session', async (req, res) => {
+  if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication services are unavailable.' });
+  if (String(req.headers['x-client-platform'] || '').toLowerCase() !== 'mobile') {
+    return res.status(403).json({ success: false, error: 'This session refresh endpoint is restricted to the mobile client.' });
+  }
+  const header = String(req.headers.authorization || '');
+  const firebaseIdToken = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!firebaseIdToken) return res.status(401).json({ success: false, error: 'Firebase authentication is required.' });
+  try {
+    const decoded = await auth.verifyIdToken(firebaseIdToken, true);
+    const snapshot = await db.collection(COLLECTIONS.USERS).doc(decoded.uid).get();
+    if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
+      return res.status(403).json({ success: false, error: 'The account is no longer authorized.' });
+    }
+    const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
+    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN) {
+      return res.status(403).json({ success: false, error: 'Super Admin access is restricted to the Web Management Console.' });
+    }
+    if (req.session) req.session.user = sessionUser;
+    return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
+  } catch (error) {
+    return res.status(401).json({ success: false, error: 'Firebase authentication could not be refreshed.' });
+  }
+});
 
 async function sendVerificationCode(phone, code, displayName, purpose = 'verification') {
   const greeting = displayName ? `Hello ${displayName}, ` : '';
@@ -277,7 +304,25 @@ router.post('/verify-phone', requireAuth, async (req, res) => {
 router.post('/verify-password', requireAuth, async (req, res) => {
   const valid = await verifyCurrentPassword(req.session.user.employeeId, req.body?.password);
   if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.' });
-  return res.json({ success: true, verified: true });
+  if (req.body?.purpose !== TAKEOVER_GRANT_PURPOSE) {
+    return res.json({ success: true, verified: true });
+  }
+  if (canonicalRole(req.session.user.role || req.session.user.roleKey) !== ROLES.FARM_MANAGER) {
+    return res.status(403).json({ success: false, error: 'Only Farm Managers may authorize a field takeover.' });
+  }
+  let assignment;
+  try {
+    assignment = await assertManagerFieldAssignment(db, req.session.user.employeeId, req.body?.fieldId);
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message });
+  }
+  const issuedAt = Date.now();
+  return res.json({
+    success: true,
+    verified: true,
+    takeoverGrant: issueTakeoverGrant({ actorId: req.session.user.employeeId, fieldId: assignment.fieldId }, issuedAt),
+    takeoverGrantExpiresAt: issuedAt + TAKEOVER_GRANT_TTL_MS
+  });
 });
 
 router.post('/change-password', requireAuth, async (req, res) => {

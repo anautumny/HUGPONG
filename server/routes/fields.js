@@ -18,13 +18,12 @@ const {
   integer,
   normalizeCropYear
 } = require('../schema/firestoreSchema');
+const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { assertFieldScope, assertBlockFarmScope } = require('../services/resourceScope');
 const { archiveFieldWithOperations } = require('../services/cropCycleOperations');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 
 async function assertManagerScope(blockFarmId, user) {
-  const role = canonicalRole(user.role || user.roleKey);
-  if (role === ROLES.SUPER_ADMIN) return;
   const userId = String(user.employeeId || user.userId || '').trim();
   const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
   if (!farm.exists || farm.data().managerUserId !== userId) {
@@ -53,7 +52,7 @@ router.get('/', requireAuth, async (req, res) => {
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       if (farmIds.length > 10) return res.status(409).json({ success: false, error: 'Manager farm scope exceeds the Firestore query limit.' });
       query = query.where('blockFarmId', 'in', farmIds);
-    } else if (role !== ROLES.SRA_ADMIN && role !== ROLES.SUPER_ADMIN) {
+    } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list fields.' });
     }
     const snapshot = await query.get();
@@ -115,7 +114,11 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       sequenceNumber: 1,
       cropType: optionalString(req.body.cropType, { max: 120 }),
       cropYear: cropYearVal,
-      currentStageNumber: integer(req.body.currentStageNumber == null ? 1 : req.body.currentStageNumber, 'currentStageNumber', { min: 1, max: 6 }),
+      currentStageNumber: integer(
+        req.body.currentStageNumber == null ? CROP_STAGE_MIN : req.body.currentStageNumber,
+        'currentStageNumber',
+        { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }
+      ),
       elapsedMonths: finiteNumber(req.body.elapsedMonths == null ? 0 : req.body.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 }),
       batchNumber: integer(req.body.batchNumber == null ? 1 : req.body.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
       status: 'ACTIVE',

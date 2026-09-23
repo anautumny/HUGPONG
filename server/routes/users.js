@@ -96,6 +96,7 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
     }
     const data = snapshot.docs
       .filter(doc => !permittedIds || permittedIds.has(doc.id) || (doc.data().status === 'PENDING' && permittedFarmIds.includes(doc.data().requestedBlockFarmId)))
+      .filter(doc => actorRole !== ROLES.SRA_ADMIN || canonicalRole(doc.data().role) !== ROLES.SUPER_ADMIN)
       .map(doc => publicUser(doc.data(), doc.id));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {

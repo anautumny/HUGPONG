@@ -18,7 +18,7 @@ const {
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 
-router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, performMobileSync, getPendingSyncCount } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount } from '../data/dataStore';
 import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
 import { useTranslation } from '../services/i18n';
 import { safeAlert } from '../utils/dialogs';
@@ -73,13 +73,15 @@ function AppHeader({ right }) {
       const online = await checkConnectivity(3500);
       if (online) {
         setSyncStatusText(t('syncing_progress', 'Syncing...'));
-        await performMobileSync();
-        setSynced(true);
-        setSyncedState(true);
-        setPendingCount(0);
+        const result = await performMobileSync('MANUAL_SYNC');
+        const remaining = Number(result.remainingCount || 0);
+        setSyncedState(remaining === 0);
+        setPendingCount(remaining);
         safeAlert(
-          t('sync_status_synced', 'Online & Synced'),
-          t('sync_toast_complete', 'Internet connection re-established! All local sugarcane operation logs have been successfully synchronized with HUGPONG cloud.')
+          remaining === 0 ? t('sync_status_synced', 'Online & Synced') : 'Sync Incomplete',
+          remaining === 0
+            ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
+            : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${remaining} remain queued.`
         );
       } else {
         safeAlert(
@@ -134,13 +136,15 @@ function AppHeader({ right }) {
     startSpinAnimation();
 
     try {
-      await performMobileSync();
-      setSynced(true);
-      setSyncedState(true);
-      setPendingCount(0);
+      const result = await performMobileSync('MANUAL_SYNC');
+      const remaining = Number(result.remainingCount || 0);
+      setSyncedState(remaining === 0);
+      setPendingCount(remaining);
       safeAlert(
-        t('sync_status_synced', 'Sync Successful'),
-        t('sync_toast_complete', 'All local sugarcane operation logs have been successfully uploaded and compiled.')
+        remaining === 0 ? t('sync_status_synced', 'Sync Successful') : 'Sync Incomplete',
+        remaining === 0
+          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
+          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${remaining} remain queued.`
       );
     } catch (err) {
       safeAlert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');

@@ -1,14 +1,14 @@
-import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — Member Home View Component
 // Role: Sugarcane Block Farm Member
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
+import { SUGARCANE_STAGES } from '../../constants/cropStages';
 
 function MemberHomeView({
   session = {},
@@ -19,6 +19,9 @@ function MemberHomeView({
   const { t, formatStageName } = useTranslation();
   const hasPlot = Array.isArray(myFields) && myFields.length > 0 && myFields[0] && myFields[0].id && myFields[0].id !== 'Unassigned (Pending Manager Allocation)';
   const primaryField = hasPlot ? myFields[0] : null;
+  const currentStage = primaryField
+    ? SUGARCANE_STAGES.find(stage => stage.stageNumber === Number(primaryField.stageNumber))
+    : null;
 
   return (
     <View style={s.container}>
@@ -89,7 +92,11 @@ function MemberHomeView({
 
           <View style={s.stageBox}>
             <Text style={s.stageLabel}>{t('current_stage', 'Current Stage')}</Text>
-            <Text style={s.stageValue}>{formatStageName ? formatStageName(primaryField.stage) : primaryField.stage}</Text>
+            <Text style={s.stageValue}>
+              {currentStage
+                ? (formatStageName ? formatStageName(currentStage.name) : currentStage.name)
+                : t('current_stage_unset', 'Current stage not set')}
+            </Text>
           </View>
 
           <View style={s.actionRow}>
@@ -129,7 +136,7 @@ const s = StyleSheet.create({
   fieldCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm },
   fieldId: { fontSize: 18, fontWeight: '900', color: COLORS.text },
   memberIdBadge: { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.xs },
-  memberIdBadgeText: { fontSize: 11, fontWeight: '800', color: COLORS.primary, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  memberIdBadgeText: { fontSize: 11, fontWeight: '800', color: COLORS.primary, fontFamily: 'monospace' },
   fieldFarm: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
   haBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 12, paddingVertical: 5, borderRadius: RADIUS.full },
   haText: { fontSize: 13, fontWeight: '900', color: COLORS.primary },

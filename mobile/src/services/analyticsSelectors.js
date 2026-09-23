@@ -7,14 +7,9 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-export const SUGARCANE_STAGES = [
-  { stageNumber: 1, name: 'Stage 1: Pre-Planting & Land Preparation', shortName: 'Pre-Planting', months: 'Month 0', description: 'Soil sampling, plowing, harrowing, and furrowing' },
-  { stageNumber: 2, name: 'Stage 2: Planting & Crop Establishment', shortName: 'Planting', months: 'Month 1', description: 'Seedcane acquisition, cutting, treating, and planting in furrows' },
-  { stageNumber: 3, name: 'Stage 3: Basal Nutrition & Early Care', shortName: 'Basal Nutrition', months: 'Months 2–3', description: 'Basal fertilizer distribution (Urea/DAP/MOP) and lime application' },
-  { stageNumber: 4, name: 'Stage 4: Cultivation & Weed Management', shortName: 'Cultivation', months: 'Months 4–5', description: 'Off-barring, manual weeding, and inter-row cultivation' },
-  { stageNumber: 5, name: 'Stage 5: Crop Maintenance & Final Hilling-Up', shortName: 'Maintenance', months: 'Months 6–8', description: 'Top-dress fertilization, pest control, and final hilling-up (pasungkal)' },
-  { stageNumber: 6, name: 'Stage 6: Harvesting & Hauling', shortName: 'Harvest & Mill', months: 'Months 10–12', description: 'Manual cane cutting, loading, hauling to mill, and post-harvest clearing' }
-];
+import { CROP_STAGE_MAX, CROP_STAGE_MIN, SUGARCANE_STAGES } from '../constants/cropStages';
+
+export { SUGARCANE_STAGES } from '../constants/cropStages';
 
 export function formatCropYear(val) {
   if (!val) return '';
@@ -70,7 +65,7 @@ export function selectCropFieldProgress({
   scopedFields.forEach(f => {
     const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id);
     const rawStage = Number(cycle?.currentStageNumber || f.stageNumber || f.currentStageNumber || 1);
-    const validStage = Math.max(1, Math.min(6, rawStage));
+    const validStage = Math.max(CROP_STAGE_MIN, Math.min(CROP_STAGE_MAX, rawStage));
     const ha = Number(f.areaHa || f.hectares || f.ha || 0);
 
     const st = stageStats[validStage];
@@ -358,18 +353,30 @@ export function selectPriceTrends({
   if (!prices || prices.length === 0) {
     return {
       trendPoints: [],
-      minSugar: 0,
-      maxSugar: 0,
-      minMolasses: 0,
-      maxMolasses: 0,
-      currentSugar: 0,
-      currentMolasses: 0
+      minSugar: null,
+      maxSugar: null,
+      minMolasses: null,
+      maxMolasses: null,
+      currentSugar: null,
+      currentMolasses: null
     };
   }
 
-  const sorted = [...prices].sort((a, b) => {
-    const da = a.effectiveDate || a.date || '';
-    const db = b.effectiveDate || b.date || '';
+  const canonicalPrices = prices.filter(price =>
+    /^\d{4}-\d{2}-\d{2}$/.test(price?.effectiveDate || '')
+    && Number.isFinite(Number(price?.sugarPricePerLkg)) && Number(price.sugarPricePerLkg) > 0
+    && Number.isFinite(Number(price?.molassesPricePerMetricTon)) && Number(price.molassesPricePerMetricTon) > 0
+  );
+  if (!canonicalPrices.length) {
+    return {
+      trendPoints: [], minSugar: null, maxSugar: null,
+      minMolasses: null, maxMolasses: null,
+      currentSugar: null, currentMolasses: null
+    };
+  }
+  const sorted = [...canonicalPrices].sort((a, b) => {
+    const da = a.effectiveDate;
+    const db = b.effectiveDate;
     return da.localeCompare(db);
   });
 
@@ -378,28 +385,28 @@ export function selectPriceTrends({
   if (timeframe === 'monthly') {
     const monthMap = new Map();
     sorted.forEach(p => {
-      const d = p.effectiveDate || p.date || '';
+      const d = p.effectiveDate;
       const monthKey = String(d).slice(0, 7);
       monthMap.set(monthKey, p);
     });
     points = Array.from(monthMap.values()).map(p => ({
-      date: p.effectiveDate || p.date,
-      periodLabel: p.effectiveDate ? new Date(`${p.effectiveDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : (p.weekLabel || 'Monthly'),
-      sugarPrice: Number(p.sugarPricePerLkg || p.price || 0),
-      sugarChange: Number(p.sugarPriceChange || 0),
-      molassesPrice: Number(p.molassesPricePerMetricTon || p.molasses || 0),
-      molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Official Circular'
+      date: p.effectiveDate,
+      periodLabel: new Date(`${p.effectiveDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      sugarPrice: Number(p.sugarPricePerLkg),
+      sugarChange: Number(p.sugarPriceChange),
+      molassesPrice: Number(p.molassesPricePerMetricTon),
+      molassesChange: Number(p.molassesPriceChange),
+      circularNumber: p.circularNumber
     }));
   } else {
     points = sorted.map(p => ({
-      date: p.effectiveDate || p.date,
-      periodLabel: p.weekLabel || p.week || p.effectiveDate || p.date,
-      sugarPrice: Number(p.sugarPricePerLkg || p.price || 0),
-      sugarChange: Number(p.sugarPriceChange || 0),
-      molassesPrice: Number(p.molassesPricePerMetricTon || p.molasses || 0),
-      molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Official Circular'
+      date: p.effectiveDate,
+      periodLabel: p.weekLabel || p.effectiveDate,
+      sugarPrice: Number(p.sugarPricePerLkg),
+      sugarChange: Number(p.sugarPriceChange),
+      molassesPrice: Number(p.molassesPricePerMetricTon),
+      molassesChange: Number(p.molassesPriceChange),
+      circularNumber: p.circularNumber
     }));
   }
 
@@ -419,7 +426,7 @@ export function selectPriceTrends({
     maxSugar,
     minMolasses,
     maxMolasses,
-    currentSugar: latest ? Number(latest.sugarPricePerLkg || latest.price || 0) : 0,
-    currentMolasses: latest ? Number(latest.molassesPricePerMetricTon || latest.molasses || 0) : 0
+    currentSugar: latest ? Number(latest.sugarPricePerLkg) : null,
+    currentMolasses: latest ? Number(latest.molassesPricePerMetricTon) : null
   };
 }

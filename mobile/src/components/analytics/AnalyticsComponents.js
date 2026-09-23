@@ -397,10 +397,30 @@ export function ActivityFrequencyList({ ranking = [] }) {
 
 // ── 7. Price Summary Card ─────────────────────────────────────────
 export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
-  const sugarPrice = priceRecord?.sugarPricePerLkg ?? priceRecord?.sugarPrice ?? 2650;
-  const molassesPrice = priceRecord?.molassesPricePerMetricTon ?? priceRecord?.molassesPrice ?? 9500;
-  const circularNum = priceRecord?.circularNumber ?? priceRecord?.source ?? 'SRA Sugar Circular';
-  const periodLabel = priceRecord?.weekLabel ?? priceRecord?.periodLabel ?? priceRecord?.effectiveDate ?? 'Current Milling Season';
+  const sugarPrice = Number(priceRecord?.sugarPricePerLkg);
+  const molassesPrice = Number(priceRecord?.molassesPricePerMetricTon);
+  const hasOfficialPrice = Boolean(
+    priceRecord && Number.isFinite(sugarPrice) && sugarPrice > 0
+    && Number.isFinite(molassesPrice) && molassesPrice > 0
+  );
+  if (!hasOfficialPrice) {
+    return (
+      <Card style={styles.priceCard}>
+        <AnalyticsEmptyState
+          title="No official price circular available"
+          subtitle="Prices will appear after an SRA Administrator publishes a complete official circular."
+        />
+        {canPost && (
+          <TouchableOpacity style={styles.postPriceBtn} onPress={onPostPricePress} activeOpacity={0.7}>
+            <Ionicons name="add-circle" size={14} color="#fff" />
+            <Text style={styles.postPriceBtnText}>Publish Official Circular</Text>
+          </TouchableOpacity>
+        )}
+      </Card>
+    );
+  }
+  const circularNum = priceRecord.circularNumber;
+  const periodLabel = priceRecord.weekLabel || priceRecord.effectiveDate;
 
   return (
     <Card style={styles.priceCard}>

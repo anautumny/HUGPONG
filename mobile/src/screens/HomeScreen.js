@@ -7,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
-import { getOutboxCount } from '../services/syncEngine';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
 import OfflineBanner from '../components/OfflineBanner';
@@ -27,7 +26,6 @@ const MIN_PRICE = 1000;
 
 const generateDynamicNotifications = (session, customDrafts, customLogs, readIds = new Set(), dismissedIds = new Set()) => {
   const notifs = [];
-  const outboxCount = getOutboxCount();
   const sortedPrices = getSortedPrices();
   const allLogs = customLogs || operationLogs || [];
   const allDrafts = customDrafts || draftLogs || [];
@@ -50,7 +48,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     scopedLogs = scopedLogs.filter(log => managerFieldIds.includes(log.fieldId));
   }
 
-  const offlineLogsCount = scopedLogs.filter(l => l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued').length + (userRole !== 'SRA Admin' ? outboxCount : 0);
+  const offlineLogsCount = getPendingSyncCount(session);
   if (offlineLogsCount > 0 && !dismissedIds.has('notif-offline-sync')) {
     notifs.push({
       id: 'notif-offline-sync',
@@ -70,9 +68,9 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   if (sortedPrices.length > 0) {
     const latest = sortedPrices[0];
     const prev = sortedPrices[1];
-    const diff = prev ? (Number(latest.price) - Number(prev.price)) : 0;
+    const diff = prev ? (Number(latest.sugarPricePerLkg) - Number(prev.sugarPricePerLkg)) : 0;
     const diffStr = diff !== 0 ? ` (${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} vs previous)` : '';
-    const priceNotifId = `notif-price-${latest.id || latest.date || 'latest'}`;
+    const priceNotifId = `notif-price-${latest.id || latest.effectiveDate || 'latest'}`;
 
     if (!dismissedIds.has(priceNotifId)) {
       notifs.push({
@@ -81,8 +79,8 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'trending-up',
         color: '#267326',
         title: 'New SRA Price Circular Broadcast',
-        msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.price || 0).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molasses || 0).toLocaleString()}/MT (${latest.week || 'Current Circular'}).`,
-        time: latest.date || 'Live Circular',
+        msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
+        time: latest.effectiveDate,
         unread: !readIds.has(priceNotifId),
       });
     }
@@ -130,7 +128,7 @@ export default function HomeScreen({ navigation }) {
     liveMol: currentMarketObservation.value,
     liveDate: currentPrice.lastUpdated || 'No records',
     liveChange: currentPrice.change || 0,
-    liveWeek: currentPrice.week || 'No circular',
+    liveWeek: currentPrice.weekLabel || 'No circular',
   });
   const { livePrice, liveMol, liveDate, liveChange, liveWeek } = priceData;
 
@@ -171,7 +169,7 @@ export default function HomeScreen({ navigation }) {
       const online = await checkConnectivity(3500);
       if (online) {
         try {
-          await performMobileSync();
+          await performMobileSync('MANUAL_SYNC');
         } catch (_) {}
         safeAlert(
           t('connection_restored', 'Connection Restored'),
@@ -211,7 +209,7 @@ export default function HomeScreen({ navigation }) {
         liveMol: currentMarketObservation.value,
         liveDate: currentPrice.lastUpdated || 'No records',
         liveChange: currentPrice.change || 0,
-        liveWeek: currentPrice.week || 'No circular',
+        liveWeek: currentPrice.weekLabel || 'No circular',
       });
     });
     const unsubNet = subscribeToNetwork((online) => {
@@ -292,9 +290,13 @@ export default function HomeScreen({ navigation }) {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
-      await performMobileSync();
+      const result = await performMobileSync('MANUAL_SYNC');
       setSyncTimeStr('Just now');
-      Alert.alert('Sync Successful', 'Your local field logs and records are synchronized with Cloud Firestore.');
+      if (result.remainingCount === 0) {
+        Alert.alert('Sync Successful', `${result.processedCount || 0} queued record(s) synchronized. No records remain.`);
+      } else {
+        Alert.alert('Sync Incomplete', `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`);
+      }
     } catch (e) {
       console.warn('Sync error:', e);
     } finally {
@@ -314,8 +316,8 @@ export default function HomeScreen({ navigation }) {
       }
       const today = new Date().toISOString().split('T')[0];
       const autoWeek = calculateSRAWeekLabel(today);
-      setInputBag(livePrice.toString());
-      setInputMol(liveMol.toString());
+      setInputBag(livePrice == null ? '' : String(livePrice));
+      setInputMol(liveMol == null ? '' : String(liveMol));
       setInputWeek(autoWeek);
       setInputEffectiveDate(today);
       setInputCircular('');
@@ -438,14 +440,14 @@ export default function HomeScreen({ navigation }) {
             <View style={s.pricePairItem}>
               <Text style={s.pricePairTag}>Sugar (B)</Text>
               <Text style={s.pricePairValue} numberOfLines={1} adjustsFontSizeToFit>
-                ₱{livePrice.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {livePrice == null ? '—' : `₱${livePrice.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </Text>
               <View style={s.priceChangeRow}>
-                {liveChange !== 0 && (
+                {livePrice != null && liveChange != null && liveChange !== 0 && (
                   <Ionicons name={liveChange > 0 ? "caret-up" : "caret-down"} size={11} color={liveChange > 0 ? COLORS.success : COLORS.danger} />
                 )}
                 <Text style={[s.priceChangeTxt, liveChange < 0 && { color: COLORS.danger }, liveChange === 0 && { color: COLORS.textMuted }]}>
-                  {liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : '0.00')}
+                  {livePrice == null ? 'No official price' : (liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : 'Steady'))}
                 </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_lkg', 'per Lkg')}</Text>
@@ -457,14 +459,14 @@ export default function HomeScreen({ navigation }) {
             <View style={s.pricePairItem}>
               <Text style={s.pricePairTag}>{t('molasses_short', 'Molasses')}</Text>
               <Text style={s.pricePairValue} numberOfLines={1} adjustsFontSizeToFit>
-                ₱{liveMol.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {liveMol == null ? '—' : `₱${liveMol.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </Text>
               <View style={s.priceChangeRow}>
-                {currentMarketObservation.change !== 0 && (
+                {liveMol != null && currentMarketObservation.change != null && currentMarketObservation.change !== 0 && (
                   <Ionicons name={currentMarketObservation.change > 0 ? "caret-up" : "caret-down"} size={11} color={currentMarketObservation.change > 0 ? COLORS.success : COLORS.danger} />
                 )}
                 <Text style={[s.priceChangeTxt, currentMarketObservation.change < 0 && { color: COLORS.danger }, currentMarketObservation.change === 0 && { color: COLORS.textMuted }]}>
-                  {currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : '0.00')}
+                  {liveMol == null ? 'No official price' : (currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : 'Steady'))}
                 </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_mt', 'per MT')}</Text>
@@ -498,7 +500,11 @@ export default function HomeScreen({ navigation }) {
           </Text>
 
           {/* Bar Chart with Dynamic Headroom Scaling & Overflow Protection */}
-          {(() => {
+          {!priceAnalytics.hasData ? (
+            <View style={{ paddingVertical: 28, alignItems: 'center' }}>
+              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>No official price circulars available.</Text>
+            </View>
+          ) : (() => {
             const allVals = [];
             if (Array.isArray(priceAnalytics.weeks)) {
               priceAnalytics.weeks.forEach(wk => {
@@ -565,7 +571,7 @@ export default function HomeScreen({ navigation }) {
           })()}
 
           {/* Legend (Weeks 1 to 4) */}
-          {chartMode === 'weekly' ? (
+          {priceAnalytics.hasData && (chartMode === 'weekly' ? (
             <View style={s.legendRow}>
               {['Week 1', 'Week 2', 'Week 3', 'Week 4'].map((l, i) => (
                 <View key={i} style={s.legendItem}>
@@ -581,7 +587,7 @@ export default function HomeScreen({ navigation }) {
                 <Text style={s.legendText}>{t('monthly_avg_label', 'Monthly Average')}</Text>
               </View>
             </View>
-          )}
+          ))}
 
           {/* Stats Row */}
           <View style={s.statsRow}>
@@ -779,12 +785,14 @@ export default function HomeScreen({ navigation }) {
                       onChangeText={setInputBag}
                       editable={!isPostingPrice}
                       keyboardType="numeric"
-                      placeholder={currentPrice.value ? String(currentPrice.value) : '0'}
+                      placeholder={currentPrice.value ? String(currentPrice.value) : 'No prior price'}
                     />
                   </View>
                   {(() => {
-                    const b = parseFloat(inputBag) || 0;
-                    const prev = currentPrice.value || 0;
+                    const b = parseFloat(inputBag);
+                    const prev = currentPrice.value;
+                    if (!Number.isFinite(b)) return <Text style={s.priceDeltaText}>Enter an official price</Text>;
+                    if (prev == null) return <Text style={s.priceDeltaText}>No prior benchmark</Text>;
                     const diff = b - prev;
                     return (
                       <Text style={s.priceDeltaText}>
@@ -808,12 +816,14 @@ export default function HomeScreen({ navigation }) {
                       onChangeText={setInputMol}
                       editable={!isPostingPrice}
                       keyboardType="numeric"
-                      placeholder={currentMarketObservation.value ? String(currentMarketObservation.value) : '0'}
+                      placeholder={currentMarketObservation.value ? String(currentMarketObservation.value) : 'No prior price'}
                     />
                   </View>
                   {(() => {
-                    const m = parseFloat(inputMol) || 0;
-                    const prevM = currentMarketObservation.value || 0;
+                    const m = parseFloat(inputMol);
+                    const prevM = currentMarketObservation.value;
+                    if (!Number.isFinite(m)) return <Text style={s.priceDeltaText}>Enter an official price</Text>;
+                    if (prevM == null) return <Text style={s.priceDeltaText}>No prior benchmark</Text>;
                     const diffM = m - prevM;
                     return (
                       <Text style={s.priceDeltaText}>
@@ -866,7 +876,7 @@ export default function HomeScreen({ navigation }) {
                   const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(inputEffectiveDate)
                     && !Number.isNaN(parsedDate.getTime())
                     && parsedDate.toISOString().slice(0, 10) === inputEffectiveDate;
-                  if (!Number.isFinite(b) || !Number.isFinite(m) || !inputWeek.trim() || !inputCircular.trim() || !canonicalDate) {
+                  if (!Number.isFinite(b) || b <= 0 || !Number.isFinite(m) || m <= 0 || !inputWeek.trim() || !inputCircular.trim() || !canonicalDate) {
                     Alert.alert(t('error_title', 'Error'), 'Enter both prices, a week label, an official circular/source, and an effective date in YYYY-MM-DD format.');
                     return;
                   }

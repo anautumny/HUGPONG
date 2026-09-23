@@ -34,8 +34,13 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
       console.warn('[UsersService] Initial API fetch notice:', err.message);
     });
 
-  // Real-time Firestore snapshot listener
+  // Only the governance role has a collection-wide Firestore subscription.
+  // Operational roles receive their server-scoped directory from /api/users.
   let unsub = null;
+  const userRole = String(user?.canonicalRole || user?.role || user?.roleKey || '').toUpperCase().replace(/[ -]/g, '_');
+  if (userRole !== 'SUPER_ADMIN') {
+    return () => { isSubscribed = false; };
+  }
   try {
     const usersRef = collection(db, COLLECTIONS.USERS);
     unsub = onSnapshot(
@@ -52,22 +57,7 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
         });
 
         // Role-based directory scoping in client view:
-        const userRole = String(user?.role || user?.roleKey || '').toUpperCase().replace(/ /g, '_');
         let scoped = allUsers;
-
-        if (userRole === 'FARM_MANAGER') {
-          // Farm Manager sees members of their assigned farm + themselves + pending applicants
-          const activeFarmId = user?.blockFarmId || '';
-          scoped = allUsers.filter(u => {
-            if (u.canonicalRole === 'SUPER_ADMIN' || u.canonicalRole === 'SRA_ADMIN') return false;
-            if (u.id === user?.id || u.id === user?.employeeId) return true;
-            if (u.status === 'PENDING' && u.requestedBlockFarmId === activeFarmId) return true;
-            return u.canonicalRole === 'MEMBER_FARMER';
-          });
-        } else if (userRole === 'SRA_ADMIN') {
-          // SRA Admin sees Farm Managers and Members, but not Super Admins
-          scoped = allUsers.filter(u => u.canonicalRole !== 'SUPER_ADMIN');
-        }
 
         scoped.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 

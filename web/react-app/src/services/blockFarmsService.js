@@ -1,11 +1,11 @@
-import { db, collection, onSnapshot } from './firebaseClient';
+import { db, collection, doc, onSnapshot, query, where } from './firebaseClient';
 import { COLLECTIONS, fromBlockFarm, fromUser } from './firestoreSchema';
 import { authenticatedRequest } from './apiClient';
 
 /**
  * Real-time subscription to block farms, registered fields, and candidate farm managers
  */
-export function subscribeToBlockFarmsData({ onUpdate, onError }) {
+export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
   let isSubscribed = true;
   const unsubscribers = [];
 
@@ -21,6 +21,12 @@ export function subscribeToBlockFarmsData({ onUpdate, onError }) {
     fields: false,
     users: false
   };
+  const role = String(user?.canonicalRole || user?.role || user?.roleKey || '').replace(/[\s-]+/g, '_').toUpperCase();
+  const isManager = role === 'FARM_MANAGER' || role === 'MANAGER';
+  if (role === 'SUPER_ADMIN') {
+    onUpdate({ ...state, isLoading: false });
+    return () => { isSubscribed = false; };
+  }
 
   const emit = () => {
     if (!isSubscribed) return;
@@ -32,11 +38,15 @@ export function subscribeToBlockFarmsData({ onUpdate, onError }) {
 
   try {
     // 1. Subscribe to Block Farms
+    const farmsReference = isManager
+      ? doc(db, COLLECTIONS.BLOCK_FARMS, String(user?.blockFarmId || 'UNASSIGNED'))
+      : collection(db, COLLECTIONS.BLOCK_FARMS);
     const farmsUnsub = onSnapshot(
-      collection(db, COLLECTIONS.BLOCK_FARMS),
+      farmsReference,
       snapshot => {
         const farms = [];
-        snapshot.forEach(docSnap => {
+        const documents = snapshot.docs || (snapshot.exists() ? [snapshot] : []);
+        documents.forEach(docSnap => {
           try {
             farms.push(fromBlockFarm(docSnap.id, docSnap.data()));
           } catch (e) {
@@ -57,8 +67,11 @@ export function subscribeToBlockFarmsData({ onUpdate, onError }) {
     unsubscribers.push(farmsUnsub);
 
     // 2. Subscribe to Fields (for plot count & cultivated area)
+    const fieldsReference = isManager
+      ? query(collection(db, COLLECTIONS.FIELDS), where('blockFarmId', '==', String(user?.blockFarmId || '').trim()))
+      : collection(db, COLLECTIONS.FIELDS);
     const fieldsUnsub = onSnapshot(
-      collection(db, COLLECTIONS.FIELDS),
+      fieldsReference,
       snapshot => {
         const fields = [];
         snapshot.forEach(docSnap => {
@@ -77,8 +90,8 @@ export function subscribeToBlockFarmsData({ onUpdate, onError }) {
     unsubscribers.push(fieldsUnsub);
 
     // 3. Subscribe to Users (for Farm Manager assignment)
-    const usersUnsub = onSnapshot(
-      collection(db, COLLECTIONS.USERS),
+    const usersUnsub = isManager ? null : onSnapshot(
+      query(collection(db, COLLECTIONS.USERS), where('role', '==', 'FARM_MANAGER')),
       snapshot => {
         const managers = [];
         snapshot.forEach(docSnap => {
@@ -99,7 +112,8 @@ export function subscribeToBlockFarmsData({ onUpdate, onError }) {
         emit();
       }
     );
-    unsubscribers.push(usersUnsub);
+    if (usersUnsub) unsubscribers.push(usersUnsub);
+    else loaded.users = true;
 
     emit();
   } catch (err) {

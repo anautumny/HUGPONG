@@ -1,5 +1,5 @@
 import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema } from '../services/storageService';
-import { initSyncEngine, enqueueAndFlushMutation, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
+import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
 import { publishTerminalTelemetry } from '../services/telemetryService';
 import { db, auth } from '../firebase/config';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
@@ -7,14 +7,15 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {
   loginWithServer,
-  refreshServerSession,
+  refreshMobileSessionFromFirebase,
   verifyPasswordWithServer,
   changePasswordWithServer,
   changePhoneWithServer,
   registerWithServer,
   requestPhoneVerificationWithServer,
   verifyPhoneWithServer,
-  logoutFromServer
+  logoutFromServer,
+  authenticatedRequest
 } from '../services/authService';
 import {
   COLLECTIONS,
@@ -35,11 +36,36 @@ import {
   toSupportTicketDocument,
   formatCropYear
 } from './firestoreSchema';
+import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations } from '../domain/operationCatalogue';
+import { SUGARCANE_STAGES } from '../constants/cropStages';
+import {
+  cleanDataForFirestore,
+  cleanupDuplicateLogs,
+  formatDisplayDate,
+  toISODateString
+} from '../utils/dataHelpers';
 
-const commitExplicitMutation = async (type, payload, options = {}) => {
-  const outcome = await enqueueAndFlushMutation(type, payload, options);
+export {
+  cleanDataForFirestore,
+  cleanupDuplicateLogs,
+  formatDisplayDate,
+  toISODateString
+} from '../utils/dataHelpers';
+
+export const commitExplicitMutation = async (type, payload, options = {}) => {
+  if (options.takeoverGrant && !getNetworkStatus()) {
+    throw new Error('Farm Manager Takeover changes require a live server connection and cannot be stored for later replay.');
+  }
+  const item = await enqueueOutboxItem(type, payload, options);
+  console.info(`[OPERATION] Enqueued: ${item.mutationId}`);
+  const result = getNetworkStatus()
+    ? await performMobileSync('POST_MUTATION')
+    : { success: false, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: getOutboxCount(), responses: {} };
+  const retained = getOutboxQueue().find(queued => queued.mutationId === item.mutationId);
+  const outcome = { item: retained || item, result, queued: Boolean(retained), response: result.responses?.[item.mutationId] };
   const retainedStatus = outcome.queued ? outcome.item?.status : null;
-  if (retainedStatus === 'conflict' || retainedStatus === 'rejected') {
+  const terminalStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected']);
+  if (terminalStatuses.has(retainedStatus) || result.reason === 'AUTHORIZATION_FAILURE' || result.reason === 'AUTHENTICATION_RECOVERY') {
     const error = new Error(outcome.item?.lastError || 'The server rejected this mutation.');
     error.status = retainedStatus === 'conflict' ? 409 : 400;
     error.data = outcome.item?.conflict || null;
@@ -63,86 +89,6 @@ const stripCredentialFields = (value = {}) => {
 // HUGPONG — Canonical Database Entities & Offline Working Store
 // Single Canonical Source of Truth: Cloud Firestore / Server DB
 // ══════════════════════════════════════════════════════════════
-
-// ── CANONICAL DATE & DEDUPLICATION UTILITIES ────────────────
-export function formatDisplayDate(dateStr) {
-  if (!dateStr) return '';
-  const str = String(dateStr).trim();
-  if (/^[A-Za-z]+ \d{1,2}, \d{4}$/.test(str)) {
-    return str;
-  }
-  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const y = parseInt(m[1], 10);
-    const monthIdx = parseInt(m[2], 10) - 1;
-    const d = parseInt(m[3], 10);
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    if (monthIdx >= 0 && monthIdx < 12) {
-      return `${months[monthIdx]} ${d}, ${y}`;
-    }
-  }
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) {
-    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  }
-  return str;
-}
-
-export function toISODateString(dateStr) {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
-  const str = String(dateStr).trim();
-  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const y = m[1];
-    const month = m[2].padStart(2, '0');
-    const day = m[3].padStart(2, '0');
-    return `${y}-${month}-${day}`;
-  }
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  return new Date().toISOString().split('T')[0];
-}
-
-export function cleanupDuplicateLogs(logs) {
-  if (!Array.isArray(logs)) return [];
-  const byId = new Map();
-  for (const l of logs) {
-    if (!l) continue;
-    const logId = l.id || `LOG-${l.fieldId}-${l.stageNumber || 1}-${l.activity || 'op'}-${l.date || Date.now()}`;
-    if (!byId.has(logId)) {
-      byId.set(logId, l);
-    } else {
-      const existing = byId.get(logId);
-      const timeExisting = new Date(existing.updatedAt || existing.createdAt || existing.date || 0).getTime();
-      const timeCurrent = new Date(l.updatedAt || l.createdAt || l.date || 0).getTime();
-      if (timeCurrent >= timeExisting) {
-        byId.set(logId, l);
-      }
-    }
-  }
-  return Array.from(byId.values());
-}
-
-export const cleanDataForFirestore = (obj) => {
-  if (obj === null || obj === undefined) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(cleanDataForFirestore);
-  const clean = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) {
-      clean[k] = cleanDataForFirestore(v);
-    }
-  }
-  return clean;
-};
 
 export const priceHistory = [];
 
@@ -669,11 +615,11 @@ export const getSortedPrices = () => {
 export const currentPrice = {
   get value() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? sorted[0].sugarPricePerLkg : 0;
+    return sorted.length > 0 ? sorted[0].sugarPricePerLkg : null;
   },
   get change() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? sorted[0].sugarPriceChange : 0;
+    return sorted.length > 0 ? sorted[0].sugarPriceChange : null;
   },
   get unit() { return 'Lkg'; },
   get mill() { return 'HPCo'; },
@@ -682,7 +628,7 @@ export const currentPrice = {
     const sorted = getSortedPrices();
     return sorted.length > 0 ? sorted[0].effectiveDate : 'No records';
   },
-  get week() {
+  get weekLabel() {
     const sorted = getSortedPrices();
     return sorted.length > 0 ? sorted[0].weekLabel : 'No records';
   }
@@ -691,18 +637,18 @@ export const currentPrice = {
 export const currentMarketObservation = {
   get value() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : 0;
+    return sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : null;
   },
   get change() {
     const sorted = getSortedPrices();
-    return sorted.length > 0 ? sorted[0].molassesPriceChange : 0;
+    return sorted.length > 0 ? sorted[0].molassesPriceChange : null;
   },
   get unit() { return 'MT'; },
   get lastUpdated() {
     const sorted = getSortedPrices();
     return sorted.length > 0 ? sorted[0].effectiveDate : 'No records';
   },
-  get week() {
+  get weekLabel() {
     const sorted = getSortedPrices();
     return sorted.length > 0 ? sorted[0].weekLabel : 'No records';
   }
@@ -729,7 +675,7 @@ export const priceAnalytics = {
   get weeks() {
     const sorted = getSortedPrices();
     if (sorted.length === 0) {
-      return [[0], [0], [0], [0]];
+      return [];
     }
     const months = this.months;
     return [0, 1, 2, 3].map(wIndex => {
@@ -743,13 +689,13 @@ export const priceAnalytics = {
   },
   get monthlyAvg() {
     const sorted = getSortedPrices();
-    if (sorted.length === 0) return 0;
+    if (sorted.length === 0) return null;
     const sum = sorted.reduce((acc, p) => acc + p.sugarPricePerLkg, 0);
     return Math.round(sum / sorted.length);
   },
   get cropYearPeak() {
     const sorted = getSortedPrices();
-    if (sorted.length === 0) return 0;
+    if (sorted.length === 0) return null;
     return Math.max(...sorted.map(p => p.sugarPricePerLkg));
   }
 };
@@ -766,10 +712,12 @@ export const clearAuthSessionStorage = async () => {
   }
 };
 
-export const verifyCurrentPassword = async (password) => {
+export const verifyCurrentPassword = async (password, fieldId = null) => {
   try {
-    await verifyPasswordWithServer(password);
-    return true;
+    return await verifyPasswordWithServer(password, fieldId ? {
+      purpose: 'MANAGER_TAKEOVER',
+      fieldId: String(fieldId).trim().toUpperCase()
+    } : {});
   } catch (error) {
     return false;
   }
@@ -792,7 +740,7 @@ export const restoreSessionFromToken = async () => {
     notify();
     if (getNetworkStatus()) {
       try {
-        const refreshed = await refreshServerSession(token);
+        const refreshed = await refreshMobileSessionFromFirebase();
         CURRENT_SESSION = { ...refreshed.user, lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       } catch (error) {
@@ -836,6 +784,9 @@ export const authenticateUser = async (contactOrId, password) => {
     CURRENT_SESSION = { ...result.user, lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     notify();
+    if (getNetworkStatus() && getOutboxCount() > 0) {
+      performMobileSync('AUTH_RESTORED').catch(() => {});
+    }
     return { ...result, requiresPasswordChange: result.user?.requiresPasswordChange === true };
   } catch (error) {
     return { success: false, error: error.message || 'Authentication service is unavailable.' };
@@ -992,11 +943,11 @@ export const getIsSynced = () => IS_SYNCED;
  * Counts only submitted ACTIVE records that have not reached Firestore.
  */
 export const getPendingSyncCount = (userSession = CURRENT_SESSION) => {
-  const outboxCount = typeof getOutboxCount === 'function' ? getOutboxCount() : 0;
   const userRole = userSession?.role || 'Member Farmer';
 
   if (userRole === 'SRA Admin') return 0;
 
+  const pendingKeys = new Set(getOutboxQueue().map(item => item.entityKey || item.mutationId || item.outboxId));
   const activeUnsyncedLogs = operationLogs.filter(l => {
     if (!l) return false;
     if (l.status !== 'ACTIVE' || l.isDraft === true) return false;
@@ -1005,7 +956,8 @@ export const getPendingSyncCount = (userSession = CURRENT_SESSION) => {
     return l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued';
   });
 
-  return activeUnsyncedLogs.length + outboxCount;
+  activeUnsyncedLogs.forEach(log => pendingKeys.add(`operation_logs/${log.id}`));
+  return pendingKeys.size;
 };
 
 let listeners = [];
@@ -1203,7 +1155,7 @@ export const updateSessionFieldId = (fieldId) => {
   }
 };
 
-export const updateFieldStageAndCycle = async (fieldId, updates) => {
+export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant = null) => {
   if (!fieldId) return { success: false, message: 'Field ID is required.' };
   const targetField = fields.find(f => f.id === fieldId);
   if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit currentCycleId.' };
@@ -1211,7 +1163,12 @@ export const updateFieldStageAndCycle = async (fieldId, updates) => {
   const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
   const baseVersion = localCycle?.updatedAt || null;
   Object.assign(targetField, updates);
-  await saveItem(STORAGE_KEYS.FIELDS, fields);
+  const locallyPersisted = await saveItem(STORAGE_KEYS.FIELDS, fields);
+  if (!locallyPersisted) {
+    Object.keys(targetField).forEach(key => delete targetField[key]);
+    Object.assign(targetField, previousField);
+    return { success: false, message: 'The stage change could not be saved on this device.' };
+  }
   notify();
 
   try {
@@ -1222,8 +1179,18 @@ export const updateFieldStageAndCycle = async (fieldId, updates) => {
     const outcome = await commitExplicitMutation('stage_update', {
       cycleId: targetField.currentCycleId,
       ...cycleUpdate
-    }, { baseVersion });
-    if (localCycle && outcome.response?.data) Object.assign(localCycle, outcome.response.data);
+    }, { baseVersion, takeoverGrant });
+    if (outcome.response?.data) {
+      if (localCycle) Object.assign(localCycle, outcome.response.data);
+      targetField.stageNumber = Number(outcome.response.data.currentStageNumber);
+      targetField.stage = canonicalStageName(outcome.response.data.currentStageNumber);
+      targetField.month = Number(outcome.response.data.elapsedMonths || 0);
+      targetField.synced = true;
+      targetField.lastSync = 'Just now';
+      await saveItem(STORAGE_KEYS.FIELDS, fields);
+      console.info(`[FIELD] Stage refreshed: ${targetField.id}`);
+      notify();
+    }
     return { success: true, data: outcome.response?.data, queuedOffline: outcome.queued };
   } catch (e) {
     Object.keys(targetField).forEach(key => delete targetField[key]);
@@ -1258,7 +1225,8 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   let queuedOffline = false;
   try {
     const outcome = await commitExplicitMutation('cycle_rollover', { fieldId: cleanId, ...request }, {
-      baseVersion: targetField.updatedAt || null
+      baseVersion: targetField.updatedAt || null,
+      takeoverGrant: options.takeoverGrant || null
     });
     queuedOffline = outcome.queued;
     result = outcome.response?.data;
@@ -1540,8 +1508,13 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     return { success: false, error: 'A valid reason for amendment or correction is required for the official audit trail.' };
   }
 
+  let passwordAuthorization;
   try {
-    await verifyPasswordWithServer(passwordVerification);
+    const isManager = canonicalRole(CURRENT_SESSION.role || CURRENT_SESSION.roleKey) === ROLES.FARM_MANAGER;
+    passwordAuthorization = await verifyPasswordWithServer(passwordVerification, isManager ? {
+      purpose: 'MANAGER_TAKEOVER',
+      fieldId: targetLog.fieldId
+    } : {});
   } catch (error) {
     return { success: false, error: 'Incorrect password. Please enter your account password to authorize modifying this log.' };
   }
@@ -1653,7 +1626,10 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
       id: logId,
       changes: canonicalChanges,
       amendment: editRecord
-    }, { baseVersion: originalLog.updatedAt || null });
+    }, {
+      baseVersion: originalLog.updatedAt || null,
+      takeoverGrant: passwordAuthorization?.takeoverGrant || null
+    });
     if (outcome.response?.data) {
       const authoritative = fromOperationLogDocument(outcome.response.data.id || logId, outcome.response.data);
       Object.keys(targetLog).forEach(key => delete targetLog[key]);
@@ -1690,7 +1666,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   return { success: true, log: targetLog, editRecord };
 };
 
-export const archivePastLogsForField = async (fieldId) => {
+export const archivePastLogsForField = async (fieldId, takeoverGrant = null) => {
   if (!fieldId) return { success: false, message: 'Field ID is required' };
   const fId = fieldId.trim().toUpperCase();
   const nowIso = new Date().toISOString();
@@ -1706,7 +1682,8 @@ export const archivePastLogsForField = async (fieldId) => {
     const outcome = await commitExplicitMutation('operation_archive', {
       operationLogIds: toArchive.map(log => log.id)
     }, {
-      baseVersion: Object.fromEntries(toArchive.map(log => [log.id, log.updatedAt || null]))
+      baseVersion: Object.fromEntries(toArchive.map(log => [log.id, log.updatedAt || null])),
+      takeoverGrant
     });
     archivedAt = outcome.response?.data?.archivedAt || outcome.response?.archivedAt || archivedAt;
   } catch (err) {
@@ -1746,20 +1723,29 @@ export const calculateSRAWeekLabel = (dateInput = new Date()) => {
 };
 
 export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, weekLabel, circularNumber, source, effectiveDate }) => {
+  const sugar = Number(sugarPricePerLkg);
+  const molasses = Number(molassesPricePerMetricTon);
+  if (!Number.isFinite(sugar) || sugar <= 0 || !Number.isFinite(molasses) || molasses <= 0) {
+    throw new Error('Both official SRA price values must be greater than zero.');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(effectiveDate || '')) || !String(weekLabel || '').trim()
+    || !String(circularNumber || '').trim() || !String(source || '').trim()) {
+    throw new Error('Effective date, week label, circular number, and official source are required.');
+  }
   const sorted = getSortedPrices();
-  const prevPrice = sorted.length > 0 ? sorted[0].sugarPricePerLkg : sugarPricePerLkg;
-  const prevMol = sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : molassesPricePerMetricTon;
-  const change = sugarPricePerLkg - prevPrice;
-  const molChange = molassesPricePerMetricTon - prevMol;
+  const prevPrice = sorted.length > 0 ? sorted[0].sugarPricePerLkg : sugar;
+  const prevMol = sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : molasses;
+  const change = sugar - prevPrice;
+  const molChange = molasses - prevMol;
 
   const pId = `PRC-${Date.now()}`;
   const newPost = toPriceDocument({
     id: pId,
     effectiveDate,
     weekLabel,
-    sugarPricePerLkg,
+    sugarPricePerLkg: sugar,
     sugarPriceChange: change,
-    molassesPricePerMetricTon,
+    molassesPricePerMetricTon: molasses,
     molassesPriceChange: molChange,
     circularNumber,
     source,
@@ -1824,8 +1810,6 @@ export const setSynced = (synced) => {
   IS_SYNCED = synced;
   if (!synced) {
     CURRENT_SESSION.pendingLogs = (CURRENT_SESSION.pendingLogs || 0) + 1;
-  } else {
-    performMobileSync();
   }
   notify();
 };
@@ -1844,253 +1828,7 @@ export const currentProfile = {
 export const profile = currentProfile;
 
 
-export const SRA_OPERATIONS_CATALOGUE = [
-  // ── Stage 1: Pre-Planting & Land Preparation ──
-  {
-    id: 'SRA-01',
-    stageNumber: 1,
-    stageName: 'Stage 1: Pre-Planting & Land Preparation',
-    section: 'I. Direct Operations',
-    name: 'Soil Sampling',
-    category: 'prep',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 100,
-    costPerHa: 100,
-    subItems: [
-      { id: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', qty: 1, unit: 'ha', unitCost: 100, subTotal: 100 }
-    ]
-  },
-  {
-    id: 'SRA-02',
-    stageNumber: 1,
-    stageName: 'Stage 1: Pre-Planting & Land Preparation',
-    section: 'I. Direct Operations',
-    name: 'Land Preparation',
-    category: 'prep',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 12000,
-    subItems: [
-      { id: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1, unit: 'ha', unitCost: 5000, subTotal: 5000 },
-      { id: 'SI-02-2', description: '2nd Pass Disc Harrowing', qty: 1, unit: 'ha', unitCost: 4000, subTotal: 4000 },
-      { id: 'SI-02-3', description: 'Furrowing / Tudling', qty: 1, unit: 'ha', unitCost: 3000, subTotal: 3000 }
-    ]
-  },
-
-  // ── Stage 2: Planting & Crop Establishment ──
-  {
-    id: 'SRA-03',
-    stageNumber: 2,
-    stageName: 'Stage 2: Planting & Crop Establishment',
-    section: 'I. Direct Operations',
-    name: 'Cost of Planting Material (Seedcane acquisition)',
-    category: 'plant',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 15000,
-    subItems: [
-      { id: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', qty: 5, unit: 'lac', unitCost: 3000, subTotal: 15000 }
-    ]
-  },
-  {
-    id: 'SRA-04',
-    stageNumber: 2,
-    stageName: 'Stage 2: Planting & Crop Establishment',
-    section: 'I. Direct Operations',
-    name: 'Planting Operations (Labor & Handling)',
-    category: 'plant',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 5000,
-    subItems: [
-      { id: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', qty: 5, unit: 'lac', unitCost: 600, subTotal: 3000 },
-      { id: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', qty: 5, unit: 'lac', unitCost: 400, subTotal: 2000 }
-    ]
-  },
-
-  // ── Stage 3: Basal Nutrition & Early Care ──
-  {
-    id: 'SRA-05',
-    stageNumber: 3,
-    stageName: 'Stage 3: Basal Nutrition & Early Care',
-    section: 'I. Direct Operations',
-    name: 'Basal Fertilizer Application (Labor & Materials)',
-    category: 'fert',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 15800,
-    subItems: [
-      { id: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', qty: 2, unit: 'bag', unitCost: 1600, subTotal: 3200 },
-      { id: 'SI-05-2', description: 'Application of 18-46-00 (DAP / Complete)', qty: 3, unit: 'bag', unitCost: 2500, subTotal: 7500 },
-      { id: 'SI-05-3', description: 'Application of 00-00-60 (MOP / Potash)', qty: 2, unit: 'bag', unitCost: 2200, subTotal: 4400 },
-      { id: 'SI-05-4', description: 'Fertilizer Application Labor', qty: 7, unit: 'bag', unitCost: 100, subTotal: 700 }
-    ]
-  },
-  {
-    id: 'SRA-06',
-    stageNumber: 3,
-    stageName: 'Stage 3: Basal Nutrition & Early Care',
-    section: 'I. Direct Operations',
-    name: 'Lime Application (Soil Amending)',
-    category: 'fert',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 2,
-    unit: 'ton',
-    rate: 2500,
-    costPerHa: 5000,
-    subItems: [
-      { id: 'SI-06-1', description: 'Agricultural Lime (Cal-Mag / Dolomite)', qty: 2, unit: 'ton', unitCost: 2500, subTotal: 5000 }
-    ]
-  },
-
-  // ── Stage 4: Cultivation & Weed Management ──
-  {
-    id: 'SRA-07',
-    stageNumber: 4,
-    stageName: 'Stage 4: Cultivation & Weed Management',
-    section: 'I. Direct Operations',
-    name: 'Cultivation (Off-barring & On-barring)',
-    category: 'weed',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 3000,
-    subItems: [
-      { id: 'SI-07-1', description: '1st Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 },
-      { id: 'SI-07-2', description: '2nd Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 }
-    ]
-  },
-  {
-    id: 'SRA-08',
-    stageNumber: 4,
-    stageName: 'Stage 4: Cultivation & Weed Management',
-    section: 'I. Direct Operations',
-    name: 'Weeding Operations',
-    category: 'weed',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 6000,
-    subItems: [
-      { id: 'SI-08-1', description: 'Manual Weeding (1st Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-2', description: 'Manual Weeding (2nd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-3', description: 'Manual Weeding (3rd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
-    ]
-  },
-
-  // ── Stage 5: Crop Maintenance & Final Hilling-Up ──
-  {
-    id: 'SRA-09',
-    stageNumber: 5,
-    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
-    section: 'I. Direct Operations',
-    name: 'Top-Dress / 2nd Dose Fertilization',
-    category: 'maint',
-    inputType: 'group',
-    isGroup: true,
-    unit: 'ha',
-    costPerHa: 2500,
-    subItems: [
-      { id: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', qty: 1.5, unit: 'bag', unitCost: 1600, subTotal: 2400 },
-      { id: 'SI-09-2', description: 'Side-dressing Application Labor', qty: 1.5, unit: 'bag', unitCost: 66.67, subTotal: 100 }
-    ]
-  },
-  {
-    id: 'SRA-10',
-    stageNumber: 5,
-    stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
-    section: 'I. Direct Operations',
-    name: 'Final Hilling-up (Pasungkal)',
-    category: 'maint',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 2500,
-    costPerHa: 2500,
-    subItems: [
-      { id: 'SI-10-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 1, unit: 'ha', unitCost: 2500, subTotal: 2500 }
-    ]
-  },
-
-  // ── Stage 6: Harvesting & Transport ──
-  {
-    id: 'SRA-11',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Cutting and Loading Operations',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 450,
-    costPerHa: 27000,
-    subItems: [
-      { id: 'SI-11-1', description: 'Cutting, De-trashing, and Truck Loading', qty: 60, unit: 'ton', unitCost: 450, subTotal: 27000 }
-    ]
-  },
-  {
-    id: 'SRA-12',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Hauling (Trucking to Mill)',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 250,
-    costPerHa: 15000,
-    subItems: [
-      { id: 'SI-12-1', description: 'Flatbed Hauling to Haw-Phil Milling Terminal', qty: 60, unit: 'ton', unitCost: 250, subTotal: 15000 }
-    ]
-  },
-  {
-    id: 'SRA-13',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Bull Cart / In-field Transport',
-    category: 'harvest',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 60,
-    unit: 'ton',
-    rate: 120,
-    costPerHa: 7200,
-    subItems: [
-      { id: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', qty: 60, unit: 'ton', unitCost: 120, subTotal: 7200 }
-    ]
-  },
-  {
-    id: 'SRA-14',
-    stageNumber: 6,
-    stageName: 'Stage 6: Harvesting & Transport',
-    section: 'I. Direct Operations',
-    name: 'Drainage & Post-Harvest Field Clearing',
-    category: 'prep',
-    inputType: 'direct',
-    isGroup: false,
-    perHa: 1,
-    unit: 'ha',
-    rate: 2000,
-    costPerHa: 2000,
-    subItems: [
-      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
-    ]
-  }
-];
+export { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations };
 
 export const updateFieldCustomStages = async (fieldId, stages) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
@@ -2106,25 +1844,6 @@ export const updateFieldCustomStages = async (fieldId, stages) => {
     }, { baseVersion });
     notifyDataUpdate();
   }
-};
-
-export const getDefaultStageOperations = (stageNumber) => {
-  return SRA_OPERATIONS_CATALOGUE
-    .filter(op => op.stageNumber === Number(stageNumber))
-    .map(op => ({
-      id: op.id,
-      name: op.name,
-      stageNumber: op.stageNumber,
-      stageName: op.stageName,
-      inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
-      isGroup: op.isGroup !== undefined ? op.isGroup : false,
-      perHa: op.perHa !== undefined ? op.perHa : (op.subItems && op.subItems[0] ? op.subItems[0].qty : 1),
-      rate: op.rate !== undefined ? op.rate : (op.subItems && op.subItems[0] ? op.subItems[0].unitCost : op.costPerHa || 0),
-      category: op.category || 'prep',
-      unit: op.unit || 'ha',
-      costPerHa: op.costPerHa || 0,
-      subItems: (op.subItems || []).map(si => ({ ...si }))
-    }));
 };
 
 export const getFieldCustomOperations = (fieldId, stageNumber) => {
@@ -2300,6 +2019,7 @@ export const listenToCloudSync = () => {
   try {
     const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
     const isMember = activeRole === ROLES.MEMBER_FARMER;
+    const isManager = activeRole === ROLES.FARM_MANAGER;
     const memberUserId = auth.currentUser.uid;
     const memberFieldId = CURRENT_SESSION?.fieldId || '__unassigned__';
     let rawFieldDocuments = [];
@@ -2314,9 +2034,15 @@ export const listenToCloudSync = () => {
       notify();
     };
 
-    const unsubBlockFarms = onSnapshot(collection(db, COLLECTIONS.BLOCK_FARMS), (snapshot) => {
+    const blockFarmsSource = isMember
+      ? doc(db, COLLECTIONS.BLOCK_FARMS, CURRENT_SESSION?.blockFarmId || '__unassigned__')
+      : isManager
+        ? doc(db, COLLECTIONS.BLOCK_FARMS, CURRENT_SESSION?.blockFarmId || '__unassigned__')
+        : collection(db, COLLECTIONS.BLOCK_FARMS);
+    const unsubBlockFarms = onSnapshot(blockFarmsSource, (snapshot) => {
       const remoteBF = [];
-      snapshot.forEach(docSnap => remoteBF.push(fromBlockFarmDocument(docSnap.id, docSnap.data())));
+      if (snapshot.docs) snapshot.forEach(docSnap => remoteBF.push(fromBlockFarmDocument(docSnap.id, docSnap.data())));
+      else if (snapshot.exists()) remoteBF.push(fromBlockFarmDocument(snapshot.id, snapshot.data()));
 
       blockFarms.length = 0;
       remoteBF.forEach(bf => blockFarms.push(bf));
@@ -2343,10 +2069,12 @@ export const listenToCloudSync = () => {
       notify();
     }, (err) => console.warn('[Mobile] SRA prices listener notice:', err));
 
+    let managerRecordUnsubscribers = [];
+    let refreshManagerRecords = () => {};
     const cyclesSource = isMember
       ? query(collection(db, COLLECTIONS.CROP_CYCLES), where('fieldId', '==', memberFieldId))
       : collection(db, COLLECTIONS.CROP_CYCLES);
-    const unsubCycles = onSnapshot(cyclesSource, (snapshot) => {
+    const unsubCycles = isManager ? () => {} : onSnapshot(cyclesSource, (snapshot) => {
       cropCycles.length = 0;
       snapshot.forEach(docSnap => cropCycles.push(fromCycleDocument(docSnap.id, docSnap.data())));
       refreshFieldViews();
@@ -2354,25 +2082,17 @@ export const listenToCloudSync = () => {
 
     const fieldsSource = isMember
       ? query(collection(db, COLLECTIONS.FIELDS), where('memberUserId', '==', memberUserId))
-      : collection(db, COLLECTIONS.FIELDS);
+      : isManager
+        ? query(collection(db, COLLECTIONS.FIELDS), where('blockFarmId', '==', CURRENT_SESSION?.blockFarmId || '__unassigned__'))
+        : collection(db, COLLECTIONS.FIELDS);
     const unsubFields = onSnapshot(fieldsSource, (snapshot) => {
       rawFieldDocuments = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+      if (isManager) refreshManagerRecords(rawFieldDocuments.map(field => field.id));
       refreshFieldViews();
     }, (err) => console.warn('[Mobile] Fields listener notice:', err));
 
     // 3. Live Operation Logs Listener (Authoritative Cloud Sync)
-    const logsSource = isMember
-      ? query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', memberFieldId))
-      : collection(db, COLLECTIONS.OPERATION_LOGS);
-    const unsubLogs = onSnapshot(logsSource, (snapshot) => {
-      const remoteLogs = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if ((data.status === 'ACTIVE' || data.status === 'ARCHIVED') && data.cycleId) {
-          remoteLogs.push(fromOperationLogDocument(docSnap.id, data));
-        }
-      });
-
+    const applyRemoteLogs = (remoteLogs) => {
       // Snapshot data replaces the canonical local replica. The only overlay is
       // derived from an explicit pending create mutation, never from a cached
       // record that happens to be absent from Firestore.
@@ -2407,12 +2127,61 @@ export const listenToCloudSync = () => {
       IS_SYNCED = pendingCount === 0;
       if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = pendingCount;
       notify();
-    }, (err) => console.warn('[Mobile] Operation logs listener notice:', err));
+    };
+    const readRemoteLogs = (snapshot) => {
+      const remoteLogs = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if ((data.status === 'ACTIVE' || data.status === 'ARCHIVED') && data.cycleId) {
+          remoteLogs.push(fromOperationLogDocument(docSnap.id, data));
+        }
+      });
+      return remoteLogs;
+    };
+    const logsSource = isMember
+      ? query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', memberFieldId))
+      : collection(db, COLLECTIONS.OPERATION_LOGS);
+    const unsubLogs = isManager ? () => {} : onSnapshot(
+      logsSource,
+      snapshot => applyRemoteLogs(readRemoteLogs(snapshot)),
+      err => console.warn('[Mobile] Operation logs listener notice:', err)
+    );
+
+    if (isManager) {
+      const cyclesByField = new Map();
+      const logsByField = new Map();
+      refreshManagerRecords = (fieldIds) => {
+        managerRecordUnsubscribers.forEach(unsubscribe => unsubscribe());
+        managerRecordUnsubscribers = [];
+        cyclesByField.clear();
+        logsByField.clear();
+        cropCycles.length = 0;
+        applyRemoteLogs([]);
+        fieldIds.forEach(fieldId => {
+          managerRecordUnsubscribers.push(onSnapshot(
+            query(collection(db, COLLECTIONS.CROP_CYCLES), where('fieldId', '==', fieldId)),
+            snapshot => {
+              cyclesByField.set(fieldId, snapshot.docs.map(document => fromCycleDocument(document.id, document.data())));
+              cropCycles.length = 0;
+              cropCycles.push(...Array.from(cyclesByField.values()).flat());
+              refreshFieldViews();
+            },
+            err => console.warn('[Mobile] Scoped crop cycles listener notice:', err)
+          ));
+          managerRecordUnsubscribers.push(onSnapshot(
+            query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', fieldId)),
+            snapshot => {
+              logsByField.set(fieldId, readRemoteLogs(snapshot));
+              applyRemoteLogs(Array.from(logsByField.values()).flat());
+            },
+            err => console.warn('[Mobile] Scoped operation logs listener notice:', err)
+          ));
+        });
+      };
+    }
 
     // 4. Live Support Tickets Listener (Authoritative Cloud Sync)
-    const ticketsSource = isMember
-      ? query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', memberUserId))
-      : collection(db, COLLECTIONS.SUPPORT_TICKETS);
+    const ticketsSource = query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', memberUserId));
     const unsubTickets = onSnapshot(ticketsSource, (snapshot) => {
       const remoteTickets = [];
       snapshot.forEach(docSnap => remoteTickets.push(fromSupportTicketDocument(docSnap.id, docSnap.data())));
@@ -2424,12 +2193,12 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Support tickets listener notice:', err));
 
     // 5. Live Users Directory Listener (Authoritative Cloud Sync)
-    const usersSource = isMember
-      ? doc(db, COLLECTIONS.USERS, memberUserId)
-      : collection(db, COLLECTIONS.USERS);
-    const unsubUsers = onSnapshot(usersSource, (snapshot) => {
+    const usersSource = activeRole === ROLES.SRA_ADMIN
+      ? query(collection(db, COLLECTIONS.USERS), where('role', 'in', [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]))
+      : doc(db, COLLECTIONS.USERS, memberUserId);
+    const unsubUsers = isManager ? () => {} : onSnapshot(usersSource, (snapshot) => {
       const remoteUsers = [];
-      if (isMember) {
+      if (activeRole !== ROLES.SRA_ADMIN) {
         if (snapshot.exists()) remoteUsers.push(fromUserDocument(snapshot.id, snapshot.data()));
       } else {
         snapshot.forEach(docSnap => remoteUsers.push(fromUserDocument(docSnap.id, docSnap.data())));
@@ -2440,9 +2209,23 @@ export const listenToCloudSync = () => {
       saveItem(STORAGE_KEYS.USERS, users);
       notify();
     }, (err) => console.warn('[Mobile] Users listener notice:', err));
+    if (isManager) {
+      authenticatedRequest('/api/users')
+        .then(result => {
+          const remoteUsers = (result.data || []).map(user => fromUserDocument(user.id || user.employeeId, user));
+          users.length = 0;
+          users.push(...remoteUsers);
+          saveItem(STORAGE_KEYS.USERS, users);
+          notify();
+        })
+        .catch(err => console.warn('[Mobile] Scoped users API notice:', err.message));
+    }
 
     // 6. Live Audit Reports Listener (Authoritative Cloud Sync)
-    const unsubAuditReports = isMember ? () => {} : onSnapshot(collection(db, COLLECTIONS.AUDIT_REPORTS), (snapshot) => {
+    const reportsSource = isManager
+      ? query(collection(db, COLLECTIONS.AUDIT_REPORTS), where('blockFarmId', '==', CURRENT_SESSION?.blockFarmId || '__unassigned__'))
+      : collection(db, COLLECTIONS.AUDIT_REPORTS);
+    const unsubAuditReports = isMember ? () => {} : onSnapshot(reportsSource, (snapshot) => {
       const remoteAudits = [];
       snapshot.forEach(docSnap => remoteAudits.push(fromAuditReportDocument(docSnap.id, docSnap.data())));
       auditReports.length = 0;
@@ -2453,7 +2236,10 @@ export const listenToCloudSync = () => {
     }, (err) => console.warn('[Mobile] Audit reports listener notice:', err));
 
     // 7. Live Audit Logs / System History Listener (Authoritative Cloud Sync)
-    const unsubAuditLogs = isMember ? () => {} : onSnapshot(collection(db, COLLECTIONS.AUDIT_LOGS), (snapshot) => {
+    const auditLogsSource = isManager
+      ? query(collection(db, COLLECTIONS.AUDIT_LOGS), where('actorUserId', '==', memberUserId))
+      : collection(db, COLLECTIONS.AUDIT_LOGS);
+    const unsubAuditLogs = isMember ? () => {} : onSnapshot(auditLogsSource, (snapshot) => {
       const remoteLogs = [];
       snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
 
@@ -2473,6 +2259,7 @@ export const listenToCloudSync = () => {
       unsubUsers();
       unsubAuditReports();
       unsubAuditLogs();
+      managerRecordUnsubscribers.forEach(unsubscribe => unsubscribe());
     };
   } catch (err) {
     console.warn('[Mobile] Error setting up Cloud listeners:', err);
@@ -2480,16 +2267,130 @@ export const listenToCloudSync = () => {
   }
 };
 
-export const performMobileSync = async () => {
-  const res = await flushOutboxToApi();
-  IS_SYNCED = getOutboxCount() === 0;
-  if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = getPendingSyncCount(CURRENT_SESSION);
-  notify();
-  return res;
+let mobileSyncPromise = null;
+
+const canonicalStageName = stageNumber => {
+  const numericStage = Number(stageNumber);
+  return SUGARCANE_STAGES.find(stage => stage.stageNumber === numericStage)?.name || null;
+};
+
+const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
+  let logsChanged = false;
+  let fieldsChanged = false;
+
+  queueBefore.forEach(item => {
+    const response = responses[item.mutationId];
+    if (!response?.success) return;
+
+    if (item.type === 'operation_log' || item.type === 'takeover_log') {
+      const serverRecord = response.data;
+      if (!serverRecord?.id) return;
+      const localId = item.payload?.id;
+      const existingIndex = operationLogs.findIndex(log => log.id === localId || log.id === serverRecord.id);
+      const reconciled = {
+        ...(existingIndex >= 0 ? operationLogs[existingIndex] : {}),
+        ...fromOperationLogDocument(serverRecord.id, serverRecord),
+        synced: true,
+        isOffline: false,
+        cloudQueueStatus: 'synced',
+        syncedAt: new Date().toISOString()
+      };
+      if (existingIndex >= 0) operationLogs[existingIndex] = reconciled;
+      else operationLogs.unshift(reconciled);
+      logsChanged = true;
+      console.info(`[OPERATION] Server acknowledged: ${serverRecord.id}`);
+    }
+
+    if (item.type === 'stage_update') {
+      const serverCycle = response.data;
+      if (!serverCycle?.id) return;
+      const cycleIndex = cropCycles.findIndex(cycle => cycle.id === serverCycle.id);
+      if (cycleIndex >= 0) cropCycles[cycleIndex] = { ...cropCycles[cycleIndex], ...serverCycle };
+      else cropCycles.push(fromCycleDocument(serverCycle.id, serverCycle));
+      const targetField = fields.find(field => field.currentCycleId === serverCycle.id);
+      if (targetField) {
+        targetField.stageNumber = Number(serverCycle.currentStageNumber);
+        targetField.stage = canonicalStageName(serverCycle.currentStageNumber);
+        targetField.month = Number(serverCycle.elapsedMonths || 0);
+        targetField.synced = true;
+        targetField.lastSync = 'Just now';
+        fieldsChanged = true;
+        console.info(`[FIELD] Stage refreshed: ${targetField.id}`);
+      }
+    }
+  });
+
+  if (logsChanged) {
+    const deduped = cleanupDuplicateLogs(operationLogs);
+    operationLogs.length = 0;
+    operationLogs.push(...deduped);
+    await saveItem(STORAGE_KEYS.LOGS, operationLogs);
+  }
+  if (fieldsChanged) await saveItem(STORAGE_KEYS.FIELDS, fields);
+};
+
+export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
+  if (mobileSyncPromise) return mobileSyncPromise;
+
+  mobileSyncPromise = (async () => {
+    console.info(`[SYNC] Trigger: ${trigger}`);
+    const remainingBefore = getOutboxCount();
+    if (remainingBefore === 0) {
+      IS_SYNCED = true;
+      if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
+      notify();
+      return { success: true, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: 0, responses: {} };
+    }
+    if (!getNetworkStatus()) {
+      return { success: false, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: remainingBefore, reason: 'OFFLINE' };
+    }
+    if (!CURRENT_SESSION?.employeeId || !auth?.currentUser) {
+      return { success: false, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: remainingBefore, reason: 'AUTHENTICATION_REQUIRED' };
+    }
+
+    try {
+      const refreshed = await refreshMobileSessionFromFirebase();
+      if (refreshed?.user) {
+        CURRENT_SESSION = { ...refreshed.user, lastActiveAt: Date.now() };
+        await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+      }
+    } catch (error) {
+      console.info(`[SYNC] Failed: AUTHENTICATION ${error?.message || 'Session refresh failed'}`);
+      return {
+        success: false,
+        attemptedCount: 0,
+        processedCount: 0,
+        failedCount: remainingBefore,
+        remainingCount: remainingBefore,
+        reason: error?.status === 403 ? 'AUTHORIZATION_FAILURE' : 'AUTHENTICATION_RECOVERY'
+      };
+    }
+
+    const queueBefore = getOutboxQueue();
+    const result = await flushOutboxToApi();
+    await reconcileSuccessfulMutations(queueBefore, result.responses);
+    IS_SYNCED = getOutboxCount() === 0;
+    if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = getPendingSyncCount(CURRENT_SESSION);
+    notify();
+    return {
+      attemptedCount: Number(result.attemptedCount || 0),
+      processedCount: Number(result.processedCount || 0),
+      failedCount: Number(result.failedCount || 0),
+      remainingCount: getOutboxCount(),
+      ...result,
+      success: result.success === true && getOutboxCount() === 0
+    };
+  })();
+
+  try {
+    return await mobileSyncPromise;
+  } finally {
+    mobileSyncPromise = null;
+  }
 };
 
 // Register automatic sync on network reconnection
-setOnReconnectCallback(performMobileSync);
+setOnReconnectCallback(trigger => performMobileSync(trigger || 'NETWORK_RESTORED'));
 
 export const initializeOfflineStorage = async () => {
   try {
@@ -2609,7 +2510,7 @@ export const initializeOfflineStorage = async () => {
       checkConnectivity().then(online => {
         if (online) {
           restoreSessionFromToken()
-            .then(result => { if (result.success) return performMobileSync(); })
+            .then(result => { if (result.success) return performMobileSync('APP_START'); })
             .catch(() => {});
         }
       });

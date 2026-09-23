@@ -29,7 +29,7 @@ async function ensurePricePublicationAudit(publication) {
   });
 }
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const snapshot = await db.collection(COLLECTIONS.SRA_PRICES).get();

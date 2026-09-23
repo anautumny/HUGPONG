@@ -179,12 +179,16 @@ export function toCycleDocument(field = {}, cycle = {}) {
 }
 
 export function fromFieldDocument(id, value = {}, cycle = null) {
+  const cycleStageNumber = Number(cycle?.currentStageNumber);
+  const canonicalStageNumber = Number.isInteger(cycleStageNumber) && cycleStageNumber >= 1 && cycleStageNumber <= 6
+    ? cycleStageNumber
+    : null;
   return {
     id,
     ...value,
     memberId: value.memberUserId || '',
     ha: Number(value.areaHa || 0),
-    stageNumber: Number(cycle?.currentStageNumber || 1),
+    stageNumber: canonicalStageNumber,
     month: Number(cycle?.elapsedMonths || 0),
     batchMonth: Number(cycle?.batchNumber || 1),
     cycleNumber: Number(cycle?.sequenceNumber || 1),

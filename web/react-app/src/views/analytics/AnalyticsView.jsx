@@ -63,6 +63,7 @@ export default function AnalyticsView() {
 
     setIsOpsLoading(true);
     const unsubOps = subscribeToOperationsData({
+      user,
       onUpdate: (data) => {
         setOperations(data.operations || []);
         setIsOpsLoading(false);

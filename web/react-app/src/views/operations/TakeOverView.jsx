@@ -3,10 +3,10 @@ import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import {
-  SUGARCANE_STAGES,
-  SRA_OPERATIONS_CATALOGUE,
   createOperation
 } from '../../services/operationsService';
+import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
+import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
 import { authenticatedRequest } from '../../services/apiClient';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import {
@@ -52,6 +52,7 @@ export default function TakeOverView() {
   // Selected field and authorization state
   const [selectedFieldId, setSelectedFieldId] = useState(initialFieldId);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [takeoverGrant, setTakeoverGrant] = useState(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // Take Over Form State
@@ -272,15 +273,16 @@ export default function TakeOverView() {
         } : null
       };
 
-      await createOperation(payload);
+      await createOperation(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
       if (advanceStage) {
         try {
-          const nextStage = Math.min(6, Number(selectedStageNumber) + 1);
+          const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
-            body: { currentStageNumber: nextStage }
+            body: { currentStageNumber: nextStage },
+            headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
           console.warn('[TakeOver] Crop cycle stage advancement note:', stageErr.message);
@@ -402,6 +404,7 @@ export default function TakeOverView() {
             onChange={(e) => {
               setSelectedFieldId(e.target.value);
               setIsAuthorized(false);
+              setTakeoverGrant(null);
             }}
             options={fieldsData.fields.map(f => {
               const isPersonal = f.memberUserId && (f.memberUserId === user?.id || f.memberUserId === user?.employeeId);
@@ -765,7 +768,8 @@ export default function TakeOverView() {
         onClose={() => setAuthModalOpen(false)}
         field={currentField}
         user={user}
-        onAuthorized={() => {
+        onAuthorized={(_field, grant) => {
+          setTakeoverGrant(grant);
           setIsAuthorized(true);
           setAuthModalOpen(false);
         }}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, Modal, Share, ActivityIndicator,
+  KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -307,7 +307,7 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }}>
         {/* Top Nav */}
         <View style={s.topNav}>
           <TouchableOpacity style={s.backBtn} onPress={back}>
@@ -717,7 +717,7 @@ const s = StyleSheet.create({
   successSub: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', marginTop: 3, marginBottom: 16 },
   credIdBox: { width: '100%', backgroundColor: '#F0F8EC', borderRadius: RADIUS.lg, borderWidth: 1.5, borderColor: COLORS.primary, padding: 14, alignItems: 'center', marginBottom: 12 },
   credIdLabel: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1, color: COLORS.primary, marginBottom: 4 },
-  credIdVal: { fontSize: 28, fontWeight: '900', color: COLORS.primary, letterSpacing: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  credIdVal: { fontSize: 28, fontWeight: '900', color: COLORS.primary, letterSpacing: 3, fontFamily: 'monospace' },
   credIdSub: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
   metaRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', backgroundColor: COLORS.background, padding: 10, borderRadius: RADIUS.md, marginBottom: 12, gap: 10 },
   metaCol: { flex: 1 },

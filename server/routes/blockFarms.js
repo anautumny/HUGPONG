@@ -30,7 +30,7 @@ router.get('/', requireAuth, async (req, res) => {
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
       const data = farms.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }));
       return res.json({ success: true, count: data.length, data });
-    } else if (role !== ROLES.SRA_ADMIN && role !== ROLES.SUPER_ADMIN) {
+    } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list block farms.' });
     }
     const snapshot = await query.get();

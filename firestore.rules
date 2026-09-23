@@ -14,13 +14,38 @@ service cloud.firestore {
       return signedIn() && role() in roles;
     }
 
-    function staff() {
-      return hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+    function manager() {
+      return hasRole(['FARM_MANAGER']);
+    }
+
+    function sraAdmin() {
+      return hasRole(['SRA_ADMIN']);
+    }
+
+    function superAdmin() {
+      return hasRole(['SUPER_ADMIN']);
+    }
+
+    function assignedFarm(farmId) {
+      return signedIn()
+        && request.auth.token.blockFarmId is string
+        && request.auth.token.blockFarmId == farmId;
+    }
+
+    function canReadFieldData(fieldData) {
+      return sraAdmin()
+        || (manager() && assignedFarm(fieldData.blockFarmId))
+        || (hasRole(['MEMBER_FARMER']) && fieldData.memberUserId == request.auth.uid);
     }
 
     function ownsField(fieldId) {
       return signedIn()
         && get(/databases/$(database)/documents/fields/$(fieldId)).data.memberUserId == request.auth.uid;
+    }
+
+    function canReadField(fieldId) {
+      return signedIn()
+        && canReadFieldData(get(/databases/$(database)/documents/fields/$(fieldId)).data);
     }
 
     function containsCredentialFields(data) {
@@ -38,55 +63,62 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn()
         && !containsCredentialFields(resource.data)
-        && (request.auth.uid == userId || staff());
+        && (request.auth.uid == userId
+          || (sraAdmin() && resource.data.role != 'SUPER_ADMIN')
+          || superAdmin());
       allow create, update, delete: if false;
     }
 
     match /block_farms/{farmId} {
-      allow read: if signedIn();
+      allow read: if sraAdmin()
+        || (manager() && assignedFarm(farmId) && resource.data.managerUserId == request.auth.uid)
+        || (hasRole(['MEMBER_FARMER']) && assignedFarm(farmId));
       allow write: if false;
     }
 
     match /fields/{fieldId} {
-      allow read: if signedIn()
-        && (staff() || resource.data.memberUserId == request.auth.uid);
+      allow read: if signedIn() && canReadFieldData(resource.data);
       allow write: if false;
     }
 
     match /crop_cycles/{cycleId} {
-      allow read: if signedIn()
-        && (staff() || ownsField(resource.data.fieldId));
+      allow read: if canReadField(resource.data.fieldId);
       allow write: if false;
     }
 
     match /operation_logs/{logId} {
-      allow read: if signedIn()
-        && (staff() || ownsField(resource.data.fieldId));
+      allow read: if canReadField(resource.data.fieldId);
       allow write: if false;
     }
 
     match /audit_reports/{reportId} {
-      allow read: if staff();
+      allow read: if sraAdmin()
+        || (manager() && assignedFarm(resource.data.blockFarmId));
       allow write: if false;
     }
 
     match /audit_logs/{eventId} {
-      allow read: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow read: if sraAdmin() || superAdmin()
+        || (manager() && (
+          resource.data.actorUserId == request.auth.uid
+          || assignedFarm(resource.data.blockFarmId)
+        ));
       allow write: if false;
     }
 
     match /sra_prices/{priceId} {
-      allow read: if signedIn();
+      allow read: if hasRole(['MEMBER_FARMER', 'FARM_MANAGER', 'SRA_ADMIN']);
       allow write: if false;
     }
 
     match /support_tickets/{ticketId} {
-      allow read: if staff() || (signedIn() && resource.data.createdByUserId == request.auth.uid);
+      allow read: if superAdmin()
+        || (signedIn() && resource.data.createdByUserId == request.auth.uid);
       allow write: if false;
     }
 
     match /terminal_diagnostics/{terminalId} {
-      allow read: if hasRole(['FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN']);
+      allow read: if superAdmin() || sraAdmin();
       allow write: if false;
     }
 

@@ -65,6 +65,10 @@ export default function AppShell() {
     );
   }
 
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
   // If user is Member Farmer, redirect with explanation (Member Farmer is mobile-only in Stage 7)
   if (isAuthenticated && roleKey === ROLE_KEYS.MEMBER_FARMER) {
     return (

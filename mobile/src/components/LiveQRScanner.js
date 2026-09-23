@@ -8,7 +8,6 @@ import {
   TextInput,
   Animated,
   Dimensions,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -540,7 +539,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: 'monospace',
   },
   manualSubmitBtn: {
     flexDirection: 'row',

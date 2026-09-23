@@ -21,12 +21,15 @@ const {
   createMutationEnvelope,
   migrateOutbox,
   appendUniqueMutation,
+  classifyMutationError,
+  createSingleFlightRunner,
   drainMutationQueue
 } = require('./mutationOutboxCore');
 
 let outboxQueue = [];
-let isProcessing = false;
 let syncListeners = [];
+const transientTakeoverGrants = new Map();
+const runOutboxSingleFlight = createSingleFlightRunner();
 
 export function subscribeToSyncEngine(listener) {
   syncListeners.push(listener);
@@ -277,7 +280,13 @@ export async function enqueueOutboxItem(type, payload, options = {}) {
   const appended = appendUniqueMutation(outboxQueue, outboxItem);
   if (!appended.inserted) return appended.item;
   outboxQueue = appended.queue;
-  await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
+  const persisted = await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
+  if (!persisted) {
+    outboxQueue = outboxQueue.filter(item => item.mutationId !== outboxItem.mutationId);
+    throw new Error('The operation could not be saved to the persistent synchronization queue.');
+  }
+  if (options.takeoverGrant) transientTakeoverGrants.set(outboxItem.mutationId, options.takeoverGrant);
+  console.info(`[SYNC] Enqueued: ${outboxItem.mutationId}`);
   notifySyncEngine();
   return outboxItem;
 }
@@ -323,30 +332,47 @@ export async function markOutboxItemFailed(outboxId, errorMessage) {
  * @param {Function} remoteUploadHandler - Async callback `async (item) => boolean`
  */
 export async function processOutbox(remoteUploadHandler) {
-  if (isProcessing) return { success: false, reason: 'Already processing' };
-  if (outboxQueue.length === 0) return { success: true, processedCount: 0 };
-
-  isProcessing = true;
-  try {
+  return runOutboxSingleFlight(async () => {
+    if (outboxQueue.length === 0) {
+      return { success: true, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: 0, responses: {} };
+    }
+    console.info(`[SYNC] Queue size: ${outboxQueue.length}`);
     const drained = await drainMutationQueue(
       outboxQueue,
-      typeof remoteUploadHandler === 'function' ? remoteUploadHandler : async () => true,
-      nextQueue => {
+      async item => {
+        console.info(`[SYNC] Item attempt: ${item.mutationId}`);
+        try {
+          const response = await (typeof remoteUploadHandler === 'function' ? remoteUploadHandler(item) : { success: true });
+          transientTakeoverGrants.delete(item.mutationId);
+          console.info(`[SYNC] Success: ${item.mutationId}`);
+          return response;
+        } catch (error) {
+          const classification = classifyMutationError(error);
+          const label = classification === 'retryable' || classification === 'server_failure' ? 'Retry' : 'Failed';
+          console.info(`[SYNC] ${label}: ${item.mutationId} ${error?.message || 'Unknown error'}`);
+          throw error;
+        }
+      },
+      async nextQueue => {
+        const persisted = await saveItem(STORAGE_KEYS.OUTBOX, nextQueue);
+        if (!persisted) throw new Error('The synchronization queue state could not be persisted.');
         outboxQueue = nextQueue;
         notifySyncEngine();
       }
     );
     outboxQueue = drained.queue;
 
-    await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue);
+    if (!(await saveItem(STORAGE_KEYS.OUTBOX, outboxQueue))) {
+      throw new Error('The synchronization result could not be persisted.');
+    }
     await saveItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
     notifySyncEngine();
 
     const { queue: _persistedQueue, ...result } = drained;
+    console.info(`[SYNC] Remaining: ${result.remainingCount}`);
+    console.info('[SYNC] Complete');
     return result;
-  } finally {
-    isProcessing = false;
-  }
+  });
 }
 
 /**
@@ -365,7 +391,7 @@ export async function flushOutboxToApi() {
 
       if (type === 'operation_log' || type === 'takeover_log') {
         if (!payload.id || !payload.cycleId) throw new Error('Queued operation requires stable id and cycleId.');
-        return createOperation(payload, mutation);
+        return createOperation(payload, mutation, transientTakeoverGrants.get(item.mutationId) || null);
       } else if (type === 'ticket') {
         return createTicket(payload, mutation);
       } else if (type === 'stage_update') {
@@ -373,20 +399,20 @@ export async function flushOutboxToApi() {
         return updateCycleStage(payload.cycleId, {
           currentStageNumber: Number(payload.currentStageNumber || payload.stageNumber),
           elapsedMonths: Number(payload.elapsedMonths || 0)
-        }, mutation);
+        }, mutation, transientTakeoverGrants.get(item.mutationId) || null);
       } else if (type === 'audit_log' || type === 'system_event') {
         return createAuditEvent(payload, mutation);
       } else if (type === 'operation_amendment') {
-        return amendOperation(payload.id, payload.changes, payload.amendment, mutation);
+        return amendOperation(payload.id, payload.changes, payload.amendment, mutation, transientTakeoverGrants.get(item.mutationId) || null);
       } else if (type === 'operation_archive') {
-        return archiveOperations(payload.operationLogIds || [payload.id], mutation);
+        return archiveOperations(payload.operationLogIds || [payload.id], mutation, transientTakeoverGrants.get(item.mutationId) || null);
       } else if (type === 'field_upsert') {
         if (payload.isNew) return createField(payload, mutation);
         return updateField(payload.id, payload, mutation);
       } else if (type === 'field_archive') {
         return archiveField(payload.id, mutation);
       } else if (type === 'cycle_rollover') {
-        return rolloverCycle(payload.fieldId, payload, mutation);
+        return rolloverCycle(payload.fieldId, payload, mutation, transientTakeoverGrants.get(item.mutationId) || null);
       } else if (type === 'price') {
         return publishPrice(payload, mutation);
       } else if (type === 'custom_stages') {

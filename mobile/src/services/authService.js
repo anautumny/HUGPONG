@@ -111,8 +111,28 @@ export async function refreshServerSession(token) {
   return result;
 }
 
-export async function verifyPasswordWithServer(password) {
-  return authenticatedRequest('/auth/verify-password', { method: 'POST', body: { password } });
+export async function verifyPasswordWithServer(password, authorization = {}) {
+  return authenticatedRequest('/auth/verify-password', {
+    method: 'POST',
+    body: { password, ...authorization }
+  });
+}
+
+export async function refreshMobileSessionFromFirebase() {
+  if (!auth?.currentUser) throw new Error('Firebase authentication must be restored before synchronization.');
+  const firebaseIdToken = await auth.currentUser.getIdToken(true);
+  const response = await fetchWithHostFallback('/auth/mobile-session', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-client-platform': 'mobile',
+      Authorization: `Bearer ${firebaseIdToken}`
+    },
+    body: JSON.stringify({})
+  });
+  const result = await parseResponse(response);
+  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  return result;
 }
 
 export async function changePasswordWithServer(currentPassword, newPassword) {

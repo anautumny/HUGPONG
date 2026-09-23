@@ -61,6 +61,7 @@ export default function AuditCenterView() {
   // Subscribe to audit reports
   useEffect(() => {
     const unsub = subscribeToAuditReports({
+      blockFarmId: isFarmManager ? user?.blockFarmId : null,
       onUpdate: ({ reports: updatedReports, isLoading, error }) => {
         setReports(updatedReports);
         setIsLoadingReports(isLoading);
@@ -86,17 +87,18 @@ export default function AuditCenterView() {
     });
 
     return () => unsub();
-  }, []);
+  }, [isFarmManager, user?.blockFarmId]);
 
   // Subscribe to operations for compilation pre-flight
   useEffect(() => {
     const unsub = subscribeToOperationsData({
+      user,
       onUpdate: ({ operations: ops }) => {
         setOperations(ops);
       }
     });
     return () => unsub();
-  }, []);
+  }, [user]);
 
   // Subscribe to fields and block farms
   useEffect(() => {
