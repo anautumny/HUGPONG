@@ -442,21 +442,21 @@ export default function SyncMonitorScreen({ navigation }) {
               <View style={s.infoItem}>
                 <Text style={s.infoItemLabel}>Field</Text>
                 <Text style={s.infoItemValue} numberOfLines={1}>
-                  {assignedField ? `${assignedField.id} (${Number(assignedField.ha || 0).toFixed(2)} Ha)` : 'DEV-FLD-001 (1.00 Ha)'}
+                  {assignedField ? `${assignedField.id} (${Number(assignedField.ha || 0).toFixed(2)} Ha)` : 'Not assigned'}
                 </Text>
               </View>
 
               <View style={s.infoItem}>
                 <Text style={s.infoItemLabel}>Farm</Text>
                 <Text style={s.infoItemValue} numberOfLines={1}>
-                  {assignedFarm?.name || 'Development Test Block Farm'}
+                  {assignedFarm?.name || 'Not assigned'}
                 </Text>
               </View>
 
               <View style={s.infoItem}>
                 <Text style={s.infoItemLabel}>Manager</Text>
                 <Text style={s.infoItemValue} numberOfLines={1}>
-                  {assignedManager?.name || assignedManager?.displayName || 'District Farm Manager'}
+                  {assignedManager?.name || assignedManager?.displayName || 'Not assigned'}
                 </Text>
               </View>
 

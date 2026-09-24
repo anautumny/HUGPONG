@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import {
@@ -6,20 +6,33 @@ import {
   archiveOperations
 } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
+import {
+  appendUniqueArchiveRecords,
+  fetchArchivedOperations,
+  getArchiveClearViewPreferenceKey,
+  readArchiveClearViewPreference,
+  writeArchiveClearViewPreference
+} from '../../services/archiveViewService';
+import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import EditOperationModal from '../../components/operations/EditOperationModal';
 import AddOperationModal from '../../components/operations/AddOperationModal';
 import TakeOverAuthModal from '../../components/operations/TakeOverAuthModal';
 import {
   Table,
-  TablePagination,
   Button,
   StatusBadge,
   ConfirmDialog,
-  Select,
-  Input
+  Select
 } from '../../components/ui';
-import { formatCurrency, formatDate, formatCropYear, formatHectares } from '../../utils/formatters';
+import {
+  canonicalStoredCropYear,
+  formatCurrency,
+  formatDate,
+  formatCropYearDisplay,
+  formatHectares,
+  uniqueCropYears
+} from '../../utils/formatters';
 import {
   ClipboardList,
   History,
@@ -84,9 +97,34 @@ export default function OperationsView() {
 
   // History search and filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ACTIVE');
+  const [statusFilter, setStatusFilter] = useState('ARCHIVED');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+  const [archiveFilters, setArchiveFilters] = useState({
+    cropYearCycle: '',
+    fieldId: '',
+    operationDefinitionId: '',
+    search: ''
+  });
+  const [archiveSearchDraft, setArchiveSearchDraft] = useState('');
+  const [archiveState, setArchiveState] = useState({
+    records: [],
+    nextCursor: null,
+    hasMore: false,
+    isLoading: false,
+    isLoadingMore: false,
+    isCleared: false,
+    error: null,
+    loadMoreError: null
+  });
+  const [archiveReloadKey, setArchiveReloadKey] = useState(0);
+  const archiveRequestIdRef = useRef(0);
+  const archiveLoadMoreLockRef = useRef(false);
+  const archivePreferenceKey = useMemo(
+    () => getArchiveClearViewPreferenceKey(user, roleKey),
+    [user?.employeeId, user?.id, user?.userId, user?.uid, user?.email, user?.canonicalRole, user?.role, roleKey]
+  );
+  const [hydratedArchivePreferenceKey, setHydratedArchivePreferenceKey] = useState('');
 
   // Auto-expand field from URL if requested
   useEffect(() => {
@@ -101,6 +139,7 @@ export default function OperationsView() {
 
     const unsubOps = subscribeToOperationsData({
       user,
+      status: 'ACTIVE',
       onUpdate: (data) => {
         if (!active) return;
         setOpsData(data);
@@ -126,6 +165,110 @@ export default function OperationsView() {
     };
   }, [user?.id, user?.employeeId]);
 
+  useEffect(() => {
+    if (!archivePreferenceKey) {
+      setHydratedArchivePreferenceKey('');
+      return;
+    }
+
+    archiveRequestIdRef.current += 1;
+    archiveLoadMoreLockRef.current = false;
+    const isCleared = readArchiveClearViewPreference(archivePreferenceKey);
+    setArchiveState(previous => ({
+      ...previous,
+      records: [],
+      nextCursor: null,
+      hasMore: false,
+      isLoading: false,
+      isLoadingMore: false,
+      isCleared,
+      error: null,
+      loadMoreError: null
+    }));
+    setHydratedArchivePreferenceKey(archivePreferenceKey);
+  }, [archivePreferenceKey]);
+
+  const loadArchivePage = useCallback(async ({ append = false } = {}) => {
+    if (append && archiveLoadMoreLockRef.current) return;
+    if (append) archiveLoadMoreLockRef.current = true;
+    const requestId = ++archiveRequestIdRef.current;
+    setArchiveState(previous => ({
+      ...previous,
+      isLoading: !append,
+      isLoadingMore: append,
+      isCleared: false,
+      error: append ? previous.error : null,
+      loadMoreError: null,
+      ...(append ? {} : { records: [], nextCursor: null, hasMore: false })
+    }));
+    try {
+      const page = await fetchArchivedOperations({
+        ...archiveFilters,
+        cursor: append ? archiveState.nextCursor : null
+      });
+      if (requestId !== archiveRequestIdRef.current) return;
+      setArchiveState(previous => ({
+        ...previous,
+        records: append
+          ? appendUniqueArchiveRecords(previous.records, page.records)
+          : page.records,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        isLoading: false,
+        isLoadingMore: false,
+        isCleared: false,
+        error: null,
+        loadMoreError: null
+      }));
+    } catch (error) {
+      if (requestId !== archiveRequestIdRef.current) return;
+      setArchiveState(previous => ({
+        ...previous,
+        isLoading: false,
+        isLoadingMore: false,
+        ...(append
+          ? { loadMoreError: error.message || 'Unable to load more archived records.' }
+          : { error: error.message || 'Unable to load archived records.' })
+      }));
+    } finally {
+      if (append) archiveLoadMoreLockRef.current = false;
+    }
+  }, [archiveFilters, archiveState.nextCursor]);
+
+  useEffect(() => {
+    if (activeTab !== 'history' || statusFilter !== 'ARCHIVED') return;
+    if (!archivePreferenceKey || hydratedArchivePreferenceKey !== archivePreferenceKey) return;
+    if (archiveState.isCleared) return;
+    loadArchivePage({ append: false });
+  }, [activeTab, statusFilter, archiveFilters, archiveReloadKey, archivePreferenceKey, hydratedArchivePreferenceKey]);
+
+  const clearArchiveView = () => {
+    writeArchiveClearViewPreference(archivePreferenceKey, true);
+    archiveRequestIdRef.current += 1;
+    archiveLoadMoreLockRef.current = false;
+    setArchiveState(previous => ({
+      ...previous,
+      records: [],
+      nextCursor: null,
+      hasMore: false,
+      isLoading: false,
+      isLoadingMore: false,
+      isCleared: true,
+      error: null,
+      loadMoreError: null
+    }));
+  };
+
+  const showArchiveRecords = () => {
+    writeArchiveClearViewPreference(archivePreferenceKey, false);
+    setArchiveState(previous => ({ ...previous, isCleared: false }));
+    loadArchivePage({ append: false });
+  };
+
+  const updateArchiveFilter = (key, value) => {
+    setArchiveFilters(previous => ({ ...previous, [key]: value }));
+  };
+
   // Scope operations to manager's fields
   const scopedOperations = useMemo(() => {
     if (!isManager) return opsData.operations;
@@ -141,6 +284,10 @@ export default function OperationsView() {
     });
     return grouped;
   }, [scopedOperations]);
+
+  const cropYearByCycleId = useMemo(() => new Map(
+    (fieldsData.cropCycles || []).map(cycle => [cycle.id, cycle.cropYear])
+  ), [fieldsData.cropCycles]);
 
   // Active takeover field object
   const activeTakeOverField = useMemo(() => {
@@ -256,6 +403,35 @@ export default function OperationsView() {
   }, [filteredOperations, currentPage]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOperations.length / pageSize));
+  const authorizedArchiveCycles = useMemo(() => {
+    const fieldIds = new Set((fieldsData.fields || []).map(field => field.id));
+    return (fieldsData.cropCycles || []).filter(cycle => fieldIds.has(cycle.fieldId));
+  }, [fieldsData.cropCycles, fieldsData.fields]);
+  const invalidArchiveCycles = useMemo(
+    () => authorizedArchiveCycles.filter(cycle => !canonicalStoredCropYear(cycle.cropYear)),
+    [authorizedArchiveCycles]
+  );
+  const archiveCycleOptions = useMemo(() => [
+    { value: '', label: 'All Crop Year Cycles' },
+    ...uniqueCropYears(authorizedArchiveCycles).map(cropYear => ({
+      value: cropYear,
+      label: formatCropYearDisplay(cropYear)
+    }))
+  ], [authorizedArchiveCycles]);
+  const archiveFieldOptions = useMemo(() => [
+    { value: '', label: 'All Fields' },
+    ...[...(fieldsData.fields || [])].sort((left, right) => String(left.id).localeCompare(String(right.id))).map(field => ({
+      value: field.id,
+      label: field.id
+    }))
+  ], [fieldsData.fields]);
+  const archiveOperationOptions = useMemo(() => [
+    { value: '', label: 'All Operations' },
+    ...SRA_OPERATIONS_CATALOGUE.map(operation => ({
+      value: operation.id,
+      label: operation.name
+    }))
+  ], []);
 
   // Handle Archive Confirmation
   const handleArchiveConfirm = async () => {
@@ -266,6 +442,7 @@ export default function OperationsView() {
       setIsArchiving(false);
       setArchiveTarget(null);
       setUpdateSuccess('Operation record archived successfully.');
+      setArchiveReloadKey(key => key + 1);
     } catch (err) {
       console.error('[OperationsView] Archive error:', err);
       setIsArchiving(false);
@@ -290,7 +467,7 @@ export default function OperationsView() {
   const historyColumns = [
     {
       key: 'performedOn',
-      header: 'Date',
+      header: 'Operation Date',
       width: '120px',
       render: (val, row) => (
         <span className="text-xs font-semibold text-hug-muted whitespace-nowrap">
@@ -319,12 +496,32 @@ export default function OperationsView() {
       cellClassName: 'font-mono font-bold text-xs text-primary dark:text-primary-light'
     },
     {
+      key: 'archivedAt',
+      header: 'Archived At',
+      width: '130px',
+      render: (value) => (
+        <span className="text-xs font-semibold text-hug-muted whitespace-nowrap">
+          {value ? formatDate(value) : '—'}
+        </span>
+      )
+    },
+    {
+      key: 'cycleId',
+      header: 'Crop Year Cycle',
+      width: '145px',
+      render: (val, operation) => (
+        <span className="text-xs font-semibold text-hug-text whitespace-nowrap">
+          {formatCropYearDisplay(operation.cropYearCycle || cropYearByCycleId.get(val))}
+        </span>
+      )
+    },
+    {
       key: 'stageNumber',
       header: 'Crop Stage',
       width: '110px',
-      render: (val) => (
+      render: (val, operation) => (
         <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-subtle text-hug-text border border-border">
-          Stage {val || 1}
+          Stage {operation.stageNumberAtRecord || val || 1}
         </span>
       )
     },
@@ -406,7 +603,7 @@ export default function OperationsView() {
         category="Farm Operations"
         badge="Operational Ledger"
         title="Field Operations Console"
-        subtitle={`Assigned field operations, crop cycle stages & supervisory ledger · ${scopedOperations.length} recorded logs`}
+        subtitle={`Assigned field operations, Crop Year Cycle stages & supervisory ledger · ${scopedOperations.length} recorded logs`}
         actions={headerActions}
       />
 
@@ -506,7 +703,7 @@ export default function OperationsView() {
                 const fieldOperations = operationsByField.get(field.id) || [];
                 const cycle = field.cropCycle;
                 const cycleSummary = cycle
-                  ? [cycle.cropType || field.cycleType, formatCropYear(cycle.cropYear || field.cropYear), `Stage ${cycle.currentStageNumber || field.stageNumber || 1}`, cycle.status]
+                  ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${cycle.currentStageNumber || field.stageNumber || 1}`, cycle.status]
                     .filter(Boolean).join(' · ')
                   : null;
 
@@ -650,7 +847,7 @@ export default function OperationsView() {
                                         {operation.operationName || operation.activity || 'Field Operation'}
                                       </span>
                                       <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-white dark:bg-surface border border-border text-hug-text">
-                                        Stage {operation.stageNumber || 1}
+                                        Stage at Recording: {operation.stageNumberAtRecord || operation.stageNumber || 1}
                                       </span>
                                       {operation.submissionSource === 'MANAGER_TAKEOVER' ? (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
@@ -679,6 +876,10 @@ export default function OperationsView() {
                                         <Calendar className="w-3.5 h-3.5 text-hug-muted" />
                                         <span>{formatDate(operation.performedOn || operation.date)}</span>
                                       </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-semibold text-hug-muted">Crop Year Cycle:</span>
+                                        <span>{formatCropYearDisplay(operation.cropYearCycle || cropYearByCycleId.get(operation.cycleId))}</span>
+                                      </div>
                                       {operation.areaHa && (
                                         <div className="flex items-center gap-1.5">
                                           <MapPin className="w-3.5 h-3.5 text-hug-muted" />
@@ -703,6 +904,15 @@ export default function OperationsView() {
                                         </div>
                                       )}
                                     </div>
+                                    {operation.photoEvidence?.dataUrl && (
+                                      <a href={operation.photoEvidence.dataUrl} target="_blank" rel="noreferrer" className="inline-flex mt-2">
+                                        <img
+                                          src={operation.photoEvidence.dataUrl}
+                                          alt={`Evidence for ${operation.operationName || operation.id}`}
+                                          className="w-24 h-16 object-cover rounded-lg border border-border hover:border-primary transition-colors"
+                                        />
+                                      </a>
+                                    )}
                                   </div>
 
                                   {/* Right: Actions */}
@@ -751,50 +961,154 @@ export default function OperationsView() {
       ) : (
         <div className="space-y-4">
           {/* History Search & Filter Bar */}
-          <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1 min-w-0 sm:min-w-[200px]">
-              <Search className="w-4 h-4 text-hug-muted absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="Search operation name, field ID, task..."
-                className="w-full text-xs font-medium pl-9 pr-3 py-2 border border-border rounded-xl bg-surface-subtle text-hug-text placeholder:text-hug-muted outline-none focus:border-primary"
-              />
+          <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="w-full sm:w-48">
+                <Select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  options={[
+                    { value: 'ARCHIVED', label: 'Archived Logs' },
+                    { value: 'ACTIVE', label: 'Active Logs' }
+                  ]}
+                />
+              </div>
+              {statusFilter === 'ARCHIVED' ? (
+                <form
+                  className="relative flex-1 min-w-0"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    updateArchiveFilter('search', archiveSearchDraft);
+                  }}
+                >
+                  <Search className="w-4 h-4 text-hug-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="search"
+                    value={archiveSearchDraft}
+                    onChange={(event) => setArchiveSearchDraft(event.target.value)}
+                    placeholder="Exact operation record ID"
+                    aria-label="Search archived operations by exact record ID"
+                    className="w-full text-xs font-medium pl-9 pr-24 py-2 border border-border rounded-xl bg-surface-subtle text-hug-text placeholder:text-hug-muted outline-none focus:border-primary"
+                  />
+                  <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1 rounded-lg bg-primary text-white text-xs font-bold">
+                    Search
+                  </button>
+                </form>
+              ) : (
+                <div className="relative flex-1 min-w-0">
+                  <Search className="w-4 h-4 text-hug-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Search active operation name, field ID, task..."
+                    className="w-full text-xs font-medium pl-9 pr-3 py-2 border border-border rounded-xl bg-surface-subtle text-hug-text placeholder:text-hug-muted outline-none focus:border-primary"
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="w-40">
-              <Select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                options={[
-                  { value: 'ACTIVE', label: 'Active Logs' },
-                  { value: 'ARCHIVED', label: 'Archived Logs' },
-                  { value: 'ALL', label: 'All Operations' }
-                ]}
-              />
-            </div>
+            {statusFilter === 'ARCHIVED' && (
+              <div className="pt-3 border-t border-border/60">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="min-w-0">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Crop Year Cycle</span>
+                    <Select
+                      value={archiveFilters.cropYearCycle}
+                      onChange={(event) => updateArchiveFilter('cropYearCycle', event.target.value)}
+                      options={archiveCycleOptions}
+                    />
+                  </label>
+                  <label className="min-w-0">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Field</span>
+                    <Select
+                      value={archiveFilters.fieldId}
+                      onChange={(event) => updateArchiveFilter('fieldId', event.target.value)}
+                      options={archiveFieldOptions}
+                    />
+                  </label>
+                  <label className="min-w-0">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Operation</span>
+                    <Select
+                      value={archiveFilters.operationDefinitionId}
+                      onChange={(event) => updateArchiveFilter('operationDefinitionId', event.target.value)}
+                      options={archiveOperationOptions}
+                    />
+                  </label>
+                </div>
+                {invalidArchiveCycles.length > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-warning">
+                    Data integrity notice: {invalidArchiveCycles.length} Crop Year Cycle record{invalidArchiveCycles.length === 1 ? '' : 's'} with an invalid stored year {invalidArchiveCycles.length === 1 ? 'is' : 'are'} excluded from this filter.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Ledger Table */}
-          <Table
-            columns={historyColumns}
-            data={paginatedOperations}
-            isLoading={opsData.isLoading}
-            error={opsData.error}
-            emptyMessage="No operation records found."
-            emptySubtext="Field activities recorded for your assigned plots will appear in this ledger."
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filteredOperations.length}
-            onPageChange={setCurrentPage}
-          />
+          {statusFilter === 'ARCHIVED' && archiveState.isCleared ? (
+            <div className="rounded-2xl border border-border bg-surface p-8 text-center shadow-xs">
+              <History className="w-8 h-8 mx-auto text-hug-muted mb-3" />
+              <h3 className="text-sm font-black text-hug-text">View cleared.</h3>
+              <p className="text-xs text-hug-muted mt-1 mb-4">Your archived records are still safely stored.</p>
+              <Button variant="secondary" onClick={showArchiveRecords}>
+                Show Records
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Table
+                columns={historyColumns}
+                data={statusFilter === 'ARCHIVED' ? archiveState.records : paginatedOperations}
+                isLoading={statusFilter === 'ARCHIVED' ? archiveState.isLoading : opsData.isLoading}
+                error={statusFilter === 'ARCHIVED' ? archiveState.error : opsData.error}
+                onRetry={statusFilter === 'ARCHIVED' ? () => loadArchivePage({ append: false }) : undefined}
+                emptyMessage={statusFilter === 'ARCHIVED' ? 'No archived records found for this selection.' : 'No active operation records found.'}
+                emptySubtext={statusFilter === 'ARCHIVED'
+                  ? 'Try another Crop Year Cycle, field, operation, or record ID.'
+                  : 'Field activities recorded for your assigned plots will appear in this ledger.'}
+                {...(statusFilter === 'ACTIVE' ? {
+                  currentPage,
+                  totalPages,
+                  totalItems: filteredOperations.length,
+                  onPageChange: setCurrentPage
+                } : {})}
+              />
+
+              {statusFilter === 'ARCHIVED' && !archiveState.isLoading && !archiveState.error && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3 shadow-xs">
+                  <p className="text-xs text-hug-muted">
+                    {archiveState.records.length} archived record{archiveState.records.length === 1 ? '' : 's'} currently displayed · newest archived first
+                    {archiveState.loadMoreError && (
+                      <span className="block mt-1 text-red-600">{archiveState.loadMoreError} Your displayed records were preserved.</span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {archiveState.hasMore && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        isLoading={archiveState.isLoadingMore}
+                        loadingText="Loading..."
+                        disabled={archiveState.isLoadingMore}
+                        onClick={() => loadArchivePage({ append: true })}
+                      >
+                        Load More
+                      </Button>
+                    )}
+                    <Button variant="secondary" size="sm" onClick={clearArchiveView} disabled={archiveState.records.length === 0}>
+                      Clear View
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 

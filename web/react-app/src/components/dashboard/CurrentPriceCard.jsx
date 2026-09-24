@@ -69,16 +69,16 @@ export default function CurrentPriceCard({
   }
 
   // Derive Sugar change
-  const currentSugar = Number(price.sugarPricePerLkg ?? price.sugarPricePerLkgBag ?? 0);
+  const currentSugar = Number(price.sugarPricePerLkg);
   const prevSugar = previousPrice
-    ? Number(previousPrice.sugarPricePerLkg ?? previousPrice.sugarPricePerLkgBag ?? 0)
+    ? Number(previousPrice.sugarPricePerLkg)
     : currentSugar;
   const sugarChange = price.sugarPriceChange != null ? Number(price.sugarPriceChange) : (currentSugar - prevSugar);
 
   // Derive Molasses change
-  const currentMol = Number(price.molassesPricePerMetricTon ?? price.molassesPrice ?? 0);
+  const currentMol = Number(price.molassesPricePerMetricTon);
   const prevMol = previousPrice
-    ? Number(previousPrice.molassesPricePerMetricTon ?? previousPrice.molassesPrice ?? 0)
+    ? Number(previousPrice.molassesPricePerMetricTon)
     : currentMol;
   const molChange = price.molassesPriceChange != null ? Number(price.molassesPriceChange) : (currentMol - prevMol);
 

@@ -8,7 +8,22 @@
  */
 
 import { CROP_STAGE_MAX, CROP_STAGE_MIN, SUGARCANE_STAGES } from '../constants/cropStages.js';
-import { formatCropYear } from '../utils/formatters.js';
+import { canonicalStoredCropYear } from '../utils/formatters.js';
+
+export function filterOperationsByCropYearCycle({ operations = [], cropCycles = [], selectedSeason = 'ALL' }) {
+  const cycleYearById = new Map(cropCycles.map(cycle => [cycle.id, canonicalStoredCropYear(cycle.cropYear)]));
+  return operations.filter(operation => {
+    if (!operation.cycleId) return false;
+    if (selectedSeason === 'ALL') return true;
+    return (canonicalStoredCropYear(operation.cropYearCycle) || cycleYearById.get(operation.cycleId)) === canonicalStoredCropYear(selectedSeason);
+  });
+}
+
+const isAnalyticsOperation = operation => {
+  const status = String(operation?.status || 'ACTIVE');
+  return status === 'ACTIVE' || status === 'submitted'
+    || (status === 'ARCHIVED' && operation?.archivedReason === 'CYCLE_COMPLETED');
+};
 
 /**
  * 1. Crop & Field Progress Selector
@@ -21,17 +36,21 @@ export function selectCropFieldProgress({
   selectedSeason = 'ALL'
 }) {
   const cycleMap = new Map();
+  const cyclesByField = new Map();
   cropCycles.forEach(c => {
     if (c.id) cycleMap.set(c.id, c);
-    if (c.fieldId) cycleMap.set(c.fieldId, c);
+    if (c.fieldId) cyclesByField.set(c.fieldId, [...(cyclesByField.get(c.fieldId) || []), c]);
   });
+  const cycleForField = field => selectedSeason === 'ALL'
+    ? cycleMap.get(field.currentCycleId)
+    : (cyclesByField.get(field.id) || []).find(cycle => canonicalStoredCropYear(cycle.cropYear) === canonicalStoredCropYear(selectedSeason));
 
   // Filter fields by scope and season
   const scopedFields = fields.filter(f => {
     if (selectedFarmId !== 'ALL' && f.blockFarmId !== selectedFarmId) return false;
-    const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id);
-    const cropYear = formatCropYear(cycle?.cropYear || f.cropYear || '');
-    if (selectedSeason !== 'ALL' && cropYear !== selectedSeason) return false;
+    const cycle = cycleForField(f);
+    const cropYear = canonicalStoredCropYear(cycle?.cropYear || f.cropYear || '');
+    if (selectedSeason !== 'ALL' && (!cycle || cropYear !== canonicalStoredCropYear(selectedSeason))) return false;
     return true;
   });
 
@@ -55,9 +74,10 @@ export function selectCropFieldProgress({
   });
 
   scopedFields.forEach(f => {
-    const cycle = cycleMap.get(f.currentCycleId) || cycleMap.get(f.id);
-    const rawStage = Number(cycle?.currentStageNumber || f.stageNumber || f.currentStageNumber || 1);
-    const validStage = Math.max(CROP_STAGE_MIN, Math.min(CROP_STAGE_MAX, rawStage));
+    const cycle = cycleForField(f);
+    const rawStage = Number(cycle?.currentStageNumber ?? f.stageNumber ?? f.currentStageNumber);
+    if (!Number.isInteger(rawStage) || rawStage < CROP_STAGE_MIN || rawStage > CROP_STAGE_MAX) return;
+    const validStage = rawStage;
     const ha = Number(f.areaHa || f.hectares || 0);
 
     const st = stageStats[validStage];
@@ -111,7 +131,7 @@ export function selectProductionCost({
 
   // Filter operations by period and scope
   const filteredOps = operations.filter(op => {
-    if (op.status !== 'ACTIVE') return false;
+    if (!isAnalyticsOperation(op)) return false;
 
     // Period filter: YYYY-MM
     if (selectedPeriod !== 'ALL') {
@@ -224,7 +244,7 @@ export function selectOperationalCostBreakdown({
   let totalOpsCount = 0;
 
   operations.forEach(op => {
-    if (op.status !== 'ACTIVE') return;
+    if (!isAnalyticsOperation(op)) return;
 
     if (selectedPeriod !== 'ALL') {
       const date = String(op.performedOn || op.isoDate || op.date || '');
@@ -283,7 +303,7 @@ export function selectFarmOperationsAnalytics({
   let totalGroupOps = 0;
 
   operations.forEach(op => {
-    if (op.status !== 'ACTIVE') return;
+    if (!isAnalyticsOperation(op)) return;
 
     if (selectedPeriod !== 'ALL') {
       const date = String(op.performedOn || op.isoDate || op.date || '');

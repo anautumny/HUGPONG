@@ -28,13 +28,16 @@ router.get('/', requireAuth, async (req, res) => {
       const farmIds = Array.from(new Set(fields.docs.map(doc => doc.data().blockFarmId).filter(Boolean)));
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
-      const data = farms.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = farms.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((left, right) => String(left.id).localeCompare(String(right.id)));
       return res.json({ success: true, count: data.length, data });
     } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list block farms.' });
     }
     const snapshot = await query.get();
-    return res.json({ success: true, count: snapshot.size, data: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) });
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

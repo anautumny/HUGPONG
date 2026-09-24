@@ -72,7 +72,7 @@ export default function CropProgressSection({
           <Sprout className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
           <p className="font-semibold text-hug-text text-sm">No parcel progress recorded</p>
           <p className="text-xs text-hug-muted mt-0.5">
-            No registered fields or active crop cycles match the current filter selection.
+            No registered fields or active Crop Year Cycles match the current filter selection.
           </p>
         </div>
       ) : (

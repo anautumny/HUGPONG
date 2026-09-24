@@ -1,8 +1,7 @@
 import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
 import { publishTerminalTelemetry } from '../services/telemetryService';
-import { db, auth } from '../firebase/config';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {
@@ -18,7 +17,6 @@ import {
   authenticatedRequest
 } from '../services/authService';
 import {
-  COLLECTIONS,
   ROLES,
   canonicalRole,
   createCycleId,
@@ -42,7 +40,10 @@ import {
   cleanDataForFirestore,
   cleanupDuplicateLogs,
   formatDisplayDate,
-  toISODateString
+  toISODateString,
+  sortNewestFirst,
+  sortOperationsNewestFirst,
+  cropYearCycleForDate
 } from '../utils/dataHelpers';
 
 export {
@@ -441,7 +442,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   }
   const resolvedCurrentCycleId = String(fieldData.currentCycleId || currentF.currentCycleId || (isNew ? createCycleId(targetId, 1) : '')).trim().toUpperCase();
   if (!resolvedCurrentCycleId) {
-    return { success: false, error: 'CURRENT_CYCLE_REQUIRED', message: 'The field must reference an existing current crop cycle.' };
+    return { success: false, error: 'CURRENT_CYCLE_REQUIRED', message: 'The field must reference an existing current Crop Year Cycle.' };
   }
 
   // Resolve verified user if assigned
@@ -470,7 +471,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
     customStages: fieldData.customStages || currentF.customStages || [],
     customOperations: fieldData.customOperations || currentF.customOperations || {},
     cycleType: fieldData.cycleType || currentF.cycleType || 'Plant Cane (New Plant)',
-    cropYear: fieldData.cropYear || currentF.cropYear || '',
+    cropYear: fieldData.cropYear || currentF.cropYear || (isNew ? cropYearCycleForDate() : ''),
     month: fieldData.month !== undefined ? fieldData.month : (currentF.month !== undefined ? currentF.month : 0),
     batchMonth: fieldData.batchMonth || currentF.batchMonth || 1,
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
@@ -510,7 +511,15 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
       baseVersion: isNew ? null : (currentF.updatedAt || null)
     });
     if (outcome.response?.data?.cycle) {
-      cropCycles.push(fromCycleDocument(outcome.response.data.cycle.id, outcome.response.data.cycle));
+      const authoritativeCycle = fromCycleDocument(outcome.response.data.cycle.id, outcome.response.data.cycle);
+      const authoritativeCycleIndex = cropCycles.findIndex(cycle => cycle.id === authoritativeCycle.id);
+      if (authoritativeCycleIndex >= 0) cropCycles[authoritativeCycleIndex] = authoritativeCycle;
+      else cropCycles.push(authoritativeCycle);
+      formattedField.cropYear = authoritativeCycle.cropYear;
+      formattedField.currentCycleId = authoritativeCycle.id;
+      const authoritativeIndex = fields.findIndex(field => field.id === formattedField.id);
+      if (authoritativeIndex >= 0) fields[authoritativeIndex] = { ...fields[authoritativeIndex], ...formattedField };
+      await saveItem(STORAGE_KEYS.FIELDS, fields);
     }
   } catch (e) {
     console.warn('[dataStore] Field mutation rejected:', e);
@@ -594,21 +603,8 @@ export const resolveBlockFarmManager = (blockFarm) => {
   return 'Pending Appointment';
 };
 
-// ── Deterministic Price Parsing & Sorting Helper ─────────────
-function parsePriceTime(p) {
-  if (p.publishedAt) {
-    const t = new Date(p.publishedAt).getTime();
-    if (!isNaN(t)) return t;
-  }
-  if (p.effectiveDate) {
-    const t = new Date(`${p.effectiveDate}T00:00:00Z`).getTime();
-    if (!isNaN(t)) return t;
-  }
-  return 0;
-}
-
 export const getSortedPrices = () => {
-  return [...priceHistory].sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
+  return sortNewestFirst(priceHistory, ['effectiveDate', 'publishedAt']);
 };
 
 // ── Dynamic Current Price & Market Observation ──────────────
@@ -727,9 +723,17 @@ export const restoreSessionFromToken = async () => {
   try {
     const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
     const session = await getItem(STORAGE_KEYS.SESSION);
-    if (!token || !session) return { success: false, reason: 'no_stored_session' };
     if (auth?.authStateReady) await auth.authStateReady();
+    if (!token || !session) {
+      stopActiveCloudSync();
+      if (auth?.currentUser) await logoutFromServer();
+      await clearAuthSessionStorage();
+      return { success: false, reason: 'no_stored_session' };
+    }
     if (!auth?.currentUser || auth.currentUser.uid !== session.employeeId) {
+      stopActiveCloudSync();
+      if (auth?.currentUser) await logoutFromServer();
+      await clearAuthSessionStorage();
       return { success: false, reason: 'firebase_session_missing' };
     }
     // Offline restoration trusts only a session previously issued after a
@@ -745,8 +749,10 @@ export const restoreSessionFromToken = async () => {
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       } catch (error) {
         if (error.status === 401) {
+          stopActiveCloudSync();
           CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
           await clearAuthSessionStorage();
+          if (auth?.currentUser) await logoutFromServer();
           return { success: false, reason: 'server_session_rejected' };
         }
       }
@@ -754,8 +760,10 @@ export const restoreSessionFromToken = async () => {
     if (CURRENT_SESSION.pendingFirstLoginVerification === true
       || CURRENT_SESSION.phoneVerified === false
       || CURRENT_SESSION.requiresPasswordChange === true) {
+      stopActiveCloudSync();
       return { success: false, reason: 'account_setup_required' };
     }
+    await restartCloudSyncIfReady();
     notify();
     return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
   } catch (err) {
@@ -765,6 +773,7 @@ export const restoreSessionFromToken = async () => {
 };
 
 export const logoutUser = async () => {
+  stopActiveCloudSync();
   await logoutFromServer();
   CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
   await clearAuthSessionStorage();
@@ -783,6 +792,7 @@ export const authenticateUser = async (contactOrId, password) => {
     }
     CURRENT_SESSION = { ...result.user, lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await restartCloudSyncIfReady();
     notify();
     if (getNetworkStatus() && getOutboxCount() > 0) {
       performMobileSync('AUTH_RESTORED').catch(() => {});
@@ -816,6 +826,7 @@ export const updateUserMobileNumber = async (newMobile, passwordVerification) =>
     const existing = users.find(user => user.employeeId === CURRENT_SESSION.employeeId);
     if (existing) Object.assign(existing, result.user);
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await restartCloudSyncIfReady();
     notify();
     return { success: true, message: 'Your registered mobile number has been updated successfully.' };
   } catch (error) {
@@ -838,6 +849,7 @@ export const updateUserPassword = async (currentPassword, newPassword) => {
     if (existing) Object.assign(existing, result.user);
     SECURITY_PREFERENCES.lastPasswordChange = new Date().toISOString().split('T')[0];
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await restartCloudSyncIfReady();
     notify();
     return { success: true, message: result.message || 'Your password has been changed successfully.' };
   } catch (error) {
@@ -858,6 +870,7 @@ export const verifyCurrentPhone = async (code) => {
     const result = await verifyPhoneWithServer(code);
     CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await restartCloudSyncIfReady();
     notify();
     return result;
   } catch (error) {
@@ -938,6 +951,79 @@ let IS_SYNCED = true;
 export const getCurrentSession = () => CURRENT_SESSION || DEFAULT_GUEST_SESSION;
 export const getIsSynced = () => IS_SYNCED;
 
+const normalizeSyncEntityId = value => String(value || '').trim().toUpperCase();
+const FIELD_SYNC_MUTATION_TYPES = new Set([
+  'operation_log',
+  'takeover_log',
+  'operation_amendment',
+  'operation_archive',
+  'field_upsert',
+  'field_archive',
+  'stage_update',
+  'cycle_rollover',
+  'custom_stages',
+  'custom_operations'
+]);
+
+/**
+ * Derive a field's status from retained mutations and local operation markers.
+ * Canonical server field documents do not carry the retired client-only
+ * `synced` property, so a missing document property must not mean "not synced".
+ */
+export const getFieldSyncState = fieldId => {
+  const normalizedFieldId = normalizeSyncEntityId(fieldId);
+  if (!normalizedFieldId || normalizedFieldId === 'UNASSIGNED') {
+    return { isSynced: false, pendingCount: 0 };
+  }
+
+  const matchingCycles = new Set(
+    cropCycles
+      .filter(cycle => normalizeSyncEntityId(cycle?.fieldId) === normalizedFieldId)
+      .map(cycle => normalizeSyncEntityId(cycle?.id))
+  );
+  const matchingOperationIds = new Set(
+    operationLogs
+      .filter(log => normalizeSyncEntityId(log?.fieldId) === normalizedFieldId)
+      .map(log => normalizeSyncEntityId(log?.id))
+  );
+  const pendingKeys = new Set();
+
+  getOutboxQueue().forEach(item => {
+    if (!FIELD_SYNC_MUTATION_TYPES.has(item?.type)) return;
+    const payload = item?.payload || {};
+    const payloadFieldId = normalizeSyncEntityId(payload.fieldId || payload.changes?.fieldId);
+    const payloadId = normalizeSyncEntityId(payload.id);
+    const entityKey = String(item?.entityKey || '');
+    const entityId = normalizeSyncEntityId(entityKey.slice(entityKey.indexOf('/') + 1));
+    const archivedOperationIds = Array.isArray(payload.operationLogIds)
+      ? payload.operationLogIds.map(normalizeSyncEntityId)
+      : [];
+
+    const targetsField = payloadFieldId === normalizedFieldId
+      || ((item.type === 'field_upsert' || item.type === 'field_archive') && payloadId === normalizedFieldId)
+      || (entityKey.startsWith('fields/') && entityId === normalizedFieldId)
+      || matchingCycles.has(normalizeSyncEntityId(payload.cycleId))
+      || (entityKey.startsWith('crop_cycles/') && matchingCycles.has(entityId))
+      || matchingOperationIds.has(payloadId)
+      || (entityKey.startsWith('operation_logs/') && matchingOperationIds.has(entityId))
+      || archivedOperationIds.some(id => matchingOperationIds.has(id));
+
+    if (targetsField) {
+      pendingKeys.add(item.entityKey || item.mutationId || item.outboxId);
+    }
+  });
+
+  operationLogs.forEach(log => {
+    if (normalizeSyncEntityId(log?.fieldId) !== normalizedFieldId) return;
+    if (log.status !== 'ACTIVE' || log.isDraft === true) return;
+    if (log.isOffline === true || log.synced === false || log.cloudQueueStatus === 'offline_queued') {
+      pendingKeys.add(`operation_logs/${log.id}`);
+    }
+  });
+
+  return { isSynced: pendingKeys.size === 0, pendingCount: pendingKeys.size };
+};
+
 /**
  * Returns accurate count of pending unsynced logs & outbox entries
  * Counts only submitted ACTIVE records that have not reached Firestore.
@@ -1004,136 +1090,6 @@ const notify = () => {
 };
 
 export const notifyDataUpdate = notify;
-
-export const fastLoginRole = async (role) => {
-  const normalized = String(role || '').trim();
-
-  if (normalized.toLowerCase().includes('super') || normalized === 'Super Admin') {
-    return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
-  }
-
-  // Canonical role profiles aligned with web Development Role Preview
-  const PROFILES = {
-    'Member Farmer': {
-      employeeId: '04000001',
-      id: '04000001',
-      name: 'Juan dela Cruz',
-      phone: '09170000004',
-      contact: '09170000004',
-      role: 'Member Farmer',
-      roleKey: 'member',
-      canonicalRole: 'MEMBER_FARMER',
-      fieldId: 'DEV-FLD-001',
-      blockFarmId: 'DEV-BF-001',
-      blockFarm: 'Hda. Adela Block Farm',
-      farm: 'Hda. Adela Block Farm',
-      memberId: '04000001',
-    },
-    'Farm Manager': {
-      employeeId: '03000001',
-      id: '03000001',
-      name: 'Jose Reyes',
-      phone: '09170000003',
-      contact: '09170000003',
-      role: 'Farm Manager',
-      roleKey: 'manager',
-      canonicalRole: 'FARM_MANAGER',
-      blockFarmId: 'DEV-BF-001',
-      blockFarm: 'Hda. Adela Block Farm',
-      farm: 'Hda. Adela Block Farm',
-    },
-    'SRA Admin': {
-      employeeId: '02000001',
-      id: '02000001',
-      name: 'Maria Santos',
-      phone: '09170000002',
-      contact: '09170000002',
-      role: 'SRA Admin',
-      roleKey: 'sra',
-      canonicalRole: 'SRA_ADMIN',
-      district: 'District 3 · Silay',
-      location: 'Silay Mill District, Negros Occidental',
-    },
-  };
-
-  const defaultProfile = PROFILES[normalized] || PROFILES['Member Farmer'];
-  const existingUser = users.find(u =>
-    u.role === normalized ||
-    u.role === defaultProfile.role ||
-    (u.employeeId && u.employeeId === defaultProfile.employeeId) ||
-    (u.contact && u.contact === defaultProfile.phone)
-  );
-
-  // Seed default block farm and field if store is currently empty
-  if (blockFarms.length === 0) {
-    blockFarms.push({
-      id: 'DEV-BF-001',
-      name: 'Hda. Adela Block Farm',
-      managerUserId: '03000001',
-      managerName: 'Jose Reyes',
-      location: 'Silay City',
-      totalHa: 45.0,
-      activeMembers: 12
-    });
-  }
-
-  if (fields.length === 0) {
-    fields.push({
-      id: 'DEV-FLD-001',
-      blockFarmId: 'DEV-BF-001',
-      blockFarmName: 'Hda. Adela Block Farm',
-      member: 'Juan dela Cruz',
-      memberName: 'Juan dela Cruz',
-      memberUserId: '04000001',
-      ha: 1.5,
-      areaHa: 1.5,
-      stage: 'Land Preparation',
-      stageNumber: 1,
-      cropYear: '2026-2027',
-      cycleType: 'Sugarcane',
-      synced: true,
-      status: 'ACTIVE'
-    });
-  }
-
-  let activeFieldId = defaultProfile.fieldId || '';
-  if (normalized === 'Member Farmer') {
-    const matchedField = fields.find(f =>
-      f.memberUserId === defaultProfile.employeeId ||
-      f.member === defaultProfile.name ||
-      f.memberName === defaultProfile.name
-    ) || fields[0];
-    if (matchedField?.id) {
-      activeFieldId = matchedField.id;
-    }
-  }
-
-  const sessionData = {
-    ...defaultProfile,
-    ...(existingUser || {}),
-    fieldId: activeFieldId,
-    phoneVerified: true,
-    passwordChanged: true,
-    requiresPasswordChange: false,
-    pendingFirstLoginVerification: false,
-    pendingLogs: 0,
-    syncedLogs: operationLogs.filter(l => l.status === 'ACTIVE' && l.synced !== false).length,
-    lastActiveAt: Date.now(),
-  };
-
-  CURRENT_SESSION = sessionData;
-
-  // Ensure user is present in memory directory
-  if (!users.some(u => (u.employeeId || u.id) === sessionData.employeeId)) {
-    users.push(sessionData);
-  }
-
-  await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, 'dev-mock-session-token');
-
-  notify();
-  return { success: true, user: CURRENT_SESSION };
-};
 
 export const setSession = (role) => {
   const account = users.find(u => u.role === role);
@@ -1204,64 +1160,46 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
 export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   if (!fieldId) return { success: false, message: 'Field ID is required' };
   const cleanId = String(fieldId).trim().toUpperCase();
-  const nowIso = new Date().toISOString();
-  
+  if (!getNetworkStatus()) {
+    return { success: false, message: 'Starting the next Crop Year Cycle requires an active server connection.' };
+  }
+  if (!getFieldSyncState(cleanId).isSynced) {
+    return { success: false, message: 'Please synchronize pending records for this field before starting the next Crop Year Cycle.' };
+  }
+
   const targetField = fields.find(f => String(f.id || '').trim().toUpperCase() === cleanId);
-  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle' };
+  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit current Crop Year Cycle' };
   const oldCycleId = targetField.currentCycleId;
   const oldCycle = cropCycles.find(c => c.id === oldCycleId);
-  const nextSequence = Number(oldCycle?.sequenceNumber || targetField.cycleNumber || 1) + 1;
-  const newCycleId = createCycleId(cleanId, nextSequence);
-  const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-  const finalCropYear = formatCropYear(options.cropYear || targetField.cropYear || '2026-2027');
   const request = {
     previousCycleId: oldCycleId,
     cropType: finalCycleType,
-    cropYear: finalCropYear,
     batchNumber: targetField.batchMonth || 1
   };
   let result;
-  let queuedOffline = false;
   try {
-    const outcome = await commitExplicitMutation('cycle_rollover', { fieldId: cleanId, ...request }, {
-      baseVersion: targetField.updatedAt || null,
-      takeoverGrant: options.takeoverGrant || null
-    });
-    queuedOffline = outcome.queued;
-    result = outcome.response?.data;
-    if (!queuedOffline && !result) throw new Error('Crop-cycle rollover returned no server response.');
-  } catch (err) {
-    return { success: false, message: err.message || 'Crop-cycle rollover was rejected by the server.' };
-  }
-  if (queuedOffline) {
-    const offlineLogIds = operationLogs
-      .filter(log => log.cycleId === oldCycleId && log.status === 'ACTIVE')
-      .map(log => log.id);
-    result = {
-      oldCycleId,
-      newCycleId,
-      archivedLogCount: offlineLogIds.length,
-      archivedOperationLogIds: offlineLogIds,
-      oldCycle: { ...oldCycle, status: 'ARCHIVED', archivedAt: nowIso, archivedByUserId: actorUserId, updatedAt: nowIso },
-      newCycle: {
-        fieldId: cleanId,
-        sequenceNumber: nextSequence,
-        cropType: finalCycleType,
-        cropYear: finalCropYear,
-        currentStageNumber: 1,
-        elapsedMonths: 0,
-        batchNumber: request.batchNumber,
-        status: 'ACTIVE',
-        startedAt: nowIso,
-        updatedAt: nowIso,
-        archivedAt: null,
-        archivedByUserId: null
+    const mutationId = `ROLLOVER-${cleanId}-${oldCycleId}`;
+    const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover`, {
+      method: 'POST',
+      headers: options.takeoverGrant ? { 'X-Hugpong-Takeover-Grant': options.takeoverGrant } : {},
+      body: {
+        ...request,
+        _mutation: {
+          mutationId,
+          idempotencyKey: mutationId,
+          entityKey: `fields/${cleanId}`,
+          baseVersion: targetField.updatedAt || null
+        }
       }
-    };
+    });
+    result = response?.data;
+    if (!result) throw new Error('Crop Year Cycle rollover returned no server response.');
+  } catch (err) {
+    return { success: false, message: err.message || 'Crop Year Cycle rollover was rejected by the server.' };
   }
   if (!result?.newCycleId || !result.newCycle) {
-    return { success: false, message: 'Crop-cycle rollover returned an incomplete response.' };
+    return { success: false, message: 'Crop Year Cycle rollover returned an incomplete response.' };
   }
   const targetLogs = operationLogs.filter(l => {
     return l.cycleId === result.oldCycleId && l.status === 'ACTIVE';
@@ -1295,8 +1233,8 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
     targetField.cycleNumber = result.newCycle.sequenceNumber;
     targetField.currentCycleId = result.newCycleId;
     targetField.lastUpdated = result.newCycle.updatedAt;
-    targetField.lastSync = queuedOffline ? targetField.lastSync : 'Just now';
-    targetField.synced = !queuedOffline;
+    targetField.lastSync = 'Just now';
+    targetField.synced = true;
     await saveItem(STORAGE_KEYS.FIELDS, fields);
   }
 
@@ -1314,13 +1252,13 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Farm Manager';
   await logSystemEvent(
     'operation',
-    'Crop Cycle Renewal',
+    'Crop Year Cycle Renewal',
     fieldId,
-    `Archived ${targetLogs.length} current log(s) and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}" (${formatCropYear(options?.cropYear || targetField?.cropYear || '2026-2027')}).`,
+    `Archived ${targetLogs.length} current log(s) and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}" (${formatCropYear(result.newCycle.cropYear)}).`,
     actorName,
     'Completed'
   );
-  return { success: true, archivedCount: result.archivedLogCount, cycleId: result.newCycleId, queuedOffline };
+  return { success: true, archivedCount: result.archivedLogCount, cycleId: result.newCycleId, cropYear: result.newCycle.cropYear, queuedOffline: false };
 };
 
 export const archiveFieldPlot = async (fieldId) => {
@@ -1672,7 +1610,7 @@ export const archivePastLogsForField = async (fieldId, takeoverGrant = null) => 
   const nowIso = new Date().toISOString();
   
   const field = fields.find(item => String(item.id || '').trim().toUpperCase() === fId);
-  if (!field?.currentCycleId) return { success: false, message: 'Field has no explicit current crop cycle' };
+  if (!field?.currentCycleId) return { success: false, message: 'Field has no explicit current Crop Year Cycle' };
   const actorUserId = getCurrentSession()?.employeeId || getCurrentSession()?.id || '';
   const toArchive = operationLogs.filter(l => l.cycleId === field.currentCycleId && l.status === 'ACTIVE');
   if (!toArchive.length) return { success: true, archivedCount: 0 };
@@ -2001,107 +1939,98 @@ export const updateSecurityPreferences = (updates) => {
 };
 
 export const resetLocalCache = async () => {
+  const authToken = await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const activeSession = CURRENT_SESSION?.employeeId ? { ...CURRENT_SESSION } : null;
   draftLogs.length = 0;
   IS_SYNCED = true;
   await clearOutbox();
   await clearHugpongStorage();
-  if (CURRENT_SESSION) {
-    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
-  }
+  const preservedAuth = [];
+  if (activeSession) preservedAuth.push([STORAGE_KEYS.SESSION, activeSession]);
+  if (authToken) preservedAuth.push([STORAGE_KEYS.AUTH_TOKEN, authToken]);
+  if (preservedAuth.length) await multiSave(preservedAuth);
   notify();
   return true;
 };
 
 // ── Real-Time Cloud Firestore Sync ──────────────────────────
+// Mobile reads use the same server-enforced authorization boundary as writes.
+// The durable outbox remains responsible for offline mutations; this refresh
+// only replaces canonical read replicas after a successful API response.
 export const listenToCloudSync = () => {
-  if (!db || !auth?.currentUser) return () => {};
+  let active = true;
+  let requestInFlight = false;
+  let refreshTimer = null;
 
-  try {
+  const stop = () => {
+    active = false;
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = null;
+  };
+
+  const refresh = async () => {
+    if (!active || requestInFlight || !getNetworkStatus()) return;
+
     const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
-    const isMember = activeRole === ROLES.MEMBER_FARMER;
-    const isManager = activeRole === ROLES.FARM_MANAGER;
-    const memberUserId = auth.currentUser.uid;
-    const memberFieldId = CURRENT_SESSION?.fieldId || '__unassigned__';
-    let rawFieldDocuments = [];
-    const refreshFieldViews = () => {
-      const cycleById = new Map(cropCycles.map(cycle => [cycle.id, cycle]));
-      const mapped = rawFieldDocuments.map(field => fromFieldDocument(field.id, field, cycleById.get(field.currentCycleId)));
-      fields.length = 0;
-      archivedFields.length = 0;
-      mapped.forEach(field => (field.status === 'ARCHIVED' ? archivedFields : fields).push(field));
-      saveItem(STORAGE_KEYS.FIELDS, fields);
-      saveItem(STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields);
-      notify();
-    };
+    const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+    const accountReady = CURRENT_SESSION?.phoneVerified === true
+      && CURRENT_SESSION?.requiresPasswordChange !== true
+      && CURRENT_SESSION?.pendingFirstLoginVerification !== true;
+    const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
 
-    const blockFarmsSource = isMember
-      ? doc(db, COLLECTIONS.BLOCK_FARMS, CURRENT_SESSION?.blockFarmId || '__unassigned__')
-      : isManager
-        ? doc(db, COLLECTIONS.BLOCK_FARMS, CURRENT_SESSION?.blockFarmId || '__unassigned__')
-        : collection(db, COLLECTIONS.BLOCK_FARMS);
-    const unsubBlockFarms = onSnapshot(blockFarmsSource, (snapshot) => {
-      const remoteBF = [];
-      if (snapshot.docs) snapshot.forEach(docSnap => remoteBF.push(fromBlockFarmDocument(docSnap.id, docSnap.data())));
-      else if (snapshot.exists()) remoteBF.push(fromBlockFarmDocument(snapshot.id, snapshot.data()));
+    if (!token || !activeRole || !sessionUserId || !accountReady
+      || !auth?.currentUser || auth.currentUser.uid !== sessionUserId) {
+      stop();
+      return;
+    }
 
-      blockFarms.length = 0;
-      remoteBF.forEach(bf => blockFarms.push(bf));
-      saveItem('@hugpong_block_farms', blockFarms);
-      notify();
-    }, (err) => console.warn('[Mobile] Block farms listener notice:', err));
+    requestInFlight = true;
+    try {
+      const isMember = activeRole === ROLES.MEMBER_FARMER;
+      const [
+        blockFarmResponse,
+        fieldsResponse,
+        cyclesResponse,
+        logsResponse,
+        pricesResponse,
+        ticketsResponse,
+        usersResponse,
+        reportsResponse,
+        auditEventsResponse
+      ] = await Promise.all([
+        authenticatedRequest('/api/block-farms'),
+        authenticatedRequest('/api/fields'),
+        authenticatedRequest('/api/crop-cycles'),
+        authenticatedRequest('/api/logs'),
+        authenticatedRequest('/api/prices'),
+        authenticatedRequest('/api/tickets'),
+        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/users'),
+        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-reports'),
+        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-events')
+      ]);
 
-    // 1. Live SRA Sugar Prices Listener
-    const unsubPrices = onSnapshot(collection(db, COLLECTIONS.SRA_PRICES), (snapshot) => {
-      const remotePrices = [];
-      snapshot.forEach(docSnap => {
-        try {
-          remotePrices.push(fromPriceDocument(docSnap.id, docSnap.data()));
-        } catch (error) {
-          console.error('[Mobile] Rejected invalid sra_prices document:', docSnap.id, error.message);
-        }
-      });
-      
-      remotePrices.sort((a, b) => parsePriceTime(b) - parsePriceTime(a));
+      if (!active) return;
 
-      priceHistory.length = 0;
-      remotePrices.forEach(p => priceHistory.push(p));
-      saveItem(STORAGE_KEYS.PRICES, remotePrices);
-      notify();
-    }, (err) => console.warn('[Mobile] SRA prices listener notice:', err));
+      const remoteBlockFarms = (blockFarmResponse.data || [])
+        .map(record => fromBlockFarmDocument(record.id, record));
+      const remoteCycles = (cyclesResponse.data || [])
+        .map(record => fromCycleDocument(record.id, record));
+      const cycleById = new Map(remoteCycles.map(cycle => [cycle.id, cycle]));
+      const mappedFields = (fieldsResponse.data || [])
+        .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
+      const remoteFields = mappedFields.filter(field => field.status !== 'ARCHIVED');
+      const remoteArchivedFields = mappedFields.filter(field => field.status === 'ARCHIVED');
 
-    let managerRecordUnsubscribers = [];
-    let refreshManagerRecords = () => {};
-    const cyclesSource = isMember
-      ? query(collection(db, COLLECTIONS.CROP_CYCLES), where('fieldId', '==', memberFieldId))
-      : collection(db, COLLECTIONS.CROP_CYCLES);
-    const unsubCycles = isManager ? () => {} : onSnapshot(cyclesSource, (snapshot) => {
-      cropCycles.length = 0;
-      snapshot.forEach(docSnap => cropCycles.push(fromCycleDocument(docSnap.id, docSnap.data())));
-      refreshFieldViews();
-    }, (err) => console.warn('[Mobile] Crop cycles listener notice:', err));
-
-    const fieldsSource = isMember
-      ? query(collection(db, COLLECTIONS.FIELDS), where('memberUserId', '==', memberUserId))
-      : isManager
-        ? query(collection(db, COLLECTIONS.FIELDS), where('blockFarmId', '==', CURRENT_SESSION?.blockFarmId || '__unassigned__'))
-        : collection(db, COLLECTIONS.FIELDS);
-    const unsubFields = onSnapshot(fieldsSource, (snapshot) => {
-      rawFieldDocuments = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-      if (isManager) refreshManagerRecords(rawFieldDocuments.map(field => field.id));
-      refreshFieldViews();
-    }, (err) => console.warn('[Mobile] Fields listener notice:', err));
-
-    // 3. Live Operation Logs Listener (Authoritative Cloud Sync)
-    const applyRemoteLogs = (remoteLogs) => {
-      // Snapshot data replaces the canonical local replica. The only overlay is
-      // derived from an explicit pending create mutation, never from a cached
-      // record that happens to be absent from Firestore.
-      const remoteIds = new Set(remoteLogs.map(r => r.id));
+      const canonicalRemoteLogs = (logsResponse.data || [])
+        .filter(record => record.cycleId && (record.status === 'ACTIVE' || record.status === 'ARCHIVED'))
+        .map(record => fromOperationLogDocument(record.id, record));
+      const remoteLogIds = new Set(canonicalRemoteLogs.map(record => record.id));
       const pendingCreateOverlays = getOutboxQueue()
         .filter(item =>
-          (item.type === 'operation_log' || item.type === 'takeover_log') &&
-          ['queued', 'retryable', 'failed', 'syncing'].includes(item.status) &&
-          item.payload?.id && !remoteIds.has(item.payload.id)
+          (item.type === 'operation_log' || item.type === 'takeover_log')
+          && ['queued', 'retryable', 'failed', 'syncing'].includes(item.status)
+          && item.payload?.id
+          && !remoteLogIds.has(item.payload.id)
         )
         .map(item => ({
           ...fromOperationLogDocument(item.payload.id, item.payload),
@@ -2109,162 +2038,111 @@ export const listenToCloudSync = () => {
           isOffline: true,
           cloudQueueStatus: 'offline_queued'
         }));
+      const reconciledLogs = sortOperationsNewestFirst(cleanupDuplicateLogs([...canonicalRemoteLogs, ...pendingCreateOverlays]));
 
-      const merged = [...remoteLogs, ...pendingCreateOverlays];
-      merged.sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
-        const timeB = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
-        if (timeA !== timeB && !isNaN(timeA) && !isNaN(timeB)) return timeB - timeA;
-        return (b.id || '').localeCompare(a.id || '');
+      const remotePrices = [];
+      (pricesResponse.data || []).forEach(record => {
+        try {
+          remotePrices.push(fromPriceDocument(record.id, record));
+        } catch (error) {
+          console.warn('[Mobile] Ignoring invalid server price record:', record?.id || '(missing id)', error.message);
+        }
       });
+      const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate', 'publishedAt']);
 
-      const dedupedLogs = cleanupDuplicateLogs(merged);
+      const remoteTickets = sortNewestFirst((ticketsResponse.data || [])
+        .map(record => fromSupportTicketDocument(record.id, record)), ['createdAt']);
+      const remoteUsers = isMember
+        ? []
+        : (usersResponse.data || []).map(record => fromUserDocument(record.id || record.employeeId, record));
+      const remoteReports = isMember
+        ? []
+        : sortNewestFirst((reportsResponse.data || []).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt']);
+      const remoteHistory = isMember ? [] : sortNewestFirst(auditEventsResponse.data || [], ['createdAt']);
+
+      blockFarms.length = 0;
+      blockFarms.push(...remoteBlockFarms);
+      cropCycles.length = 0;
+      cropCycles.push(...remoteCycles);
+      fields.length = 0;
+      fields.push(...remoteFields);
+      archivedFields.length = 0;
+      archivedFields.push(...remoteArchivedFields);
       operationLogs.length = 0;
-      dedupedLogs.forEach(rl => operationLogs.push(rl));
-      saveItem(STORAGE_KEYS.LOGS, operationLogs);
+      operationLogs.push(...reconciledLogs);
+      priceHistory.length = 0;
+      priceHistory.push(...orderedRemotePrices);
+      supportTickets.length = 0;
+      supportTickets.push(...remoteTickets);
+      if (!isMember) {
+        users.length = 0;
+        users.push(...remoteUsers);
+        auditReports.length = 0;
+        auditReports.push(...remoteReports);
+        systemHistory.length = 0;
+        systemHistory.push(...remoteHistory);
+      }
 
       const pendingCount = getPendingSyncCount(CURRENT_SESSION);
       IS_SYNCED = pendingCount === 0;
-      if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = pendingCount;
-      notify();
-    };
-    const readRemoteLogs = (snapshot) => {
-      const remoteLogs = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if ((data.status === 'ACTIVE' || data.status === 'ARCHIVED') && data.cycleId) {
-          remoteLogs.push(fromOperationLogDocument(docSnap.id, data));
-        }
-      });
-      return remoteLogs;
-    };
-    const logsSource = isMember
-      ? query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', memberFieldId))
-      : collection(db, COLLECTIONS.OPERATION_LOGS);
-    const unsubLogs = isManager ? () => {} : onSnapshot(
-      logsSource,
-      snapshot => applyRemoteLogs(readRemoteLogs(snapshot)),
-      err => console.warn('[Mobile] Operation logs listener notice:', err)
-    );
+      CURRENT_SESSION.pendingLogs = pendingCount;
 
-    if (isManager) {
-      const cyclesByField = new Map();
-      const logsByField = new Map();
-      refreshManagerRecords = (fieldIds) => {
-        managerRecordUnsubscribers.forEach(unsubscribe => unsubscribe());
-        managerRecordUnsubscribers = [];
-        cyclesByField.clear();
-        logsByField.clear();
-        cropCycles.length = 0;
-        applyRemoteLogs([]);
-        fieldIds.forEach(fieldId => {
-          managerRecordUnsubscribers.push(onSnapshot(
-            query(collection(db, COLLECTIONS.CROP_CYCLES), where('fieldId', '==', fieldId)),
-            snapshot => {
-              cyclesByField.set(fieldId, snapshot.docs.map(document => fromCycleDocument(document.id, document.data())));
-              cropCycles.length = 0;
-              cropCycles.push(...Array.from(cyclesByField.values()).flat());
-              refreshFieldViews();
-            },
-            err => console.warn('[Mobile] Scoped crop cycles listener notice:', err)
-          ));
-          managerRecordUnsubscribers.push(onSnapshot(
-            query(collection(db, COLLECTIONS.OPERATION_LOGS), where('fieldId', '==', fieldId)),
-            snapshot => {
-              logsByField.set(fieldId, readRemoteLogs(snapshot));
-              applyRemoteLogs(Array.from(logsByField.values()).flat());
-            },
-            err => console.warn('[Mobile] Scoped operation logs listener notice:', err)
-          ));
-        });
-      };
-    }
-
-    // 4. Live Support Tickets Listener (Authoritative Cloud Sync)
-    const ticketsSource = query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', memberUserId));
-    const unsubTickets = onSnapshot(ticketsSource, (snapshot) => {
-      const remoteTickets = [];
-      snapshot.forEach(docSnap => remoteTickets.push(fromSupportTicketDocument(docSnap.id, docSnap.data())));
-
-      supportTickets.length = 0;
-      remoteTickets.forEach(rt => supportTickets.push(rt));
-      saveItem(STORAGE_KEYS.TICKETS, supportTickets);
-      notify();
-    }, (err) => console.warn('[Mobile] Support tickets listener notice:', err));
-
-    // 5. Live Users Directory Listener (Authoritative Cloud Sync)
-    const usersSource = activeRole === ROLES.SRA_ADMIN
-      ? query(collection(db, COLLECTIONS.USERS), where('role', 'in', [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]))
-      : doc(db, COLLECTIONS.USERS, memberUserId);
-    const unsubUsers = isManager ? () => {} : onSnapshot(usersSource, (snapshot) => {
-      const remoteUsers = [];
-      if (activeRole !== ROLES.SRA_ADMIN) {
-        if (snapshot.exists()) remoteUsers.push(fromUserDocument(snapshot.id, snapshot.data()));
-      } else {
-        snapshot.forEach(docSnap => remoteUsers.push(fromUserDocument(docSnap.id, docSnap.data())));
+      const cacheEntries = [
+        ['@hugpong_block_farms', blockFarms],
+        [STORAGE_KEYS.FIELDS, fields],
+        [STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields],
+        [STORAGE_KEYS.LOGS, operationLogs],
+        [STORAGE_KEYS.PRICES, priceHistory],
+        [STORAGE_KEYS.TICKETS, supportTickets],
+        [STORAGE_KEYS.SESSION, CURRENT_SESSION]
+      ];
+      if (!isMember) {
+        cacheEntries.push(
+          [STORAGE_KEYS.USERS, users],
+          [STORAGE_KEYS.AUDIT_REPORTS, auditReports],
+          [STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]
+        );
       }
-
-      users.length = 0;
-      remoteUsers.forEach(ru => users.push(ru));
-      saveItem(STORAGE_KEYS.USERS, users);
-      notify();
-    }, (err) => console.warn('[Mobile] Users listener notice:', err));
-    if (isManager) {
-      authenticatedRequest('/api/users')
-        .then(result => {
-          const remoteUsers = (result.data || []).map(user => fromUserDocument(user.id || user.employeeId, user));
-          users.length = 0;
-          users.push(...remoteUsers);
-          saveItem(STORAGE_KEYS.USERS, users);
-          notify();
-        })
-        .catch(err => console.warn('[Mobile] Scoped users API notice:', err.message));
+      await multiSave(cacheEntries);
+      if (active) notify();
+    } catch (error) {
+      if (error.status === 401) {
+        stop();
+        return;
+      }
+      console.warn('[Mobile] Server data refresh notice:', error.message);
+    } finally {
+      requestInFlight = false;
     }
+  };
 
-    // 6. Live Audit Reports Listener (Authoritative Cloud Sync)
-    const reportsSource = isManager
-      ? query(collection(db, COLLECTIONS.AUDIT_REPORTS), where('blockFarmId', '==', CURRENT_SESSION?.blockFarmId || '__unassigned__'))
-      : collection(db, COLLECTIONS.AUDIT_REPORTS);
-    const unsubAuditReports = isMember ? () => {} : onSnapshot(reportsSource, (snapshot) => {
-      const remoteAudits = [];
-      snapshot.forEach(docSnap => remoteAudits.push(fromAuditReportDocument(docSnap.id, docSnap.data())));
-      auditReports.length = 0;
-      auditReports.push(...remoteAudits);
-      saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
-      saveItem('@hugpong_audit_logs', auditReports);
-      notify();
-    }, (err) => console.warn('[Mobile] Audit reports listener notice:', err));
+  refresh();
+  refreshTimer = setInterval(refresh, 15000);
+  return stop;
+};
 
-    // 7. Live Audit Logs / System History Listener (Authoritative Cloud Sync)
-    const auditLogsSource = isManager
-      ? query(collection(db, COLLECTIONS.AUDIT_LOGS), where('actorUserId', '==', memberUserId))
-      : collection(db, COLLECTIONS.AUDIT_LOGS);
-    const unsubAuditLogs = isMember ? () => {} : onSnapshot(auditLogsSource, (snapshot) => {
-      const remoteLogs = [];
-      snapshot.forEach(docSnap => remoteLogs.push({ id: docSnap.id, ...docSnap.data() }));
+let activeCloudSyncStop = null;
 
-      systemHistory.length = 0;
-      systemHistory.push(...remoteLogs);
-      saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
-      notify();
-    }, (err) => console.warn('[Mobile] Audit logs listener notice:', err));
+const stopActiveCloudSync = () => {
+  if (typeof activeCloudSyncStop === 'function') activeCloudSyncStop();
+  activeCloudSyncStop = null;
+};
 
-    return () => {
-      unsubBlockFarms();
-      unsubPrices();
-      unsubCycles();
-      unsubFields();
-      unsubLogs();
-      unsubTickets();
-      unsubUsers();
-      unsubAuditReports();
-      unsubAuditLogs();
-      managerRecordUnsubscribers.forEach(unsubscribe => unsubscribe());
-    };
-  } catch (err) {
-    console.warn('[Mobile] Error setting up Cloud listeners:', err);
-    return () => {};
-  }
+export const restartCloudSyncIfReady = async () => {
+  stopActiveCloudSync();
+
+  const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+  const accountReady = CURRENT_SESSION?.phoneVerified === true
+    && CURRENT_SESSION?.requiresPasswordChange !== true
+    && CURRENT_SESSION?.pendingFirstLoginVerification !== true;
+
+  if (!token || !activeRole || !sessionUserId || !accountReady) return false;
+  if (!auth?.currentUser || auth.currentUser.uid !== sessionUserId) return false;
+
+  activeCloudSyncStop = listenToCloudSync();
+  return true;
 };
 
 let mobileSyncPromise = null;
@@ -2321,7 +2199,7 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
   });
 
   if (logsChanged) {
-    const deduped = cleanupDuplicateLogs(operationLogs);
+    const deduped = sortOperationsNewestFirst(cleanupDuplicateLogs(operationLogs));
     operationLogs.length = 0;
     operationLogs.push(...deduped);
     await saveItem(STORAGE_KEYS.LOGS, operationLogs);
@@ -2410,7 +2288,7 @@ export const initializeOfflineStorage = async () => {
     }
     if (Array.isArray(stored[STORAGE_KEYS.LOGS]) && stored[STORAGE_KEYS.LOGS].length > 0) {
       operationLogs.length = 0;
-      const normalized = cleanupDuplicateLogs(stored[STORAGE_KEYS.LOGS])
+      const normalized = sortOperationsNewestFirst(cleanupDuplicateLogs(stored[STORAGE_KEYS.LOGS])
         .filter(l => l && l.cycleId && (l.status === 'ACTIVE' || l.status === 'ARCHIVED'))
         .map(l => {
         const effCost = Number(l.totalCost != null ? l.totalCost : (l.cost || 0));
@@ -2426,7 +2304,7 @@ export const initializeOfflineStorage = async () => {
           period: displayDate,
           isoDate: toISODateString(displayDate)
         };
-      });
+      }));
       normalized.forEach(l => operationLogs.push(l));
     }
     if (Array.isArray(stored[STORAGE_KEYS.DRAFTS])) {
@@ -2444,7 +2322,7 @@ export const initializeOfflineStorage = async () => {
     }
     if (Array.isArray(stored[STORAGE_KEYS.TICKETS]) && stored[STORAGE_KEYS.TICKETS].length > 0) {
       supportTickets.length = 0;
-      stored[STORAGE_KEYS.TICKETS].forEach(t => supportTickets.push(t));
+      supportTickets.push(...sortNewestFirst(stored[STORAGE_KEYS.TICKETS], ['createdAt']));
     }
     if (stored[STORAGE_KEYS.PREFS]) SECURITY_PREFERENCES = stored[STORAGE_KEYS.PREFS];
 
@@ -2469,15 +2347,16 @@ export const initializeOfflineStorage = async () => {
     // Hydrate cached audit reports
     if (Array.isArray(stored[STORAGE_KEYS.AUDIT_REPORTS]) && stored[STORAGE_KEYS.AUDIT_REPORTS].length > 0) {
       auditReports.length = 0;
-      stored[STORAGE_KEYS.AUDIT_REPORTS].forEach(a => {
-        if (a && (a.status === 'PENDING' || a.status === 'CERTIFIED')) auditReports.push(a);
-      });
+      auditReports.push(...sortNewestFirst(
+        stored[STORAGE_KEYS.AUDIT_REPORTS].filter(a => a && (a.status === 'PENDING' || a.status === 'CERTIFIED')),
+        ['compiledAt', 'createdAt']
+      ));
     }
 
     // Hydrate cached system history
     if (Array.isArray(stored[STORAGE_KEYS.SYSTEM_HISTORY]) && stored[STORAGE_KEYS.SYSTEM_HISTORY].length > 0) {
       systemHistory.length = 0;
-      stored[STORAGE_KEYS.SYSTEM_HISTORY].forEach(s => systemHistory.push(s));
+      systemHistory.push(...sortNewestFirst(stored[STORAGE_KEYS.SYSTEM_HISTORY], ['createdAt', 'rawTimestamp', 'timestamp']));
     }
     
     const pendingCount = getPendingSyncCount(CURRENT_SESSION);
@@ -2492,14 +2371,12 @@ export const initializeOfflineStorage = async () => {
     notify();
 
     try {
-      let stopCloudSync = null;
       if (auth) {
         onAuthStateChanged(auth, firebaseUser => {
-          if (stopCloudSync) {
-            stopCloudSync();
-            stopCloudSync = null;
+          const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+          if (!firebaseUser || !sessionUserId || firebaseUser.uid !== sessionUserId) {
+            stopActiveCloudSync();
           }
-          if (firebaseUser) stopCloudSync = listenToCloudSync();
         });
       }
       // Publish background device telemetry

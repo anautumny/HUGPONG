@@ -35,7 +35,7 @@ export default function TicketsView() {
       }
     });
 
-    const unsubFields = subscribeToFieldsData({
+    const unsubFields = isSuperAdmin ? null : subscribeToFieldsData({
       user,
       onUpdate: (data) => {
         setFields(data.fields || []);
@@ -46,7 +46,7 @@ export default function TicketsView() {
       if (typeof unsubTickets === 'function') unsubTickets();
       if (typeof unsubFields === 'function') unsubFields();
     };
-  }, [user]);
+  }, [user, isSuperAdmin]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -104,8 +104,8 @@ export default function TicketsView() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         fields={fields}
-        onCreated={() => {
-          // Auto-updated via snapshot listener
+        onCreated={(createdTicket) => {
+          setTickets(current => [createdTicket, ...current.filter(ticket => ticket.id !== createdTicket.id)]);
         }}
       />
 
@@ -115,8 +115,8 @@ export default function TicketsView() {
           isOpen={Boolean(ticketToResolve)}
           onClose={() => setTicketToResolve(null)}
           ticket={ticketToResolve}
-          onUpdated={() => {
-            // Auto-updated via snapshot listener
+          onUpdated={(updatedTicket) => {
+            setTickets(current => current.map(ticket => ticket.id === updatedTicket.id ? updatedTicket : ticket));
           }}
         />
       )}

@@ -244,7 +244,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
             <span className="text-[11px] font-medium text-hug-muted block mb-1">Price Stability Index</span>
             <div className="flex items-baseline justify-between">
               <span className="text-base font-bold text-hug-text">
-                {currentPrice ? formatCurrency(currentPrice.pricePerLkg || currentPrice.price || 0) : '—'}
+                {currentPrice ? formatCurrency(currentPrice.sugarPricePerLkg) : '—'}
               </span>
               <span className="text-xs text-hug-muted font-medium">per LKg</span>
             </div>
@@ -259,7 +259,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
               <span className="text-base font-bold text-hug-text">
                 {auditReports.length > 0
                   ? `${Math.round(((auditReports.length - pendingAudits.length) / auditReports.length) * 100)}%`
-                  : '100%'}
+                  : '—'}
               </span>
               <span className="text-xs text-hug-muted font-medium">Certified Dossiers</span>
             </div>

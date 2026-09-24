@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const { hashPassword, verifyPassword, PASSWORD_HASH_FORMAT } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
@@ -16,7 +17,6 @@ const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
 const { ROLES, publicRoleLabel, ROLE_ALLOWED_PLATFORMS, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
-const webAuthRouting = require('../../web/shared/auth-routing');
 
 function responseRecorder() {
   return {
@@ -113,7 +113,8 @@ test('a server-issued bearer authenticates but cannot cross a role guard', () =>
   assert.equal(roleRes.body.code, 'FORBIDDEN');
 });
 
-test('web role routing uses exact canonical mappings without substring collisions', () => {
+test('web role routing uses exact canonical mappings without substring collisions', async () => {
+  const webAuthRouting = await import(pathToFileURL(path.resolve(__dirname, '../../web/react-app/src/utils/authRouting.js')).href);
   const aliases = {
     'Super Admin': 'superadmin',
     SUPER_ADMIN: 'superadmin',
@@ -136,26 +137,36 @@ test('web role routing uses exact canonical mappings without substring collision
   assert.equal(webAuthRouting.dashboardPath('member'), null);
 });
 
-test('role pages wait for session resolution and use the shared exact route guard', () => {
-  for (const roleDirectory of ['super-admin', 'sra-admin', 'farm-manager']) {
-    const html = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/dashboard.html`), 'utf8');
-    const guard = fs.readFileSync(path.resolve(__dirname, `../../web/roles/${roleDirectory}/${roleDirectory}.js`), 'utf8');
-    assert.match(html, /<html[^>]+class="auth-pending"/);
-    assert.match(html, /auth-routing\.js/);
-    assert.match(guard, /webRoleKeyFromUser\(/);
-    assert.match(guard, /getWebDashboardPath\(/);
-    assert.doesNotMatch(guard, /roleLower\.includes\(/);
-  }
+test('React routes wait for session resolution and use the exact role guard', () => {
+  const appSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/App.jsx'), 'utf8');
+  const authSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/context/AuthContext.jsx'), 'utf8');
+  assert.match(appSource, /function RoleRoute\(\{ allowed, children \}\)/);
+  assert.match(appSource, /if \(isLoading\) return null/);
+  assert.match(appSource, /allowed\.includes\(roleKey\)/);
+  assert.match(appSource, /<AuthProvider>/);
+  assert.match(authSource, /roleKeyFromUser\(/);
+  assert.match(authSource, /refreshSession/);
+  assert.doesNotMatch(appSource, /roleLower\.includes\(/);
 });
 
-test('Firestore users listener updates the directory but never the authenticated identity', () => {
-  const core = fs.readFileSync(path.resolve(__dirname, '../../web/shared/core.js'), 'utf8');
-  const usersListenerStart = core.indexOf('// 6. Listen on Users Directory');
-  const usersListenerEnd = core.indexOf('// 7. Listen on Audit Reports');
-  assert.ok(usersListenerStart >= 0 && usersListenerEnd > usersListenerStart);
-  const usersListener = core.slice(usersListenerStart, usersListenerEnd);
-  assert.match(usersListener, /db\.users = remoteUsers/);
-  assert.doesNotMatch(usersListener, /hugpong_user|activeUser\s*=|sessionUser\s*=/);
+test('production login surfaces cannot manufacture development sessions or seed farm data', () => {
+  const webLogin = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/LoginView.jsx'), 'utf8');
+  const webApp = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/App.jsx'), 'utf8');
+  const mobileLogin = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/auth/LoginScreen.js'), 'utf8');
+  const mobileStore = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/data/dataStore.js'), 'utf8');
+  const mobileSyncMonitor = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/SyncMonitorScreen.js'), 'utf8');
+  const runtime = [webLogin, webApp, mobileLogin, mobileStore, mobileSyncMonitor].join('\n');
+
+  assert.doesNotMatch(runtime, /dev-mock-session-token|Development Role Preview|fastLoginRole|handleQuickRoleSwitch/);
+  assert.doesNotMatch(runtime, /DEV-FLD-001|DEV-BF-001/);
+  assert.doesNotMatch(webApp, /ComponentShowcaseView|path="\/showcase"/);
+});
+
+test('server-scoped users subscription updates the directory but never the authenticated identity', () => {
+  const usersService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/usersService.js'), 'utf8');
+  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users'/);
+  assert.match(usersService, /onUpdate\(\{ users: active, pendingUsers,/);
+  assert.doesNotMatch(usersService, /hugpong_user|setUser\(|saveSession\(|localStorage/);
 });
 
 test('OTP values remain server-side, enforce matching context, and are single-use', () => {
@@ -282,7 +293,43 @@ test('web and mobile runtime source contain no direct Firestore mutation calls',
   }
 });
 
-test('Super Admin role is strictly restricted to web and rejected on mobile platform', () => {
+test('governance and support reads use server-scoped APIs instead of client collection reads', () => {
+  const apiClient = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/apiClient.js'), 'utf8');
+  const ticketsService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/ticketsService.js'), 'utf8');
+  const maintenanceService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/maintenanceService.js'), 'utf8');
+  const telemetryService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/telemetryService.js'), 'utf8');
+  const usersService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/usersService.js'), 'utf8');
+  const mobileStore = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/data/dataStore.js'), 'utf8');
+
+  assert.match(apiClient, /subscribeToAuthenticatedResource/);
+  assert.match(ticketsService, /subscribeToAuthenticatedResource\('\/api\/tickets'/);
+  assert.match(maintenanceService, /subscribeToAuthenticatedResource\('\/api\/audit-events'/);
+  assert.match(maintenanceService, /authenticatedRequest\('\/api\/system-diagnostics'/);
+  assert.match(telemetryService, /subscribeToAuthenticatedResource\('\/api\/terminal-diagnostics'/);
+  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users'/);
+  assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /onSnapshot|collection\(db/);
+  for (const endpoint of ['/api/block-farms', '/api/fields', '/api/crop-cycles', '/api/logs', '/api/prices', '/api/tickets', '/api/users', '/api/audit-reports', '/api/audit-events']) {
+    assert.match(mobileStore, new RegExp(`authenticatedRequest\\('${endpoint}'`));
+  }
+  assert.doesNotMatch(mobileStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
+});
+
+test('governance API routes enforce role-scoped read boundaries', () => {
+  const auditEvents = fs.readFileSync(path.resolve(__dirname, '../routes/auditEvents.js'), 'utf8');
+  const telemetry = fs.readFileSync(path.resolve(__dirname, '../routes/telemetry.js'), 'utf8');
+  const diagnostics = fs.readFileSync(path.resolve(__dirname, '../routes/systemDiagnostics.js'), 'utf8');
+  const server = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
+
+  assert.match(auditEvents, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.FARM_MANAGER, ROLES\.SRA_ADMIN, ROLES\.SUPER_ADMIN\]\)/);
+  assert.match(auditEvents, /\.where\('actorUserId', '==', identity\.userId\)/);
+  assert.match(auditEvents, /\.where\('blockFarmId', 'in', farmIds\.slice\(index, index \+ 10\)\)/);
+  assert.match(telemetry, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.FARM_MANAGER, ROLES\.SRA_ADMIN, ROLES\.SUPER_ADMIN\]\)/);
+  assert.match(telemetry, /\.where\('userId', 'in', uniqueUserIds\.slice\(index, index \+ 10\)\)/);
+  assert.match(diagnostics, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.SUPER_ADMIN\]\)/);
+  assert.match(server, /app\.use\('\/api\/system-diagnostics', systemDiagnosticsRoutes\)/);
+});
+
+test('role platforms are enforced by auth for both web and mobile', () => {
   assert.equal(isRoleAllowedOnPlatform(ROLES.SUPER_ADMIN, 'web'), true);
   assert.equal(isRoleAllowedOnPlatform(ROLES.SUPER_ADMIN, 'mobile'), false);
   assert.deepEqual(ROLE_ALLOWED_PLATFORMS[ROLES.SUPER_ADMIN], ['web']);
@@ -299,12 +346,22 @@ test('Super Admin role is strictly restricted to web and rejected on mobile plat
   const authRouteSource = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
   assert.match(
     authRouteSource,
-    /sessionUser\.canonicalRole === ROLES\.SUPER_ADMIN && clientPlatform === 'mobile'/,
-    'auth /login and /session must reject SUPER_ADMIN on mobile platform'
+    /!isRoleAllowedOnPlatform\(sessionUser\.canonicalRole, clientPlatform\)/,
+    'auth /login and /session must enforce the canonical platform matrix'
   );
   assert.match(
     authRouteSource,
     /Super Admin access is restricted to the Web Management Console\./,
     'auth routes must return the exact restriction message'
   );
+  assert.match(
+    authRouteSource,
+    /Member Farmer accounts are restricted to the HUGPONG mobile application\./,
+    'auth routes must reject MEMBER_FARMER on the web'
+  );
+
+  const webAuthSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/context/AuthContext.jsx'), 'utf8');
+  const appShellSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/layout/AppShell.jsx'), 'utf8');
+  assert.match(webAuthSource, /'x-client-platform': 'web'/);
+  assert.match(appShellSource, /await logout\(\)[\s\S]*navigate\('\/login', \{ replace: true \}\)/);
 });

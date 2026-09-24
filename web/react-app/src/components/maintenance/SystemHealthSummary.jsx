@@ -1,5 +1,6 @@
 import React from 'react';
 import { Server, Database, Activity, CheckCircle2, AlertTriangle, ShieldCheck, Clock, Layers } from 'lucide-react';
+import { formatCropYearDisplay } from '../../utils/formatters';
 
 export default function SystemHealthSummary({
   healthData = null,
@@ -25,6 +26,13 @@ export default function SystemHealthSummary({
       return ts;
     }
   };
+
+  const activeCropYears = Array.isArray(collectionCounts.activeCropYears)
+    ? collectionCounts.activeCropYears.map(year => formatCropYearDisplay(year)).filter(Boolean)
+    : [];
+  const activeCropYearLabel = activeCropYears.length > 0
+    ? activeCropYears.join(' · ')
+    : 'None active';
 
   return (
     <div className={`space-y-4 ${className}`}>
@@ -177,22 +185,25 @@ export default function SystemHealthSummary({
             </span>
           </div>
 
-          {/* 5. Crop Cycles */}
+          {/* 5. Active Crop Year Cycle */}
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
-            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Crop Cycles</span>
-            <span className="text-xl font-black text-hug-text block">
+            <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Active Crop Year Cycle</span>
+            <span
+              className={`${activeCropYears.length > 1 ? 'text-sm' : 'text-xl'} font-black text-hug-text block truncate`}
+              title={activeCropYears.join(', ')}
+            >
               {(!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
                 ? 'Unavailable'
                 : collectionCounts.cropCycles == null
                   ? 'Loading...'
-                  : collectionCounts.cropCycles}
+                  : activeCropYearLabel}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {(!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
                 ? 'database unreachable'
                 : collectionCounts.cropCycles == null
                   ? 'reading crop_cycles'
-                  : `${collectionCounts.activeCropCycles ?? 0} active · ${collectionCounts.archivedCropCycles ?? 0} archived`}
+                  : `${collectionCounts.cropCycles ?? 0} records · ${collectionCounts.activeCropCycles ?? 0} active · ${collectionCounts.archivedCropCycles ?? 0} archived`}
             </span>
           </div>
 

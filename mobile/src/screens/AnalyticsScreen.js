@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../theme';
 import {
   fields as fieldsStore,
+  cropCycles as cropCyclesStore,
   operationLogs as opsStore,
   blockFarms as farmsStore,
   getSortedPrices,
@@ -23,7 +24,7 @@ import {
   selectOperationalCostBreakdown,
   selectFarmOperationsAnalytics,
   selectPriceTrends,
-  formatCropYear
+  filterOperationsByCropYearCycle
 } from '../services/analyticsSelectors';
 import {
   AnalyticsScopeCard,
@@ -36,11 +37,13 @@ import {
   AnalyticsEmptyState
 } from '../components/analytics/AnalyticsComponents';
 import { ScreenHeader, Card, PrimaryButton, SecondaryButton } from '../components/ui';
+import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
 
 export default function AnalyticsScreen({ navigation, route }) {
   const { t } = useTranslation();
   const [session, setSession] = useState(getCurrentSession());
   const [allFields, setAllFields] = useState(fieldsStore);
+  const [allCropCycles, setAllCropCycles] = useState(cropCyclesStore);
   const [allOps, setAllOps] = useState(opsStore);
   const [allFarms, setAllFarms] = useState(farmsStore);
   const [pricesList, setPricesList] = useState(getSortedPrices());
@@ -63,6 +66,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   }, [isManager, allFarms, session]);
 
   const [selectedSeason, setSelectedSeason] = useState('ALL');
+  const [cycleFilterInitialized, setCycleFilterInitialized] = useState(false);
   const [selectedFarmId, setSelectedFarmId] = useState(defaultFarmId);
   const [selectedFieldId, setSelectedFieldId] = useState('ALL');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
@@ -82,6 +86,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     const unsub = subscribe(() => {
       setSession(getCurrentSession());
       setAllFields([...fieldsStore]);
+      setAllCropCycles([...cropCyclesStore]);
       setAllOps([...opsStore]);
       setAllFarms([...farmsStore]);
       setPricesList(getSortedPrices());
@@ -116,28 +121,47 @@ export default function AnalyticsScreen({ navigation, route }) {
     const validFieldIds = new Set(scopedFields.map(f => f.id));
     return allOps.filter(op => {
       if (!validFieldIds.has(op.fieldId)) return false;
-      return op.status === 'ACTIVE';
+      return ['ACTIVE', 'ARCHIVED', 'submitted'].includes(String(op.status || 'ACTIVE'));
     });
   }, [scopedFields, allOps]);
 
   // Available filter options derived strictly from recorded data
   const availableSeasons = useMemo(() => {
-    const set = new Set();
-    scopedFields.forEach(f => {
-      if (f.cropYear) set.add(formatCropYear(f.cropYear));
-    });
-    if (set.size === 0) set.add(formatCropYear(new Date().getFullYear()));
-    return Array.from(set).sort().reverse();
-  }, [scopedFields]);
+    const fieldIds = new Set(scopedFields.map(field => field.id));
+    return uniqueCropYears(allCropCycles.filter(cycle => fieldIds.has(cycle.fieldId)));
+  }, [scopedFields, allCropCycles]);
+
+  const currentSeason = useMemo(() => {
+    const fieldIds = new Set(scopedFields.map(field => field.id));
+    return allCropCycles
+      .filter(cycle => cycle.status === 'ACTIVE' && fieldIds.has(cycle.fieldId))
+      .map(cycle => canonicalStoredCropYear(cycle.cropYear))
+      .filter(Boolean)
+      .sort()
+      .reverse()[0] || '';
+  }, [scopedFields, allCropCycles]);
+
+  useEffect(() => {
+    if (!cycleFilterInitialized && allCropCycles.length > 0) {
+      setSelectedSeason(currentSeason || 'ALL');
+      setCycleFilterInitialized(true);
+    }
+  }, [cycleFilterInitialized, currentSeason, allCropCycles.length]);
+
+  const cycleScopedOps = useMemo(() => filterOperationsByCropYearCycle({
+    operations: scopedOps,
+    cropCycles: allCropCycles,
+    selectedSeason
+  }), [scopedOps, allCropCycles, selectedSeason]);
 
   const availablePeriods = useMemo(() => {
     const set = new Set();
-    scopedOps.forEach(op => {
+    cycleScopedOps.forEach(op => {
       const d = String(op.performedOn || op.isoDate || op.date || '');
       if (d && d.length >= 7) set.add(d.slice(0, 7));
     });
     return Array.from(set).sort().reverse();
-  }, [scopedOps]);
+  }, [cycleScopedOps]);
 
   // Effective farm and field display names for ScopeCard
   const activeFarmName = useMemo(() => {
@@ -158,19 +182,19 @@ export default function AnalyticsScreen({ navigation, route }) {
     try {
       return selectCropFieldProgress({
         fields: scopedFields,
-        cropCycles: [],
+        cropCycles: allCropCycles,
         selectedFarmId: selectedFarmId,
         selectedSeason: selectedSeason
       });
     } catch (e) {
       return { totalPlots: 0, totalAcreageHa: 0, stagesDistribution: [], activePlots: [] };
     }
-  }, [scopedFields, selectedFarmId, selectedSeason]);
+  }, [scopedFields, allCropCycles, selectedFarmId, selectedSeason]);
 
   const productionCost = useMemo(() => {
     try {
       return selectProductionCost({
-        operations: scopedOps,
+        operations: cycleScopedOps,
         fields: scopedFields,
         blockFarms: allFarms,
         selectedFarmId: selectedFarmId,
@@ -181,12 +205,12 @@ export default function AnalyticsScreen({ navigation, route }) {
     } catch (e) {
       return { totalExpenditure: 0, operationsCount: 0, averageCostPerHa: 0, totalAuditedHa: 0, breakdownByEntity: [] };
     }
-  }, [scopedOps, scopedFields, allFarms, selectedFarmId, selectedFieldId, selectedPeriod, isManager, isMember]);
+  }, [cycleScopedOps, scopedFields, allFarms, selectedFarmId, selectedFieldId, selectedPeriod, isManager, isMember]);
 
   const costBreakdown = useMemo(() => {
     try {
       return selectOperationalCostBreakdown({
-        operations: scopedOps,
+        operations: cycleScopedOps,
         fields: scopedFields,
         selectedFarmId: selectedFarmId,
         selectedPeriod: selectedPeriod
@@ -194,12 +218,12 @@ export default function AnalyticsScreen({ navigation, route }) {
     } catch (e) {
       return { grandTotalCost: 0, categories: [], topCategory: null };
     }
-  }, [scopedOps, scopedFields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedPeriod]);
 
   const operationsAnalytics = useMemo(() => {
     try {
       return selectFarmOperationsAnalytics({
-        operations: scopedOps,
+        operations: cycleScopedOps,
         fields: scopedFields,
         selectedFarmId: selectedFarmId,
         selectedPeriod: selectedPeriod
@@ -207,7 +231,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     } catch (e) {
       return { totalOps: 0, totalHa: 0, byActivity: [], byMonth: [], mostFrequent: null };
     }
-  }, [scopedOps, scopedFields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedPeriod]);
 
   const priceTrends = useMemo(() => {
     return selectPriceTrends({
@@ -539,7 +563,8 @@ export default function AnalyticsScreen({ navigation, route }) {
       <AnalyticsScopeModal
         visible={showScopeModal}
         onClose={() => setShowScopeModal(false)}
-        seasons={availableSeasons}
+        seasons={['ALL', ...availableSeasons]}
+        currentSeason={currentSeason}
         farms={allFarms}
         fields={scopedFields}
         periods={availablePeriods}
@@ -552,7 +577,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         onSelectField={setSelectedFieldId}
         onSelectPeriod={setSelectedPeriod}
         onReset={() => {
-          setSelectedSeason('ALL');
+          setSelectedSeason(currentSeason || 'ALL');
           setSelectedFarmId(defaultFarmId);
           setSelectedFieldId('ALL');
           setSelectedPeriod('ALL');

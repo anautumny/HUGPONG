@@ -18,6 +18,7 @@ export const createField = (payload, mutation) => api('/api/fields', 'POST', pay
 export const updateField = (id, payload, mutation) => api(`/api/fields/${encodeURIComponent(id)}`, 'PATCH', payload, mutation);
 export const archiveField = (id, mutation) => api(`/api/fields/${encodeURIComponent(id)}/archive`, 'POST', {}, mutation);
 export const updateCycleStage = (cycleId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, 'PATCH', payload, mutation, takeoverGrant);
+export const startCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/start`, 'POST', payload, mutation, takeoverGrant);
 export const rolloverCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, 'POST', payload, mutation, takeoverGrant);
 export const saveCustomStages = (fieldId, customStages, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-stages`, 'PUT', { customStages }, mutation);
 export const saveCustomOperations = (fieldId, customOperations, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-operations`, 'PUT', { customOperations }, mutation);

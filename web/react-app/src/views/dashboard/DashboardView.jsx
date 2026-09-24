@@ -63,8 +63,8 @@ export default function DashboardView() {
     };
   }, [roleKey, user?.id, user?.employeeId, user?.blockFarmId, subscriptionKey]);
 
-  // Handle scoped section failure
-  if (dashboardData.error && dashboardData.isLoading) {
+  // Do not present authorization or transport failures as legitimate zero totals.
+  if (dashboardData.error) {
     return (
       <ErrorState
         title="Dashboard Connection Issue"

@@ -806,7 +806,7 @@ export default function PlannerScreen({ navigation }) {
           <>
             {/* Title */}
             <View>
-              <Text style={s.pageTitle}>{t('planner_page_title', 'Sugarcane Crop Cycle Planner')}</Text>
+              <Text style={s.pageTitle}>{t('planner_page_title', 'Sugarcane Crop Year Cycle Planner')}</Text>
               <Text style={s.pageSub}>{t('planner_page_sub', 'Select a growth stage below to inspect, customize, or dispatch operations.')}</Text>
             </View>
 
@@ -1873,7 +1873,7 @@ export default function PlannerScreen({ navigation }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <View>
                 <Text style={s.modalTitle}>Select Farm Plot to Plan</Text>
-                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>Choose any block farm field to customize its crop cycle</Text>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>Choose any Block Farm field to customize its Crop Year Cycle</Text>
               </View>
               <TouchableOpacity onPress={() => setShowFieldPickerModal(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={24} color={COLORS.text} />

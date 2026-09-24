@@ -12,24 +12,23 @@ function snapshot(entries) {
 }
 
 function fakeDatabase(collections) {
+  function query(entries, constraints = []) {
+    return {
+      async get() {
+        return snapshot(entries.filter(([, data]) => constraints.every(({ field, operator, value }) => operator === 'in'
+          ? value.includes(data[field])
+          : data[field] === value)));
+      },
+      where(field, operator, value) {
+        assert.ok(operator === '==' || operator === 'in');
+        return query(entries, [...constraints, { field, operator, value }]);
+      }
+    };
+  }
   return {
     collection(name) {
       const entries = Object.entries(collections[name] || {});
-      return {
-        async get() {
-          return snapshot(entries);
-        },
-        where(field, operator, value) {
-          assert.ok(operator === '==' || operator === 'in');
-          return {
-            async get() {
-              return snapshot(entries.filter(([, data]) => operator === 'in'
-                ? value.includes(data[field])
-                : data[field] === value));
-            }
-          };
-        }
-      };
+      return query(entries);
     }
   };
 }
@@ -44,8 +43,8 @@ const database = fakeDatabase({
     'FLD-2': { blockFarmId: 'BF-2', memberUserId: 'MEM-2' }
   },
   operation_logs: {
-    'LOG-1': { fieldId: 'FLD-1', totalCost: 100 },
-    'LOG-2': { fieldId: 'FLD-2', totalCost: 200 }
+    'LOG-1': { fieldId: 'FLD-1', totalCost: 100, status: 'ACTIVE' },
+    'LOG-2': { fieldId: 'FLD-2', totalCost: 200, status: 'ARCHIVED' }
   }
 });
 
@@ -62,4 +61,9 @@ test('operation query service preserves Member Farmer own-field scope', async ()
 test('operation query service preserves district-wide SRA read scope', async () => {
   const records = await listOperationRecords(database, { employeeId: 'SRA-1', role: 'SRA_ADMIN' });
   assert.deepEqual(records.map(record => record.id), ['LOG-1', 'LOG-2']);
+});
+
+test('operation query service can exclude archived records at query time', async () => {
+  const records = await listOperationRecords(database, { employeeId: 'SRA-1', role: 'SRA_ADMIN' }, { status: 'ACTIVE' });
+  assert.deepEqual(records.map(record => record.id), ['LOG-1']);
 });

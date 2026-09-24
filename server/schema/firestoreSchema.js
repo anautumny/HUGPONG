@@ -34,6 +34,7 @@ const ROLE_ALLOWED_PLATFORMS = Object.freeze({
 const USER_STATUSES = Object.freeze(['PENDING', 'ACTIVE', 'DISABLED']);
 const ENTITY_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const OPERATION_LOG_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
+const CROP_CYCLE_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const AUDIT_REPORT_STATUSES = Object.freeze(['PENDING', 'CERTIFIED']);
 const SUBMISSION_SOURCES = Object.freeze(['MEMBER', 'MANAGER_TAKEOVER']);
 const TICKET_PRIORITIES = Object.freeze(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
@@ -146,12 +147,18 @@ function reportPeriod(value) {
   return result;
 }
 
-function normalizeCropYear(value) {
-  if (value == null || value === '') {
-    const d = new Date();
-    const startYear = d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1;
-    return `${startYear}-${startYear + 1}`;
-  }
+function cropYearCycleForDate(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('A valid server date is required to generate the Crop Year Cycle.');
+  const startYear = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric'
+  }).format(date));
+  return `${startYear}-${startYear + 1}`;
+}
+
+function normalizeCropYear(value, date = new Date()) {
+  if (value == null || value === '') return cropYearCycleForDate(date);
   const str = String(value).trim();
   const rangeMatch = str.match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
   if (rangeMatch) {
@@ -166,6 +173,19 @@ function normalizeCropYear(value) {
     return `${year}-${year + 1}`;
   }
   return str;
+}
+
+function cropYearParts(value, date = new Date()) {
+  const cropYear = normalizeCropYear(value, date);
+  const match = cropYear.match(/^(\d{4})-(\d{4})$/);
+  if (!match || Number(match[2]) !== Number(match[1]) + 1) {
+    throw new Error('Crop Year Cycle must use the canonical YYYY-YYYY annual range.');
+  }
+  return {
+    cropYear,
+    cropYearStart: Number(match[1]),
+    cropYearEnd: Number(match[2])
+  };
 }
 
 function cleanObject(value) {
@@ -210,6 +230,27 @@ function amendments(value) {
   }));
 }
 
+function photoEvidence(value) {
+  if (!value) return null;
+  const dataUrl = requiredString(value.dataUrl, 'photoEvidence.dataUrl', { max: 850000 });
+  if (!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
+    throw new Error('photoEvidence.dataUrl must be a JPEG, PNG, or WebP data URL.');
+  }
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const inferredBytes = Math.floor((encoded.length * 3) / 4);
+  const byteSize = value.byteSize == null ? inferredBytes : Number(value.byteSize);
+  if (!Number.isInteger(byteSize) || byteSize < 1 || inferredBytes > 614400 || byteSize > 614400) {
+    throw new Error('Photo evidence must not exceed 600 KB after resizing.');
+  }
+  return {
+    dataUrl,
+    mimeType: enumValue(value.mimeType || 'image/jpeg', ['IMAGE/JPEG', 'IMAGE/PNG', 'IMAGE/WEBP'], 'photoEvidence.mimeType').toLowerCase(),
+    fileName: optionalString(value.fileName || 'field-evidence.jpg', { max: 180 }),
+    byteSize,
+    capturedAt: value.capturedAt ? isoTimestamp(value.capturedAt, 'photoEvidence.capturedAt') : nowIso()
+  };
+}
+
 function buildOperationLog(input, context = {}) {
   const createdAt = input.createdAt ? isoTimestamp(input.createdAt, 'createdAt') : (context.now || nowIso());
   const updatedAt = input.updatedAt ? isoTimestamp(input.updatedAt, 'updatedAt') : (context.now || nowIso());
@@ -226,6 +267,11 @@ function buildOperationLog(input, context = {}) {
   const payload = {
     fieldId: requiredString(input.fieldId, 'fieldId', { max: 80 }).toUpperCase(),
     cycleId: requiredString(input.cycleId, 'cycleId', { max: 120 }).toUpperCase(),
+    blockFarmId: nullableId(input.blockFarmId),
+    cropYearCycle: input.cropYearCycle ? normalizeCropYear(input.cropYearCycle) : null,
+    stageNumberAtRecord: input.stageNumberAtRecord == null
+      ? null
+      : integer(input.stageNumberAtRecord, 'stageNumberAtRecord', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
     submittedByUserId: requiredString(context.submittedByUserId || input.submittedByUserId, 'submittedByUserId', { max: 80 }),
     submissionSource: enumValue(input.submissionSource || 'MEMBER', SUBMISSION_SOURCES, 'submissionSource'),
     operationDefinitionId: requiredString(input.operationDefinitionId, 'operationDefinitionId', { max: 120 }),
@@ -238,6 +284,7 @@ function buildOperationLog(input, context = {}) {
     quantity: quantity(input.quantity),
     totalCost: finiteNumber(input.totalCost, 'totalCost'),
     lineItems: lineItems(input.lineItems),
+    photoEvidence: photoEvidence(input.photoEvidence),
     isSupplemental: Boolean(input.isSupplemental),
     amendments: amendments(input.amendments),
     status,
@@ -259,6 +306,9 @@ function buildOperationSnapshot(logId, log) {
     operationLogId: requiredString(logId, 'operationLogId', { max: 120 }),
     fieldId: log.fieldId,
     cycleId: log.cycleId,
+    blockFarmId: log.blockFarmId || null,
+    cropYearCycle: log.cropYearCycle || null,
+    stageNumberAtRecord: log.stageNumberAtRecord == null ? null : log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
     operationName: log.operationName,
     category: log.category,
@@ -321,6 +371,7 @@ module.exports = {
   USER_STATUSES,
   ENTITY_STATUSES,
   OPERATION_LOG_STATUSES,
+  CROP_CYCLE_STATUSES,
   AUDIT_REPORT_STATUSES,
   SUBMISSION_SOURCES,
   TICKET_PRIORITIES,
@@ -338,6 +389,8 @@ module.exports = {
   calendarDate,
   reportPeriod,
   normalizeCropYear,
+  cropYearCycleForDate,
+  cropYearParts,
   cleanObject,
   buildOperationLog,
   buildOperationSnapshot,

@@ -2,6 +2,7 @@ import React from 'react';
 import { Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
+import { formatCropYearDisplay } from '../../utils/formatters';
 
 /**
  * Format currency / numeric value with 2 decimals
@@ -69,16 +70,22 @@ export default function PrintableAuditReport({
   const totalFarmArea = farm?.totalAreaHa ? Number(farm.totalAreaHa).toFixed(4) : totalAuditedHa.toFixed(4);
   const auditedAreaStr = totalAuditedHa.toFixed(4);
 
-  // ── 2. Derive Crop Year Timeline from System Period ──────────────
-  const periodStr = String(report.period || report.month || '2026-09');
+  // Use stored cycle context only; never relabel historical reports from today's year.
+  const periodStr = String(report.period || report.month || '');
   const match = periodStr.match(/^(\d{4})-(\d{2})$/);
-  const reportYear = match ? parseInt(match[1], 10) : new Date().getFullYear();
-  const reportMonth = match ? parseInt(match[2], 10) : 9;
-
-  // SRA crop cycle begins around September (month 9)
-  const cy1Start = reportMonth >= 9 ? reportYear : reportYear - 1;
-  const currentCY = `CY ${cy1Start}-${cy1Start + 1}`;
-  const nextCY = `CY ${cy1Start + 1}-${cy1Start + 2}`;
+  const firstOperationDate = String(operationLogs.find(log => log.performedOn)?.performedOn || '');
+  const operationDateMatch = firstOperationDate.match(/^(\d{4})-(\d{2})/);
+  const reportYear = match
+    ? parseInt(match[1], 10)
+    : (operationDateMatch ? parseInt(operationDateMatch[1], 10) : 0);
+  const reportMonth = match
+    ? parseInt(match[2], 10)
+    : (operationDateMatch ? parseInt(operationDateMatch[2], 10) : 1);
+  const storedCropYear = report.cropYear || operationLogs.find(log => log.cropYear)?.cropYear || '';
+  const storedStartYear = Number(String(storedCropYear).match(/\d{4}/)?.[0]);
+  const cycleStartYear = Number.isInteger(storedStartYear) ? storedStartYear : reportYear;
+  const currentCY = `Crop Year Cycle ${formatCropYearDisplay(storedCropYear)}`;
+  const nextCY = 'Following Period';
 
   // Helper to determine which month column to activate for a log
   const getMonthCol = (performedOn, isMilling = false) => {
@@ -90,7 +97,7 @@ export default function PrintableAuditReport({
       if (parts.length >= 2) {
         const year = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10);
-        if (isMilling || year > cy1Start + 1 || (year === cy1Start + 1 && month >= 9)) {
+        if (isMilling || year > cycleStartYear + 1 || (year === cycleStartYear + 1 && month >= 9)) {
           return { isNextCY: true, monthNum: Math.min(Math.max(month - 8, 1), 3) };
         }
         return { isNextCY: false, monthNum: month };

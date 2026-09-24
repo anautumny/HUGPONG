@@ -23,6 +23,7 @@ export const STORAGE_KEYS = {
   SYSTEM_HISTORY: '@hugpong_system_history',
   READ_NOTIF_IDS: '@hugpong_read_notif_ids',
   DISMISSED_NOTIF_IDS: '@hugpong_dismissed_notif_ids',
+  ARCHIVE_VIEW_PREFERENCES: '@hugpong_archive_view_preferences',
 };
 
 const PRESERVED_INSTALLATION_KEYS = new Set([

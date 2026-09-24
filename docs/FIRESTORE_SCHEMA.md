@@ -121,9 +121,13 @@ Custom plan objects retain their stable catalogue/custom operation IDs. They are
 ```js
 {
   fieldId: string,
+  blockFarmId: string,
+  farmMemberId: string | null,
   sequenceNumber: number,
   cropType: string,
   cropYear: string,
+  cropYearStart: number,
+  cropYearEnd: number,
   currentStageNumber: 1 | 2 | 3 | 4 | 5 | 6,
   elapsedMonths: number,
   batchNumber: number,
@@ -131,11 +135,12 @@ Custom plan objects retain their stable catalogue/custom operation IDs. They are
   startedAt: string,
   updatedAt: string,
   archivedAt: string | null,
-  archivedByUserId: string | null
+  archivedByUserId: string | null,
+  completedAt: string | null
 }
 ```
 
-Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must point to it. A rollover archives that cycle, archives its ACTIVE operation logs, creates the next cycle, and changes only the field's `currentCycleId`.
+Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must point to it. The server generates `cropYear` from the server year only when creating a cycle; stored historical values are never recalculated on January 1. A rollover requires Harvest, rejects duplicate `fieldId + cropYear`, archives the old cycle and its ACTIVE operation logs, creates the next cycle at Stage 1, and atomically changes the field pointer.
 
 ### `operation_logs/{operationLogId}`
 
@@ -143,6 +148,9 @@ Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must
 {
   fieldId: string,
   cycleId: string,
+  blockFarmId: string | null,
+  cropYearCycle: string | null,    // immutable display/offline snapshot
+  stageNumberAtRecord: number | null,
   submittedByUserId: string,
   submissionSource: "MEMBER" | "MANAGER_TAKEOVER",
   operationDefinitionId: string,   // SRA catalogue ID or stable custom-operation ID
@@ -174,11 +182,12 @@ Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must
   createdAt: string,
   updatedAt: string,
   archivedAt: string | null,
-  archivedByUserId: string | null
+  archivedByUserId: string | null,
+  archivedReason: "CYCLE_COMPLETED" | null
 }
 ```
 
-Only `operationName` is snapshotted from the operation definition because a historical ledger must remain intelligible if a custom plan label changes. No farm/member/actor display names are copied.
+`cycleId` is the authoritative agricultural-year relationship. New operations also preserve the server-derived `cropYearCycle`, `stageNumberAtRecord`, and `blockFarmId` context so offline synchronization and historical analytics never reattach a record to a later cycle. Display names are still resolved at read time.
 
 ### `audit_reports/{auditReportId}`
 

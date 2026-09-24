@@ -59,7 +59,7 @@ export function AnalyticsScopeCard({
             activeOpacity={0.7}
           >
             <Ionicons name="calendar-outline" size={13} color={COLORS.textSecondary} />
-            <Text style={styles.scopeChipValueClean}>{season === 'ALL' ? 'All Seasons' : season}</Text>
+            <Text style={styles.scopeChipValueClean}>{season === 'ALL' ? 'All Crop Year Cycles' : season}</Text>
           </TouchableOpacity>
         )}
         {fieldName && (
@@ -92,6 +92,7 @@ export function AnalyticsScopeModal({
   visible,
   onClose,
   seasons = [],
+  currentSeason = '',
   farms = [],
   fields = [],
   periods = [],
@@ -114,7 +115,7 @@ export function AnalyticsScopeModal({
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalTitle}>Filter Analytics Scope</Text>
-              <Text style={styles.modalSub}>Select season, farm, parcel, or period</Text>
+              <Text style={styles.modalSub}>Select Crop Year Cycle, farm, parcel, or period</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
               <Ionicons name="close" size={22} color={COLORS.text} />
@@ -124,7 +125,7 @@ export function AnalyticsScopeModal({
           <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 14, paddingVertical: 10 }}>
             {/* Season Selector */}
             <View>
-              <Text style={styles.filterSectionTitle}>CROP YEAR / SEASON</Text>
+              <Text style={styles.filterSectionTitle}>CROP YEAR CYCLE</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsWrap}>
                 {seasons.map(s => {
                   const isSel = selectedSeason === s;
@@ -135,7 +136,7 @@ export function AnalyticsScopeModal({
                       onPress={() => onSelectSeason(s)}
                     >
                       <Text style={[styles.filterChipText, isSel && styles.filterChipTextActive]}>
-                        {s === 'ALL' ? 'All Seasons' : s}
+                        {s === 'ALL' ? 'All Crop Year Cycles' : `${s}${s === currentSeason ? ' (Current)' : ''}`}
                       </Text>
                     </TouchableOpacity>
                   );

@@ -2,12 +2,21 @@
  * Application-level connectivity monitor. A connection is considered usable
  * only when the device is connected and internet reachability is confirmed.
  */
-import NetInfo from '@react-native-community/netinfo';
+import { probeServerConnectivity } from './authService';
+
+let NetInfo = null;
+try {
+  const netInfoModule = require('@react-native-community/netinfo');
+  NetInfo = netInfoModule.default || netInfoModule;
+} catch (error) {
+  console.warn('[networkService] Native NetInfo is unavailable; using the HUGPONG server health probe.', error?.message || error);
+}
 
 let currentNetworkOnline = false;
 let listeners = [];
 let netInfoUnsubscribe = null;
 let onReconnectCallback = null;
+let connectivityCheckPromise = null;
 
 export const setOnReconnectCallback = (cb) => {
   onReconnectCallback = cb;
@@ -58,17 +67,28 @@ const applyNetInfoState = (state, forceTrigger = false) => {
 };
 
 export const checkConnectivity = async () => {
-  try {
-    return applyNetInfoState(await NetInfo.fetch());
-  } catch (error) {
-    setNetworkStatus(false);
-    return false;
-  }
+  if (connectivityCheckPromise) return connectivityCheckPromise;
+  connectivityCheckPromise = (async () => {
+    try {
+      if (NetInfo?.fetch) return applyNetInfoState(await NetInfo.fetch());
+      const serverReachable = await probeServerConnectivity();
+      setNetworkStatus(serverReachable);
+      return serverReachable;
+    } catch (error) {
+      setNetworkStatus(false);
+      return false;
+    } finally {
+      connectivityCheckPromise = null;
+    }
+  })();
+  return connectivityCheckPromise;
 };
 
 export const startNetworkMonitor = () => {
   if (netInfoUnsubscribe) return netInfoUnsubscribe;
-  netInfoUnsubscribe = NetInfo.addEventListener(state => applyNetInfoState(state));
+  netInfoUnsubscribe = NetInfo?.addEventListener
+    ? NetInfo.addEventListener(state => applyNetInfoState(state))
+    : () => {};
   checkConnectivity();
   return netInfoUnsubscribe;
 };

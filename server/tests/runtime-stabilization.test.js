@@ -24,7 +24,12 @@ const cropCycleRoute = read('server/routes/cropCycles.js');
 const webOperations = read('web/react-app/src/services/operationReadService.js');
 const webSchema = read('web/react-app/src/services/firestoreSchema.js');
 const webFields = read('web/react-app/src/services/fieldsService.js');
+const webAddOperation = read('web/react-app/src/components/operations/AddOperationModal.jsx');
+const cropCycleOperations = read('server/services/cropCycleOperations.js');
+const mobilePackage = read('mobile/package.json');
+const mobileAppConfig = read('mobile/app.json');
 const stages = JSON.parse(read('mobile/src/constants/cropStages.json'));
+const { buildOperationLog } = require('../schema/firestoreSchema');
 
 test('manual, automatic, and status UI share the canonical durable outbox', () => {
   assert.match(read('mobile/src/services/storageService.js'), /OUTBOX:\s*'@hugpong_outbox'/);
@@ -53,11 +58,27 @@ test('pending count deduplicates an operation and its outbox envelope', () => {
   assert.doesNotMatch(homeScreen, /offlineLogsCount\s*=.*\+.*outboxCount/);
 });
 
+test('field sync badges derive status from the durable queue instead of removed document flags', () => {
+  assert.match(dataStore, /export const getFieldSyncState = fieldId/);
+  assert.match(dataStore, /getOutboxQueue\(\)\.forEach/);
+  assert.match(fieldOps, /getFieldSyncState/);
+  assert.doesNotMatch(fieldOps, /safeField\??\.synced|field\.synced|selectedField\??\.synced/);
+});
+
 test('automatic sync uses persistent NetInfo reachability instead of screen lifecycle polling', () => {
   assert.match(networkService, /NetInfo\.addEventListener/);
   assert.match(networkService, /isConnected === true && state\.isInternetReachable === true/);
   assert.doesNotMatch(networkService, /setInterval|clients3\.google/);
   assert.match(networkService, /NETWORK_RESTORED/);
+});
+
+test('mobile startup tolerates an older APK without the NetInfo native module', () => {
+  const authService = read('mobile/src/services/authService.js');
+  assert.doesNotMatch(networkService, /^import NetInfo/m);
+  assert.match(networkService, /try \{\s*const netInfoModule = require\('@react-native-community\/netinfo'\)/);
+  assert.match(networkService, /if \(NetInfo\?\.fetch\)/);
+  assert.match(networkService, /probeServerConnectivity\(\)/);
+  assert.match(authService, /fetchWithHostFallback\('\/health'/);
 });
 
 test('startup, foreground, reconnect, post-mutation, and manual triggers converge on one sync function', () => {
@@ -87,6 +108,101 @@ test('sync refreshes server authorization from Firebase without replaying a stal
   assert.match(authRoute, /snapshot\.data\(\)\.status !== 'ACTIVE'/);
 });
 
+test('mobile cloud refresh starts only after the Firebase and server sessions agree', () => {
+  assert.match(dataStore, /!auth\?\.currentUser \|\| auth\.currentUser\.uid !== sessionUserId/);
+  assert.match(dataStore, /const token = await getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
+  assert.match(dataStore, /if \(!token \|\| !activeRole \|\| !sessionUserId \|\| !accountReady\) return false/);
+  assert.match(dataStore, /await restartCloudSyncIfReady\(\)/);
+  assert.doesNotMatch(dataStore, /__unassigned__|\*\*unassigned\*\*/);
+});
+
+test('mobile canonical reads use role-scoped server APIs without direct Firestore listeners', () => {
+  for (const endpoint of [
+    '/api/block-farms',
+    '/api/fields',
+    '/api/crop-cycles',
+    '/api/logs',
+    '/api/prices',
+    '/api/tickets',
+    '/api/users',
+    '/api/audit-reports',
+    '/api/audit-events'
+  ]) {
+    assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}'`));
+  }
+  assert.doesNotMatch(dataStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
+});
+
+test('clearing the mobile data cache preserves the authenticated session pair', () => {
+  const resetFlow = dataStore.slice(dataStore.indexOf('export const resetLocalCache'), dataStore.indexOf('export const listenToCloudSync'));
+  assert.match(resetFlow, /getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
+  assert.match(resetFlow, /\[STORAGE_KEYS\.SESSION, activeSession\]/);
+  assert.match(resetFlow, /\[STORAGE_KEYS\.AUTH_TOKEN, authToken\]/);
+  assert.match(resetFlow, /multiSave\(preservedAuth\)/);
+});
+
+test('mobile API discovery prefers the active Metro host and retains emulator fallback', () => {
+  assert.match(authService, /NativeModules\?\.SourceCode\?\.scriptURL/);
+  assert.match(authService, /resolveMetroApiUrl\(\)/);
+  assert.match(authService, /http:\/\/10\.0\.2\.2:3000/);
+  assert.match(authService, /for \(const origin of origins\)/);
+});
+
+test('new operation forms cannot attach photos while legacy evidence remains schema-readable', () => {
+  const smallPayload = Buffer.from('photo evidence').toString('base64');
+  const operation = buildOperationLog({
+    fieldId: 'FLD-001',
+    cycleId: 'CYC-FLD-001-001',
+    submittedByUserId: '04000001',
+    submissionSource: 'MEMBER',
+    operationDefinitionId: 'SRA-02',
+    operationName: 'Land Preparation',
+    category: 'prep',
+    stageNumber: 1,
+    performedOn: '2026-09-23',
+    areaHa: 1,
+    peopleCount: 2,
+    quantity: null,
+    totalCost: 100,
+    lineItems: [],
+    photoEvidence: {
+      dataUrl: `data:image/jpeg;base64,${smallPayload}`,
+      mimeType: 'image/jpeg',
+      fileName: 'field.jpg',
+      byteSize: 14,
+      capturedAt: '2026-09-23T00:00:00.000Z'
+    }
+  });
+  assert.equal(operation.photoEvidence.fileName, 'field.jpg');
+  assert.match(webSchema, /photoEvidence: photoEvidence\(value\.photoEvidence\)/);
+  assert.doesNotMatch(fieldOps, /photoEvidence|ImagePicker|preparePhotoEvidence|form_attach_photo/);
+  assert.doesNotMatch(webAddOperation, /photoEvidence|resizePhotoEvidence|Choose Photo|Field Photo/);
+  assert.doesNotMatch(mobilePackage, /expo-image-picker|expo-image-manipulator/);
+  assert.doesNotMatch(mobileAppConfig, /expo-image-picker/);
+  assert.match(cropCycleOperations, /submissionSource:[^\n]+\n\s*photoEvidence: null/);
+  assert.match(cropCycleOperations, /photoEvidence: existing\.photoEvidence \|\| null/);
+
+  const oversized = Buffer.alloc(614401).toString('base64');
+  assert.throws(() => buildOperationLog({
+    ...operation,
+    photoEvidence: {
+      dataUrl: `data:image/jpeg;base64,${oversized}`,
+      mimeType: 'image/jpeg',
+      byteSize: 614401,
+      capturedAt: '2026-09-23T00:00:00.000Z'
+    }
+  }), /600 KB/);
+});
+
+test('mobile uses Block Farm terminology and derives the selected-field stage from stageNumber', () => {
+  const translations = read('mobile/src/services/i18n.js');
+  const profile = read('mobile/src/screens/ProfileScreen.js');
+  assert.doesNotMatch(translations, /profile_block_farm:\s*'[^']*Location/);
+  assert.doesNotMatch(profile, /Block Farm Location/);
+  assert.match(fieldOps, /INITIAL_STAGES\.find\(item => item\.number === Number\(field\?\.stageNumber\)\)/);
+  assert.match(fieldOps, /Current stage not set/);
+});
+
 test('Farm Manager takeover grants are transient and offline takeover is stopped', () => {
   assert.match(outboxCore, /takeoverGrant:\s*null/);
   assert.match(syncEngine, /transientTakeoverGrants/);
@@ -113,10 +229,16 @@ test('all six canonical stages are available to the Active Field view', () => {
 });
 
 test('Active Field shows an honest unset state and never fabricates Stage 1', () => {
+  const mobileAnalytics = read('mobile/src/services/analyticsSelectors.js');
+  const webAnalytics = read('web/react-app/src/services/analyticsSelectors.js');
   assert.match(memberHome, /Current stage not set/);
   assert.doesNotMatch(memberHome, /primaryField\.stage\b/);
   assert.match(mobileSchema, /canonicalStageNumber[\s\S]*:\s*null/);
   assert.doesNotMatch(mobileSchema, /stageNumber:\s*Number\(cycle\?\.currentStageNumber \|\| 1\)/);
+  assert.doesNotMatch(mobileAnalytics, /currentStageNumber \|\| f\.stageNumber \|\| f\.currentStageNumber \|\| 1/);
+  assert.doesNotMatch(webAnalytics, /currentStageNumber \|\| f\.stageNumber \|\| f\.currentStageNumber \|\| 1/);
+  assert.match(mobileAnalytics, /if \(!Number\.isInteger\(rawStage\)/);
+  assert.match(webAnalytics, /if \(!Number\.isInteger\(rawStage\)/);
 });
 
 test('stage reconciliation updates the same canonical stageNumber used by Home', () => {
@@ -155,8 +277,27 @@ test('server log creation remains idempotent by stable client operation ID', () 
   assert.match(service, /transaction\.create\(targetRef, payload\)/);
 });
 
-test('assigned Farm Manager web reads operations by scoped field IDs before analytics', () => {
-  assert.match(webOperations, /where\('blockFarmId', '==', String\(user\?\.blockFarmId \|\| ''\)\.trim\(\)\)/);
-  assert.match(webOperations, /where\('fieldId', '==', fieldId\)/);
-  assert.doesNotMatch(webOperations, /FARM_MANAGER[\s\S]{0,300}collection\(db, COLLECTIONS\.OPERATION_LOGS\)[\s\S]{0,100}onSnapshot/);
+test('assigned Farm Manager web operations use the server-scoped API before analytics', () => {
+  const operationQuery = read('server/services/operationQueryService.js');
+  assert.match(webOperations, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
+  assert.doesNotMatch(webOperations, /onSnapshot|collection\(db|where\(/);
+  assert.match(operationQuery, /where\('managerUserId', '==', userId\)/);
+  assert.match(operationQuery, /where\('fieldId', 'in', fieldIds\)/);
+});
+
+test('web and mobile sign-out entry points require confirmation and expose guarded loading states', () => {
+  const webSidebar = read('web/react-app/src/components/layout/Sidebar.jsx');
+  const webLogin = read('web/react-app/src/views/LoginView.jsx');
+  const mobileProfile = read('mobile/src/screens/ProfileScreen.js');
+  const mobileLogin = read('mobile/src/screens/auth/LoginScreen.js');
+
+  assert.match(webSidebar, /isSignOutConfirmOpen/);
+  assert.match(webSidebar, /loadingText="Signing out\.\.\."/);
+  assert.match(webLogin, /isSetupSignOutConfirmOpen/);
+  assert.match(webLogin, /handleConfirmSetupSignOut/);
+  assert.match(mobileProfile, /const \[isSigningOut, setIsSigningOut\]/);
+  assert.match(mobileProfile, /disabled=\{isSigningOut\}/);
+  assert.match(mobileLogin, /Sign Out and Stop Account Setup\?/);
+  assert.match(mobileLogin, /await logoutUser\(\)/);
+  assert.match(mobileLogin, /setupSigningOut \? 'Signing Out\.\.\.' : 'Sign Out'/);
 });

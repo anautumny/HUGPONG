@@ -9,7 +9,8 @@ import {
   selectProductionCost,
   selectOperationalCostBreakdown,
   selectFarmOperationsAnalytics,
-  selectPriceTrends
+  selectPriceTrends,
+  filterOperationsByCropYearCycle
 } from '../../services/analyticsSelectors';
 
 import AnalyticsFilters from '../../components/analytics/AnalyticsFilters';
@@ -19,7 +20,7 @@ import CostBreakdownSection from '../../components/analytics/CostBreakdownSectio
 import FarmOperationsSection from '../../components/analytics/FarmOperationsSection';
 import PriceTrendsSection from '../../components/analytics/PriceTrendsSection';
 import Button from '../../components/ui/Button';
-import { formatCropYear } from '../../utils/formatters';
+import { canonicalStoredCropYear, uniqueCropYears } from '../../utils/formatters';
 
 export default function AnalyticsView() {
   const { user } = useAuth();
@@ -40,6 +41,7 @@ export default function AnalyticsView() {
 
   // Filter states
   const [selectedSeason, setSelectedSeason] = useState('ALL');
+  const [cycleFilterInitialized, setCycleFilterInitialized] = useState(false);
   const [selectedFarmId, setSelectedFarmId] = useState('ALL');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
   const [priceTimeframe, setPriceTimeframe] = useState('weekly');
@@ -94,34 +96,47 @@ export default function AnalyticsView() {
   }, [user]);
 
   // Derive available filter options dynamically from real recorded data
-  const availableSeasons = useMemo(() => {
-    const seasons = new Set();
-    cropCycles.forEach(c => {
-      if (c.cropYear) seasons.add(formatCropYear(c.cropYear));
-    });
-    fields.forEach(f => {
-      if (f.cropYear) seasons.add(formatCropYear(f.cropYear));
-    });
-    if (seasons.size === 0) {
-      seasons.add(formatCropYear(new Date().getFullYear()));
+  const availableSeasons = useMemo(() => uniqueCropYears(cropCycles), [cropCycles]);
+
+  const currentSeason = useMemo(() => {
+    const fieldIds = new Set(fields
+      .filter(field => selectedFarmId === 'ALL' || field.blockFarmId === selectedFarmId)
+      .map(field => field.id));
+    return cropCycles
+      .filter(cycle => cycle.status === 'ACTIVE' && fieldIds.has(cycle.fieldId))
+      .map(cycle => canonicalStoredCropYear(cycle.cropYear))
+      .filter(Boolean)
+      .sort()
+      .reverse()[0] || '';
+  }, [cropCycles, fields, selectedFarmId]);
+
+  useEffect(() => {
+    if (!cycleFilterInitialized && !isFieldsLoading) {
+      setSelectedSeason(currentSeason || 'ALL');
+      setCycleFilterInitialized(true);
     }
-    return Array.from(seasons).sort().reverse();
-  }, [cropCycles, fields]);
+  }, [cycleFilterInitialized, currentSeason, isFieldsLoading]);
+
+  const cycleScopedOperations = useMemo(() => filterOperationsByCropYearCycle({
+    operations,
+    cropCycles,
+    selectedSeason
+  }), [operations, cropCycles, selectedSeason]);
 
   const availablePeriods = useMemo(() => {
     const periods = new Set();
-    operations.forEach(op => {
+    cycleScopedOperations.forEach(op => {
       const d = String(op.performedOn || op.isoDate || op.date || '');
       if (d && d.length >= 7) {
         periods.add(d.slice(0, 7));
       }
     });
     return Array.from(periods).sort().reverse();
-  }, [operations]);
+  }, [cycleScopedOperations]);
 
   // Reset Filters handler
   const handleResetFilters = () => {
-    setSelectedSeason('ALL');
+    setSelectedSeason(currentSeason || 'ALL');
     setSelectedFarmId('ALL');
     setSelectedPeriod('ALL');
   };
@@ -138,32 +153,32 @@ export default function AnalyticsView() {
 
   const productionCostData = useMemo(() => {
     return selectProductionCost({
-      operations,
+      operations: cycleScopedOperations,
       fields,
       blockFarms,
       selectedFarmId,
       selectedPeriod,
       isFarmManager
     });
-  }, [operations, fields, blockFarms, selectedFarmId, selectedPeriod, isFarmManager]);
+  }, [cycleScopedOperations, fields, blockFarms, selectedFarmId, selectedPeriod, isFarmManager]);
 
   const costBreakdownData = useMemo(() => {
     return selectOperationalCostBreakdown({
-      operations,
+      operations: cycleScopedOperations,
       fields,
       selectedFarmId,
       selectedPeriod
     });
-  }, [operations, fields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOperations, fields, selectedFarmId, selectedPeriod]);
 
   const operationsAnalyticsData = useMemo(() => {
     return selectFarmOperationsAnalytics({
-      operations,
+      operations: cycleScopedOperations,
       fields,
       selectedFarmId,
       selectedPeriod
     });
-  }, [operations, fields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOperations, fields, selectedFarmId, selectedPeriod]);
 
   const priceTrendsData = useMemo(() => {
     return selectPriceTrends({
@@ -263,6 +278,7 @@ export default function AnalyticsView() {
       {/* Shared Filter Bar */}
       <AnalyticsFilters
         seasons={availableSeasons}
+        currentSeason={currentSeason}
         selectedSeason={selectedSeason}
         onSeasonChange={setSelectedSeason}
         blockFarms={blockFarms}

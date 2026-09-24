@@ -1,23 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Server, RefreshCw, AlertCircle } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { checkSystemHealth, fetchCropCycleInventory, subscribeToAuditLogs } from '../../services/maintenanceService';
-import { subscribeToUsersData } from '../../services/usersService';
-import { subscribeToFieldsData } from '../../services/fieldsService';
-import { subscribeToOperationsData } from '../../services/operationsService';
-import { subscribeToPrices } from '../../services/pricesService';
+import { AlertCircle } from 'lucide-react';
+import { checkSystemHealth, fetchSystemDiagnostics, subscribeToAuditLogs } from '../../services/maintenanceService';
 import SystemHealthSummary from '../../components/maintenance/SystemHealthSummary';
 import SystemAuditLedger from '../../components/maintenance/SystemAuditLedger';
 
 export default function MaintenanceView() {
-  const { user, roleKey } = useAuth();
-
   const [healthData, setHealthData] = useState(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
 
   const [auditLogs, setAuditLogs] = useState([]);
   const [isLogsLoading, setIsLogsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [errors, setErrors] = useState({ audit: null, inventory: null });
+  const error = errors.audit || errors.inventory;
 
   // Collection counts
   const [counts, setCounts] = useState({
@@ -28,32 +22,32 @@ export default function MaintenanceView() {
     prices: 0,
     cropCycles: null,
     activeCropCycles: null,
-    archivedCropCycles: null
+    archivedCropCycles: null,
+    activeCropYears: []
   });
 
-  const loadCropCycleInventory = async () => {
+  const loadSystemInventory = async () => {
     setCounts(prev => ({
       ...prev,
       cropCycles: null,
       activeCropCycles: null,
-      archivedCropCycles: null
+      archivedCropCycles: null,
+      activeCropYears: []
     }));
     try {
-      const inventory = await fetchCropCycleInventory();
-      setCounts(prev => ({
-        ...prev,
-        cropCycles: inventory.count,
-        activeCropCycles: inventory.active,
-        archivedCropCycles: inventory.archived
-      }));
+      const inventory = await fetchSystemDiagnostics();
+      setCounts(inventory);
+      setErrors(prev => ({ ...prev, inventory: null }));
     } catch (err) {
-      console.warn('[MaintenanceView] Crop cycle inventory err:', err.message);
+      console.warn('[MaintenanceView] System inventory err:', err.message);
       setCounts(prev => ({
         ...prev,
         cropCycles: 'UNAVAILABLE',
         activeCropCycles: null,
-        archivedCropCycles: null
+        archivedCropCycles: null,
+        activeCropYears: []
       }));
+      setErrors(prev => ({ ...prev, inventory: err.message || 'Failed to load system inventory.' }));
     }
   };
 
@@ -71,69 +65,27 @@ export default function MaintenanceView() {
 
   useEffect(() => {
     runHealthCheck();
-    if (roleKey !== 'superadmin') loadCropCycleInventory();
+    loadSystemInventory();
+    const inventoryTimer = setInterval(loadSystemInventory, 15000);
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({
       onUpdate: (data) => {
         setAuditLogs(data.logs || []);
         setIsLogsLoading(data.isLoading);
-        setError(data.error);
+        setErrors(prev => ({ ...prev, audit: data.error || null }));
       },
       onError: (err) => {
-        setError(err.message || 'Failed to load audit logs.');
+        setErrors(prev => ({ ...prev, audit: err.message || 'Failed to load audit logs.' }));
         setIsLogsLoading(false);
       }
     });
 
-    // Subscriptions to collect truthful live record volumes
-    const unsubUsers = subscribeToUsersData({
-      user,
-      onUpdate: (data) => {
-        setCounts(prev => ({ ...prev, users: (data.users || []).length + (data.pendingUsers || []).length }));
-      }
-    });
-
-    const unsubFields = roleKey === 'superadmin' ? null : subscribeToFieldsData({
-      user,
-      onUpdate: (data) => {
-        const cycles = Array.isArray(data.cropCycles) ? data.cropCycles : [];
-        const active = cycles.filter(c => String(c.status || '').toUpperCase() === 'ACTIVE').length;
-        const archived = cycles.filter(c => String(c.status || '').toUpperCase() === 'ARCHIVED').length;
-        setCounts(prev => ({
-          ...prev,
-          blockFarms: (data.blockFarms || []).length,
-          fields: (data.fields || []).length,
-          ...(cycles.length > 0 ? {
-            cropCycles: cycles.length,
-            activeCropCycles: active,
-            archivedCropCycles: archived
-          } : {})
-        }));
-      }
-    });
-
-    const unsubOps = roleKey === 'superadmin' ? null : subscribeToOperationsData({
-      user,
-      onUpdate: (data) => {
-        setCounts(prev => ({ ...prev, operations: (data.operations || []).length }));
-      }
-    });
-
-    const unsubPrices = roleKey === 'superadmin' ? null : subscribeToPrices({
-      onUpdate: (data) => {
-        setCounts(prev => ({ ...prev, prices: (data.prices || []).length }));
-      }
-    });
-
     return () => {
+      clearInterval(inventoryTimer);
       if (typeof unsubLogs === 'function') unsubLogs();
-      if (typeof unsubUsers === 'function') unsubUsers();
-      if (typeof unsubFields === 'function') unsubFields();
-      if (typeof unsubOps === 'function') unsubOps();
-      if (typeof unsubPrices === 'function') unsubPrices();
     };
-  }, [user, roleKey]);
+  }, []);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">

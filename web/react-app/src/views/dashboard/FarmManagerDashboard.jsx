@@ -105,7 +105,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
       icon: Activity
     },
     {
-      label: 'Crop Cycle State',
+      label: 'Crop Year Cycle State',
       value: 'Active',
       subtext: 'Current Milling Season',
       icon: Calendar

@@ -30,7 +30,7 @@ export const ROLE_LABELS = Object.freeze({
   [ROLE_KEYS.SUPER_ADMIN]: 'Super Admin',
   [ROLE_KEYS.SRA_ADMIN]: 'SRA Admin',
   [ROLE_KEYS.FARM_MANAGER]: 'Farm Manager',
-  [ROLE_KEYS.MEMBER_FARMER]: 'Member Farmer'
+  [ROLE_KEYS.MEMBER_FARMER]: 'Farm Member'
 });
 
 export const DASHBOARD_PATHS = Object.freeze({

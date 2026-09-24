@@ -6,10 +6,10 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import {
   authenticateUser,
   isValidUserIdentifier,
+  logoutUser,
   requestCurrentPhoneVerification,
   updateUserPassword,
-  verifyCurrentPhone,
-  fastLoginRole
+  verifyCurrentPhone
 } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { isOnline, addNetworkListener } from '../../services/networkService';
@@ -46,29 +46,9 @@ export default function LoginScreen({ navigation }) {
   const [phoneVerificationCode, setPhoneVerificationCode] = useState('');
   const [phoneVerificationError, setPhoneVerificationError] = useState('');
   const [phoneVerificationSaving, setPhoneVerificationSaving] = useState(false);
+  const [phoneVerificationResending, setPhoneVerificationResending] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
-  const [fastLoggingIn, setFastLoggingIn] = useState('');
-
-  const handleFastLogin = async (roleName) => {
-    if (!deviceOnline && !isOnline()) {
-      setShowOfflineGateModal(true);
-      return;
-    }
-    setFastLoggingIn(roleName);
-    setAuthError('');
-    try {
-      const res = await fastLoginRole(roleName);
-      if (res.success) {
-        navigation.replace('MainTabs');
-      } else {
-        setAuthError(res.error || 'Failed to fast sign in.');
-      }
-    } catch (err) {
-      setAuthError('An error occurred during fast sign in.');
-    } finally {
-      setFastLoggingIn('');
-    }
-  };
+  const [setupSigningOut, setSetupSigningOut] = useState(false);
 
   useEffect(() => {
     const unsubNet = addNetworkListener((status) => {
@@ -202,6 +182,51 @@ export default function LoginScreen({ navigation }) {
       return;
     }
     navigation.replace('MainTabs');
+  };
+
+  const handleResendPhoneVerification = async () => {
+    if (phoneVerificationResending || setupSigningOut) return;
+    setPhoneVerificationResending(true);
+    setPhoneVerificationError('');
+    try {
+      const result = await requestCurrentPhoneVerification();
+      if (!result.success) setPhoneVerificationError(result.error || 'A new code could not be sent.');
+    } catch (error) {
+      setPhoneVerificationError(error.message || 'A new code could not be sent.');
+    } finally {
+      setPhoneVerificationResending(false);
+    }
+  };
+
+  const completeSetupSignOut = async () => {
+    if (setupSigningOut) return;
+    setSetupSigningOut(true);
+    try {
+      await logoutUser();
+      setShowPhoneVerificationModal(false);
+      setShowFirstLoginModal(false);
+      setAuthenticatedUser(null);
+      setPendingPasswordChange(false);
+      setPhoneVerificationCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error) {
+      Alert.alert('Sign Out Failed', error.message || 'Unable to end the setup session. Please try again.');
+    } finally {
+      setSetupSigningOut(false);
+    }
+  };
+
+  const confirmSetupSignOut = () => {
+    if (setupSigningOut || phoneVerificationSaving || phoneVerificationResending || firstLoginSaving) return;
+    Alert.alert(
+      'Sign Out and Stop Account Setup?',
+      'Your current setup session will end. You can sign in again later to complete verification or update your password.',
+      [
+        { text: 'Continue Setup', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: completeSetupSignOut }
+      ]
+    );
   };
 
   const handleSaveFirstLoginPassword = async () => {
@@ -390,62 +415,6 @@ export default function LoginScreen({ navigation }) {
               <Text style={s.securityNoticeText}>Encrypted &amp; SRA Certified Agricultural Gateway</Text>
             </View>
 
-            {/* Quick Shell Preview Switcher for Development / Fast Log In */}
-            <View style={s.quickLoginWrap}>
-              <View style={s.quickLoginHeaderRow}>
-                <View style={s.quickDivider} />
-                <Text style={s.quickLoginTitle}>Development Role Preview</Text>
-                <View style={s.quickDivider} />
-              </View>
-
-              <View style={s.quickGrid}>
-                <TouchableOpacity
-                  style={[s.quickRoleBtn, s.quickRoleBtnFull, fastLoggingIn === 'Member Farmer' && s.quickRoleBtnActive]}
-                  onPress={() => handleFastLogin('Member Farmer')}
-                  disabled={Boolean(fastLoggingIn)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#EBF7EE' }]}>
-                    <Ionicons name="leaf-outline" size={14} color="#15803D" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.quickRoleTitle}>Member Farmer</Text>
-                    <Text style={s.quickRoleSub} numberOfLines={1}>Juan · DEV-FLD-001</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[s.quickRoleBtn, fastLoggingIn === 'Farm Manager' && s.quickRoleBtnActive]}
-                  onPress={() => handleFastLogin('Farm Manager')}
-                  disabled={Boolean(fastLoggingIn)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.quickRoleIconWrap, { backgroundColor: COLORS.primaryBg }]}>
-                    <Ionicons name="business-outline" size={14} color={COLORS.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.quickRoleTitle}>Farm Manager</Text>
-                    <Text style={s.quickRoleSub} numberOfLines={1}>Jose · DEV-BF-001</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[s.quickRoleBtn, fastLoggingIn === 'SRA Admin' && s.quickRoleBtnActive]}
-                  onPress={() => handleFastLogin('SRA Admin')}
-                  disabled={Boolean(fastLoggingIn)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.quickRoleIconWrap, { backgroundColor: '#EFF6FF' }]}>
-                    <Ionicons name="shield-checkmark-outline" size={14} color="#2563EB" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.quickRoleTitle}>SRA Admin</Text>
-                    <Text style={s.quickRoleSub} numberOfLines={1}>Maria · Regulatory</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </View>
           </View>
 
           {/* Register Link */}
@@ -466,7 +435,12 @@ export default function LoginScreen({ navigation }) {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <Modal visible={showPhoneVerificationModal} transparent animationType="fade">
+      <Modal
+        visible={showPhoneVerificationModal}
+        transparent
+        animationType="fade"
+        onRequestClose={confirmSetupSignOut}
+      >
         <View style={s.modalOverlay}>
           <KeyboardAvoidingView style={{ width: '100%' }}>
             <View style={s.modalCard}>
@@ -500,17 +474,31 @@ export default function LoginScreen({ navigation }) {
                   />
                 </View>
               </View>
+              <TouchableOpacity
+                style={[s.setupSignOutBtn, setupSigningOut && { opacity: 0.65 }]}
+                onPress={confirmSetupSignOut}
+                disabled={setupSigningOut || phoneVerificationSaving || phoneVerificationResending}
+              >
+                {setupSigningOut
+                  ? <ActivityIndicator size="small" color="#DC2626" />
+                  : <Ionicons name="log-out-outline" size={16} color="#DC2626" />}
+                <Text style={s.setupSignOutText}>{setupSigningOut ? 'Signing Out...' : 'Sign Out'}</Text>
+              </TouchableOpacity>
               <View style={s.modalBtnRow}>
                 <TouchableOpacity
                   style={s.modalCancelBtn}
-                  onPress={async () => {
-                    const result = await requestCurrentPhoneVerification();
-                    if (!result.success) setPhoneVerificationError(result.error || 'A new code could not be sent.');
-                  }}
+                  onPress={handleResendPhoneVerification}
+                  disabled={phoneVerificationResending || phoneVerificationSaving || setupSigningOut}
                 >
-                  <Text style={s.modalCancelText}>Resend Code</Text>
+                  {phoneVerificationResending
+                    ? <ActivityIndicator size="small" color={COLORS.primary} />
+                    : <Text style={s.modalCancelText}>Resend Code</Text>}
                 </TouchableOpacity>
-                <TouchableOpacity style={s.modalSaveBtn} onPress={handleVerifyPhone} disabled={phoneVerificationSaving}>
+                <TouchableOpacity
+                  style={s.modalSaveBtn}
+                  onPress={handleVerifyPhone}
+                  disabled={phoneVerificationSaving || setupSigningOut}
+                >
                   {phoneVerificationSaving
                     ? <ActivityIndicator size="small" color="#fff" />
                     : <Text style={s.modalSaveText}>Verify Phone</Text>}
@@ -526,9 +514,7 @@ export default function LoginScreen({ navigation }) {
         visible={showFirstLoginModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => {
-          setShowFirstLoginModal(false);
-        }}
+        onRequestClose={confirmSetupSignOut}
       >
         <View style={s.modalOverlay}>
           <KeyboardAvoidingView style={{ width: '100%' }}>
@@ -638,19 +624,20 @@ export default function LoginScreen({ navigation }) {
               {/* Action Buttons */}
               <View style={s.modalBtnRow}>
                 <TouchableOpacity
-                  style={s.modalCancelBtn}
-                  onPress={() => {
-                    setShowFirstLoginModal(false);
-                  }}
+                  style={[s.modalCancelBtn, setupSigningOut && { opacity: 0.65 }]}
+                  onPress={confirmSetupSignOut}
+                  disabled={setupSigningOut || firstLoginSaving}
                   activeOpacity={0.7}
                 >
-                  <Text style={s.modalCancelText}>Sign Out</Text>
+                  {setupSigningOut
+                    ? <ActivityIndicator size="small" color="#DC2626" />
+                    : <Text style={s.modalCancelText}>Sign Out</Text>}
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[s.modalSaveBtn, (!isReqValid || firstLoginSaving) && { opacity: 0.7 }]}
                   onPress={handleSaveFirstLoginPassword}
-                  disabled={firstLoginSaving}
+                  disabled={firstLoginSaving || setupSigningOut}
                   activeOpacity={0.8}
                 >
                   {firstLoginSaving ? (
@@ -831,76 +818,6 @@ const s = StyleSheet.create({
     fontWeight: '600',
   },
 
-  quickLoginWrap: {
-    marginTop: 8,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  quickLoginHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  quickDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  quickLoginTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'space-between',
-  },
-  quickRoleBtn: {
-    width: '48.5%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: 8,
-    paddingHorizontal: 9,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: '#F9FAF7',
-  },
-  quickRoleBtnFull: {
-    width: '100%',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  quickRoleBtnActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: '#EBF7EE',
-  },
-  quickRoleIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickRoleTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  quickRoleSub: {
-    fontSize: 9.5,
-    color: COLORS.textMuted,
-    fontWeight: '600',
-    marginTop: 1,
-  },
-
   registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },
   registerText: { fontSize: 13, color: COLORS.textMuted },
   registerLink: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
@@ -1042,6 +959,19 @@ const s = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
     color: COLORS.textSecondary,
+  },
+  setupSignOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  setupSignOutText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#DC2626',
   },
   modalSaveBtn: {
     flex: 1,

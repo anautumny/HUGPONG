@@ -3,6 +3,7 @@ import { Search, History, CheckCircle2, AlertTriangle, Shield, Clock, ChevronLef
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
+import { formatCropYearDisplay } from '../../utils/formatters';
 
 export default function SystemAuditLedger({
   logs = [],
@@ -11,8 +12,18 @@ export default function SystemAuditLedger({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState('ALL');
+  const [cropYearFilter, setCropYearFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+
+  const cropYearOptions = useMemo(() => {
+    const years = Array.from(new Set(logs.flatMap(log => log.cropYears || [])))
+      .sort((left, right) => right.localeCompare(left));
+    return [
+      { value: 'ALL', label: 'All Crop Year Cycles' },
+      ...years.map(year => ({ value: year, label: formatCropYearDisplay(year) }))
+    ];
+  }, [logs]);
 
   const filteredLogs = useMemo(() => {
     let result = [...logs];
@@ -21,18 +32,23 @@ export default function SystemAuditLedger({
       result = result.filter(l => l.outcome === outcomeFilter);
     }
 
+    if (cropYearFilter !== 'ALL') {
+      result = result.filter(log => (log.cropYears || []).includes(cropYearFilter));
+    }
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       result = result.filter(l =>
         (l.actorUserId && l.actorUserId.toLowerCase().includes(q)) ||
         (l.eventType && l.eventType.toLowerCase().includes(q)) ||
         (l.entityType && l.entityType.toLowerCase().includes(q)) ||
-        (l.details && l.details.toLowerCase().includes(q))
+        (l.details && l.details.toLowerCase().includes(q)) ||
+        (l.cropYears || []).some(year => formatCropYearDisplay(year).toLowerCase().includes(q))
       );
     }
 
     return result;
-  }, [logs, outcomeFilter, searchTerm]);
+  }, [logs, outcomeFilter, cropYearFilter, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
   const validPage = Math.min(currentPage, totalPages);
@@ -54,6 +70,7 @@ export default function SystemAuditLedger({
       return isNaN(d.getTime()) ? isoString : d.toLocaleString([], {
         month: 'short',
         day: 'numeric',
+        year: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
       });
@@ -78,7 +95,7 @@ export default function SystemAuditLedger({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div className="w-full sm:w-56">
             <Input
               type="text"
@@ -102,6 +119,17 @@ export default function SystemAuditLedger({
               options={outcomeOptions}
             />
           </div>
+
+          <div className="w-48">
+            <Select
+              value={cropYearFilter}
+              onChange={(e) => {
+                setCropYearFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              options={cropYearOptions}
+            />
+          </div>
         </div>
       </div>
 
@@ -111,6 +139,7 @@ export default function SystemAuditLedger({
           <thead>
             <tr className="bg-bg/60 dark:bg-[#0C1015]/60 border-b border-border/80 text-hug-muted font-bold text-xs uppercase tracking-wider">
               <th scope="col" className="px-4 py-3.5">Timestamp</th>
+              <th scope="col" className="px-4 py-3.5">Crop Year Cycle</th>
               <th scope="col" className="px-4 py-3.5">Actor</th>
               <th scope="col" className="px-4 py-3.5">Event Type</th>
               <th scope="col" className="px-4 py-3.5">Target Entity</th>
@@ -124,6 +153,7 @@ export default function SystemAuditLedger({
               Array.from({ length: 4 }).map((_, idx) => (
                 <tr key={idx} className="animate-pulse">
                   <td className="px-4 py-4"><div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" /></td>
+                  <td className="px-4 py-4"><div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4"><div className="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4"><div className="h-4 w-28 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4"><div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" /></td>
@@ -133,7 +163,7 @@ export default function SystemAuditLedger({
               ))
             ) : filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-10 px-4 text-hug-muted text-xs">
+                <td colSpan={7} className="text-center py-10 px-4 text-hug-muted text-xs">
                   <History className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
                   <p className="font-semibold text-hug-text text-sm">No audit logs found</p>
                   <p className="text-xs text-hug-muted mt-0.5">
@@ -146,6 +176,10 @@ export default function SystemAuditLedger({
                 <tr key={l.id} className="hover:bg-bg/40 dark:hover:bg-gray-800/30 transition-colors">
                   <td className="px-4 py-3.5 whitespace-nowrap text-xs text-hug-muted font-mono">
                     {formatDate(l.createdAt)}
+                  </td>
+
+                  <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold text-hug-text">
+                    {(l.cropYears || []).map(formatCropYearDisplay).join(', ') || '—'}
                   </td>
 
                   <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs font-bold text-hug-text">

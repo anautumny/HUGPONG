@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SPACING, RADIUS, SHADOW } from '../theme';
 import { auditLogs, operationLogs } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
+import { sortNewestFirst } from '../utils/dataHelpers';
 
 const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '—');
 
@@ -27,8 +28,9 @@ export default function AuditHistoryModal({
   onOpenQR
 }) {
   const { t, formatPhaseMonth } = useTranslation();
-  const [selectedAuditId, setSelectedAuditId] = useState(auditLogs[0]?.id || 'AUD-2026-05');
-  const activeAudit = auditLogs.find(a => a.id === selectedAuditId) || auditLogs[0] || {};
+  const orderedAudits = sortNewestFirst(auditLogs, ['compiledAt', 'createdAt', 'period', 'month']);
+  const [selectedAuditId, setSelectedAuditId] = useState(orderedAudits[0]?.id || 'AUD-2026-05');
+  const activeAudit = orderedAudits.find(a => a.id === selectedAuditId) || orderedAudits[0] || {};
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -51,7 +53,7 @@ export default function AuditHistoryModal({
           {/* Monthly Selector Horizontal Chips */}
           <Text style={s.sectionLabel}>{t('select_report_month', 'Select Report Month')}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.monthScroll} contentContainerStyle={{ gap: 8 }}>
-            {Array.from(new Map((auditLogs || []).map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => {
+            {Array.from(new Map(orderedAudits.map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => {
               const auditKey = audit.reportId || audit.id || `audit-${idx}`;
               const isSel = audit.id === selectedAuditId || audit.reportId === selectedAuditId;
               return (

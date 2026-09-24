@@ -1,26 +1,36 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SyncProvider } from './context/SyncContext';
 import AppShell from './components/layout/AppShell';
-import LandingView from './views/LandingView';
-import LoginView from './views/LoginView';
-import { PrivacyPolicyView, TermsView, CookiePolicyView } from './views/LegalViews';
-import DashboardView from './views/dashboard/DashboardView';
-import ComponentShowcaseView from './views/ComponentShowcaseView';
-import FarmFieldRegistryView from './views/fields/FarmFieldRegistryView';
-import OperationsView from './views/operations/OperationsView';
-import TakeOverView from './views/operations/TakeOverView';
-import AuditCenterView from './views/audit/AuditCenterView';
-import PricesView from './views/prices/PricesView';
-import AnalyticsView from './views/analytics/AnalyticsView';
-import UsersView from './views/users/UsersView';
-import SyncView from './views/sync/SyncView';
-import TicketsView from './views/support/TicketsView';
-import MaintenanceView from './views/maintenance/MaintenanceView';
-import SettingsView from './views/settings/SettingsView';
 import { ROLE_KEYS } from './utils/authRouting';
+
+const LandingView = lazy(() => import('./views/LandingView'));
+const LoginView = lazy(() => import('./views/LoginView'));
+const PrivacyPolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })));
+const TermsView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })));
+const CookiePolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.CookiePolicyView })));
+const DashboardView = lazy(() => import('./views/dashboard/DashboardView'));
+const FarmFieldRegistryView = lazy(() => import('./views/fields/FarmFieldRegistryView'));
+const OperationsView = lazy(() => import('./views/operations/OperationsView'));
+const TakeOverView = lazy(() => import('./views/operations/TakeOverView'));
+const AuditCenterView = lazy(() => import('./views/audit/AuditCenterView'));
+const PricesView = lazy(() => import('./views/prices/PricesView'));
+const AnalyticsView = lazy(() => import('./views/analytics/AnalyticsView'));
+const UsersView = lazy(() => import('./views/users/UsersView'));
+const SyncView = lazy(() => import('./views/sync/SyncView'));
+const TicketsView = lazy(() => import('./views/support/TicketsView'));
+const MaintenanceView = lazy(() => import('./views/maintenance/MaintenanceView'));
+const SettingsView = lazy(() => import('./views/settings/SettingsView'));
+
+function RouteLoadingState() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center text-sm font-semibold text-hug-muted">
+      Loading workspace…
+    </div>
+  );
+}
 
 function RootRoute() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -55,7 +65,8 @@ export default function App() {
       <AuthProvider>
         <SyncProvider>
           <BrowserRouter>
-            <Routes>
+            <Suspense fallback={<RouteLoadingState />}>
+              <Routes>
               {/* Public Surfaces */}
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<LoginView />} />
@@ -66,7 +77,6 @@ export default function App() {
               {/* Authenticated Application Shell */}
               <Route element={<AppShell />}>
                 <Route path="/dashboard" element={<DashboardView />} />
-                <Route path="/showcase" element={<ComponentShowcaseView />} />
                 <Route path="/fields" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
                 <Route path="/block-farms" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
                 <Route path="/registry" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
@@ -84,7 +94,8 @@ export default function App() {
 
               {/* Catch-all fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+              </Routes>
+            </Suspense>
           </BrowserRouter>
         </SyncProvider>
       </AuthProvider>

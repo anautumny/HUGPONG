@@ -9,7 +9,6 @@ import {
   createField,
   updateField,
   archiveField,
-  rolloverCycle,
   publishPrice,
   saveCustomStages,
   saveCustomOperations,
@@ -412,7 +411,9 @@ export async function flushOutboxToApi() {
       } else if (type === 'field_archive') {
         return archiveField(payload.id, mutation);
       } else if (type === 'cycle_rollover') {
-        return rolloverCycle(payload.fieldId, payload, mutation, transientTakeoverGrants.get(item.mutationId) || null);
+        const error = new Error('Queued Crop Year Cycle rollover is not permitted. Synchronize the field, then start the next cycle while online.');
+        error.status = 422;
+        throw error;
       } else if (type === 'price') {
         return publishPrice(payload, mutation);
       } else if (type === 'custom_stages') {

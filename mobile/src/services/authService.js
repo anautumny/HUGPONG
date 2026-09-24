@@ -1,9 +1,20 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth } from '../firebase/config';
 import { STORAGE_KEYS, getItem, saveItem } from './storageService';
 
-const API_REQUEST_TIMEOUT_MS = 10000;
+const API_REQUEST_TIMEOUT_MS = 6000;
+
+function normalizeOrigin(value) {
+  const origin = String(value || '').trim().replace(/\/$/, '');
+  return /^https?:\/\//i.test(origin) ? origin : null;
+}
+
+function resolveMetroApiUrl() {
+  const scriptUrl = NativeModules?.SourceCode?.scriptURL;
+  const match = String(scriptUrl || '').match(/^https?:\/\/([^/:]+)(?::\d+)?\//i);
+  return match?.[1] ? `http://${match[1]}:3000` : null;
+}
 
 function resolveDefaultApiUrl() {
   const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
@@ -19,37 +30,50 @@ function resolveDefaultApiUrl() {
 
 export const API_BASE_URL = resolveDefaultApiUrl();
 
+function apiOriginCandidates() {
+  const candidates = [
+    resolveMetroApiUrl(),
+    API_BASE_URL,
+    Platform.OS === 'android' ? 'http://10.0.2.2:3000' : null,
+    'http://localhost:3000'
+  ].map(normalizeOrigin).filter(Boolean);
+  return [...new Set(candidates)];
+}
+
 async function fetchWithHostFallback(path, options) {
-  const fetchWithTimeout = async (url) => {
+  const fetchWithTimeout = async (origin) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } catch (err) {
-      if (err.name === 'AbortError' || /aborted|canceled|cancelled/i.test(String(err.message || ''))) {
-        throw new Error(`Could not reach the HUGPONG server at ${API_BASE_URL}. Check that the server is running and the phone is on the same Wi-Fi network.`);
-      }
-      throw err;
+      return await fetch(`${origin}${path}`, { ...options, signal: controller.signal });
     } finally {
       clearTimeout(timeout);
     }
   };
 
-  try {
-    return await fetchWithTimeout(`${API_BASE_URL}${path}`);
-  } catch (err) {
-    if (err.message.startsWith('Could not reach the HUGPONG server')) throw err;
-    if (Platform.OS === 'android') {
-      const fallbackHost = API_BASE_URL.includes('10.0.2.2')
-        ? API_BASE_URL.replace('10.0.2.2', 'localhost')
-        : (API_BASE_URL.includes('localhost') ? API_BASE_URL.replace('localhost', '10.0.2.2') : null);
-      if (fallbackHost) {
-        try {
-          return await fetchWithTimeout(`${fallbackHost}${path}`);
-        } catch (_) {}
-      }
+  const origins = apiOriginCandidates();
+  let lastError = null;
+  for (const origin of origins) {
+    try {
+      return await fetchWithTimeout(origin);
+    } catch (error) {
+      lastError = error;
     }
-    throw err;
+  }
+  const error = new Error(`Could not reach the HUGPONG server. Tried ${origins.join(', ')}. Check that the server is running and the device can reach this computer.`);
+  error.cause = lastError;
+  throw error;
+}
+
+export async function probeServerConnectivity() {
+  try {
+    const response = await fetchWithHostFallback('/health', {
+      method: 'GET',
+      headers: { 'x-client-platform': 'mobile' }
+    });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 

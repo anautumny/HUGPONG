@@ -91,6 +91,26 @@ export const amendments = value =>
     changes: item.changes && typeof item.changes === 'object' ? item.changes : {}
   }));
 
+export const photoEvidence = value => {
+  if (!value) return null;
+  const dataUrl = String(value.dataUrl || '');
+  if (!/^data:image\/(?:jpeg|png|webp);base64,/i.test(dataUrl)) {
+    throw new Error('Photo evidence must be a JPEG, PNG, or WebP image.');
+  }
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const byteSize = Number(value.byteSize || Math.floor((encoded.length * 3) / 4));
+  if (!Number.isFinite(byteSize) || byteSize <= 0 || byteSize > 614400) {
+    throw new Error('Photo evidence must not exceed 600 KB after resizing.');
+  }
+  return {
+    dataUrl,
+    mimeType: String(value.mimeType || 'image/jpeg').toLowerCase(),
+    fileName: String(value.fileName || 'field-evidence.jpg').slice(0, 180),
+    byteSize,
+    capturedAt: value.capturedAt || now()
+  };
+};
+
 export const toUser = value => {
   const canonicalRole = role(value.canonicalRole || value.role);
   if (!canonicalRole) throw new Error('User role must be canonical.');
@@ -183,10 +203,10 @@ export function formatCropYear(val, fallback = '') {
 
 export const toCycle = (field, value) => {
   const status = String(value.status || 'ACTIVE').toUpperCase();
-  if (!['ACTIVE', 'ARCHIVED'].includes(status)) throw new Error('Crop cycle status must be ACTIVE or ARCHIVED.');
+  if (!['ACTIVE', 'ARCHIVED'].includes(status)) throw new Error('Crop Year Cycle status must be ACTIVE or ARCHIVED.');
   const archivedAt = status === 'ARCHIVED' ? (value.archivedAt || null) : null;
   const archivedByUserId = status === 'ARCHIVED' ? (value.archivedByUserId || null) : null;
-  if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED crop cycles require archive metadata.');
+  if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED Crop Year Cycles require archive metadata.');
   return {
     fieldId: String(value.fieldId || field.id || '').trim().toUpperCase(),
     sequenceNumber: Number(value.sequenceNumber || field.cycleNumber || 1),
@@ -218,6 +238,11 @@ export const toOperation = (value, context = {}) => {
   return {
     fieldId,
     cycleId: operationCycleId,
+    blockFarmId: String(context.blockFarmId || value.blockFarmId || '').trim().toUpperCase() || null,
+    cropYearCycle: formatCropYear(context.cropYearCycle || value.cropYearCycle || value.cropYear || '', '') || null,
+    stageNumberAtRecord: (context.stageNumberAtRecord ?? value.stageNumberAtRecord) == null
+      ? null
+      : Number(context.stageNumberAtRecord ?? value.stageNumberAtRecord),
     submittedByUserId,
     submissionSource: context.submissionSource || value.submissionSource || 'MEMBER',
     operationDefinitionId: value.operationDefinitionId || value.sraOperationId || 'CUSTOM',
@@ -230,6 +255,7 @@ export const toOperation = (value, context = {}) => {
     quantity,
     totalCost: Number(value.totalCost ?? value.cost ?? 0),
     lineItems: lineItems(value),
+    photoEvidence: photoEvidence(value.photoEvidence),
     isSupplemental: Boolean(value.isSupplemental),
     amendments: amendments(value.amendments),
     status,
@@ -268,6 +294,9 @@ export const snapshot = (id, value) => {
     operationLogId: id,
     fieldId: log.fieldId,
     cycleId: log.cycleId,
+    blockFarmId: log.blockFarmId,
+    cropYearCycle: log.cropYearCycle,
+    stageNumberAtRecord: log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
     operationName: log.operationName,
     category: log.category,
@@ -285,6 +314,9 @@ export const canonicalSnapshot = item => item.operationLogId && item.cycleId ? (
   operationLogId: item.operationLogId,
   fieldId: String(item.fieldId || '').trim().toUpperCase(),
   cycleId: String(item.cycleId || '').trim().toUpperCase(),
+  blockFarmId: String(item.blockFarmId || '').trim().toUpperCase() || null,
+  cropYearCycle: formatCropYear(item.cropYearCycle || '', '') || null,
+  stageNumberAtRecord: item.stageNumberAtRecord == null ? null : Number(item.stageNumberAtRecord),
   operationDefinitionId: item.operationDefinitionId || 'CUSTOM',
   operationName: String(item.operationName || '').trim(),
   category: String(item.category || '').trim(),

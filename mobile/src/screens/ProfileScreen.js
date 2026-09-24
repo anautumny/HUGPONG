@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, Alert, Switch, TextInput, Platform,
+  Modal, Dimensions, Alert, Switch, TextInput, Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -21,6 +21,7 @@ export default function ProfileScreen({ navigation }) {
   const [isOnline, setIsOnline] = useState(getNetworkStatus());
   const [dataVersion, setDataVersion] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [lastSync, setLastSync] = useState('Today, 8:05 AM');
   const [langExpanded, setLangExpanded] = useState(false);
   const [autoSync, setAutoSync] = useState(true);
@@ -132,8 +133,22 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
+  const completeSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      await logoutUser();
+      navigation.replace('Login');
+    } catch (error) {
+      Alert.alert(t('error_title', 'Sign Out Failed'), error.message || 'Unable to end the current session. Please try again.');
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
   const signOut = () => {
-    if (session.pendingLogs > 0) {
+    if (isSigningOut) return;
+    if (Number(session?.pendingLogs || 0) > 0) {
       Alert.alert(
         t('signout_confirm_title', 'Sign Out'),
         t('signout_unsynced_msg', 'You have pending unsynced records. Signing out without syncing may cause data loss. Please sync first or proceed anyway.'),
@@ -142,10 +157,7 @@ export default function ProfileScreen({ navigation }) {
           { 
             text: t('signout_btn_anyway', 'Sign Out Anyway'), 
             style: 'destructive', 
-            onPress: async () => {
-              await logoutUser();
-              navigation.replace('Login');
-            } 
+            onPress: completeSignOut
           },
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
         ]
@@ -159,10 +171,7 @@ export default function ProfileScreen({ navigation }) {
           { 
             text: t('profile_logout', 'Sign Out'), 
             style: 'destructive', 
-            onPress: async () => {
-              await logoutUser();
-              navigation.replace('Login');
-            } 
+            onPress: completeSignOut
           },
         ]
       );
@@ -216,7 +225,7 @@ export default function ProfileScreen({ navigation }) {
             { 
               key: 'farm_agency',
               icon: 'business', 
-              label: session?.role === 'SRA Admin' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm Location')),
+              label: session?.role === 'SRA Admin' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm')),
               value: session?.role === 'SRA Admin' ? 'Sugar Regulatory Administration (SRA)' : (assignedFarm?.name || 'Unassigned')
             },
             { 
@@ -466,9 +475,17 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         {/* ── 7. Sign Out ── */}
-        <TouchableOpacity style={s.signOutBtn} onPress={signOut}>
-          <Ionicons name="log-out-outline" size={20} color="#DC2626" />
-          <Text style={s.signOutText}>{t('profile_logout', 'Sign Out')}</Text>
+        <TouchableOpacity
+          style={[s.signOutBtn, isSigningOut && { opacity: 0.65 }]}
+          onPress={signOut}
+          disabled={isSigningOut}
+        >
+          {isSigningOut
+            ? <ActivityIndicator size="small" color="#DC2626" />
+            : <Ionicons name="log-out-outline" size={20} color="#DC2626" />}
+          <Text style={s.signOutText}>
+            {isSigningOut ? t('profile_signing_out', 'Signing Out...') : t('profile_logout', 'Sign Out')}
+          </Text>
         </TouchableOpacity>
 
         <Text style={s.footerNote}>

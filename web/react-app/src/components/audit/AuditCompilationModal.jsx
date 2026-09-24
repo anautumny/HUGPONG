@@ -202,7 +202,7 @@ export default function AuditCompilationModal({
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-bg p-3.5 rounded-xl border border-border">
             <div>
               <span className="block font-bold text-hug-text text-sm">
-                Active Crop Cycle Audit Batch
+                Active Crop Year Cycle Audit Batch
               </span>
               <p className="text-[11px] text-hug-muted mt-0.5">
                 Automatically bundles all uncompiled ACTIVE operations into an immutable SRA QR dossier.

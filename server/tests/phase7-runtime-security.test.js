@@ -80,7 +80,7 @@ test('takeover mutations require the server-verified grant on every manager writ
   const cycles = read('../routes/cropCycles.js');
   const operations = read('../services/cropCycleOperations.js');
   assert.equal((logs.match(/attachTakeoverAuthorization/g) || []).length, 4);
-  assert.equal((cycles.match(/attachTakeoverAuthorization/g) || []).length, 3);
+  assert.equal((cycles.match(/attachTakeoverAuthorization/g) || []).length, 4);
   assert.match(operations, /user\.takeoverGrant\.fieldId !== normalizedFieldId/);
   assert.match(operations, /user\.takeoverGrant\.actorId !== identity\.actorId/);
 });
@@ -99,12 +99,13 @@ test('Firestore read rules enforce operational scope and exclude Super Admin fro
   assert.doesNotMatch(agriculturalRules, /superAdmin\(\)|SUPER_ADMIN/);
 });
 
-test('Farm Manager operation subscriptions scope before analytics aggregation', () => {
-  const source = read('../../web/react-app/src/services/operationReadService.js');
-  const managerScope = source.indexOf("where('blockFarmId', '=='");
-  const operationListener = source.indexOf("where('fieldId', '=='");
-  assert.ok(managerScope >= 0 && operationListener > managerScope);
-  assert.doesNotMatch(source, /FARM_MANAGER[\s\S]{0,500}collection\(db, COLLECTIONS\.OPERATION_LOGS\)[\s\S]{0,100}onSnapshot/);
+test('Farm Manager operation subscriptions delegate scoped aggregation to the server', () => {
+  const webSource = read('../../web/react-app/src/services/operationReadService.js');
+  const serverSource = read('../services/operationQueryService.js');
+  assert.match(webSource, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
+  assert.doesNotMatch(webSource, /onSnapshot|collection\(db|where\(/);
+  assert.match(serverSource, /where\('managerUserId', '==', userId\)/);
+  assert.match(serverSource, /where\('fieldId', 'in', fieldIds\)/);
 });
 
 test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operation UI', () => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import Sidebar from './Sidebar';
@@ -8,7 +8,9 @@ import Topbar from './Topbar';
 const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
 export default function AppShell() {
-  const { user, roleKey, isAuthenticated, isLoading } = useAuth();
+  const { user, roleKey, isAuthenticated, isLoading, logout } = useAuth();
+  const navigate = useNavigate();
+  const [isReturningToLogin, setIsReturningToLogin] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_COLLAPSED_KEY) === 'true';
@@ -51,6 +53,17 @@ export default function AppShell() {
     });
   }, []);
 
+  const handleReturnToLogin = async () => {
+    if (isReturningToLogin) return;
+    setIsReturningToLogin(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsReturningToLogin(false);
+    }
+  };
+
   // Show clean loading skeleton while session resolves
   if (isLoading) {
     return (
@@ -78,12 +91,17 @@ export default function AppShell() {
           <p className="text-sm text-hug-text2 mb-4">
             Member Farmer accounts use the HUGPONG mobile application for field management and harvest monitoring.
           </p>
-          <a
-            href="/login"
-            className="inline-block px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl shadow-xs hover:bg-primary-hover transition-colors"
+          <button
+            type="button"
+            onClick={handleReturnToLogin}
+            disabled={isReturningToLogin}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl shadow-xs hover:bg-primary-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Return to Login
-          </a>
+            {isReturningToLogin && (
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden="true" />
+            )}
+            {isReturningToLogin ? 'Signing out...' : 'Return to Login'}
+          </button>
         </div>
       </div>
     );

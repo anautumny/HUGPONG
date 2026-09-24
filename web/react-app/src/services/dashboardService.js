@@ -1,95 +1,115 @@
-import { db, collection, onSnapshot } from './firebaseClient';
-import { COLLECTIONS, fromPrice, fromTicket, fromReport } from './firestoreSchema';
+import {
+  fromBlockFarm,
+  fromField,
+  fromOperation,
+  fromPrice,
+  fromReport,
+  fromTicket
+} from './firestoreSchema';
+import {
+  authenticatedRead,
+  subscribeToAuthenticatedLoader
+} from './apiClient';
 import { ROLE_KEYS } from '../utils/authRouting';
-import { subscribeToFieldsData } from './fieldsService';
-import { subscribeToOperationsData } from './operationReadService';
+import {
+  sortCropYearsNewestFirst,
+  sortNewestFirst,
+  sortOperationsNewestFirst
+} from '../utils/recordOrdering';
 
-function parsePriceTime(price) {
-  const value = price?.publishedAt || (price?.effectiveDate ? `${price.effectiveDate}T00:00:00Z` : '');
-  const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
+const emptyDashboard = () => ({
+  prices: [], currentPrice: null, previousPrice: null,
+  fields: [], scopedFields: [], blockFarms: [], assignedBlockFarm: null,
+  operations: [], recentOperations: [], cropCycles: [],
+  supportTickets: [], auditReports: [], terminalDiagnostics: []
+});
+
+function terminalDiagnostic(data) {
+  return {
+    id: data.id,
+    deviceId: data.deviceId || data.id,
+    userId: data.userId || '',
+    model: data.model || 'Android Terminal',
+    os: data.os || 'Android',
+    appVersion: data.appVersion || 'v1.0.0',
+    battery: data.battery || '—',
+    cachedLogs: Number(data.cachedLogs || 0),
+    status: data.status || 'SYNCED',
+    updatedAt: data.updatedAt || null
+  };
 }
 
 export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
-  let isSubscribed = true;
-  const unsubscribers = [];
-  const state = {
-    prices: [], currentPrice: null, previousPrice: null,
-    fields: [], scopedFields: [], blockFarms: [], assignedBlockFarm: null,
-    operations: [], recentOperations: [], cropCycles: [],
-    supportTickets: [], auditReports: [], terminalDiagnostics: [],
-    isLoading: true, error: null
-  };
+  return subscribeToAuthenticatedLoader(async ({ force }) => {
+    if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
+      const [ticketsResult, diagnosticsResult] = await Promise.all([
+        authenticatedRead('/api/tickets', { force }),
+        authenticatedRead('/api/terminal-diagnostics', { force })
+      ]);
+      return {
+        ...emptyDashboard(),
+        supportTickets: sortNewestFirst(
+          (ticketsResult.data || []).map(ticket => fromTicket(ticket.id, ticket)),
+          ['createdAt']
+        ),
+        terminalDiagnostics: sortNewestFirst(
+          (diagnosticsResult.data || []).map(terminalDiagnostic),
+          ['updatedAt']
+        )
+      };
+    }
 
-  const emit = () => {
-    if (!isSubscribed) return;
-    state.scopedFields = state.fields;
-    state.assignedBlockFarm = roleKey === ROLE_KEYS.FARM_MANAGER
-      ? state.blockFarms.find(farm => farm.id === user?.blockFarmId) || state.blockFarms[0] || null
+    const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
+    const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult] = await Promise.all([
+      authenticatedRead('/api/prices', { force }),
+      authenticatedRead('/api/fields', { force }),
+      authenticatedRead('/api/block-farms', { force }),
+      authenticatedRead('/api/crop-cycles', { force }),
+      authenticatedRead('/api/logs', { force }),
+      includeAudits
+        ? authenticatedRead('/api/audit-reports', { force })
+        : Promise.resolve({ data: [] })
+    ]);
+
+    const prices = sortNewestFirst(
+      (pricesResult.data || []).map(price => fromPrice(price.id, price)),
+      ['effectiveDate']
+    );
+    const fields = (fieldsResult.data || [])
+      .map(field => fromField(field.id, field))
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const blockFarms = (farmsResult.data || [])
+      .map(farm => fromBlockFarm(farm.id, farm))
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const operations = sortOperationsNewestFirst(
+      (logsResult.data || []).map(operation => fromOperation(operation.id, operation))
+    );
+    const auditReports = sortNewestFirst(
+      (auditsResult.data || []).map(report => fromReport(report.id, report)),
+      ['compiledAt', 'createdAt']
+    );
+    const assignedBlockFarm = roleKey === ROLE_KEYS.FARM_MANAGER
+      ? blockFarms.find(farm => farm.id === user?.blockFarmId) || blockFarms[0] || null
       : null;
-    state.recentOperations = state.operations.slice(0, 5);
-    onUpdate({ ...state, isLoading: false });
-  };
-  const fail = error => {
-    state.error = error.message;
-    emit();
-    if (onError) onError(error);
-  };
 
-  if (roleKey !== ROLE_KEYS.SUPER_ADMIN) {
-    unsubscribers.push(onSnapshot(collection(db, COLLECTIONS.SRA_PRICES), snapshot => {
-      const prices = snapshot.docs.map(document => fromPrice(document.id, document.data()))
-        .sort((left, right) => parsePriceTime(right) - parsePriceTime(left));
-      state.prices = prices;
-      state.currentPrice = prices[0] || null;
-      state.previousPrice = prices[1] || null;
-      emit();
-    }, fail));
-
-    unsubscribers.push(subscribeToFieldsData({
-      user,
-      onUpdate: data => {
-        state.fields = data.fields || [];
-        state.blockFarms = data.blockFarms || [];
-        state.cropCycles = data.cropCycles || [];
-        emit();
-      },
-      onError: fail
-    }));
-
-    unsubscribers.push(subscribeToOperationsData({
-      user,
-      onUpdate: data => {
-        state.operations = data.operations || [];
-        emit();
-      },
-      onError: fail
-    }));
-  }
-
-  if (roleKey === ROLE_KEYS.SRA_ADMIN) {
-    unsubscribers.push(onSnapshot(collection(db, COLLECTIONS.AUDIT_REPORTS), snapshot => {
-      state.auditReports = snapshot.docs.map(document => fromReport(document.id, document.data()));
-      emit();
-    }, fail));
-  }
-
-  if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-    unsubscribers.push(onSnapshot(collection(db, COLLECTIONS.SUPPORT_TICKETS), snapshot => {
-      state.supportTickets = snapshot.docs.map(document => fromTicket(document.id, document.data()));
-      emit();
-    }, fail));
-    unsubscribers.push(onSnapshot(collection(db, COLLECTIONS.TERMINAL_DIAGNOSTICS), snapshot => {
-      state.terminalDiagnostics = snapshot.docs.map(document => ({ id: document.id, ...document.data() }));
-      emit();
-    }, fail));
-  }
-
-  emit();
-  return () => {
-    isSubscribed = false;
-    unsubscribers.forEach(unsubscribe => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    });
-  };
+    return {
+      ...emptyDashboard(),
+      prices,
+      currentPrice: prices[0] || null,
+      previousPrice: prices[1] || null,
+      fields,
+      scopedFields: fields,
+      blockFarms,
+      assignedBlockFarm,
+      cropCycles: sortCropYearsNewestFirst(cyclesResult.data || []),
+      operations,
+      recentOperations: operations.slice(0, 5),
+      auditReports
+    };
+  }, {
+    onData: data => onUpdate({ ...data, isLoading: false, error: null }),
+    onError: error => {
+      if (onError) onError(error);
+    }
+  });
 }

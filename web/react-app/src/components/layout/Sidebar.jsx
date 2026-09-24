@@ -27,6 +27,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { roleLabelFromKey, ROLE_KEYS } from '../../utils/authRouting';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 export default function Sidebar({
   isCollapsed = false,
@@ -37,6 +38,8 @@ export default function Sidebar({
   const { user, roleKey, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const userMenuRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -76,6 +79,18 @@ export default function Sidebar({
   const handleNavClick = () => {
     if (isMobileDrawer) {
       onCloseMobileDrawer();
+    }
+  };
+
+  const handleConfirmSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      await logout();
+      setIsSignOutConfirmOpen(false);
+      navigate('/login', { replace: true });
+    } finally {
+      setIsSigningOut(false);
     }
   };
 
@@ -239,6 +254,7 @@ export default function Sidebar({
   const collapsed = isCollapsed && !isMobileDrawer;
 
   return (
+    <>
     <aside
       id="sidebar"
       className={`${
@@ -483,10 +499,9 @@ export default function Sidebar({
             <button
               type="button"
               id="popover-signout"
-              onClick={async () => {
+              onClick={() => {
                 setIsUserMenuOpen(false);
-                await logout();
-                navigate('/login');
+                setIsSignOutConfirmOpen(true);
               }}
               className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-danger hover:bg-danger-bg/60 transition-colors cursor-pointer text-left"
               role="menuitem"
@@ -540,5 +555,18 @@ export default function Sidebar({
         </button>
       </div>
     </aside>
+    <ConfirmDialog
+      isOpen={isSignOutConfirmOpen}
+      title="Sign out of HUGPONG?"
+      message="Your current session will end and you will return to the sign-in page."
+      confirmText="Sign Out"
+      cancelText="Stay Signed In"
+      type="danger"
+      isLoading={isSigningOut}
+      loadingText="Signing out..."
+      onConfirm={handleConfirmSignOut}
+      onCancel={() => setIsSignOutConfirmOpen(false)}
+    />
+    </>
   );
 }

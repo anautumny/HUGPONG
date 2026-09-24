@@ -57,27 +57,32 @@ test('reset remains separate from explicit account bootstrap and runtime startup
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const resetScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'resetDevelopmentFirestore.js'), 'utf8');
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const webStore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'webDataStore.js'), 'utf8');
+  const fieldsService = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'fieldsService.js'), 'utf8');
+  const operationsService = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'operationReadService.js'), 'utf8');
 
   assert.match(packageJson.scripts['reset:dev-firestore'], /--execute/);
   assert.match(packageJson.scripts['bootstrap:dev-test-accounts'], /bootstrapDevelopmentTestAccounts/);
   assert.doesNotMatch(packageJson.scripts.start, /reset|bootstrap/i);
   assert.doesNotMatch(resetScript, /bootstrapDevelopmentTestAccounts|bootstrapInitialDevelopmentSuperAdmin/);
   assert.doesNotMatch(serverSource, /resetDevelopmentFirestore|bootstrapDevelopmentTestAccounts/);
-  assert.match(webStore, /blockFarms:\s*\[\]/);
-  assert.match(webStore, /users:\s*\[\]/);
-  assert.match(webStore, /logs:\s*\[\]/);
+  assert.doesNotMatch(fieldsService, /sample|mock|seed/i);
+  assert.doesNotMatch(operationsService, /sample|mock|seed/i);
 });
 
-test('client cache epochs invalidate old replicas and outboxes', () => {
+test('mobile cache epochs invalidate old replicas and React web keeps no legacy database cache', () => {
   const mobileStorage = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'storageService.js'), 'utf8');
   const mobileDataStore = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
-  const webCore = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'core.js'), 'utf8');
+  const webAuth = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'context', 'AuthContext.jsx'), 'utf8');
+  const webSourceRoot = path.join(__dirname, '..', '..', 'web', 'react-app', 'src');
+  const webSources = fs.readdirSync(webSourceRoot, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile() && /\.(js|jsx)$/.test(entry.name))
+    .map(entry => fs.readFileSync(path.join(entry.parentPath, entry.name), 'utf8'))
+    .join('\n');
 
   assert.match(mobileStorage, /MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1'/);
   assert.match(mobileStorage, /key\.startsWith\('@hugpong_'\)/);
   assert.match(mobileDataStore, /await ensureCurrentCacheSchema\(\)/);
   assert.doesNotMatch(mobileDataStore, /@hugpong_clean_prod_v2/);
-  assert.match(webCore, /CURRENT_DB_VERSION = '2026_09_17_post_reset_v2'/);
-  assert.match(webCore, /clearWebAuthSession\(\)/);
+  assert.match(webAuth, /localStorage\.removeItem\('hugpong_auth_token'\)/);
+  assert.doesNotMatch(webSources, /HUGPONG_DB|CURRENT_DB_VERSION|hugpong_db/);
 });

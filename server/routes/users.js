@@ -84,20 +84,38 @@ router.post('/phone-verification/verify', requireAuth, requireRole([ROLES.FARM_M
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const snapshot = await db.collection(COLLECTIONS.USERS).get();
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
     const actorId = String(req.session.user.employeeId || '').trim();
-    let permittedIds = null;
-    let permittedFarmIds = [];
+    let documents = [];
     if (actorRole === ROLES.FARM_MANAGER) {
-      permittedFarmIds = await managerFarmIds(actorId);
-      const fields = await db.collection(COLLECTIONS.FIELDS).get();
-      permittedIds = new Set([actorId, ...fields.docs.filter(doc => permittedFarmIds.includes(doc.data().blockFarmId)).map(doc => doc.data().memberUserId).filter(Boolean)]);
+      const permittedFarmIds = await managerFarmIds(actorId);
+      const permittedIds = new Set([actorId]);
+      for (let index = 0; index < permittedFarmIds.length; index += 10) {
+        const fields = await db.collection(COLLECTIONS.FIELDS)
+          .where('blockFarmId', 'in', permittedFarmIds.slice(index, index + 10))
+          .get();
+        fields.docs.forEach(doc => {
+          if (doc.data().memberUserId) permittedIds.add(doc.data().memberUserId);
+        });
+      }
+      const recordsById = new Map();
+      const scopedUsers = await db.getAll(...Array.from(permittedIds).map(id => db.collection(COLLECTIONS.USERS).doc(id)));
+      scopedUsers.filter(doc => doc.exists).forEach(doc => recordsById.set(doc.id, doc));
+      for (let index = 0; index < permittedFarmIds.length; index += 10) {
+        const pending = await db.collection(COLLECTIONS.USERS)
+          .where('requestedBlockFarmId', 'in', permittedFarmIds.slice(index, index + 10))
+          .get();
+        pending.docs.filter(doc => doc.data().status === 'PENDING').forEach(doc => recordsById.set(doc.id, doc));
+      }
+      documents = Array.from(recordsById.values());
+    } else {
+      const snapshot = await db.collection(COLLECTIONS.USERS).get();
+      documents = snapshot.docs;
     }
-    const data = snapshot.docs
-      .filter(doc => !permittedIds || permittedIds.has(doc.id) || (doc.data().status === 'PENDING' && permittedFarmIds.includes(doc.data().requestedBlockFarmId)))
+    const data = documents
       .filter(doc => actorRole !== ROLES.SRA_ADMIN || canonicalRole(doc.data().role) !== ROLES.SUPER_ADMIN)
-      .map(doc => publicUser(doc.data(), doc.id));
+      .map(doc => publicUser(doc.data(), doc.id))
+      .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')) || String(left.id || '').localeCompare(String(right.id || '')));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

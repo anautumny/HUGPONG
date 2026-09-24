@@ -22,7 +22,7 @@ import FieldEnrollmentModal from '../../components/fields/FieldEnrollmentModal';
 import FieldEditModal from '../../components/fields/FieldEditModal';
 import FieldDetailModal from '../../components/fields/FieldDetailModal';
 import BlockFarmModal from '../../components/fields/BlockFarmModal';
-import { formatHectares } from '../../utils/formatters';
+import { formatHectares, formatCropYearDisplay } from '../../utils/formatters';
 import {
   Building2,
   MapPin,
@@ -416,8 +416,18 @@ export default function FarmFieldRegistryView() {
       )
     },
     {
+      key: 'cropYear',
+      header: 'Crop Year Cycle',
+      width: '145px',
+      render: (val, row) => (
+        <span className="font-semibold text-hug-text whitespace-nowrap">
+          {formatCropYearDisplay(val || row.cropCycle?.cropYear)}
+        </span>
+      )
+    },
+    {
       key: 'stageNumber',
-      header: 'Growth Stage',
+      header: 'Current Stage',
       width: '120px',
       render: (val) => (
         <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-primary-bg/50 dark:bg-primary/20 text-primary dark:text-primary-light border border-primary/20">
@@ -896,6 +906,7 @@ export default function FarmFieldRegistryView() {
         isOpen={Boolean(detailField)}
         onClose={() => setDetailField(null)}
         field={detailField}
+        cropCycles={(fieldsState.cropCycles || []).filter(cycle => cycle.fieldId === detailField?.id)}
         isManager={isFarmManager}
         onEdit={isFarmManager ? (f) => setEditField(f) : undefined}
       />
@@ -976,7 +987,7 @@ export default function FarmFieldRegistryView() {
         isLoading={isArchiving}
         loadingText="Archiving Field..."
         title={`Archive field plot ${archiveTarget?.id}?`}
-        message="This field parcel will be archived. All associated active crop cycles and historical operation records will remain preserved in compliance audit ledgers."
+        message="This field parcel will be archived. All associated active Crop Year Cycles and historical operation records will remain preserved in compliance audit ledgers."
         confirmText="Archive Plot"
         cancelText="Cancel"
         type="danger"

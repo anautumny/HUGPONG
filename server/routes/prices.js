@@ -11,6 +11,7 @@ const {
   buildSraPrice
 } = require('../schema/firestoreSchema');
 const { publishSraPrice } = require('../services/priceService');
+const { sortNewestFirst } = require('../services/recordOrdering');
 const { readMutationContext } = require('../services/mutationContext');
 
 async function ensurePricePublicationAudit(publication) {
@@ -33,8 +34,10 @@ router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGE
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const snapshot = await db.collection(COLLECTIONS.SRA_PRICES).get();
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) }))
-      .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    const data = sortNewestFirst(
+      snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })),
+      ['effectiveDate']
+    );
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

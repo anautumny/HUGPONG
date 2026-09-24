@@ -5,7 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import RootNavigator from './src/navigation/RootNavigator';
 import { LanguageProvider } from './src/services/i18n';
-import { startNetworkMonitor, stopNetworkMonitor } from './src/services/networkService';
+import { checkConnectivity, startNetworkMonitor, stopNetworkMonitor } from './src/services/networkService';
 import { performMobileSync } from './src/data/dataStore';
 
 // Optimize native screen transitions and memory consumption on Android.
@@ -18,7 +18,11 @@ export default function App() {
     const appStateSubscription = AppState.addEventListener('change', nextState => {
       const returnedToForeground = /inactive|background/.test(previousState || '') && nextState === 'active';
       previousState = nextState;
-      if (returnedToForeground) performMobileSync('APP_FOREGROUND').catch(() => {});
+      if (returnedToForeground) {
+        checkConnectivity()
+          .then(online => online && performMobileSync('APP_FOREGROUND'))
+          .catch(() => {});
+      }
     });
     return () => {
       appStateSubscription.remove();

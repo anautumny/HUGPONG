@@ -63,3 +63,23 @@ export function formatCropYear(val, fallback = '—') {
   }
   return str;
 }
+
+export function formatCropYearDisplay(val, fallback = '—') {
+  const normalized = formatCropYear(val, fallback);
+  return normalized === fallback ? fallback : normalized.replace('-', '–');
+}
+
+export function canonicalStoredCropYear(val) {
+  const match = String(val || '').trim().match(/^(\d{4})\s*[-–—/]\s*(\d{4})$/);
+  if (!match || Number(match[2]) !== Number(match[1]) + 1) return '';
+  return `${match[1]}-${match[2]}`;
+}
+
+export function uniqueCropYears(records = [], selector = record => record?.cropYear) {
+  const years = new Set();
+  records.forEach(record => {
+    const cropYear = canonicalStoredCropYear(selector(record));
+    if (cropYear) years.add(cropYear);
+  });
+  return Array.from(years).sort((left, right) => Number(right.slice(0, 4)) - Number(left.slice(0, 4)));
+}

@@ -1,88 +1,58 @@
-# HUGPONG — System Architecture & Directory Reference
+# HUGPONG Architecture and Directory Reference
 
-## 🌟 Overview
-HUGPONG is an offline-first agricultural management platform for sugarcane block farming, supporting Silay Sugar Regulatory Administration (SRA), Farm Managers, and cooperative Members.
+## Repository structure
 
----
-
-## 📁 Repository Directory Structure
-
-```
+```text
 HUGPONG/
-│
-├── shared/                                 ← Universal Shared Configuration
-│   └── firebase-config.js                  ← Single source of truth for Firebase project (hugpong-ff)
-│
-├── web/                                    ← Web Client Application
-│   ├── index.html                          ← Public portal & app landing
-│   ├── login.html                          ← Role-aware login portal with Express auth
-│   ├── dashboard.html                      ← Workspace auto-redirector
-│   ├── admin.css                           ← Global styling and theme tokens
-│   ├── logo.png                            ← Platform brand logo
-│   ├── shared/                             ← Web Shared Infrastructure
-│   │   ├── firebase-init.js                ← Web Firebase SDK connector & event emitter
-│   │   ├── webDataStore.js                 ← Empty-state store & SRA domain configuration
-│   │   └── core.js                         ← Database engine, Firestore listeners, session verification
-│   │
-│   └── roles/                              ← Role-Isolated Workspaces
-│       ├── super-admin/
-│       │   ├── dashboard.html              ← Super Admin console
-│       │   └── super-admin.js              ← User management & system governance
-│       ├── sra-admin/
-│       │   ├── dashboard.html              ← SRA Administrator console
-│       │   └── sra-admin.js                ← SRA weekly prices & QR audit desk
-│       └── farm-manager/
-│           ├── dashboard.html              ← Block farm operations workspace
-│           └── farm-manager.js             ← Field plot allocations & log certification
-│
-├── server/                                 ← Backend API & Security Gateway
-│   ├── server.js                           ← Express server application (port 3000)
-│   ├── firebase-admin.js                   ← Firebase Admin SDK initializer
-│   ├── package.json                        ← Dependencies: express, firebase-admin, express-session, cors
-│   │
-│   ├── middleware/
-│   │   ├── auth.js                         ← Session verification guard
-│   │   └── roleGuard.js                    ← Role authorization clearance middleware
-│   │
-│   └── routes/
-│       ├── auth.js                         ← /auth/login, /auth/logout, /auth/session
-│       ├── prices.js                       ← /api/prices
-│       ├── users.js                        ← /api/users, /api/users/approve
-│       ├── fields.js                       ← /api/fields
-│       ├── logs.js                         ← /api/logs, /api/logs/certify
-│       └── tickets.js                      ← /api/tickets
-│
-├── mobile/                                 ← React Native (Expo) Mobile Application
-│   ├── App.js
-│   ├── index.js
-│   ├── app.json
-│   ├── package.json
-│   │
-│   └── src/
-│       ├── firebase/config.js              ← React Native Firebase SDK initializer
-│       ├── data/dataStore.js               ← Production data store & local cache
-│       ├── services/                       ← syncEngine.js, storageService.js, i18n.js
-│       ├── components/                     ← AppHeader.js, EmptyState.js, ErrorState.js
-│       ├── navigation/RootNavigator.js     ← Tab & stack navigation
-│       ├── theme.js                        ← Colors, fonts, spacing, shadows
-│       └── screens/
-│           ├── HomeScreen.js               ← Modular role router
-│           ├── FieldOpsScreen.js           ← Crop cycle operations
-│           ├── AnalyticsScreen.js          ← Financial & yield analytics
-│           ├── PlannerScreen.js            ← Crop cycle stage planner
-│           ├── ProfileScreen.js            ← Profile & preferences
-│           ├── SecurityScreen.js           ← PIN & biometric lock
-│           ├── SyncMonitorScreen.js        ← Member telemetry & sync health
-│           ├── member/                     ← Member-specific modular views
-│           ├── manager/                    ← Farm Manager-specific modular views
-│           ├── sra/                        ← SRA Admin-specific modular views
-│           └── auth/                       ← Login, Register, Forgot Password, Onboarding
-│
-├── docs/                                   ← Project Documentation
-│   ├── system_flow_audit.md                ← Full security & connectivity audit report
-│   └── folder-structure.md                 ← Architecture & conventions documentation
-│
-├── run-web.bat                             ← Launches Web Console
-├── run-mobile.bat                          ← Starts Expo development server
-└── run-server.bat                          ← Starts Express backend server
+|-- mobile/                         Expo / React Native Android client
+|   |-- App.js                      application-level network/AppState sync triggers
+|   |-- assets/                     mobile brand assets
+|   `-- src/
+|       |-- components/             reusable native UI and analytics components
+|       |-- constants/              six-stage crop-cycle adapter
+|       |-- data/                   local store, cache reconciliation, schema adapter
+|       |-- domain/                 fourteen-operation catalogue adapter
+|       |-- firebase/               read-only Firebase client initialization
+|       |-- navigation/             stack and tab registration
+|       |-- screens/                role-aware mobile screens
+|       |-- services/               auth, outbox, sync, storage, network, telemetry
+|       `-- utils/                  pure mobile helpers
+|-- server/                         Node / Express authority and security gateway
+|   |-- domain/                     crop-stage contract and legacy bookmark mapping
+|   |-- middleware/                 authentication, role, and Takeover guards
+|   |-- routes/                     authenticated HTTP API controllers
+|   |-- schema/                     canonical Firestore serializers and validators
+|   |-- scripts/                    gated development reset/bootstrap utilities
+|   |-- security/                   token, password, OTP, claims, Takeover signing
+|   |-- services/                   domain transactions and scope services
+|   |-- tests/                      server, security, parity, and runtime regressions
+|   `-- server.js                   API and React production host
+|-- web/react-app/                  canonical React / Vite / Tailwind web console
+|   |-- public/                     production web assets
+|   |-- src/
+|   |   |-- components/             reusable React UI
+|   |   |-- constants/              six-stage crop-cycle adapter
+|   |   |-- context/                auth, sync, and theme state
+|   |   |-- domain/                 fourteen-operation catalogue adapter
+|   |   |-- services/               scoped reads and authoritative API mutations
+|   |   |-- utils/                  role mapping and formatting
+|   |   `-- views/                  routed role workspaces
+|   `-- tests/                      web contract and parity regressions
+|-- docs/                           historical audits and current documentation
+|-- firestore.rules                 least-privilege client read rules
+|-- firebase.json                   Firebase rule configuration
+|-- run-server.bat                  start the backend API
+|-- run-web.bat                     build and serve the React console
+`-- run-mobile.bat                  start Expo
 ```
+
+## Ownership boundaries
+
+- Node/Express owns validation, authorization, and all canonical mutations.
+- Firestore is the canonical cloud database. Client SDK access is read-only and scope constrained.
+- React/Vite/Tailwind is the only active web UI. Old standalone HTML and DOM-driven dashboards were removed in Phase 8; legacy bookmark paths remain server redirects.
+- React Native is the canonical Android UI.
+- AsyncStorage and `@hugpong_outbox` own mobile offline persistence and retry state.
+- Platform-local stage and operation adapters are protected by parity tests because Metro, Vite, and Node have different module/runtime boundaries.
+
+Historical baseline documents describe earlier revisions and should not be treated as the current runtime architecture.

@@ -5,9 +5,9 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot } from './firebaseClient';
-import { COLLECTIONS, fromPrice } from './firestoreSchema';
-import { authenticatedRequest } from './apiClient';
+import { fromPrice } from './firestoreSchema';
+import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
+import { sortNewestFirst } from '../utils/recordOrdering';
 
 /**
  * Calculate human-readable SRA week label from calendar date
@@ -31,59 +31,21 @@ export function calculateSRAWeekLabel(dateString) {
  * @param {Function} [options.onError]
  */
 export function subscribeToPrices({ onUpdate, onError }) {
-  let isSubscribed = true;
-
-  // Authoritative API fetch first
-  authenticatedRequest('/api/prices')
-    .then(res => {
-      if (!isSubscribed) return;
-      if (res.success && Array.isArray(res.data)) {
-        const sorted = res.data.map(item => fromPrice(item.id, item))
-          .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
-        const current = sorted[0] || null;
-        const previous = sorted[1] || null;
-        onUpdate({ prices: sorted, currentPrice: current, previousPrice: previous, isLoading: false, error: null });
-      }
-    })
-    .catch(err => {
-      console.warn('[PricesService] Initial API fetch note:', err.message);
-    });
-
-  // Real-time Firestore snapshot listener
-  let unsub = null;
-  try {
-    const pricesRef = collection(db, COLLECTIONS.SRA_PRICES);
-    unsub = onSnapshot(
-      pricesRef,
-      snapshot => {
-        if (!isSubscribed) return;
-        const prices = [];
-        snapshot.forEach(docSnap => {
-          try {
-            prices.push(fromPrice(docSnap.id, docSnap.data()));
-          } catch (e) {
-            console.warn('[PricesService] Skip price doc:', docSnap.id, e.message);
-          }
-        });
-
-        prices.sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
-        const current = prices[0] || null;
-        const previous = prices[1] || null;
-        onUpdate({ prices, currentPrice: current, previousPrice: previous, isLoading: false, error: null });
-      },
-      err => {
-        console.warn('[PricesService] Snapshot listener note:', err.message);
-        if (onError) onError(err);
-      }
-    );
-  } catch (err) {
-    console.warn('[PricesService] Could not establish Firestore listener:', err.message);
-  }
-
-  return () => {
-    isSubscribed = false;
-    if (typeof unsub === 'function') unsub();
-  };
+  return subscribeToAuthenticatedResource('/api/prices', {
+    onData: response => {
+      const prices = sortNewestFirst((response.data || []).map(item => fromPrice(item.id, item)), ['effectiveDate']);
+      onUpdate({
+        prices,
+        currentPrice: prices[0] || null,
+        previousPrice: prices[1] || null,
+        isLoading: false,
+        error: null
+      });
+    },
+    onError: error => {
+      if (onError) onError(error);
+    }
+  });
 }
 
 /**

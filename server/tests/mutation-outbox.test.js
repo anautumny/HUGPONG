@@ -16,7 +16,14 @@ const {
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 
 test('offline creation produces one explicit durable mutation envelope', () => {
-  const payload = { id: 'LOG-OFFLINE-1', fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE' };
+  const payload = {
+    id: 'LOG-OFFLINE-1',
+    fieldId: 'FLD-1',
+    cycleId: 'CYC-1',
+    cropYearCycle: '2026-2027',
+    stageNumberAtRecord: 4,
+    status: 'ACTIVE'
+  };
   const item = createMutationEnvelope('operation_log', payload, {
     now: 1_700_000_000_000,
     random: 'ABC12345',
@@ -27,6 +34,8 @@ test('offline creation produces one explicit durable mutation envelope', () => {
   assert.equal(item.idempotencyKey, item.mutationId);
   assert.equal(item.entityKey, 'operation_logs/LOG-OFFLINE-1');
   assert.deepEqual(item.payload, payload);
+  assert.equal(item.payload.cropYearCycle, '2026-2027');
+  assert.equal(item.payload.stageNumberAtRecord, 4);
   assert.equal(item.status, 'queued');
   assert.equal(item.payload.offlineCaptured, undefined, 'transport metadata is not mixed into canonical data');
 });
@@ -205,16 +214,26 @@ test('server validates mutation identity and rejects stale base versions', () =>
   );
 });
 
-test('mobile sync has no broad lifecycle upload/refresh and listeners use explicit overlays only', () => {
+test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle reads through the API', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
   const syncSource = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'syncEngine.js'), 'utf8');
-  const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'shared', 'core.js'), 'utf8');
+  const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'operationReadService.js'), 'utf8');
 
-  assert.doesNotMatch(source, /authenticatedRequest\('\/api\/(crop-cycles|fields|logs)'\)/);
+  assert.match(source, /authenticatedRequest\('\/api\/crop-cycles'\)/);
+  assert.match(source, /authenticatedRequest\('\/api\/fields'\)/);
+  assert.match(source, /authenticatedRequest\('\/api\/logs'\)/);
+  assert.doesNotMatch(source, /onSnapshot|collection\(db/);
   assert.doesNotMatch(source, /const localOnly/);
   assert.match(source, /pendingCreateOverlays/);
   assert.match(syncSource, /enqueueAndFlushMutation/);
   assert.match(syncSource, /idempotencyKey/);
   assert.match(syncSource, /baseVersion/);
+  assert.match(source, /Starting the next Crop Year Cycle requires an active server connection/);
+  assert.match(source, /Please synchronize pending records for this field before starting the next Crop Year Cycle/);
+  assert.doesNotMatch(source, /commitExplicitMutation\('cycle_rollover'/);
+  assert.match(syncSource, /Queued Crop Year Cycle rollover is not permitted/);
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);
+  assert.match(webSource, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
+  assert.match(webSource, /fromOperation\(item\.id, item\)/);
+  assert.doesNotMatch(webSource, /onSnapshot|collection\(db/);
 });

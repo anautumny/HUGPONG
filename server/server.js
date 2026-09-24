@@ -30,6 +30,7 @@ const ticketRoutes = require('./routes/tickets');
 const smsRoutes = require('./routes/sms');
 const auditEventRoutes = require('./routes/auditEvents');
 const telemetryRoutes = require('./routes/telemetry');
+const systemDiagnosticsRoutes = require('./routes/systemDiagnostics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,7 +48,10 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+// Operation photo evidence is resized and capped by both clients before it is
+// accepted by the canonical schema. Keep the transport ceiling below the
+// Firestore document limit while allowing one compact JPEG attachment.
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 if (isProduction) app.set('trust proxy', 1);
 
@@ -86,10 +90,10 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/audit-events', auditEventRoutes);
 app.use('/api/terminal-diagnostics', telemetryRoutes);
+app.use('/api/system-diagnostics', systemDiagnosticsRoutes);
 
 // ── Static Web Serving (React Production SPA + Legacy Web Fallback) ──────
 const reactDistPath = path.join(__dirname, '../web/react-app/dist');
-const legacyWebPath = path.join(__dirname, '../web');
 
 // Legacy entry redirect: direct legacy HTML routes to modern React SPA
 app.get(['/login.html', '/index.html'], (req, res) => {
@@ -110,7 +114,6 @@ app.get(Object.keys(LEGACY_LEGAL_PAGE_REDIRECTS), (req, res) => {
 if (fs.existsSync(reactDistPath)) {
   app.use(express.static(reactDistPath));
 }
-app.use(express.static(legacyWebPath));
 
 // ── Health Check & System Status ────────────────────────────
 app.get('/health', (req, res) => {

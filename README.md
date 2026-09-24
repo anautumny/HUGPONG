@@ -1,33 +1,30 @@
-# HUGPONG - Agricultural Management Platform
+# HUGPONG Agricultural Management Platform
 
-An offline-first agricultural management system designed specifically for sugarcane block farm operations in Silay City. This capstone project bridges the gap between field-level manual data collection and regional administrative oversight through a unified mobile application and web dashboard ecosystem.
+HUGPONG is an offline-first sugarcane field-operations and regulatory oversight system for Block Farms in Silay City.
 
-## Project Structure
+## Canonical architecture
 
-*   **/mobile**
-    React Native (Expo) application utilizing AsyncStorage for offline-first data caching. Designed for Field Members and Farm Managers to log the 8-stage crop cycle without requiring an active internet connection.
-*   **/admin**
-    Web-based administration console built with HTML, CSS (Tailwind CSS v4), and JavaScript. Designed for Farm Managers and SRA (Admin) to review descriptive analytics, track weekly SRA sugar prices, and generate certified audit reports.
+- `server/`: Node.js and Express security gateway, authoritative mutation API, role/scope enforcement, and Firestore transactions.
+- `web/react-app/`: React, Vite, and Tailwind CSS management console for Farm Managers, SRA Admins, and Super Admins.
+- `mobile/`: Expo and React Native Android application for Farm Members, Farm Managers, and SRA Admins.
+- `firestore.rules`: least-privilege client read rules; canonical client writes are denied.
+- Firestore: canonical cloud persistence.
+- AsyncStorage and `@hugpong_outbox`: canonical mobile offline persistence and durable mutation queue.
 
-### Key Features
-*   **Offline-First Field Logging**: Members log operations offline; Managers approve them when online.
-*   **Dynamic Role Switcher**: UI dynamically adapts to 4 roles (Member, Farm Manager, SRA (Admin), Super Admin) instantly.
-*   **Visual Diagnostic Dashboard**: Real-time breakdown of operational expenses, crop stages, and SRA prices using custom UI components.
-*   **Role-Based Access Control (RBAC)**: Strict permission tiers separating Field Members, Farm Managers, SRA (Admin), and Super Admins.
-*   **SRA QR Audit Verification**: End-to-end audit capability allowing SRA (Admin) to verify and certify field operation logs via encrypted hash codes.
+The crop-cycle contract contains exactly six stages: Land Preparation, Planting, Basal, Weeding, Top-Dress, and Harvest. Submitted field operations use the `ACTIVE` / `ARCHIVED` lifecycle.
 
-## Getting Started
+## Local development
 
-To run the complete HUGPONG ecosystem locally, utilize the provided batch scripts in the root directory:
+1. Run `run-server.bat` for the backend API.
+2. Run `run-web.bat` to build and serve the React production console at `http://localhost:3000`.
+3. Run `run-mobile.bat` to start Expo.
 
-1.  **Start the Backend Server**
-    Run `run-server.bat` to initialize the Node.js backend.
-2.  **Start the Mobile Application**
-    Run `run-mobile.bat` to launch the React Native Expo server.
-3.  **Start the Admin Web Dashboard**
-    Run `run-admin.bat` to open the local administrative console in your default web browser.
+For Expo Go on a physical phone, keep the phone and computer on the same network and configure `mobile/.env` with the computer's LAN API address, for example:
 
-For Expo Go on a physical phone, keep the phone and computer on the same Wi-Fi network and set `mobile/.env` to the computer's LAN address, for example `EXPO_PUBLIC_API_BASE_URL=http://10.253.28.161:3000`. Use `http://10.0.2.2:3000` only with an Android emulator. Restart Expo after changing this value.
+```text
+EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:3000
+```
 
----
-Developed as a Capstone Project for Agricultural Information Systems.
+Use `http://10.0.2.2:3000` only for an Android emulator. Restart Expo after changing the environment file.
+
+Development reset and test-account creation are explicit, separately gated server scripts. Runtime login screens do not contain mock-session or role-bypass controls.

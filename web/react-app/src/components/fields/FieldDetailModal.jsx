@@ -2,13 +2,14 @@ import React from 'react';
 import { Modal, Button, StatusBadge } from '../ui';
 import { Layers, MapPin, User, Calendar, Sprout, Activity, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { formatHectares, formatDate, formatCropYear } from '../../utils/formatters';
+import { formatHectares, formatDate, formatCropYearDisplay } from '../../utils/formatters';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
 
 export default function FieldDetailModal({
   isOpen = false,
   onClose,
   field = null,
+  cropCycles = [],
   isManager = false,
   onEdit,
   onArchive
@@ -98,6 +99,18 @@ export default function FieldDetailModal({
           </div>
         </div>
 
+        {cropCycles.length > 0 && (
+          <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-hug-muted">Crop Year History</p>
+            {cropCycles.map(cycle => (
+              <div key={cycle.id} className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-hug-text">{formatCropYearDisplay(cycle.cropYear)}</span>
+                <StatusBadge status={cycle.status} />
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Ownership & Block Farm Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 rounded-xl border border-border bg-white dark:bg-surface space-y-2">
@@ -140,19 +153,19 @@ export default function FieldDetailModal({
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-primary dark:text-primary-light uppercase tracking-wider flex items-center gap-1.5">
               <Sprout className="w-4 h-4" />
-              Active Crop Cycle
+              Active Crop Year Cycle
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white dark:bg-surface text-primary border border-primary/20 font-mono">
-              Cycle {field.cycleNumber || 1} ({field.cycleType || 'Plant Cane'}{field.cropYear || field.cropCycle?.cropYear ? ` · ${formatCropYear(field.cropYear || field.cropCycle?.cropYear)}` : ''})
+              {formatCropYearDisplay(field.cropYear || field.cropCycle?.cropYear)}
             </span>
           </div>
           <p className="text-sm font-bold text-hug-text">
-            {stageObj?.name || 'Current stage not set'}
+            Current Stage: {stageObj?.name || 'Not set'}
           </p>
           <p className="text-xs text-hug-muted">
             {stageObj
               ? <>{stageObj.description} · Timeline: <strong>{stageObj.months}</strong></>
-              : 'No canonical crop-cycle stage is currently available.'}
+              : 'No canonical Crop Year Cycle stage is currently available.'}
           </p>
         </div>
 

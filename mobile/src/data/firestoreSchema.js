@@ -158,10 +158,10 @@ export function toCycleDocument(field = {}, cycle = {}) {
   const sequenceNumber = Number(cycle.sequenceNumber || field.cycleNumber || 1);
   if (!Number.isInteger(sequenceNumber) || sequenceNumber < 1) throw new Error('sequenceNumber must be an integer >= 1.');
   const status = String(cycle.status || 'ACTIVE').toUpperCase();
-  if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw new Error('Crop cycle status must be ACTIVE or ARCHIVED.');
+  if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw new Error('Crop Year Cycle status must be ACTIVE or ARCHIVED.');
   const archivedAt = status === 'ARCHIVED' ? (cycle.archivedAt || null) : null;
   const archivedByUserId = status === 'ARCHIVED' ? (cycle.archivedByUserId || null) : null;
-  if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED crop cycles require archive metadata.');
+  if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED Crop Year Cycles require archive metadata.');
   return {
     fieldId: String(field.id || cycle.fieldId || '').trim().toUpperCase(),
     sequenceNumber,
@@ -242,6 +242,26 @@ function canonicalAmendments(value) {
     }));
 }
 
+function canonicalPhotoEvidence(value) {
+  if (!value) return null;
+  const dataUrl = String(value.dataUrl || '');
+  if (!/^data:image\/(?:jpeg|png|webp);base64,/i.test(dataUrl)) {
+    throw new Error('Photo evidence must be a JPEG, PNG, or WebP image.');
+  }
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const byteSize = Number(value.byteSize || Math.floor((encoded.length * 3) / 4));
+  if (!Number.isFinite(byteSize) || byteSize <= 0 || byteSize > 614400) {
+    throw new Error('Photo evidence must not exceed 600 KB after resizing.');
+  }
+  return {
+    dataUrl,
+    mimeType: String(value.mimeType || 'image/jpeg').toLowerCase(),
+    fileName: String(value.fileName || 'field-evidence.jpg').slice(0, 180),
+    byteSize,
+    capturedAt: value.capturedAt || new Date().toISOString()
+  };
+}
+
 export function toOperationLogDocument(value = {}, context = {}) {
   const status = String(context.status || value.status || 'ACTIVE').toUpperCase();
   if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw new Error('Operation log status must be ACTIVE or ARCHIVED.');
@@ -258,6 +278,11 @@ export function toOperationLogDocument(value = {}, context = {}) {
   return {
     fieldId,
     cycleId,
+    blockFarmId: String(context.blockFarmId || value.blockFarmId || '').trim().toUpperCase() || null,
+    cropYearCycle: formatCropYear(context.cropYearCycle || value.cropYearCycle || value.cropYear || '', '') || null,
+    stageNumberAtRecord: (context.stageNumberAtRecord ?? value.stageNumberAtRecord) == null
+      ? null
+      : Number(context.stageNumberAtRecord ?? value.stageNumberAtRecord),
     submittedByUserId,
     submissionSource: context.submissionSource || value.submissionSource || 'MEMBER',
     operationDefinitionId: value.operationDefinitionId || value.sraOperationId || 'CUSTOM',
@@ -270,6 +295,7 @@ export function toOperationLogDocument(value = {}, context = {}) {
     quantity: quantityValue,
     totalCost: Number(value.totalCost ?? value.cost ?? 0),
     lineItems: canonicalLineItems(value),
+    photoEvidence: canonicalPhotoEvidence(value.photoEvidence),
     isSupplemental: Boolean(value.isSupplemental),
     amendments: canonicalAmendments(value.amendments),
     status,
@@ -314,6 +340,9 @@ export function operationSnapshot(id, value) {
     operationLogId: id,
     fieldId: log.fieldId,
     cycleId: log.cycleId,
+    blockFarmId: log.blockFarmId,
+    cropYearCycle: log.cropYearCycle,
+    stageNumberAtRecord: log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
     operationName: log.operationName,
     category: log.category,
@@ -342,6 +371,9 @@ export function toAuditReportDocument(value = {}, context = {}) {
       operationLogId: item.operationLogId,
       fieldId: String(item.fieldId || '').trim().toUpperCase(),
       cycleId: String(item.cycleId || '').trim().toUpperCase(),
+      blockFarmId: String(item.blockFarmId || '').trim().toUpperCase() || null,
+      cropYearCycle: formatCropYear(item.cropYearCycle || '', '') || null,
+      stageNumberAtRecord: item.stageNumberAtRecord == null ? null : Number(item.stageNumberAtRecord),
       operationDefinitionId: item.operationDefinitionId || 'CUSTOM',
       operationName: String(item.operationName || '').trim(),
       category: String(item.category || '').trim(),

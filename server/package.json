@@ -6,13 +6,14 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
+    "audit:crop-years": "node scripts/auditCropYearIntegrity.js",
     "bootstrap:dev-test-accounts": "node scripts/bootstrapDevelopmentTestAccounts.js",
     "reset:dev-firestore:plan": "node scripts/resetDevelopmentFirestore.js",
     "reset:dev-firestore": "node scripts/resetDevelopmentFirestore.js --execute"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2",
+    "express": "^4.22.3",
     "express-session": "^1.17.3",
     "firebase-admin": "^12.0.0"
   },

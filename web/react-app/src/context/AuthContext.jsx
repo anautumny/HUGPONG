@@ -43,7 +43,8 @@ export function AuthProvider({ children }) {
     try {
       const response = await fetch('/auth/session', {
         headers: {
-          Authorization: `Bearer ${existingToken || ''}`
+          Authorization: `Bearer ${existingToken || ''}`,
+          'x-client-platform': 'web'
         },
         credentials: 'include'
       });
@@ -95,6 +96,14 @@ export function AuthProvider({ children }) {
     }
 
     const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
+    if (resolvedRole === 'member') {
+      try {
+        await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      } finally {
+        clearSession();
+      }
+      throw new Error('Member Farmer accounts are restricted to the HUGPONG mobile application.');
+    }
     if (data.firebaseCustomToken) {
       await signInWithCustomTokenSilently(data.firebaseCustomToken).catch(() => {});
     }

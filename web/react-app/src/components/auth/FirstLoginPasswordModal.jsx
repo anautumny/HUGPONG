@@ -255,7 +255,8 @@ export default function FirstLoginPasswordModal({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2.5 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg dark:hover:bg-[#0C1015] transition-all cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-2.5 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg dark:hover:bg-[#0C1015] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Sign Out
             </button>

@@ -5,80 +5,31 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot } from './firebaseClient';
-import { COLLECTIONS, fromUser } from './firestoreSchema';
-import { authenticatedRequest } from './apiClient';
+import { fromUser } from './firestoreSchema';
+import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 
 /**
- * Real-time subscription to users directory
+ * Periodic server-authoritative subscription to the scoped users directory
  * @param {Object} options
  * @param {Object} options.user - Current session user
  * @param {Function} options.onUpdate - Callback with { users, pendingUsers, isLoading, error }
  * @param {Function} [options.onError]
  */
 export function subscribeToUsersData({ user, onUpdate, onError }) {
-  let isSubscribed = true;
-
-  // Initial authoritative API fetch
-  authenticatedRequest('/api/users')
-    .then(res => {
-      if (!isSubscribed) return;
-      if (res.success && Array.isArray(res.data)) {
-        const users = res.data.map(u => fromUser(u.id || u.employeeId, u));
-        const active = users.filter(u => u.status !== 'PENDING');
-        const pending = users.filter(u => u.status === 'PENDING');
-        onUpdate({ users: active, pendingUsers: pending, isLoading: false, error: null });
-      }
-    })
-    .catch(err => {
-      console.warn('[UsersService] Initial API fetch notice:', err.message);
-    });
-
-  // Only the governance role has a collection-wide Firestore subscription.
-  // Operational roles receive their server-scoped directory from /api/users.
-  let unsub = null;
-  const userRole = String(user?.canonicalRole || user?.role || user?.roleKey || '').toUpperCase().replace(/[ -]/g, '_');
-  if (userRole !== 'SUPER_ADMIN') {
-    return () => { isSubscribed = false; };
-  }
-  try {
-    const usersRef = collection(db, COLLECTIONS.USERS);
-    unsub = onSnapshot(
-      usersRef,
-      snapshot => {
-        if (!isSubscribed) return;
-        const allUsers = [];
-        snapshot.forEach(docSnap => {
-          try {
-            allUsers.push(fromUser(docSnap.id, docSnap.data()));
-          } catch (e) {
-            console.warn('[UsersService] Skip user doc:', docSnap.id, e.message);
-          }
-        });
-
-        // Role-based directory scoping in client view:
-        let scoped = allUsers;
-
-        scoped.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-
-        const active = scoped.filter(u => u.status !== 'PENDING');
-        const pending = scoped.filter(u => u.status === 'PENDING');
-
-        onUpdate({ users: active, pendingUsers: pending, isLoading: false, error: null });
-      },
-      err => {
-        console.warn('[UsersService] Snapshot listener notice:', err.message);
-        if (onError) onError(err);
-      }
-    );
-  } catch (err) {
-    console.warn('[UsersService] Could not establish Firestore listener:', err.message);
-  }
-
-  return () => {
-    isSubscribed = false;
-    if (typeof unsub === 'function') unsub();
-  };
+  return subscribeToAuthenticatedResource('/api/users', {
+    onData: response => {
+      const users = (response.data || [])
+        .map(record => fromUser(record.id || record.employeeId, record))
+        .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
+      const active = users.filter(record => record.status !== 'PENDING');
+      const pendingUsers = users.filter(record => record.status === 'PENDING');
+      onUpdate({ users: active, pendingUsers, isLoading: false, error: null });
+    },
+    onError: error => {
+      console.warn('[UsersService] API subscription notice:', error.message);
+      if (onError) onError(error);
+    }
+  });
 }
 
 /**

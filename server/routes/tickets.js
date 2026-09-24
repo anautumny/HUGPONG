@@ -16,16 +16,18 @@ const {
   nowIso
 } = require('../schema/firestoreSchema');
 const { readMutationContext } = require('../services/mutationContext');
+const { sortNewestFirst } = require('../services/recordOrdering');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const isSuperAdmin = String(req.session.user.role || '').toUpperCase().replace(/ /g, '_') === 'SUPER_ADMIN';
-    const snapshot = await db.collection(COLLECTIONS.SUPPORT_TICKETS).get();
-    const data = snapshot.docs
-      .filter(doc => isSuperAdmin || doc.data().createdByUserId === actorId)
-      .map(doc => ({ id: doc.id, ...doc.data() }));
+    const ticketQuery = isSuperAdmin
+      ? db.collection(COLLECTIONS.SUPPORT_TICKETS)
+      : db.collection(COLLECTIONS.SUPPORT_TICKETS).where('createdByUserId', '==', actorId);
+    const snapshot = await ticketQuery.get();
+    const data = sortNewestFirst(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), ['createdAt']);
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

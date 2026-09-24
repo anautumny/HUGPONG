@@ -27,6 +27,18 @@ function getRoleKey(role) {
   return 'member';
 }
 
+function platformRestrictionMessage(role, platform) {
+  const canonical = canonicalRole(role);
+  const normalizedPlatform = String(platform || '').trim().toLowerCase();
+  if (canonical === ROLES.MEMBER_FARMER && normalizedPlatform === 'web') {
+    return 'Member Farmer accounts are restricted to the HUGPONG mobile application.';
+  }
+  if (canonical === ROLES.SUPER_ADMIN && normalizedPlatform === 'mobile') {
+    return 'Super Admin access is restricted to the Web Management Console.';
+  }
+  return 'This account is not authorized for the requested platform.';
+}
+
 function createUserId(role) {
   const prefixes = { [ROLES.SUPER_ADMIN]: '01', [ROLES.SRA_ADMIN]: '02', [ROLES.FARM_MANAGER]: '03', [ROLES.MEMBER_FARMER]: '04' };
   return `${prefixes[role]}${Math.floor(100000 + Math.random() * 900000)}`;
@@ -113,8 +125,8 @@ router.post('/mobile-session', async (req, res) => {
       return res.status(403).json({ success: false, error: 'The account is no longer authorized.' });
     }
     const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
-    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN) {
-      return res.status(403).json({ success: false, error: 'Super Admin access is restricted to the Web Management Console.' });
+    if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, 'mobile')) {
+      return res.status(403).json({ success: false, error: platformRestrictionMessage(sessionUser.canonicalRole, 'mobile') });
     }
     if (req.session) req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
@@ -153,10 +165,10 @@ router.post('/login', async (req, res) => {
     }
     const sessionUser = await buildSessionUser(matchedUser.id, matchedUser);
     const clientPlatform = String(req.headers['x-client-platform'] || req.body?.clientPlatform || '').trim().toLowerCase();
-    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN && clientPlatform === 'mobile') {
+    if (clientPlatform && !isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
       return res.status(403).json({
         success: false,
-        error: 'Super Admin access is restricted to the Web Management Console.'
+        error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
       });
     }
     req.session.user = sessionUser;
@@ -373,11 +385,13 @@ router.get('/session', requireAuth, async (req, res) => {
     }
     const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
     const clientPlatform = String(req.headers['x-client-platform'] || '').trim().toLowerCase();
-    if (sessionUser.canonicalRole === ROLES.SUPER_ADMIN && clientPlatform === 'mobile') {
+    if (clientPlatform && !isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
+      req.session.user = null;
+      res.clearCookie('hugpong.sid');
       return res.status(403).json({
         success: false,
         authenticated: false,
-        error: 'Super Admin access is restricted to the Web Management Console.'
+        error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
       });
     }
     req.session.user = sessionUser;
@@ -397,4 +411,4 @@ router.post('/logout', (req, res) => {
 });
 
 module.exports = router;
-module.exports._test = { normalizeContact, getRoleKey };
+module.exports._test = { normalizeContact, getRoleKey, platformRestrictionMessage };

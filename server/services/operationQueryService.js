@@ -1,6 +1,7 @@
 'use strict';
 
 const { COLLECTIONS, ROLES, canonicalRole } = require('../schema/firestoreSchema');
+const { sortOperationsNewestFirst } = require('./recordOrdering');
 
 async function getOperationActorScope(database, user) {
   const userId = String(user?.employeeId || user?.userId || '').trim();
@@ -35,19 +36,25 @@ async function getOperationActorScope(database, user) {
   return { role, userId, fieldIds: fieldSnapshot.docs.map(document => document.id) };
 }
 
-async function listOperationRecords(database, user) {
+async function listOperationRecords(database, user, options = {}) {
   const scope = await getOperationActorScope(database, user);
+  const requestedStatus = String(options.status || '').trim().toUpperCase();
+  const status = ['ACTIVE', 'ARCHIVED'].includes(requestedStatus) ? requestedStatus : null;
   if (scope.all) {
-    const snapshot = await database.collection(COLLECTIONS.OPERATION_LOGS).get();
-    return snapshot.docs.map(document => ({ id: document.id, ...document.data() }));
+    let query = database.collection(COLLECTIONS.OPERATION_LOGS);
+    if (status) query = query.where('status', '==', status);
+    const snapshot = await query.get();
+    return sortOperationsNewestFirst(snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
   }
   const records = [];
   for (let index = 0; index < scope.fieldIds.length; index += 10) {
     const fieldIds = scope.fieldIds.slice(index, index + 10);
-    const snapshot = await database.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', fieldIds).get();
+    let query = database.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', fieldIds);
+    if (status) query = query.where('status', '==', status);
+    const snapshot = await query.get();
     records.push(...snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
   }
-  return records;
+  return sortOperationsNewestFirst(records);
 }
 
 module.exports = {

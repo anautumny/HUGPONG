@@ -13,6 +13,7 @@ import OfflineBanner from '../components/OfflineBanner';
 import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
 import { getItem, saveItem, STORAGE_KEYS } from '../services/storageService';
 import { safeAlert } from '../utils/dialogs';
+import { sortNewestFirst } from '../utils/dataHelpers';
 
 // Role-Specific Modular Views
 import MemberHomeView from './member/MemberHomeView';
@@ -50,6 +51,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
 
   const offlineLogsCount = getPendingSyncCount(session);
   if (offlineLogsCount > 0 && !dismissedIds.has('notif-offline-sync')) {
+    const latestPending = sortNewestFirst(scopedLogs.filter(log => log.synced === false || log.isOffline === true), ['createdAt', 'localCreatedAt', 'timestamp'])[0];
     notifs.push({
       id: 'notif-offline-sync',
       type: 'sync',
@@ -58,6 +60,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
       title: 'Offline Logs Pending Sync',
       msg: `${offlineLogsCount} field operation log(s) for your block farm are stored locally on your device. Connect to internet and tap to synchronize to Cloud Firestore.`,
       time: 'Ready to sync',
+      createdAt: latestPending?.createdAt || latestPending?.localCreatedAt || latestPending?.timestamp || null,
       badgeText: 'Tap to Sync',
       unread: !readIds.has('notif-offline-sync'),
       actionType: 'sync'
@@ -81,6 +84,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         title: 'New SRA Price Circular Broadcast',
         msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
         time: latest.effectiveDate,
+        createdAt: latest.effectiveDate,
         unread: !readIds.has(priceNotifId),
       });
     }
@@ -93,6 +97,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
       : allDrafts.filter(d => managerFieldIds.includes(d.fieldId) || d.authorName === session?.name);
 
     if (scopedDrafts.length > 0 && !dismissedIds.has('notif-unsubmitted-drafts')) {
+      const latestDraft = sortNewestFirst(scopedDrafts, ['createdAt', 'timestamp', 'date'])[0];
       notifs.push({
         id: 'notif-unsubmitted-drafts',
         type: 'draft',
@@ -101,6 +106,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         title: 'Unsubmitted Field Drafts',
         msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member Farmer' ? 'your assigned plot(s)' : 'your managed block farm'}. Tap to review, edit, and record operations.`,
         time: `${scopedDrafts.length} draft${scopedDrafts.length !== 1 ? 's' : ''}`,
+        createdAt: latestDraft?.createdAt || latestDraft?.timestamp || latestDraft?.date || null,
         badgeText: 'Review Drafts',
         unread: !readIds.has('notif-unsubmitted-drafts'),
         actionType: 'drafts'
@@ -108,7 +114,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     }
   }
 
-  return notifs;
+  return sortNewestFirst(notifs, ['createdAt']);
 };
 
 export default function HomeScreen({ navigation }) {

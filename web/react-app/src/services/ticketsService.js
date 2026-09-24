@@ -5,9 +5,9 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot, query, where } from './firebaseClient';
-import { COLLECTIONS, fromTicket } from './firestoreSchema';
-import { authenticatedRequest } from './apiClient';
+import { fromTicket } from './firestoreSchema';
+import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
+import { sortNewestFirst } from '../utils/recordOrdering';
 
 export const TICKET_PRIORITIES = Object.freeze(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
 export const TICKET_STATUSES = Object.freeze(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']);
@@ -22,67 +22,24 @@ export const TICKET_CATEGORIES = Object.freeze([
 ]);
 
 /**
- * Real-time subscription to support tickets
+ * Periodic server-authoritative subscription to support tickets
  * @param {Object} options
  * @param {Object} options.user
  * @param {Function} options.onUpdate - Callback with { tickets, isLoading, error }
  * @param {Function} [options.onError]
  */
 export function subscribeToTicketsData({ user, onUpdate, onError }) {
-  let isSubscribed = true;
-
-  // Initial authoritative API fetch
-  authenticatedRequest('/api/tickets')
-    .then(res => {
-      if (!isSubscribed) return;
-      if (res.success && Array.isArray(res.data)) {
-        const sorted = res.data.map(t => fromTicket(t.id, t))
-          .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        onUpdate({ tickets: sorted, isLoading: false, error: null });
-      }
-    })
-    .catch(err => {
-      console.warn('[TicketsService] Initial API fetch notice:', err.message);
-    });
-
-  // Real-time Firestore snapshot listener
-  let unsub = null;
-  try {
-    const actorId = String(user?.id || user?.employeeId || '').trim();
-    const isSuperAdmin = String(user?.canonicalRole || user?.role || user?.roleKey || '').toUpperCase().replace(/[ -]/g, '_') === 'SUPER_ADMIN';
-    const ticketsRef = isSuperAdmin
-      ? collection(db, COLLECTIONS.SUPPORT_TICKETS)
-      : query(collection(db, COLLECTIONS.SUPPORT_TICKETS), where('createdByUserId', '==', actorId));
-    unsub = onSnapshot(
-      ticketsRef,
-      snapshot => {
-        if (!isSubscribed) return;
-        const list = [];
-        snapshot.forEach(docSnap => {
-          try {
-            const data = docSnap.data();
-            list.push(fromTicket(docSnap.id, data));
-          } catch (e) {
-            console.warn('[TicketsService] Skip ticket doc:', docSnap.id, e.message);
-          }
-        });
-
-        list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        onUpdate({ tickets: list, isLoading: false, error: null });
-      },
-      err => {
-        console.warn('[TicketsService] Snapshot listener notice:', err.message);
-        if (onError) onError(err);
-      }
-    );
-  } catch (err) {
-    console.warn('[TicketsService] Could not establish Firestore listener:', err.message);
-  }
-
-  return () => {
-    isSubscribed = false;
-    if (typeof unsub === 'function') unsub();
-  };
+  return subscribeToAuthenticatedResource('/api/tickets', {
+    onData: response => {
+      const tickets = sortNewestFirst((response.data || [])
+        .map(ticket => fromTicket(ticket.id, ticket)), ['createdAt']);
+      onUpdate({ tickets, isLoading: false, error: null });
+    },
+    onError: error => {
+      console.warn('[TicketsService] API subscription notice:', error.message);
+      if (onError) onError(error);
+    }
+  });
 }
 
 /**

@@ -190,7 +190,8 @@ export default function FirstLoginVerifyModal({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg dark:hover:bg-[#0C1015] transition-all cursor-pointer"
+              disabled={isVerifying || isResending}
+              className="px-4 py-2 border border-border text-hug-text2 text-xs font-bold rounded-xl hover:bg-bg dark:hover:bg-[#0C1015] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Sign Out
             </button>

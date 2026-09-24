@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Edit3 } from 'lucide-react';
 import { updateField } from '../../services/fieldsService';
-import { formatCropYear } from '../../utils/formatters';
+import { formatCropYearDisplay } from '../../utils/formatters';
 
 const SUGARCANE_VARIETIES = [
   'VMC 84-524',
@@ -22,14 +22,6 @@ const SOIL_TYPES = [
   'Sandy Clay Loam'
 ];
 
-const currentYear = new Date().getFullYear();
-const currentStart = new Date().getMonth() >= 8 ? currentYear : currentYear - 1;
-const CROP_YEAR_OPTIONS = [
-  `${currentStart - 1}-${currentStart}`,
-  `${currentStart}-${currentStart + 1}`,
-  `${currentStart + 1}-${currentStart + 2}`
-];
-
 export default function FieldEditModal({
   isOpen = false,
   onClose,
@@ -43,7 +35,6 @@ export default function FieldEditModal({
   const [areaHa, setAreaHa] = useState('');
   const [variety, setVariety] = useState('');
   const [soilType, setSoilType] = useState('');
-  const [cropYear, setCropYear] = useState(CROP_YEAR_OPTIONS[1]);
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,7 +47,6 @@ export default function FieldEditModal({
       setAreaHa(String(field.areaHa || field.ha || ''));
       setVariety(field.variety || SUGARCANE_VARIETIES[0]);
       setSoilType(field.soilType || SOIL_TYPES[0]);
-      setCropYear(formatCropYear(field.cropYear || field.cropCycle?.cropYear) || CROP_YEAR_OPTIONS[1]);
       setErrors({});
       setServerError(null);
     }
@@ -90,8 +80,7 @@ export default function FieldEditModal({
         memberUserId: memberUserId || null,
         areaHa: numHa,
         variety,
-        soilType,
-        cropYear
+        soilType
       };
 
       await updateField(field.id, payload);
@@ -244,18 +233,17 @@ export default function FieldEditModal({
           </FormField>
         </div>
 
-        {/* Crop Year */}
+        {/* Crop Year Cycle is changed only through the renewal workflow. */}
         <FormField
           id="edit-crop-year"
-          label="Crop Year (CY)"
-          helperText="Official SRA milling crop year."
+          label="Crop Year Cycle"
+          helperText="Stored cycle context. Start a legitimate new cycle to change it."
         >
-          <Select
+          <Input
             id="edit-crop-year"
-            value={cropYear}
-            onChange={(e) => setCropYear(e.target.value)}
-            disabled={isSubmitting}
-            options={CROP_YEAR_OPTIONS.map(cy => ({ value: cy, label: cy }))}
+            value={formatCropYearDisplay(field.cropYear || field.cropCycle?.cropYear)}
+            readOnly
+            disabled
           />
         </FormField>
       </form>

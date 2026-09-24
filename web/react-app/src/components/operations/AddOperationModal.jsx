@@ -110,6 +110,16 @@ export default function AddOperationModal({
   };
 
   const handleTemplateChange = (opId) => {
+    if (opId === 'CUSTOM') {
+      setSelectedOpId('CUSTOM');
+      setActivityName('');
+      setInputMode('direct');
+      setSubItems([]);
+      setDirectQty(areaHa || '1');
+      setDirectUnit('ha');
+      setDirectRate('0');
+      return;
+    }
     const tmpl = SRA_OPERATIONS_CATALOGUE.find(o => o.id === opId);
     if (tmpl) {
       applyTemplate(tmpl);
@@ -209,12 +219,19 @@ export default function AddOperationModal({
     try {
       const cycleId = field.currentCycleId || field.cropCycle?.id;
       if (!cycleId) {
-        throw new Error('No active crop cycle found for this field plot. An active cycle is required to record operations.');
+        throw new Error('No active Crop Year Cycle found for this field plot. An active Crop Year Cycle is required to record operations.');
+      }
+      const stageAtRecord = Number(field.cropCycle?.currentStageNumber ?? field.stageNumber);
+      if (!Number.isInteger(stageAtRecord) || stageAtRecord < 1 || stageAtRecord > 6) {
+        throw new Error('The field Current Stage is unavailable. Refresh the Crop Year Cycle before recording an operation.');
       }
 
       const payload = {
         fieldId: field.id,
         cycleId,
+        blockFarmId: field.blockFarmId,
+        cropYearCycle: field.cropCycle?.cropYear || field.cropYear,
+        stageNumberAtRecord: stageAtRecord,
         operationDefinitionId: selectedOpId || 'CUSTOM',
         operationName: activityName.trim(),
         category: SRA_OPERATIONS_CATALOGUE.find(o => o.id === selectedOpId)?.category || 'General Care',
@@ -252,7 +269,7 @@ export default function AddOperationModal({
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
-          console.warn('[AddOperationModal] Crop cycle stage advancement note:', stageErr.message);
+          console.warn('[AddOperationModal] Crop Year Cycle stage advancement note:', stageErr.message);
         }
       }
 
@@ -333,17 +350,20 @@ export default function AddOperationModal({
 
           <FormField
             id="add-op-template-select"
-            label="SRA Template (14 Canonical)"
-            badge="Auto-configures"
+            label="Operation"
+            badge="14 SRA templates + custom"
           >
             <Select
               id="add-op-template-select"
               value={selectedOpId}
               onChange={(e) => handleTemplateChange(e.target.value)}
-              options={SRA_OPERATIONS_CATALOGUE.map(o => ({
-                value: o.id,
-                label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
-              }))}
+              options={[
+                { value: 'CUSTOM', label: 'CUSTOM: Enter a Custom Operation' },
+                ...SRA_OPERATIONS_CATALOGUE.map(o => ({
+                  value: o.id,
+                  label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
+                }))
+              ]}
             />
           </FormField>
         </div>

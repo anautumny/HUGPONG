@@ -36,11 +36,11 @@ test('schema and display crop-year formatters preserve their existing fallback c
 test('crop progress uses the current crop-cycle stage and recorded field area', () => {
   const result = selectCropFieldProgress({
     fields: [
-      { id: 'FLD-1', blockFarmId: 'BF-1', currentCycleId: 'CYC-1', cropYear: '2025', areaHa: 2, stageNumber: 1 },
-      { id: 'FLD-2', blockFarmId: 'BF-2', cropYear: '2026', areaHa: 3, stageNumber: 6 }
+      { id: 'FLD-1', blockFarmId: 'BF-1', currentCycleId: 'CYC-1', cropYear: '2025-2026', areaHa: 2, stageNumber: 1 },
+      { id: 'FLD-2', blockFarmId: 'BF-2', cropYear: '2026-2027', areaHa: 3, stageNumber: 6 }
     ],
     cropCycles: [
-      { id: 'CYC-1', fieldId: 'FLD-1', cropYear: '2026', currentStageNumber: 3 }
+      { id: 'CYC-1', fieldId: 'FLD-1', cropYear: '2026-2027', currentStageNumber: 3 }
     ],
     selectedFarmId: 'BF-1',
     selectedSeason: '2026-2027'

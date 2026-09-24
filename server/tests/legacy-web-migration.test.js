@@ -26,15 +26,16 @@ test('legacy legal-page bookmarks use the React legal surfaces', () => {
   });
 });
 
-test('legacy dashboard redirects are registered before legacy static serving', () => {
+test('legacy bookmarks redirect before the canonical React static application', () => {
   const serverSource = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
   const redirectIndex = serverSource.indexOf('app.get(Object.keys(LEGACY_ROLE_DASHBOARD_REDIRECTS)');
   const legalRedirectIndex = serverSource.indexOf('app.get(Object.keys(LEGACY_LEGAL_PAGE_REDIRECTS)');
-  const staticIndex = serverSource.indexOf('app.use(express.static(legacyWebPath))');
+  const staticIndex = serverSource.indexOf('app.use(express.static(reactDistPath))');
 
   assert.ok(redirectIndex >= 0, 'legacy redirect handler must be registered');
   assert.ok(legalRedirectIndex >= 0, 'legacy legal redirect handler must be registered');
-  assert.ok(staticIndex >= 0, 'legacy static fallback must remain available during migration');
+  assert.ok(staticIndex >= 0, 'React production assets must be served');
   assert.ok(redirectIndex < staticIndex, 'redirect handler must run before legacy static serving');
   assert.ok(legalRedirectIndex < staticIndex, 'legal redirect handler must run before legacy static serving');
+  assert.doesNotMatch(serverSource, /legacyWebPath/);
 });

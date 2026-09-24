@@ -23,12 +23,7 @@ const SOIL_TYPES = [
 ];
 
 const currentYear = new Date().getFullYear();
-const currentStart = new Date().getMonth() >= 8 ? currentYear : currentYear - 1;
-const CROP_YEAR_OPTIONS = [
-  `${currentStart - 1}-${currentStart}`,
-  `${currentStart}-${currentStart + 1}`,
-  `${currentStart + 1}-${currentStart + 2}`
-];
+const CROP_YEAR_PREVIEW = `${currentYear}–${currentYear + 1}`;
 
 export default function FieldEnrollmentModal({
   isOpen = false,
@@ -44,7 +39,6 @@ export default function FieldEnrollmentModal({
   const [areaHa, setAreaHa] = useState('');
   const [variety, setVariety] = useState(SUGARCANE_VARIETIES[0]);
   const [soilType, setSoilType] = useState(SOIL_TYPES[0]);
-  const [cropYear, setCropYear] = useState(CROP_YEAR_OPTIONS[1]);
   const [initialStage, setInitialStage] = useState('1');
 
   const [errors, setErrors] = useState({});
@@ -92,7 +86,6 @@ export default function FieldEnrollmentModal({
         areaHa: numHa,
         variety,
         soilType,
-        cropYear,
         currentStageNumber: Number(initialStage) || 1
       };
 
@@ -259,12 +252,12 @@ export default function FieldEnrollmentModal({
           </FormField>
         </div>
 
-        {/* 4. Initial Crop Stage & Crop Year */}
+        {/* 4. Initial Crop Stage & server-generated Crop Year Cycle */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <FormField
             id="initial-stage-select"
             label="Initial Crop Stage"
-            helperText="New crop cycle starts at this stage."
+            helperText="The Crop Year Cycle starts at this stage."
           >
             <Select
               id="initial-stage-select"
@@ -276,16 +269,15 @@ export default function FieldEnrollmentModal({
           </FormField>
 
           <FormField
-            id="crop-year-select"
-            label="Crop Year (CY)"
-            helperText="Official SRA milling season."
+            id="crop-year-cycle-preview"
+            label="Crop Year Cycle"
+            helperText="Preview only. The server sets the canonical year when the field is enrolled."
           >
-            <Select
-              id="crop-year-select"
-              value={cropYear}
-              onChange={(e) => setCropYear(e.target.value)}
-              disabled={isSubmitting}
-              options={CROP_YEAR_OPTIONS.map(cy => ({ value: cy, label: cy }))}
+            <Input
+              id="crop-year-cycle-preview"
+              value={CROP_YEAR_PREVIEW}
+              readOnly
+              disabled
             />
           </FormField>
         </div>

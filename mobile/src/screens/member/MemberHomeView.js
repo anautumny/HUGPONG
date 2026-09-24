@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
+import { formatCropYearDisplay } from '../../utils/dataHelpers';
 
 function MemberHomeView({
   session = {},
@@ -91,12 +92,20 @@ function MemberHomeView({
           </View>
 
           <View style={s.stageBox}>
-            <Text style={s.stageLabel}>{t('current_stage', 'Current Stage')}</Text>
-            <Text style={s.stageValue}>
-              {currentStage
-                ? (formatStageName ? formatStageName(currentStage.name) : currentStage.name)
-                : t('current_stage_unset', 'Current stage not set')}
-            </Text>
+            <View style={s.fieldContextRow}>
+              <View style={s.fieldContextItem}>
+                <Text style={s.stageLabel}>Crop Year Cycle</Text>
+                <Text style={s.stageValue}>{formatCropYearDisplay(primaryField.cropYear)}</Text>
+              </View>
+              <View style={s.fieldContextItem}>
+                <Text style={s.stageLabel}>{t('current_stage', 'Current Stage')}</Text>
+                <Text style={s.stageValue}>
+                  {currentStage
+                    ? (formatStageName ? formatStageName(currentStage.name) : currentStage.name)
+                    : t('current_stage_unset', 'Current stage not set')}
+                </Text>
+              </View>
+            </View>
           </View>
 
           <View style={s.actionRow}>
@@ -141,6 +150,8 @@ const s = StyleSheet.create({
   haBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 12, paddingVertical: 5, borderRadius: RADIUS.full },
   haText: { fontSize: 13, fontWeight: '900', color: COLORS.primary },
   stageBox: { backgroundColor: '#F8FAF5', padding: SPACING.sm + 2, borderRadius: RADIUS.md, marginVertical: SPACING.sm, borderWidth: 1, borderColor: '#E5EDE0' },
+  fieldContextRow: { flexDirection: 'row', gap: SPACING.md },
+  fieldContextItem: { flex: 1 },
   stageLabel: { fontSize: 11.5, color: COLORS.textMuted, textTransform: 'uppercase', fontWeight: '700', letterSpacing: 0.3 },
   stageValue: { fontSize: 14.5, fontWeight: '800', color: COLORS.text, marginTop: 3 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: SPACING.xs },

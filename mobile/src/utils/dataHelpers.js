@@ -46,6 +46,93 @@ export function toISODateString(dateStr) {
   return new Date().toISOString().split('T')[0];
 }
 
+export function timestampMillis(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value?.toMillis === 'function') {
+    const time = value.toMillis();
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value === 'object') {
+    const seconds = value.seconds ?? value._seconds;
+    const nanoseconds = value.nanoseconds ?? value._nanoseconds ?? 0;
+    if (Number.isFinite(Number(seconds))) return (Number(seconds) * 1000) + Math.floor(Number(nanoseconds) / 1e6);
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return Math.abs(value) < 1e12 ? value * 1000 : value;
+  }
+  const parsed = Date.parse(String(value).trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+const valueFor = (record, selector) => typeof selector === 'function' ? selector(record) : record?.[selector];
+
+function firstTimestamp(record, selectors) {
+  for (const selector of selectors) {
+    const time = timestampMillis(valueFor(record, selector));
+    if (time != null) return time;
+  }
+  return 0;
+}
+
+const stableId = record => String(record?.id || record?.reportId || record?.deviceId || record?.employeeId || '');
+
+export function compareNewestFirst(left, right, selectors = ['createdAt'], tieSelectors = []) {
+  const primaryDifference = firstTimestamp(right, selectors) - firstTimestamp(left, selectors);
+  if (primaryDifference) return primaryDifference;
+  const tieDifference = firstTimestamp(right, tieSelectors) - firstTimestamp(left, tieSelectors);
+  if (tieDifference) return tieDifference;
+  return stableId(left).localeCompare(stableId(right));
+}
+
+export function sortNewestFirst(records, selectors = ['createdAt'], tieSelectors = []) {
+  return [...(records || [])].sort((left, right) => compareNewestFirst(left, right, selectors, tieSelectors));
+}
+
+export function sortOperationsNewestFirst(records) {
+  return sortNewestFirst(
+    records,
+    ['performedOn', 'isoDate', 'date', 'createdAt', 'clientCreatedAt', 'localCreatedAt'],
+    ['createdAt', 'clientCreatedAt', 'localCreatedAt', 'timestamp']
+  );
+}
+
+export function cropYearCycleForDate(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const startYear = date.getFullYear();
+  return `${startYear}-${startYear + 1}`;
+}
+
+export function formatCropYearDisplay(value, fallback = '—') {
+  const match = String(value || '').match(/(\d{4})\s*[-–—/]\s*(\d{2,4})/);
+  if (!match) return fallback;
+  const startYear = Number(match[1]);
+  const endYear = Number(match[2]) < 100
+    ? Math.floor(startYear / 100) * 100 + Number(match[2])
+    : Number(match[2]);
+  return `${startYear}–${endYear}`;
+}
+
+export function canonicalStoredCropYear(value) {
+  const match = String(value || '').trim().match(/^(\d{4})\s*[-–—/]\s*(\d{4})$/);
+  if (!match || Number(match[2]) !== Number(match[1]) + 1) return '';
+  return `${match[1]}-${match[2]}`;
+}
+
+export function uniqueCropYears(records = [], selector = record => record?.cropYear) {
+  const years = new Set();
+  records.forEach(record => {
+    const cropYear = canonicalStoredCropYear(selector(record));
+    if (cropYear) years.add(cropYear);
+  });
+  return Array.from(years).sort((left, right) => Number(right.slice(0, 4)) - Number(left.slice(0, 4)));
+}
+
 export function cleanupDuplicateLogs(logs) {
   if (!Array.isArray(logs)) return [];
   const byId = new Map();

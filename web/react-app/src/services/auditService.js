@@ -6,9 +6,9 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { db, collection, onSnapshot, query, where } from './firebaseClient';
-import { COLLECTIONS, fromReport } from './firestoreSchema';
-import { authenticatedRequest } from './apiClient';
+import { fromReport } from './firestoreSchema';
+import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
+import { sortNewestFirst } from '../utils/recordOrdering';
 
 /**
  * Real-time subscription to audit reports collection
@@ -18,64 +18,20 @@ import { authenticatedRequest } from './apiClient';
  * @param {string} [options.blockFarmId] - Optional client filter for Farm Manager scope
  */
 export function subscribeToAuditReports({ onUpdate, onError, blockFarmId = null }) {
-  let isSubscribed = true;
-
-  // Initial fetch from authoritative API endpoint
-  authenticatedRequest('/api/audit-reports')
-    .then(res => {
-      if (!isSubscribed) return;
-      if (res.success && Array.isArray(res.data)) {
-        let reports = res.data.map(item => fromReport(item.id, item));
-        if (blockFarmId) {
-          reports = reports.filter(r => r.blockFarmId === blockFarmId);
-        }
-        reports.sort((a, b) => new Date(b.compiledAt || b.createdAt || 0) - new Date(a.compiledAt || a.createdAt || 0));
-        onUpdate({ reports, isLoading: false, error: null });
-      }
-    })
-    .catch(err => {
-      console.warn('[AuditService] Initial API fetch notice:', err.message);
-    });
-
-  // Real-time Firestore snapshot listener
-  let unsub = null;
-  try {
-    const reportsRef = blockFarmId
-      ? query(collection(db, COLLECTIONS.AUDIT_REPORTS), where('blockFarmId', '==', blockFarmId))
-      : collection(db, COLLECTIONS.AUDIT_REPORTS);
-    unsub = onSnapshot(
-      reportsRef,
-      snapshot => {
-        if (!isSubscribed) return;
-        const reports = [];
-        snapshot.forEach(docSnap => {
-          try {
-            reports.push(fromReport(docSnap.id, docSnap.data()));
-          } catch (e) {
-            console.warn('[AuditService] Skip report doc:', docSnap.id, e.message);
-          }
-        });
-
-        let filtered = reports;
-        if (blockFarmId) {
-          filtered = filtered.filter(r => r.blockFarmId === blockFarmId);
-        }
-        filtered.sort((a, b) => new Date(b.compiledAt || b.createdAt || 0) - new Date(a.compiledAt || a.createdAt || 0));
-        onUpdate({ reports: filtered, isLoading: false, error: null });
-      },
-      err => {
-        console.warn('[AuditService] Snapshot listener note:', err.message);
-        if (onError) onError(err);
-      }
-    );
-  } catch (err) {
-    console.warn('[AuditService] Could not establish Firestore listener:', err.message);
-  }
-
-  return () => {
-    isSubscribed = false;
-    if (typeof unsub === 'function') unsub();
-  };
+  return subscribeToAuthenticatedResource('/api/audit-reports', {
+    onData: response => {
+      let reports = (response.data || []).map(item => fromReport(item.id, item));
+      if (blockFarmId) reports = reports.filter(report => report.blockFarmId === blockFarmId);
+      onUpdate({
+        reports: sortNewestFirst(reports, ['compiledAt', 'createdAt']),
+        isLoading: false,
+        error: null
+      });
+    },
+    onError: error => {
+      if (onError) onError(error);
+    }
+  });
 }
 
 /**

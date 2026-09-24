@@ -216,3 +216,30 @@ test('web and Android analytics produce equal canonical metrics for equal data a
   const priceInput = { prices, timeframe: 'weekly' };
   assert.deepEqual(plain(mobileAnalytics.selectPriceTrends(priceInput)), plain(webAnalytics.selectPriceTrends(priceInput)));
 });
+
+test('web and Android filter costs by Crop Year Cycle identity instead of operation calendar year', async () => {
+  const mobileAnalytics = await loadMobileAnalytics();
+  const cropCycles = [
+    { id: 'CYC-2025', fieldId: 'FIELD-001', cropYear: '2025-2026', status: 'ARCHIVED' },
+    { id: 'CYC-2026', fieldId: 'FIELD-001', cropYear: '2026-2027', status: 'ACTIVE' },
+    { id: 'CYC-2027', fieldId: 'FIELD-001', cropYear: '2027-2028', status: 'ARCHIVED' }
+  ];
+  const operations = [
+    { id: 'OP-A', fieldId: 'FIELD-001', cycleId: 'CYC-2025', cropYearCycle: '2025-2026', status: 'ARCHIVED', archivedReason: 'CYCLE_COMPLETED', performedOn: '2026-02-01', totalCost: 1000 },
+    { id: 'OP-B', fieldId: 'FIELD-001', cycleId: 'CYC-2026', cropYearCycle: '2026-2027', status: 'ACTIVE', performedOn: '2027-02-01', totalCost: 2000 }
+  ];
+  const fields = [{ id: 'FIELD-001', blockFarmId: 'BF-001', areaHa: 2 }];
+  const blockFarms = [{ id: 'BF-001', name: 'North Farm' }];
+
+  for (const selector of [webAnalytics, mobileAnalytics]) {
+    const selected2026 = selector.filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: '2026-2027' });
+    const selected2025 = selector.filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: '2025-2026' });
+    const selected2027 = selector.filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: '2027-2028' });
+    const all = selector.filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: 'ALL' });
+
+    assert.equal(selector.selectProductionCost({ operations: selected2026, fields, blockFarms }).totalExpenditure, 2000);
+    assert.equal(selector.selectProductionCost({ operations: selected2025, fields, blockFarms }).totalExpenditure, 1000);
+    assert.equal(selector.selectProductionCost({ operations: all, fields, blockFarms }).totalExpenditure, 3000);
+    assert.equal(selected2027.length, 0, 'February 2027 must remain in the stored 2026-2027 cycle');
+  }
+});

@@ -141,6 +141,15 @@ export default function TakeOverView() {
   // Handle template selection
   const handleTemplateSelect = (opId) => {
     setSelectedOpId(opId);
+    if (opId === 'CUSTOM') {
+      setActivityName('');
+      setInputMode('direct');
+      setSubItems([]);
+      setDirectQty(areaHa || '1');
+      setDirectUnit('ha');
+      setDirectRate('0');
+      return;
+    }
     const tmpl = SRA_OPERATIONS_CATALOGUE.find(o => o.id === opId);
     if (!tmpl) return;
 
@@ -233,7 +242,7 @@ export default function TakeOverView() {
     try {
       const cycleId = currentField?.currentCycleId || currentField?.cropCycle?.id;
       if (!cycleId) {
-        setServerError('No active crop cycle found for this field plot. An active cycle is required to record operations.');
+        setServerError('No active Crop Year Cycle found for this field plot. An active Crop Year Cycle is required to record operations.');
         setIsSubmitting(false);
         return;
       }
@@ -285,7 +294,7 @@ export default function TakeOverView() {
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
-          console.warn('[TakeOver] Crop cycle stage advancement note:', stageErr.message);
+          console.warn('[TakeOver] Crop Year Cycle stage advancement note:', stageErr.message);
         }
       }
 
@@ -446,7 +455,7 @@ export default function TakeOverView() {
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-hug-text uppercase tracking-wider flex items-center gap-1.5">
               <Sprout className="w-4 h-4 text-primary" />
-              <span>Crop Cycle Stages</span>
+              <span>Crop Year Cycle Stages</span>
             </h3>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg text-primary dark:text-primary-light">
               Sequential Cycle
@@ -513,17 +522,20 @@ export default function TakeOverView() {
           {/* SRA Operation Selector */}
           <FormField
             id="takeover-op-select"
-            label="SRA Operation (14 Templates)"
-            badge="Auto-configures"
+            label="Operation"
+            badge="14 SRA templates + custom"
           >
             <Select
               id="takeover-op-select"
               value={selectedOpId}
               onChange={(e) => handleTemplateSelect(e.target.value)}
-              options={SRA_OPERATIONS_CATALOGUE.map(o => ({
-                value: o.id,
-                label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
-              }))}
+              options={[
+                { value: 'CUSTOM', label: 'CUSTOM: Enter a Custom Operation' },
+                ...SRA_OPERATIONS_CATALOGUE.map(o => ({
+                  value: o.id,
+                  label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
+                }))
+              ]}
             />
           </FormField>
 

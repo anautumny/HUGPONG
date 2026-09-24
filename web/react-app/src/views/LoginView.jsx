@@ -6,9 +6,10 @@ import { ROLE_KEYS } from '../utils/authRouting';
 import AccountRecoveryModal from '../components/auth/AccountRecoveryModal';
 import FirstLoginVerifyModal from '../components/auth/FirstLoginVerifyModal';
 import FirstLoginPasswordModal from '../components/auth/FirstLoginPasswordModal';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 export default function LoginView() {
-  const { login, saveSession, isAuthenticated, sessionExpiredNotice, clearSession } = useAuth();
+  const { login, saveSession, isAuthenticated, isLoading, roleKey, sessionExpiredNotice, logout } = useAuth();
   const navigate = useNavigate();
 
   const [identifier, setIdentifier] = useState('');
@@ -27,13 +28,15 @@ export default function LoginView() {
   const [pendingAuthToken, setPendingAuthToken] = useState(null);
   const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [isSetupSignOutConfirmOpen, setIsSetupSignOutConfirmOpen] = useState(false);
+  const [isSetupSigningOut, setIsSetupSigningOut] = useState(false);
 
   // If already authenticated and verified, redirect to dashboard
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!isLoading && isAuthenticated && roleKey !== ROLE_KEYS.MEMBER_FARMER) {
       navigate('/dashboard', { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, isLoading, navigate, roleKey]);
 
   // Security lockout timer
   useEffect(() => {
@@ -72,13 +75,6 @@ export default function LoginView() {
 
     try {
       const result = await login(identifier.trim(), password);
-
-      // Check if user is Member Farmer
-      if (result.roleKey === ROLE_KEYS.MEMBER_FARMER) {
-        setIsSubmitting(false);
-        setErrorMessage('Member Farmer accounts use the HUGPONG mobile application.');
-        return;
-      }
 
       // Check for first-login phone verification gate
       if (result.needsVerification) {
@@ -142,26 +138,27 @@ export default function LoginView() {
   };
 
   const handleModalCancel = () => {
-    setIsVerifyModalOpen(false);
-    setIsPasswordModalOpen(false);
-    setPendingAuthUser(null);
-    setPendingAuthToken(null);
-    clearSession();
+    setIsSetupSignOutConfirmOpen(true);
   };
 
-  // Quick Shell Preview for testing different roles
-  const handleQuickRoleSwitch = (roleKey, name, phoneNum) => {
-    const mockUser = {
-      employeeId: `DEV-${roleKey.toUpperCase()}`,
-      name,
-      phone: phoneNum,
-      canonicalRole: roleKey,
-      role: roleKey === ROLE_KEYS.SUPER_ADMIN ? 'Super Admin' : roleKey === ROLE_KEYS.FARM_MANAGER ? 'Farm Manager' : 'SRA Admin',
-      phoneVerified: true,
-      passwordChanged: true
-    };
-    saveSession(mockUser, roleKey, 'dev-mock-session-token');
-    navigate('/dashboard', { replace: true });
+  const handleConfirmSetupSignOut = async () => {
+    if (isSetupSigningOut) return;
+    setIsSetupSigningOut(true);
+    try {
+      await logout();
+      setIsSetupSignOutConfirmOpen(false);
+      setIsVerifyModalOpen(false);
+      setIsPasswordModalOpen(false);
+      setPendingAuthUser(null);
+      setPendingAuthToken(null);
+    } finally {
+      setIsSetupSigningOut(false);
+    }
+  };
+
+  const handleCancelSetupSignOut = () => {
+    if (isSetupSigningOut) return;
+    setIsSetupSignOutConfirmOpen(false);
   };
 
   return (
@@ -321,35 +318,6 @@ export default function LoginView() {
           <span>Encrypted Session &middot; SRA Certified Gateway</span>
         </div>
 
-        {/* Quick Shell Preview Switcher for Development / Batch Verification */}
-        <div className="mt-5 pt-4 border-t border-border">
-          <p className="text-[10px] font-bold text-hug-muted uppercase tracking-wider mb-2 text-center">
-            Development Role Preview
-          </p>
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleQuickRoleSwitch(ROLE_KEYS.FARM_MANAGER, 'Jose Reyes', '09170000003')}
-              className="px-2 py-1.5 rounded-lg border border-border bg-surface-subtle hover:bg-surface hover:border-primary/50 text-[11px] font-semibold text-hug-text2 hover:text-primary transition-colors text-center cursor-pointer"
-            >
-              Farm Manager
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickRoleSwitch(ROLE_KEYS.SRA_ADMIN, 'Maria Santos', '09170000002')}
-              className="px-2 py-1.5 rounded-lg border border-border bg-surface-subtle hover:bg-surface hover:border-primary/50 text-[11px] font-semibold text-hug-text2 hover:text-primary transition-colors text-center cursor-pointer"
-            >
-              SRA Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickRoleSwitch(ROLE_KEYS.SUPER_ADMIN, 'Super Admin', '09170000001')}
-              className="px-2 py-1.5 rounded-lg border border-border bg-surface-subtle hover:bg-surface hover:border-primary/50 text-[11px] font-semibold text-hug-text2 hover:text-primary transition-colors text-center cursor-pointer"
-            >
-              Super Admin
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Footer Legal Links */}
@@ -388,6 +356,19 @@ export default function LoginView() {
         pendingToken={pendingAuthToken}
         onPasswordChangeSuccess={handlePasswordChangeSuccess}
         onCancel={handleModalCancel}
+      />
+
+      <ConfirmDialog
+        isOpen={isSetupSignOutConfirmOpen}
+        title="Sign out and stop account setup?"
+        message="Your current setup session will end. You can sign in again later to finish verification or update your password."
+        confirmText="Sign Out"
+        cancelText="Continue Setup"
+        type="danger"
+        isLoading={isSetupSigningOut}
+        loadingText="Signing out..."
+        onConfirm={handleConfirmSetupSignOut}
+        onCancel={handleCancelSetupSignOut}
       />
     </div>
   );

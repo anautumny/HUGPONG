@@ -17,6 +17,7 @@ const {
   optionalString
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
+const { sortNewestFirst } = require('../services/recordOrdering');
 
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]), async (req, res) => {
   try {
@@ -32,7 +33,8 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]),
       reportQuery = reportQuery.where('blockFarmId', 'in', farmIds);
     }
     const snapshot = await reportQuery.get();
-    return res.json({ success: true, count: snapshot.size, data: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) });
+    const data = sortNewestFirst(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), ['compiledAt', 'createdAt']);
+    return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

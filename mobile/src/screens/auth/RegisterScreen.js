@@ -594,7 +594,7 @@ export default function RegisterScreen({ navigation }) {
 
             <Text style={s.successTitle}>Registration Submitted</Text>
             <Text style={s.successSub}>
-              Your Member Farmer account is pending approval. You can sign in after an authorized Farm Manager or administrator activates it.
+              Your Farm Member account is pending approval. You can sign in after an authorized Farm Manager or administrator activates it.
             </Text>
 
             {/* Permanent User ID Display */}

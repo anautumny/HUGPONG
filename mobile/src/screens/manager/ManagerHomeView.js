@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { operationLogs, users } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
+import { sortOperationsNewestFirst } from '../../utils/dataHelpers';
 
 function ManagerHomeView({
   session = {},
@@ -42,16 +43,7 @@ function ManagerHomeView({
     const toc = farmLogs.length;
 
     // Sort descending by chronological date/timestamp, then ID
-    const sorted = [...farmLogs].sort((a, b) => {
-      const dateA = a.createdAt || a.date || a.period;
-      const dateB = b.createdAt || b.date || b.period;
-      const timeA = dateA ? new Date(dateA).getTime() : 0;
-      const timeB = dateB ? new Date(dateB).getTime() : 0;
-      if (!isNaN(timeA) && !isNaN(timeB) && timeB !== timeA) {
-        return timeB - timeA;
-      }
-      return (b.id || '').localeCompare(a.id || '');
-    });
+    const sorted = sortOperationsNewestFirst(farmLogs);
 
     const formatted = sorted.map(log => {
       const f = fieldMap[log.fieldId];

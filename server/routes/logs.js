@@ -12,14 +12,25 @@ const {
   archiveOperationRecords
 } = require('../services/cropCycleOperations');
 const { listOperationRecords } = require('../services/operationQueryService');
+const { listArchivedOperationPage } = require('../services/archiveQueryService');
 const { readMutationContext } = require('../services/mutationContext');
 const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthorization');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const data = await listOperationRecords(db, req.session.user);
+    const data = await listOperationRecords(db, req.session.user, { status: req.query.status });
     return res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    return res.status(error.status || 500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/archive', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const page = await listArchivedOperationPage(db, req.session.user, req.query);
+    return res.json({ success: true, count: page.data.length, ...page });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message });
   }

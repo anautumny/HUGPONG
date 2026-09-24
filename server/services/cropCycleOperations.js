@@ -11,7 +11,8 @@ const {
   integer,
   finiteNumber,
   nowIso,
-  normalizeCropYear
+  normalizeCropYear,
+  cropYearParts
 } = require('../schema/firestoreSchema');
 const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { assertBaseVersion } = require('./mutationContext');
@@ -23,6 +24,14 @@ function serviceError(message, status = 400, data) {
   error.status = status;
   if (data !== undefined) error.data = data;
   return error;
+}
+
+function cycleClosedConflict(cycleId, fieldId) {
+  return serviceError(
+    'cycleId must be the field\'s explicit ACTIVE Crop Year Cycle. The original cycle is closed, and the operation was not moved to the field\'s newer cycle.',
+    409,
+    { code: 'CYCLE_CLOSED_CONFLICT', cycleId, fieldId }
+  );
 }
 
 function actor(user) {
@@ -65,7 +74,7 @@ async function readActiveCurrentCycle(transaction, database, fieldAccess, cycleI
   const normalizedCycleId = String(cycleId || '').trim().toUpperCase();
   const cycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(normalizedCycleId);
   const cycleSnapshot = await transaction.get(cycleRef);
-  if (!cycleSnapshot.exists) throw serviceError('The referenced crop cycle does not exist.', 404);
+  if (!cycleSnapshot.exists) throw serviceError('The referenced Crop Year Cycle does not exist.', 404);
   const cycle = cycleSnapshot.data();
   if (fieldAccess.field.status !== 'ACTIVE') {
     throw serviceError('Operations can only be changed for an ACTIVE field.', 409);
@@ -75,7 +84,10 @@ async function readActiveCurrentCycle(transaction, database, fieldAccess, cycleI
     cycle.fieldId !== fieldAccess.fieldId ||
     cycle.status !== 'ACTIVE'
   ) {
-    throw serviceError('cycleId must be the field\'s explicit ACTIVE crop cycle.', 409);
+    if (cycle.fieldId === fieldAccess.fieldId && cycle.status === 'ARCHIVED') {
+      throw cycleClosedConflict(normalizedCycleId, fieldAccess.fieldId);
+    }
+    throw serviceError('cycleId must be the field\'s explicit ACTIVE Crop Year Cycle.', 409);
   }
   return { cycle, cycleRef, cycleSnapshot };
 }
@@ -101,17 +113,21 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
     }
 
     const access = await readAuthorizedField(transaction, database, fieldId, user, 'record operations');
-    await readActiveCurrentCycle(transaction, database, access, cycleId);
+    const activeCycle = await readActiveCurrentCycle(transaction, database, access, cycleId);
     const payload = buildOperationLog({
       ...input,
       fieldId,
       cycleId,
+      blockFarmId: access.field.blockFarmId,
+      cropYearCycle: normalizeCropYear(activeCycle.cycle.cropYear),
+      stageNumberAtRecord: activeCycle.cycle.currentStageNumber,
       status: 'ACTIVE',
       archivedAt: null,
       archivedByUserId: null,
       createdAt: input.createdAt || timestamp,
       updatedAt: timestamp,
-      submissionSource: access.actorRole === ROLES.FARM_MANAGER ? 'MANAGER_TAKEOVER' : 'MEMBER'
+      submissionSource: access.actorRole === ROLES.FARM_MANAGER ? 'MANAGER_TAKEOVER' : 'MEMBER',
+      photoEvidence: null
     }, { submittedByUserId: access.actorId, now: timestamp });
     transaction.create(targetRef, payload);
     return { replayed: false, id: logId, record: payload };
@@ -134,7 +150,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     }
 
     const access = await readAuthorizedField(transaction, database, existing.fieldId, user, 'amend operations');
-    await readActiveCurrentCycle(transaction, database, access, existing.cycleId);
+    const activeCycle = await readActiveCurrentCycle(transaction, database, access, existing.cycleId);
     if (access.actorRole === ROLES.MEMBER_FARMER && existing.submittedByUserId !== access.actorId) {
       throw serviceError('Member Farmers may amend only operations they submitted.', 403);
     }
@@ -144,7 +160,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     assertBaseVersion(existing.updatedAt, mutationContext, snapshot.id, { id: snapshot.id, ...existing });
 
     const requested = changes && typeof changes === 'object' ? changes : {};
-    const immutable = ['fieldId', 'cycleId', 'submittedByUserId', 'submissionSource', 'createdAt'];
+    const immutable = ['fieldId', 'cycleId', 'blockFarmId', 'cropYearCycle', 'stageNumberAtRecord', 'submittedByUserId', 'submissionSource', 'createdAt'];
     for (const key of immutable) {
       if (requested[key] != null && requested[key] !== existing[key]) {
         throw serviceError(`${key} is immutable for submitted operation logs.`, 409);
@@ -163,8 +179,12 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       status: 'ACTIVE',
       fieldId: existing.fieldId,
       cycleId: existing.cycleId,
+      blockFarmId: existing.blockFarmId || access.field.blockFarmId,
+      cropYearCycle: existing.cropYearCycle || normalizeCropYear(activeCycle.cycle.cropYear),
+      stageNumberAtRecord: existing.stageNumberAtRecord == null ? activeCycle.cycle.currentStageNumber : existing.stageNumberAtRecord,
       submittedByUserId: existing.submittedByUserId,
       submissionSource: existing.submissionSource,
+      photoEvidence: existing.photoEvidence || null,
       createdAt: existing.createdAt,
       archivedAt: null,
       archivedByUserId: null,
@@ -242,12 +262,12 @@ async function updateCycleStage(database, cycleId, input, user, timestamp = nowI
   return database.runTransaction(async transaction => {
     const cycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(normalizedCycleId);
     const cycleSnapshot = await transaction.get(cycleRef);
-    if (!cycleSnapshot.exists) throw serviceError('Crop cycle not found.', 404);
+    if (!cycleSnapshot.exists) throw serviceError('Crop Year Cycle not found.', 404);
     const cycle = cycleSnapshot.data();
-    if (cycle.status !== 'ACTIVE') throw serviceError('ARCHIVED crop cycles cannot be changed.', 409);
+    if (cycle.status !== 'ACTIVE') throw serviceError('ARCHIVED Crop Year Cycles cannot be changed.', 409);
     const access = await readAuthorizedField(transaction, database, cycle.fieldId, user, 'update crop stages');
     if (access.field.currentCycleId !== normalizedCycleId) {
-      throw serviceError('The crop cycle is not the field current cycle.', 409);
+      throw serviceError('The Crop Year Cycle is not the field current cycle.', 409);
     }
     const requestedStage = integer(input.currentStageNumber, 'currentStageNumber', {
       min: CROP_STAGE_MIN,
@@ -273,9 +293,9 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
   const previousCycleId = requiredString(input.previousCycleId, 'previousCycleId', { max: 120 }).toUpperCase();
 
   return database.runTransaction(async transaction => {
-    const access = await readAuthorizedField(transaction, database, normalizedFieldId, user, 'roll over crop cycles');
+    const access = await readAuthorizedField(transaction, database, normalizedFieldId, user, 'roll over Crop Year Cycles');
     const { field, fieldRef, actorId } = access;
-    if (field.status !== 'ACTIVE') throw serviceError('Only an ACTIVE field can start a new crop cycle.', 409);
+    if (field.status !== 'ACTIVE') throw serviceError('Only an ACTIVE field can start a new Crop Year Cycle.', 409);
     if (!field.currentCycleId) throw serviceError('Field has no explicit currentCycleId.', 409);
 
     if (field.currentCycleId !== previousCycleId) {
@@ -313,21 +333,32 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
     if (!oldCycleSnapshot.exists) throw serviceError('The field currentCycleId does not reference an existing cycle.', 409);
     const oldCycle = oldCycleSnapshot.data();
     if (oldCycle.fieldId !== normalizedFieldId || oldCycle.status !== 'ACTIVE') {
-      throw serviceError('The referenced current crop cycle is not ACTIVE for this field.', 409);
+      throw serviceError('The referenced current Crop Year Cycle is not ACTIVE for this field.', 409);
+    }
+    if (Number(oldCycle.currentStageNumber) !== CROP_STAGE_MAX) {
+      throw serviceError('The current Crop Year Cycle must reach Harvest before rollover.', 409);
+    }
+
+    const fieldCycles = await transaction.get(
+      database.collection(COLLECTIONS.CROP_CYCLES).where('fieldId', '==', normalizedFieldId)
+    );
+    const activeCycles = fieldCycles.docs.filter(doc => doc.data().status === 'ACTIVE');
+    if (activeCycles.length !== 1 || activeCycles[0].id !== previousCycleId) {
+      throw serviceError('The field must have exactly one canonical ACTIVE Crop Year Cycle before rollover.', 409);
     }
 
     const nextSequence = integer(oldCycle.sequenceNumber, 'sequenceNumber', { min: 1, max: 9998 }) + 1;
     const newCycleId = createCycleId(normalizedFieldId, nextSequence);
     const newCycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(newCycleId);
     const newCycleSnapshot = await transaction.get(newCycleRef);
-    if (newCycleSnapshot.exists) throw serviceError('The next crop cycle already exists.', 409);
+    if (newCycleSnapshot.exists) throw serviceError('The next Crop Year Cycle already exists.', 409);
 
     const cycleLogs = await transaction.get(
       database.collection(COLLECTIONS.OPERATION_LOGS).where('cycleId', '==', previousCycleId)
     );
     const activeLogs = cycleLogs.docs.filter(doc => doc.data().status === 'ACTIVE');
     if (activeLogs.length > MAX_ATOMIC_ROLLOVER_LOGS) {
-      throw serviceError(`Crop-cycle rollover supports at most ${MAX_ATOMIC_ROLLOVER_LOGS} ACTIVE operation records in one atomic transaction.`, 409);
+      throw serviceError(`Crop Year Cycle rollover supports at most ${MAX_ATOMIC_ROLLOVER_LOGS} ACTIVE operation records in one atomic transaction.`, 409);
     }
 
     const archivedOldCycle = {
@@ -337,11 +368,24 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       archivedByUserId: actorId,
       updatedAt: timestamp
     };
+    const nextCropYear = cropYearParts(null, timestamp);
+    const duplicateAnnualCycle = fieldCycles.docs.find(doc => normalizeCropYear(doc.data().cropYear) === nextCropYear.cropYear);
+    if (duplicateAnnualCycle) {
+      throw serviceError('This field already has a Crop Year Cycle for the server-generated annual range.', 409, {
+        code: 'DUPLICATE_CROP_YEAR_CYCLE',
+        cropYearCycle: nextCropYear.cropYear,
+        cycleId: duplicateAnnualCycle.id
+      });
+    }
     const newCycle = {
       fieldId: normalizedFieldId,
+      blockFarmId: field.blockFarmId,
+      farmMemberId: field.memberUserId || null,
       sequenceNumber: nextSequence,
       cropType: requiredString(input.cropType || oldCycle.cropType, 'cropType', { max: 120 }),
-      cropYear: normalizeCropYear(input.cropYear),
+      cropYear: nextCropYear.cropYear,
+      cropYearStart: nextCropYear.cropYearStart,
+      cropYearEnd: nextCropYear.cropYearEnd,
       currentStageNumber: CROP_STAGE_MIN,
       elapsedMonths: 0,
       batchNumber: integer(input.batchNumber == null ? 1 : input.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
@@ -349,13 +393,15 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       startedAt: timestamp,
       updatedAt: timestamp,
       archivedAt: null,
-      archivedByUserId: null
+      archivedByUserId: null,
+      completedAt: null
     };
 
     transaction.update(oldCycleRef, {
       status: archivedOldCycle.status,
       archivedAt: archivedOldCycle.archivedAt,
       archivedByUserId: archivedOldCycle.archivedByUserId,
+      completedAt: timestamp,
       updatedAt: archivedOldCycle.updatedAt
     });
     for (const logSnapshot of activeLogs) {
@@ -363,6 +409,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
         status: 'ARCHIVED',
         archivedAt: timestamp,
         archivedByUserId: actorId,
+        archivedReason: 'CYCLE_COMPLETED',
         updatedAt: timestamp
       });
     }
@@ -378,6 +425,61 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       newCycle,
       replayed: false
     };
+  });
+}
+
+async function createInitialFieldCycle(database, fieldId, input, user, timestamp = nowIso(), mutationContext = null) {
+  const normalizedFieldId = String(fieldId || '').trim().toUpperCase();
+  return database.runTransaction(async transaction => {
+    const access = await readAuthorizedField(transaction, database, normalizedFieldId, user, 'start Crop Year Cycles');
+    const { field, fieldRef } = access;
+    if (field.status !== 'ACTIVE') throw serviceError('Only an ACTIVE field can start a Crop Year Cycle.', 409);
+    if (field.currentCycleId) throw serviceError('The field already has an active Crop Year Cycle pointer.', 409);
+    assertBaseVersion(field.updatedAt, mutationContext, normalizedFieldId, { id: normalizedFieldId, ...field });
+
+    const fieldCycles = await transaction.get(
+      database.collection(COLLECTIONS.CROP_CYCLES).where('fieldId', '==', normalizedFieldId)
+    );
+    if (fieldCycles.docs.some(doc => doc.data().status === 'ACTIVE')) {
+      throw serviceError('The field already owns an ACTIVE Crop Year Cycle.', 409);
+    }
+    const annual = cropYearParts(null, timestamp);
+    const duplicate = fieldCycles.docs.find(doc => normalizeCropYear(doc.data().cropYear) === annual.cropYear);
+    if (duplicate) {
+      throw serviceError('This field already has a Crop Year Cycle for the server-generated annual range.', 409, {
+        code: 'DUPLICATE_CROP_YEAR_CYCLE', cycleId: duplicate.id, cropYearCycle: annual.cropYear
+      });
+    }
+
+    const sequenceNumber = fieldCycles.docs.reduce(
+      (maximum, doc) => Math.max(maximum, Number(doc.data().sequenceNumber) || 0), 0
+    ) + 1;
+    const cycleId = createCycleId(normalizedFieldId, sequenceNumber);
+    const cycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId);
+    if ((await transaction.get(cycleRef)).exists) throw serviceError('The canonical Crop Year Cycle ID already exists.', 409);
+    const cycle = {
+      fieldId: normalizedFieldId,
+      blockFarmId: field.blockFarmId,
+      farmMemberId: field.memberUserId || null,
+      sequenceNumber,
+      cropType: requiredString(input.cropType || 'Plant Cane (New Plant)', 'cropType', { max: 120 }),
+      cropYear: annual.cropYear,
+      cropYearStart: annual.cropYearStart,
+      cropYearEnd: annual.cropYearEnd,
+      currentStageNumber: CROP_STAGE_MIN,
+      elapsedMonths: 0,
+      batchNumber: integer(input.batchNumber == null ? 1 : input.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
+      status: 'ACTIVE',
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      archivedAt: null,
+      archivedByUserId: null,
+      completedAt: null
+    };
+    const updatedField = { ...field, currentCycleId: cycleId, cropYear: annual.cropYear, updatedAt: timestamp };
+    transaction.create(cycleRef, cycle);
+    transaction.update(fieldRef, { currentCycleId: cycleId, cropYear: annual.cropYear, updatedAt: timestamp });
+    return { cycleId, cycle, field: updatedField };
   });
 }
 
@@ -448,5 +550,6 @@ module.exports = {
   archiveOperationRecords,
   updateCycleStage,
   rolloverFieldCycle,
+  createInitialFieldCycle,
   archiveFieldWithOperations
 };

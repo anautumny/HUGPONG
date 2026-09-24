@@ -50,3 +50,33 @@ test('mobile Firestore cleanup recursively removes undefined object fields', asy
     }
   );
 });
+
+test('mobile operation ordering keeps an offline record in its chronological position after reconciliation', async () => {
+  const { cleanupDuplicateLogs, sortOperationsNewestFirst } = await loadMobileDataHelpers();
+  const synced = { id: 'LOG-1', performedOn: '2026-09-23', createdAt: '2026-09-23T10:00:00.000Z', cost: 10 };
+  const reconciled = { ...synced, updatedAt: '2026-09-23T10:35:00.000Z', cost: 11 };
+  const offline = { id: 'LOG-2', performedOn: '2026-09-23', localCreatedAt: '2026-09-23T10:30:00.000Z', synced: false };
+  const older = { id: 'LOG-0', performedOn: '2026-09-22', createdAt: '2026-09-23T11:00:00.000Z' };
+  const result = sortOperationsNewestFirst(cleanupDuplicateLogs([synced, offline, older, reconciled]));
+  assert.deepEqual(result.map(record => record.id), ['LOG-2', 'LOG-1', 'LOG-0']);
+  assert.equal(result.filter(record => record.id === 'LOG-1').length, 1);
+});
+
+test('mobile Crop Year Cycle preview is deterministic and display-only formatting preserves storage', async () => {
+  const { cropYearCycleForDate, formatCropYearDisplay } = await loadMobileDataHelpers();
+  assert.equal(cropYearCycleForDate(new Date('2027-06-01T00:00:00.000Z')), '2027-2028');
+  assert.equal(formatCropYearDisplay('2027-2028'), '2027–2028');
+});
+
+test('mobile Crop Year Cycle options exclude invalid years and deduplicate across fields', async () => {
+  const { canonicalStoredCropYear, uniqueCropYears } = await loadMobileDataHelpers();
+  const cycles = [
+    { id: 'A', fieldId: 'FLD-1', cropYear: '2026-2027' },
+    { id: 'B', fieldId: 'FLD-2', cropYear: '2026-2027' },
+    { id: 'C', fieldId: 'FLD-3', cropYear: '2025-2026' },
+    { id: 'D', fieldId: 'FLD-1', cropYear: '2026' },
+    { id: 'E', fieldId: 'FLD-1', cropYear: null }
+  ];
+  assert.deepEqual(uniqueCropYears(cycles), ['2026-2027', '2025-2026']);
+  assert.equal(canonicalStoredCropYear('2026'), '');
+});

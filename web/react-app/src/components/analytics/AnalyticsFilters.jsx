@@ -6,6 +6,7 @@ import { formatCropYear } from '../../utils/formatters';
 
 export default function AnalyticsFilters({
   seasons = [],
+  currentSeason = '',
   selectedSeason = 'ALL',
   onSeasonChange,
   blockFarms = [],
@@ -19,10 +20,11 @@ export default function AnalyticsFilters({
   className = ''
 }) {
   const seasonOptions = [
-    { value: 'ALL', label: 'All Crop Seasons' },
+    { value: 'ALL', label: 'All Crop Year Cycles' },
     ...seasons.map(s => {
       const formatted = formatCropYear(s);
-      return { value: formatted, label: `Crop Year ${formatted}` };
+      const current = formatted === formatCropYear(currentSeason) ? ' (Current)' : '';
+      return { value: formatted, label: `Crop Year Cycle ${formatted.replace('-', '–')}${current}` };
     })
   ];
 
@@ -62,7 +64,7 @@ export default function AnalyticsFilters({
               )}
             </h3>
             <p className="text-xs text-hug-muted">
-              Scope data across crop cycles, Block Farms, and reporting periods.
+              Scope data across Crop Year Cycles, Block Farms, and reporting periods.
             </p>
           </div>
         </div>
@@ -72,7 +74,7 @@ export default function AnalyticsFilters({
           {/* Season Filter */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
-              Crop Season
+              Crop Year Cycle
             </label>
             <Select
               value={selectedSeason}

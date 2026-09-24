@@ -1,23 +1,12 @@
 /**
  * ══════════════════════════════════════════════════════════════
  * HUGPONG — Firebase Client SDK Initializer
- * Provides read-only real-time Firestore synchronization and
- * custom-token authenticated sessions.
+ * Provides custom-token authenticated sessions. Application data reads and
+ * writes are intentionally routed through the server-authoritative API.
  * ══════════════════════════════════════════════════════════════
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  where
-} from 'firebase/firestore';
 import {
   getAuth,
   setPersistence,
@@ -37,7 +26,6 @@ export const webFirebaseConfig = {
 };
 
 const app = !getApps().length ? initializeApp(webFirebaseConfig) : getApp();
-export const db = getFirestore(app);
 export const auth = getAuth(app);
 
 // Configure local session persistence
@@ -54,21 +42,10 @@ export async function signOutFirebase() {
   return signOut(auth);
 }
 
-export {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  where,
-  onAuthStateChanged
-};
+export { onAuthStateChanged };
 
 export default {
   app,
-  db,
   auth,
   signInWithCustomTokenSilently,
   signOutFirebase
