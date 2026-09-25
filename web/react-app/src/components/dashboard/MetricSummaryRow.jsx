@@ -42,7 +42,11 @@ export default function MetricSummaryRow({
 
               <div className="flex items-baseline gap-2">
                 <span className={`text-2xl sm:text-3xl font-black tracking-tight ${
-                  m.alert ? 'text-amber-600 dark:text-amber-400' : 'text-hug-text'
+                  m.tone === 'danger'
+                    ? 'text-danger'
+                    : m.tone === 'warning' || m.alert
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-hug-text'
                 }`}>
                   {m.value}
                 </span>

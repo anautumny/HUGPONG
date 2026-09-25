@@ -1,11 +1,19 @@
 import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Check, ArrowRight, Download, Github } from 'lucide-react';
+import { Check, ArrowRight, Download, Github, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
 
 export default function LandingView() {
   const { isAuthenticated } = useAuth();
+  const { theme, setTheme } = useTheme();
+
+  const cycleTheme = () => {
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
+  };
 
   return (
     <div className="min-h-screen w-full flex flex-col justify-between relative overflow-x-hidden bg-bg text-hug-text selection:bg-primary selection:text-white">
@@ -27,7 +35,7 @@ export default function LandingView() {
         </Link>
 
         {/* Navigation Links */}
-        <nav className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm font-semibold text-hug-text2">
+        <nav className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm font-semibold text-hug-text2">
           <a
             href="https://github.com/Mattaeeee/HUGPONG/releases"
             target="_blank"
@@ -37,12 +45,30 @@ export default function LandingView() {
             <Github className="w-4 h-4 text-hug-muted shrink-0" />
             <span>GitHub Releases (APK)</span>
           </a>
+
           <Link
             to={isAuthenticated ? "/dashboard" : "/login"}
             className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold transition-all shadow-xs hover:shadow"
           >
             {isAuthenticated ? "Open Dashboard" : "Sign In"}
           </Link>
+
+          {/* Theme Switcher: Light / Dark / System (Very Right) */}
+          <button
+            type="button"
+            onClick={cycleTheme}
+            className="p-2 sm:p-2.5 rounded-xl border border-border bg-surface text-hug-text2 hover:text-primary hover:bg-surface-subtle transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
+            title={'Current theme: ' + theme + '. Click to switch (Light, Dark, System).'}
+            aria-label={'Current theme: ' + theme + '. Click to switch.'}
+          >
+            {theme === 'dark' ? (
+              <Moon className="w-4 h-4 text-primary-light" />
+            ) : theme === 'light' ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : (
+              <Monitor className="w-4 h-4 text-hug-muted" />
+            )}
+          </button>
         </nav>
       </header>
 
@@ -59,7 +85,7 @@ export default function LandingView() {
           {/* Main Headline */}
           <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-hug-text leading-tight">
             Silay Sugarcane Block Farm &amp;{' '}
-            <span className="text-primary">SRA Governance Platform</span>
+            <span className="text-primary">Agricultural Operations Platform</span>
           </h1>
 
           {/* Subtext */}
@@ -169,17 +195,12 @@ export default function LandingView() {
 
       {/* Footer */}
       <footer className="w-full px-6 sm:px-10 lg:px-16 py-5 border-t border-border flex flex-col md:flex-row items-center justify-between gap-3 text-xs font-semibold text-hug-muted relative z-30 bg-surface/90 backdrop-blur-md">
-        <p>&copy; 2026 HUGPONG. Silay Sugarcane Block Farm &amp; SRA Governance Platform.</p>
+        <p>&copy; 2026 HUGPONG Agricultural Platform.</p>
         <div className="flex flex-wrap items-center gap-4 sm:gap-6">
           <Link to="/privacy" className="hover:text-primary transition-colors">Privacy Policy (RA 10173)</Link>
           <Link to="/terms" className="hover:text-primary transition-colors">Terms of Use</Link>
+          <Link to="/compliance" className="hover:text-primary transition-colors">Compliance</Link>
           <Link to="/cookies" className="hover:text-primary transition-colors">Cookie Policy</Link>
-          <Link to={isAuthenticated ? "/dashboard" : "/login"} className="hover:text-primary transition-colors">
-            {isAuthenticated ? "Workspace Dashboard" : "Admin Gateway"}
-          </Link>
-          <a href="https://github.com/Mattaeeee/HUGPONG" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
-            GitHub
-          </a>
         </div>
       </footer>
 

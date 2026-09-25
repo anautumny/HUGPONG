@@ -7,7 +7,8 @@ import { operationPresentation } from '../../domain/presentationContract';
 
 export default function RecentOperationsTable({
   operations = [],
-  isLoading = false
+  isLoading = false,
+  showConsoleLink = true
 }) {
   if (isLoading) {
     return (
@@ -39,13 +40,15 @@ export default function RecentOperationsTable({
           </p>
         </div>
 
-        <Link
-          to="/operations"
-          className="text-xs font-bold text-primary dark:text-primary-light hover:underline inline-flex items-center gap-1 cursor-pointer"
-        >
-          <span>View Operations Console</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
+        {showConsoleLink && (
+          <Link
+            to="/operations"
+            className="text-xs font-bold text-primary dark:text-primary-light hover:underline inline-flex items-center gap-1 cursor-pointer"
+          >
+            <span>View Operations Console</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        )}
       </div>
 
       {/* Content */}

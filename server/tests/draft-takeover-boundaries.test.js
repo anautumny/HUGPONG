@@ -46,3 +46,15 @@ test('draft submission uses ownership preflight and stable operation identity', 
   assert.match(webAdd, /initialDraft\?\.submittedOperationId/);
   assert.match(webAdd, /submissionLockRef\.current/);
 });
+
+test('Planner lists and mutates only the signed-in field owner plots', () => {
+  const planner = read('../../mobile/src/screens/PlannerScreen.js');
+  const mobileStore = read('../../mobile/src/data/dataStore.js');
+  const fieldRoutes = read('../routes/fields.js');
+
+  assert.match(planner, /allFields\.filter\(field => getOperationCapabilities\(session, field\)\.canPlan\)/);
+  assert.match(planner, /displayedFields\.filter\(f =>/);
+  assert.doesNotMatch(planner, /All Plots/);
+  assert.match(mobileStore, /getOperationCapabilities\(CURRENT_SESSION, field\)\.canPlan/);
+  assert.match(fieldRoutes, /operationAuthorization\(req\.session\.user, \{ id: fieldId, \.\.\.latest \}\)\.canPlan/);
+});

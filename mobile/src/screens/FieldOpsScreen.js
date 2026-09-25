@@ -49,10 +49,9 @@ import {
   readArchiveClearViewPreference,
   writeArchiveClearViewPreference
 } from '../services/archiveViewService';
+import { exportAuditReportPdf } from '../services/auditPdfService';
 
 const { height, width } = Dimensions.get('window');
-// Persistent parcel attributes for Field Plot Registration (Web & Mobile Parity)
-const SOIL_TYPES = ['Clay Loam', 'Sandy Loam', 'Loam', 'Clay', 'Silt Loam'];
 const INITIAL_STAGES = INITIAL_CROP_STAGES;
 
 const verifyLocalAuditIntegrity = async report => {
@@ -904,6 +903,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [auditHistoryCursor, setAuditHistoryCursor] = useState(null);
   const [auditHistoryHasMore, setAuditHistoryHasMore] = useState(false);
   const [isLoadingAuditHistory, setIsLoadingAuditHistory] = useState(false);
+  const [exportingAuditId, setExportingAuditId] = useState(null);
   const currentRealMonth = displayPeriod(businessPeriodKey());
   const [compileMonth, setCompileMonth] = useState(currentRealMonth);
   const [managerLedgerScope, setManagerLedgerScope] = useState('selected');
@@ -1327,13 +1327,13 @@ export default function FieldOpsScreen({ navigation, route }) {
     cropYear: cropYearCycleForDate()
   });
   const [showManagerAssignModal, setShowManagerAssignModal] = useState(false);
+  const [showOwnerDropdown, setShowOwnerDropdown] = useState(false);
   const [managerAssignForm, setManagerAssignForm] = useState({
     userId: '',
     fieldId: '',
     blockFarm: '',
     blockFarmId: '',
     ha: '1.5',
-    soilType: 'Clay Loam',
     isEditing: false
   });
   const [isAssigningPlot, setIsAssigningPlot] = useState(false);
@@ -1353,7 +1353,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         blockFarm: fieldToEdit.blockFarm || defaultFarm,
         blockFarmId: fieldToEdit.blockFarmId || matchedBf?.id || '',
         ha: String(fieldToEdit.ha || '1.5'),
-        soilType: fieldToEdit.soilType || 'Clay Loam',
         isEditing: true
       });
     } else {
@@ -1363,10 +1362,10 @@ export default function FieldOpsScreen({ navigation, route }) {
         blockFarm: defaultFarm,
         blockFarmId: matchedBf?.id || '',
         ha: '1.5',
-        soilType: 'Clay Loam',
         isEditing: false
       });
     }
+    setShowOwnerDropdown(false);
     setShowManagerAssignModal(true);
   };
 
@@ -1499,6 +1498,22 @@ export default function FieldOpsScreen({ navigation, route }) {
 
   // Preview QR code specifically for an existing or historical audit report
   const handleViewHistoricalAuditQR = (audit) => openAuditQrTransfer(audit);
+
+  const handleExportAuditPdf = async audit => {
+    const reportId = audit?.reportId || audit?.id || audit?.periodKey || audit?.period || audit?.month || 'report';
+    if (exportingAuditId) return;
+    setExportingAuditId(reportId);
+    try {
+      await exportAuditReportPdf(audit, {
+        blockFarms,
+        currentUser: session
+      });
+    } catch (error) {
+      Alert.alert('PDF Export Failed', error.message || 'The audit report could not be generated.');
+    } finally {
+      setExportingAuditId(null);
+    }
+  };
 
   // Dynamic calculations & compilation for month-level Hybrid Cloud-Anchored QR package
   const handleGenerateAudit = () => {
@@ -3215,7 +3230,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               isNetOnline ? 'Operation Recorded — Synced' : 'Operation Saved — Unsynced',
               submissionSynced
                 ? `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been synchronized to Cloud Firestore.\n\nStage ${stageNum} remains active (${stageLoggedOps.length} operations logged). Tap "Mark Stage as Complete" on the field card once all stage tasks are finished.`
-                : `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been saved to your device local storage (${stageLoggedOps.length} operations for Stage ${stageNum}).\n\n🟡 Status: Queued for Cloud Sync\nIt will automatically upload to Cloud Firestore when your internet connection is restored.`,
+                : `"${newLog.activity}" (₱${Number(costValue).toLocaleString()}) has been saved to your device local storage (${stageLoggedOps.length} operations for Stage ${stageNum}).\n\nStatus: Queued for Cloud Sync\nIt will automatically upload to Cloud Firestore when your internet connection is restored.`,
               [
                 { text: 'Done', style: 'cancel' },
                 { text: 'View Ledger', style: 'default', onPress: () => setShowHistoryModal(true) }
@@ -4624,12 +4639,12 @@ export default function FieldOpsScreen({ navigation, route }) {
                                   </View>
                                   {isFullySyncedLog && (
                                     <View style={{ backgroundColor: '#E8F5E8', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
-                                      <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#15803D' }}>✓ {t('recorded_badge', 'RECORDED')}</Text>
+                                      <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#15803D' }}>{t('recorded_badge', 'RECORDED')}</Text>
                                     </View>
                                   )}
                                   {hasUnsyncedLog && (
                                     <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs }}>
-                                      <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#B45309' }}>🟡 {t('sync_status_pending', 'QUEUED OFFLINE')}</Text>
+                                      <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#B45309' }}>{t('sync_status_pending', 'QUEUED OFFLINE')}</Text>
                                     </View>
                                   )}
                                   <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.text }} numberOfLines={1}>
@@ -4876,7 +4891,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                       <View style={{ marginTop: 12, padding: 10, backgroundColor: '#FFF', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#FEF0D0' }}>
                         <Text style={{ fontSize: 11.5, color: '#92400E', lineHeight: 16 }}>
-                          💡 <Text style={{ fontWeight: '700' }}>Next Steps:</Text> Once your Farm Manager registers your field plot (e.g. FLD-NCY-00X) and declares your land hectarage and cane variety, your 6-stage growth cycle timeline and operation logging will activate here automatically.
+                          <Text style={{ fontWeight: '700' }}>Next Steps:</Text> Once your Farm Manager registers your field plot (e.g. FLD-NCY-00X) and declares your land hectarage and cane variety, your 6-stage growth cycle timeline and operation logging will activate here automatically.
                         </Text>
                       </View>
                     </View>
@@ -5041,23 +5056,23 @@ export default function FieldOpsScreen({ navigation, route }) {
                     </View>
                   </View>
 
-                  {/* 3 Metric Cards with Aligned Typography */}
+                  {/* 3 Metric Cards: Equal Width, Equal Height & Clean Typography */}
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                    <View style={{ flex: 1, backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }}>{t('stat_recorded_logs', 'Compiled Logs')}</Text>
-                      <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.primary, marginTop: 3 }}>
+                    <View style={{ flex: 1, minHeight: 68, justifyContent: 'space-between', backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 9, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
+                      <Text style={{ fontSize: 9.5, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }} numberOfLines={1}>{t('stat_recorded_logs', 'Compiled Logs')}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary, marginTop: 4 }} numberOfLines={1}>
                         {compiledCount > 0
                           ? (uncompiledLogs.length > 0 ? `${compiledCount} done / ${uncompiledLogs.length} ready` : `${compiledCount} logs`)
-                          : (farmLogs.length > 0 ? `${uncompiledLogs.length} ready` : '0')}
+                          : (farmLogs.length > 0 ? `${uncompiledLogs.length} ready` : '0 logs')}
                       </Text>
                     </View>
-                    <View style={{ flex: 1, backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }}>Active Area</Text>
-                      <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.text, marginTop: 3 }}>{totalHa.toFixed(2)} Ha</Text>
+                    <View style={{ flex: 1, minHeight: 68, justifyContent: 'space-between', backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 9, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
+                      <Text style={{ fontSize: 9.5, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }} numberOfLines={1}>Active Area</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.text, marginTop: 4 }} numberOfLines={1}>{totalHa.toFixed(2)} Ha</Text>
                     </View>
-                    <View style={{ flex: 1.1, backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }}>{t('report_total_cost', 'Total Cost')}</Text>
-                      <Text style={{ fontSize: 13.5, fontWeight: '900', color: COLORS.primary, marginTop: 3 }} numberOfLines={1}>₱{totalCost.toLocaleString()}</Text>
+                    <View style={{ flex: 1, minHeight: 68, justifyContent: 'space-between', backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 9, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
+                      <Text style={{ fontSize: 9.5, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }} numberOfLines={1}>{t('stat_total_cost_short', 'Total Cost')}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary, marginTop: 4 }} numberOfLines={1}>₱{totalCost.toLocaleString()}</Text>
                     </View>
                   </View>
 
@@ -5131,6 +5146,34 @@ export default function FieldOpsScreen({ navigation, route }) {
                 </View>
               );
             })()}
+
+            {/* Big Prominent Register Plot Button (Under Audit Card) */}
+            {deviceOnline && activeRole === 'Farm Manager' && (
+              <TouchableOpacity
+                onPress={() => openAssignModal()}
+                activeOpacity={0.85}
+                style={{
+                  backgroundColor: '#EBF7EE',
+                  borderWidth: 1.5,
+                  borderColor: COLORS.primary,
+                  borderRadius: RADIUS.lg,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  marginBottom: 12,
+                  minHeight: 48,
+                  ...SHADOW.xs
+                }}
+              >
+                <Ionicons name="add-circle" size={20} color={COLORS.primary} />
+                <Text style={{ fontSize: 14.5, fontWeight: '900', color: COLORS.primary, letterSpacing: 0.2 }}>
+                  {t('btn_register_plot', 'Register Plot')}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Pending Member Registrations Alert Banner */}
             {pendingUsersList && pendingUsersList.length > 0 && (
@@ -5206,35 +5249,9 @@ export default function FieldOpsScreen({ navigation, route }) {
               return (
                 <View style={{ marginBottom: 4 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={[s.sectionLabel, { marginBottom: 0 }]}>
-                        {!deviceOnline ? t('my_fields', 'My Personal Field Plot') : (managerFieldFilter === 'my' ? t('my_fields', 'My Personal Plot') : t('view_all_fields', 'All Block Farm Fields'))}
-                      </Text>
-                      {deviceOnline && (
-                        <TouchableOpacity
-                          onPress={() => openAssignModal()}
-                          activeOpacity={0.8}
-                          style={{
-                            backgroundColor: '#EBF7EE',
-                            borderWidth: 1.5,
-                            borderColor: COLORS.primary,
-                            paddingHorizontal: 16,
-                            paddingVertical: 10,
-                            borderRadius: RADIUS.md,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 7,
-                            minHeight: 46,
-                            ...SHADOW.card
-                          }}
-                        >
-                          <Ionicons name="add-circle" size={19} color={COLORS.primary} />
-                          <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>
-                            {t('btn_register_plot', 'Register Plot')}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
+                    <Text style={[s.sectionLabel, { marginBottom: 0 }]}>
+                      {!deviceOnline ? t('my_fields', 'My Personal Field Plot') : (managerFieldFilter === 'my' ? t('my_fields', 'My Personal Plot') : t('view_all_fields', 'All Block Farm Fields'))}
+                    </Text>
                     
                     {!deviceOnline ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFFBEB', paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#FEF0D0' }}>
@@ -5321,14 +5338,14 @@ export default function FieldOpsScreen({ navigation, route }) {
                     )}
                   </View>
                   {(() => {
-                    if (activeRole === 'Farm Manager' && !operationCapabilities.ownField && deviceOnline) {
+                    if (activeRole === 'Farm Manager' && !operationCapabilities.ownField && deviceOnline && isTakeOver) {
                       return (
                         <TouchableOpacity
                           onPress={handleInitiateTakeOver}
                           style={{
-                            backgroundColor: isTakeOver ? '#FEE2E2' : '#F0F8EC',
+                            backgroundColor: '#FEE2E2',
                             borderWidth: 1.5,
-                            borderColor: isTakeOver ? '#DC2626' : COLORS.primary,
+                            borderColor: '#DC2626',
                             paddingHorizontal: 16,
                             paddingVertical: 10,
                             borderRadius: RADIUS.md,
@@ -5341,12 +5358,12 @@ export default function FieldOpsScreen({ navigation, route }) {
                           activeOpacity={0.8}
                         >
                           <Ionicons
-                            name={isTakeOver ? "close-circle" : "shield-checkmark"}
+                            name="close-circle"
                             size={18}
-                            color={isTakeOver ? "#DC2626" : COLORS.primary}
+                            color="#DC2626"
                           />
-                          <Text style={{ fontSize: 14, fontWeight: '900', color: isTakeOver ? '#DC2626' : COLORS.primary }}>
-                            {isTakeOver ? 'Exit Manager Takeover' : t('btn_take_over', 'Manager Takeover')}
+                          <Text style={{ fontSize: 14, fontWeight: '900', color: '#DC2626' }}>
+                            Exit Manager Takeover
                           </Text>
                         </TouchableOpacity>
                       );
@@ -5428,35 +5445,28 @@ export default function FieldOpsScreen({ navigation, route }) {
               );
             })()}
 
-            <View style={[s.receiptCard, { marginBottom: SPACING.md, padding: 16 }]}>
-              {/* Header with Title and Prominent Button */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <View style={{ flex: 1, marginRight: 10 }}>
-                  <Text style={{ fontSize: 16.5, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 }}>
-                    Descriptive Summary
-                  </Text>
-                  <Text style={{ fontSize: 12.5, color: COLORS.textMuted, fontWeight: '600', marginTop: 2 }}>
-                    {selectedFarm === 'All' ? 'All District Block Farms' : selectedFarm}
-                  </Text>
+            <View style={[s.receiptCard, s.sraSummaryCard]}>
+              <View style={s.sraSummaryHeader}>
+                <View style={s.sraSummaryHeading}>
+                  <View style={s.sraSummaryIcon}>
+                    <Ionicons name="stats-chart-outline" size={18} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.sraSummaryTitle}>Descriptive Summary</Text>
+                    <Text style={s.sraSummarySubtitle} numberOfLines={1}>
+                      {selectedFarm === 'All' ? 'All District Block Farms' : selectedFarm}
+                    </Text>
+                  </View>
                 </View>
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => navigation.navigate('Analytics', { blockFarm: selectedFarm })}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: '#F0F8EC',
-                    borderWidth: 1.5,
-                    borderColor: COLORS.primary,
-                    paddingHorizontal: 12,
-                    paddingVertical: 7,
-                    borderRadius: RADIUS.md,
-                    minHeight: 38,
-                    ...SHADOW.xs
-                  }}
+                  style={s.sraAnalyticsButton}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open district analytics"
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '900', color: COLORS.primary }}>Open Analytics</Text>
+                  <Ionicons name="bar-chart-outline" size={15} color={COLORS.primary} />
+                  <Text style={s.sraAnalyticsButtonText}>Analytics</Text>
                   <Ionicons name="arrow-forward" size={14} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
@@ -5489,85 +5499,50 @@ export default function FieldOpsScreen({ navigation, route }) {
                 const compiledLogsCount = Number(farmLogs.length || 0);
 
                 return (
-                  <View style={{ gap: 12 }}>
-                    {/* Primary 3-Metric Clean Row (No heavy boxed wireframe) */}
-                    <View style={{
-                      flexDirection: 'row',
-                      backgroundColor: '#F7FAF5',
-                      borderRadius: RADIUS.lg,
-                      paddingVertical: 14,
-                      paddingHorizontal: 8,
-                      borderWidth: 1.2,
-                      borderColor: '#E2EBDC',
-                      alignItems: 'center'
-                    }}>
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>
-                          Total Area
-                        </Text>
-                        <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text }}>
-                          {totalHa.toFixed(1)} <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.primary }}>Ha</Text>
+                  <View style={s.sraSummaryContent}>
+                    <View style={s.sraPrimaryMetric}>
+                      <View style={s.sraMetricLabelRow}>
+                        <Ionicons name="wallet-outline" size={14} color={COLORS.primary} />
+                        <Text style={s.sraMetricLabel}>Average Cost / Ha</Text>
+                      </View>
+                      <Text style={s.sraPrimaryMetricValue}>₱{costPerHa.toLocaleString()}</Text>
+                      <Text style={s.sraPrimaryMetricHint}>Current-cycle recorded operations</Text>
+                    </View>
+
+                    <View style={s.sraSupportingMetrics}>
+                      <View style={s.sraSupportingMetric}>
+                        <View style={s.sraMetricLabelRow}>
+                          <Ionicons name="map-outline" size={14} color={COLORS.primary} />
+                          <Text style={s.sraMetricLabel}>Total Area</Text>
+                        </View>
+                        <Text style={s.sraSupportingMetricValue}>
+                          {totalHa.toFixed(1)} <Text style={s.sraMetricUnit}>Ha</Text>
                         </Text>
                       </View>
 
-                      <View style={{ width: 1, height: 32, backgroundColor: '#DCE8D7' }} />
-
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>
-                          Current Cycle Logs
-                        </Text>
-                        <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.primary }}>
-                          {compiledLogsCount} <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.primary }}>Logs</Text>
-                        </Text>
-                      </View>
-
-                      <View style={{ width: 1, height: 32, backgroundColor: '#DCE8D7' }} />
-
-                      <View style={{ flex: 1.2, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>
-                          Avg Cost / Ha
-                        </Text>
-                        <Text style={{ fontSize: 17, fontWeight: '900', color: COLORS.primaryDark }}>
-                          ₱{costPerHa.toLocaleString()}
+                      <View style={s.sraSupportingMetric}>
+                        <View style={s.sraMetricLabelRow}>
+                          <Ionicons name="reader-outline" size={14} color={COLORS.primary} />
+                          <Text style={s.sraMetricLabel}>Current Cycle Logs</Text>
+                        </View>
+                        <Text style={s.sraSupportingMetricValue}>
+                          {compiledLogsCount} <Text style={s.sraMetricUnit}>Logs</Text>
                         </Text>
                       </View>
                     </View>
 
-                    {/* Secondary Context Badges in a Sleek Metadata Strip */}
-                    <View style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-around',
-                      paddingVertical: 9,
-                      paddingHorizontal: 8,
-                      backgroundColor: '#FAFCF8',
-                      borderRadius: RADIUS.md,
-                      borderWidth: 1,
-                      borderColor: '#EDF3EA'
-                    }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <View style={s.sraContextWrap}>
+                      <View style={s.sraContextChip}>
                         <Ionicons name="grid-outline" size={14} color={COLORS.primary} />
-                        <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary }}>
-                          {uniqueFarms} {uniqueFarms === 1 ? 'Farm' : 'Farms'}
-                        </Text>
+                        <Text style={s.sraContextText}>{uniqueFarms} {uniqueFarms === 1 ? 'Farm' : 'Farms'}</Text>
                       </View>
-
-                      <Text style={{ color: '#D0DCD0', fontSize: 12 }}>•</Text>
-
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <View style={s.sraContextChip}>
                         <Ionicons name="people-outline" size={14} color={COLORS.primary} />
-                        <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary }}>
-                          {uniqueMembers} Farm Member{uniqueMembers === 1 ? '' : 's'}
-                        </Text>
+                        <Text style={s.sraContextText}>{uniqueMembers} Member{uniqueMembers === 1 ? '' : 's'}</Text>
                       </View>
-
-                      <Text style={{ color: '#D0DCD0', fontSize: 12 }}>•</Text>
-
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <View style={s.sraContextChip}>
                         <Ionicons name="briefcase-outline" size={14} color={COLORS.primary} />
-                        <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary }}>
-                          {fManagers} {fManagers === 1 ? 'Manager' : 'Managers'}
-                        </Text>
+                        <Text style={s.sraContextText}>{fManagers} {fManagers === 1 ? 'Manager' : 'Managers'}</Text>
                       </View>
                     </View>
                   </View>
@@ -5643,6 +5618,8 @@ export default function FieldOpsScreen({ navigation, route }) {
               const repLogs = activeReport.operationCount || activeReport.operationSnapshots?.length || 0;
               const repDate = activeReport.submittedAt || activeReport.compiledAt || activeReport.dateGenerated || activeReport.date || '—';
               const repTitle = `${activeReport.blockFarmName || activeReport.blockFarmId || selectedFarm} — ${activeReport.periodKey ? displayPeriod(activeReport.periodKey) : compileMonth} Report`;
+              const repExportId = activeReport.reportId || activeReport.id || activeReport.periodKey || activeReport.period || activeReport.month || 'report';
+              const isExportingReport = exportingAuditId === repExportId;
 
               return (
                 <View style={s.auditCard}>
@@ -5666,24 +5643,17 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Text style={s.auditLabel}>{t('report_generated_date', 'Report Generated')}</Text>
                     <Text style={s.auditVal}>{repDate}</Text>
                   </View>
-                  <TouchableOpacity 
-                    style={s.pdfBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        'Exporting PDF',
-                        `Generating District Operations Report for ${activeReport.blockFarm || selectedFarm}...`,
-                        [
-                          { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-                          { 
-                            text: 'Download', 
-                            onPress: () => Alert.alert('Success', 'HUGPONG_District_Ops_Report.pdf has been securely saved to your device Downloads folder.')
-                          }
-                        ]
-                      );
-                    }}
+                  <TouchableOpacity
+                    style={[s.pdfBtn, isExportingReport && { opacity: 0.65 }]}
+                    onPress={() => handleExportAuditPdf(activeReport)}
+                    disabled={Boolean(exportingAuditId)}
                   >
-                    <Ionicons name="download-outline" size={16} color={COLORS.primary} />
-                    <Text style={s.pdfBtnText}>Export PDF Report</Text>
+                    {isExportingReport ? (
+                      <ActivityIndicator size="small" color={COLORS.primary} />
+                    ) : (
+                      <Ionicons name="download-outline" size={16} color={COLORS.primary} />
+                    )}
+                    <Text style={s.pdfBtnText}>{isExportingReport ? 'Preparing PDF...' : 'Export PDF Report'}</Text>
                   </TouchableOpacity>
                 </View>
               );
@@ -6544,139 +6514,201 @@ export default function FieldOpsScreen({ navigation, route }) {
       {/* ── SRA Audit Inspection & Certification Modal ── */}
       <Modal visible={showSRAInspectModal} transparent animationType="slide">
         <View style={s.qrOverlay}>
-          <View style={[s.qrModal, { width: width > 500 ? 460 : '92%', maxHeight: '85%', padding: 20 }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingBottom: 12, marginBottom: 14 }}>
-              <View>
-                <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.primary }}>
-                  {scannedAuditDuplicate
-                    ? 'Audit Already Imported'
-                    : scannedAuditReport?.integrityStatus === 'VERIFIED'
-                      ? 'SRA Compliance Inspection'
-                      : 'Audit Report Found'}
-                </Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
-                  {scannedAuditReport?.reportId || scannedAuditReport?.id || 'HUGPONG Audit Report'}
-                </Text>
+          <View style={{ width: width > 500 ? 460 : '94%', maxHeight: '88%', backgroundColor: '#FFFFFF', borderRadius: RADIUS.xl, padding: 18, alignItems: 'stretch', ...SHADOW.lg }}>
+            {/* Clean Modal Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 12, marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 8 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ alignSelf: 'flex-start', backgroundColor: COLORS.primaryBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs, marginBottom: 2 }}>
+                    <Text style={{ fontSize: 9.5, fontWeight: '900', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {scannedAuditDuplicate
+                        ? 'Duplicate Record'
+                        : scannedAuditReport?.integrityStatus === 'VERIFIED'
+                          ? 'SRA Verified Inspection'
+                          : 'Audit Report Found'}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: COLORS.text }} numberOfLines={1}>
+                    {scannedAuditReport?.reportId || scannedAuditReport?.id || 'HUGPONG Audit Report'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }} numberOfLines={1}>
+                    {scannedAuditReport?.blockFarmName || scannedAuditReport?.blockFarmId || 'District Block Farm'} · {scannedAuditReport?.periodKey ? displayPeriod(scannedAuditReport.periodKey) : 'Monthly Audit'}
+                  </Text>
+                </View>
               </View>
-              <TouchableOpacity onPress={() => setShowSRAInspectModal(false)} style={{ padding: 4 }}>
-                <Ionicons name="close" size={22} color={COLORS.text} />
+              <TouchableOpacity onPress={() => setShowSRAInspectModal(false)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="close" size={18} color={COLORS.text} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-              {/* Status Banner */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: scannedAuditReport?.status === 'CERTIFIED' ? '#EBF7EE' : '#FEF3C7', padding: 12, borderRadius: 10, marginBottom: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name={scannedAuditReport?.status === 'CERTIFIED' ? "shield-checkmark" : "time"} size={20} color={scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#D97706'} />
-                  <View>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#92400E' }}>
-                      {scannedAuditReport?.status === 'CERTIFIED'
-                        ? 'SRA Certified Record'
-                        : scannedAuditReport?.integrityStatus === 'VERIFIED'
-                          ? 'Awaiting Certification'
-                          : 'Complete Report Decoded'}
+            <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 4 }}>
+              {/* Status / Integrity Banner */}
+              {scannedAuditReport?.status === 'CERTIFIED' ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#EBF7EE', padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#A3E635' }}>
+                  <Ionicons name="shield-checkmark" size={20} color={COLORS.success} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.success }}>
+                      SRA Certified Record
                     </Text>
-                    <Text style={{ fontSize: 10, color: COLORS.textMuted }}>Hash: {scannedAuditReport?.qrSignature || scannedAuditReport?.qrHash || 'Unavailable'}</Text>
+                    <Text style={{ fontSize: 10.5, color: '#15803D', marginTop: 1 }}>
+                      Hash: {scannedAuditReport?.qrSignature || scannedAuditReport?.qrHash || 'Verified'}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 9.5, fontWeight: '900', color: COLORS.success }}>CERTIFIED</Text>
                   </View>
                 </View>
-                <Text style={{ fontSize: 10, fontWeight: '800', textTransform: 'uppercase', color: scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#92400E' }}>
-                  {scannedAuditReport?.integrityStatus === 'VERIFIED' || scannedAuditReport?.status === 'CERTIFIED'
-                    ? (scannedAuditReport?.status || 'Pending')
-                    : 'Decoded'}
-                </Text>
-              </View>
-
-              {/* Farm Metadata */}
-              <View style={{ backgroundColor: '#F8FAF5', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 14 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Report ID:</Text>
-                  <Text style={{ maxWidth: '65%', fontSize: 11, fontWeight: '700', color: COLORS.text, textAlign: 'right' }}>{scannedAuditReport?.reportId || scannedAuditReport?.id || 'Unavailable'}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Block Farm:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.blockFarmName || scannedAuditReport?.blockFarmId || 'District Block Farm'}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Audit Period:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.periodKey ? displayPeriod(scannedAuditReport.periodKey) : 'Unknown period'}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Farm Manager:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.compiledByName || scannedAuditReport?.compiledByUserId || 'Unknown'}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Fields / Members:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.fieldSnapshots?.length || 0} / {scannedAuditReport?.memberCount || 0}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Total Block Farm Area:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Active Operations Area:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Compiled Operations:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.operationSnapshots?.length || 0} logs</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Total Production Cost:</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '900', color: COLORS.primary }}>Php {Number(scannedAuditReport?.totalCost || 0).toLocaleString()}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Generated:</Text>
-                  <Text style={{ maxWidth: '65%', fontSize: 11, fontWeight: '700', color: COLORS.text, textAlign: 'right' }}>{scannedAuditReport?.compiledAt ? new Date(scannedAuditReport.compiledAt).toLocaleString() : 'Unavailable'}</Text>
-                </View>
-              </View>
-
-              <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 14 }}>
-                <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, marginBottom: 8 }}>Compiled Operation Snapshots</Text>
-                {(scannedAuditReport?.operationSnapshots || []).map(operation => (
-                  <View key={operation.operationLogId} style={{ paddingVertical: 7, borderTopWidth: 1, borderTopColor: COLORS.border }}>
-                    <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{operation.operationName || operation.operationDefinitionId}</Text>
-                    <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>{operation.fieldId} · {operation.performedOn} · Stage {operation.stageNumber}</Text>
-                    <Text style={{ fontSize: 10.5, color: COLORS.primary }}>Php {Number(operation.totalCost || 0).toLocaleString()}</Text>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FEF3C7', padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#F59E0B' }}>
+                  <Ionicons name="time" size={20} color="#D97706" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#92400E' }}>
+                      {scannedAuditReport?.integrityStatus === 'VERIFIED' ? 'Awaiting Certification' : 'Audit Decoded from QR'}
+                    </Text>
+                    <Text style={{ fontSize: 10.5, color: '#B45309', marginTop: 1 }}>
+                      {scannedAuditReport?.integrityStatus === 'VERIFIED'
+                        ? 'Integrity verified. Ready for SRA Regulatory Inspector seal.'
+                        : 'Decoded successfully. Ready for cloud import into SRA Audit Inbox.'}
+                    </Text>
                   </View>
-                ))}
+                  <View style={{ backgroundColor: '#FDE68A', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#92400E' }}>
+                      {scannedAuditReport?.integrityStatus === 'VERIFIED' ? 'VERIFIED' : 'PENDING'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* 3 Metrics Tiles: Total Cost, Fields Reported, Compiled Logs */}
+              {(() => {
+                const opSnapshots = Array.isArray(scannedAuditReport?.operationSnapshots) ? scannedAuditReport.operationSnapshots : [];
+                const fieldCnt = scannedAuditReport?.fieldsReported ?? scannedAuditReport?.fieldCount ?? (
+                  Array.isArray(scannedAuditReport?.fieldSnapshots) && scannedAuditReport.fieldSnapshots.length > 0
+                    ? scannedAuditReport.fieldSnapshots.length
+                    : (opSnapshots.length > 0 ? new Set(opSnapshots.map(o => o.fieldId).filter(Boolean)).size : 1)
+                );
+                const logCnt = scannedAuditReport?.logsCount ?? scannedAuditReport?.totalLogs ?? scannedAuditReport?.operationCount ?? opSnapshots.length;
+
+                return (
+                  <View style={{ flexDirection: 'row', backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' }}>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.text }}>
+                        ₱{Number(scannedAuditReport?.totalCost || 0).toLocaleString()}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: COLORS.textMuted, marginTop: 2 }}>Total Cost</Text>
+                    </View>
+                    <View style={{ width: 1, height: 24, backgroundColor: '#E2E8DC' }} />
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.primary }}>
+                        {fieldCnt}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: COLORS.textMuted, marginTop: 2 }}>Fields Reported</Text>
+                    </View>
+                    <View style={{ width: 1, height: 24, backgroundColor: '#E2E8DC' }} />
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.text }}>
+                        {logCnt}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: COLORS.textMuted, marginTop: 2 }}>Compiled Logs</Text>
+                    </View>
+                  </View>
+                );
+              })()}
+
+              {/* Farm & Report Metadata */}
+              <View style={{ backgroundColor: '#F8FAF5', padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E5E7EB', gap: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>Block Farm:</Text>
+                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{scannedAuditReport?.blockFarmName || scannedAuditReport?.blockFarmId || 'District Block Farm'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>Audit Period:</Text>
+                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{scannedAuditReport?.periodKey ? displayPeriod(scannedAuditReport.periodKey) : (scannedAuditReport?.period || 'Monthly')}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>Farm Manager:</Text>
+                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{scannedAuditReport?.compiledByName || scannedAuditReport?.compiledByUserId || 'Farm Manager'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>Generated:</Text>
+                  <Text style={{ maxWidth: '65%', fontSize: 11.5, fontWeight: '800', color: COLORS.text, textAlign: 'right' }}>
+                    {scannedAuditReport?.compiledAt
+                      ? new Date(scannedAuditReport.compiledAt).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })
+                      : (scannedAuditReport?.dateGenerated || 'Recently generated')}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>Total Audited Area:</Text>
+                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.primary }}>{Number(scannedAuditReport?.hectaresAudited || scannedAuditReport?.totalHectares || 1).toFixed(2)} Ha</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>QR Hash ID:</Text>
+                  <Text style={{ maxWidth: '65%', fontSize: 10.5, fontWeight: '800', color: COLORS.primary, fontFamily: 'monospace' }} numberOfLines={1}>
+                    {scannedAuditReport?.qrSignature || scannedAuditReport?.qrHash || 'Unavailable'}
+                  </Text>
+                </View>
               </View>
 
-              {/* SRA Agronomic Benchmark Evaluation */}
-              <View style={{ backgroundColor: '#F0F9FF', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BAE6FD', marginBottom: 14 }}>
-                <Text style={{ fontSize: 11, fontWeight: '800', color: '#0369A1', marginBottom: 3 }}>SRA District Agronomic Benchmark</Text>
-                <Text style={{ fontSize: 11, color: '#0C4A6E', lineHeight: 16 }}>
-                  Average cost per hectare: Php {Math.round(Number(scannedAuditReport?.totalCost || 0) / Math.max(Number(scannedAuditReport?.hectaresAudited || 0), 0.01)).toLocaleString()} / Ha (calculated against {Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha audited area).
-                </Text>
-              </View>
+              {/* Compiled Operation Snapshots */}
+              {Array.isArray(scannedAuditReport?.operationSnapshots) && scannedAuditReport.operationSnapshots.length > 0 && (
+                <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E5E7EB', gap: 6 }}>
+                  <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.primary, marginBottom: 2 }}>
+                    Compiled Operation Snapshots ({scannedAuditReport.operationSnapshots.length})
+                  </Text>
+                  {scannedAuditReport.operationSnapshots.map((operation, opIdx) => {
+                    const isLast = opIdx === scannedAuditReport.operationSnapshots.length - 1;
+                    return (
+                      <View key={operation.operationLogId || `op-${opIdx}`} style={{ paddingVertical: 6, borderBottomWidth: isLast ? 0 : 1, borderBottomColor: '#F3F4F6' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text, flex: 1, paddingRight: 6 }}>
+                            {operation.operationName || operation.operationDefinitionId}
+                          </Text>
+                          <Text style={{ fontSize: 12, fontWeight: '900', color: COLORS.primary }}>
+                            Php {Number(operation.totalCost || 0).toLocaleString()}
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 10.5, color: COLORS.textMuted, marginTop: 2 }}>
+                          {operation.fieldId} · {operation.performedOn || operation.date} · Stage {operation.stageNumber || 1}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
 
               {/* Verification Info if Certified */}
               {scannedAuditReport?.verifiedBy && (
-                <View style={{ padding: 10, backgroundColor: '#F3F4F6', borderRadius: 8, marginBottom: 14 }}>
+                <View style={{ padding: 10, backgroundColor: '#F3F4F6', borderRadius: RADIUS.xs }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Certified By: <Text style={{ fontWeight: '700', color: COLORS.text }}>{scannedAuditReport.verifiedBy}</Text></Text>
                   {scannedAuditReport.certifiedAt && <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>Certified On: {scannedAuditReport.certifiedAt}</Text>}
                 </View>
               )}
             </ScrollView>
 
-            {/* Actions */}
-            <View style={{ marginTop: 14, gap: 8 }}>
+            {/* Clean Actions Footer */}
+            <View style={{ marginTop: 12, gap: 8 }}>
               {scannedAuditDuplicate && (
                 <TouchableOpacity
-                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 7, ...SHADOW.sm }}
                   onPress={() => setScannedAuditDuplicate(false)}
                 >
-                  <Ionicons name="document-text-outline" size={18} color="#fff" />
+                  <Ionicons name="document-text-outline" size={17} color="#fff" />
                   <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>View Existing Report</Text>
                 </TouchableOpacity>
               )}
               {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus !== 'VERIFIED' && (
                 <TouchableOpacity
                   disabled={isAuditActionPending}
-                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, opacity: isAuditActionPending ? 0.6 : 1 }}
+                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 7, opacity: isAuditActionPending ? 0.6 : 1, ...SHADOW.sm }}
                   onPress={handleImportScannedAudit}
                 >
-                  <Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{isAuditActionPending ? 'Importing...' : 'Import Report'}</Text>
+                  <Ionicons name="cloud-upload-outline" size={17} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13.5 }}>
+                    {isAuditActionPending ? 'Importing Report...' : 'Import Report'}
+                  </Text>
                 </TouchableOpacity>
               )}
               {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
@@ -6686,40 +6718,37 @@ export default function FieldOpsScreen({ navigation, route }) {
                     onChangeText={setAuditReturnReason}
                     placeholder="Reason for correction"
                     multiline
-                    style={{ minHeight: 72, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, padding: 10, fontSize: 12, textAlignVertical: 'top', backgroundColor: '#fff' }}
+                    style={{ minHeight: 64, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: RADIUS.md, padding: 10, fontSize: 12, textAlignVertical: 'top', backgroundColor: '#fff' }}
                   />
                   <TouchableOpacity
                     disabled={isAuditActionPending || !auditReturnReason.trim()}
-                    style={{ paddingVertical: 12, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#B45309', opacity: isAuditActionPending || !auditReturnReason.trim() ? 0.5 : 1 }}
+                    style={{ paddingVertical: 12, borderRadius: RADIUS.md, alignItems: 'center', borderWidth: 1, borderColor: '#B45309', opacity: isAuditActionPending || !auditReturnReason.trim() ? 0.5 : 1 }}
                     onPress={() => handleReturnAuditReport(scannedAuditReport)}
                   >
                     <Text style={{ color: '#92400E', fontWeight: '800', fontSize: 13 }}>{isAuditActionPending ? 'Returning...' : 'Return Audit'}</Text>
                   </TouchableOpacity>
                 </>
               )}
-              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
+              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
                 <TouchableOpacity
-                  style={{ backgroundColor: COLORS.success, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                  style={{ backgroundColor: COLORS.success, paddingVertical: 13, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 7, ...SHADOW.sm }}
                   onPress={() => handleCertifyReport(scannedAuditReport)}
                 >
-                  <Ionicons name="checkmark-seal" size={18} color="#fff" />
+                  <Ionicons name="checkmark-seal-outline" size={18} color="#fff" />
                   <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Issue Official SRA Digital Seal</Text>
                 </TouchableOpacity>
-              ) : !scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED ? (
-                <View style={{ backgroundColor: '#EBF7EE', paddingVertical: 10, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.success }}>
-                  <Ionicons name="checkmark-done" size={18} color={COLORS.success} />
+              )}
+              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED && (
+                <View style={{ backgroundColor: '#EBF7EE', paddingVertical: 10, borderRadius: RADIUS.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.success }}>
+                  <Ionicons name="checkmark-done" size={17} color={COLORS.success} />
                   <Text style={{ color: COLORS.success, fontWeight: '800', fontSize: 12 }}>Certified &amp; Immutable</Text>
                 </View>
-              ) : !scannedAuditDuplicate ? (
-                <View style={{ backgroundColor: '#FEF3C7', paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#F59E0B' }}>
-                  <Text style={{ color: '#92400E', fontWeight: '800', fontSize: 12 }}>Integrity / cloud confirmation pending</Text>
-                </View>
-              ) : null}
+              )}
               <TouchableOpacity
-                style={{ paddingVertical: 11, borderRadius: 10, alignItems: 'center', backgroundColor: '#F1F5E9' }}
+                style={{ paddingVertical: 11, borderRadius: RADIUS.md, alignItems: 'center', backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' }}
                 onPress={() => setShowSRAInspectModal(false)}
               >
-                <Text style={{ color: COLORS.text, fontWeight: '700', fontSize: 12 }}>
+                <Text style={{ color: COLORS.text, fontWeight: '700', fontSize: 12.5 }}>
                   {scannedAuditReport?.integrityStatus === 'VERIFIED' && !scannedAuditDuplicate ? 'Close Inspector' : 'Cancel'}
                 </Text>
               </TouchableOpacity>
@@ -7192,38 +7221,88 @@ export default function FieldOpsScreen({ navigation, route }) {
 
       {/* ── Manager Assign Field Modal ── */}
       <Modal visible={showManagerAssignModal} animationType="slide" onRequestClose={() => setShowManagerAssignModal(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
-            <View style={{ flex: 1, paddingRight: 10 }}>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>{managerAssignForm.isEditing ? 'Edit Field Plot & Ownership' : 'Enroll New Field Plot'}</Text>
-              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
-                {managerAssignForm.isEditing ? 'Modify parcel specifications and member.' : 'Register parcel and assign member.'}
-              </Text>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }} edges={['top', 'bottom']}>
+          {/* Web-Parity Modal Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingTop: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#FFFFFF' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, flex: 1, paddingRight: 10 }}>
+              <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                <Ionicons name="layers-outline" size={22} color={COLORS.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ alignSelf: 'flex-start', backgroundColor: COLORS.primaryBg, paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.full, marginBottom: 4 }}>
+                  <Text style={{ fontSize: 9.5, fontWeight: '900', color: COLORS.primary, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                    Field Parcel Allocation
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 17, fontWeight: '800', color: COLORS.text, letterSpacing: -0.2 }}>
+                  {managerAssignForm.isEditing ? 'Edit Field Plot & Ownership' : 'Enroll New Field Plot'}
+                </Text>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2, lineHeight: 16 }}>
+                  {managerAssignForm.isEditing ? 'Modify parcel specifications and assigned member.' : 'Register an individual sugarcane field and assign its field owner.'}
+                </Text>
+              </View>
             </View>
-            <TouchableOpacity onPress={() => setShowManagerAssignModal(false)} style={{ padding: 4 }}>
-              <Ionicons name="close" size={24} color={COLORS.text} />
+            <TouchableOpacity 
+              onPress={() => {
+                setShowOwnerDropdown(false);
+                setShowManagerAssignModal(false);
+              }} 
+              style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={20} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={{ paddingHorizontal: SPACING.lg }} showsVerticalScrollIndicator={false}>
-            <View style={{ gap: 14, paddingVertical: 12 }}>
+            <View style={{ gap: 16, paddingVertical: 16 }}>
 
-              {/* 1. Parent Block Farm Selector */}
-              <View style={{ gap: 6 }}>
-                <Text style={s.formLabel}>Parent Block Farm <Text style={{ color: '#DC2626' }}>*</Text></Text>
+              {/* 1. Field Plot ID (Web Parity) */}
+              <View style={{ gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>Field Plot ID</Text>
+                  <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.textMuted }}>
+                      {managerAssignForm.isEditing ? 'Existing Plot' : 'System generated'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1.2, borderColor: '#E5E7EB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                  <Ionicons name="barcode-outline" size={17} color={COLORS.textMuted} />
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, fontFamily: 'monospace' }}>
+                    {managerAssignForm.isEditing ? managerAssignForm.fieldId : 'Generated after enrollment'}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  {managerAssignForm.isEditing ? 'Permanent parcel identifier.' : 'Generated by the server after enrollment.'}
+                </Text>
+              </View>
+
+              {/* 2. Parent Block Farm (Web Parity) */}
+              <View style={{ gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
+                    Parent Block Farm <Text style={{ color: '#DC2626' }}>*</Text>
+                  </Text>
+                  {managerAssignForm.isEditing && (
+                    <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.primary }}>Assigned Cluster</Text>
+                    </View>
+                  )}
+                </View>
+
                 {managerAssignForm.isEditing ? (
-                  <View style={[s.formInput, { backgroundColor: '#F4F7F2', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
+                  <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1.2, borderColor: '#E5E7EB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <Ionicons name="business-outline" size={17} color={COLORS.primary} />
+                    <Text style={{ fontSize: 13.5, fontWeight: '700', color: COLORS.text }}>
                       {managerAssignForm.blockFarm || 'No block farm selected'}
                     </Text>
-                    <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.sm }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>Assigned Cluster</Text>
-                    </View>
                   </View>
                 ) : (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <View style={{ gap: 8 }}>
                     {(blockFarms || []).map(bf => {
                       const isSelected = managerAssignForm.blockFarm === bf.name;
+                      const codeDisplay = bf.code || bf.id ? `(${bf.code || bf.id})` : '';
                       return (
                         <TouchableOpacity
                           key={bf.id || bf.name}
@@ -7234,137 +7313,362 @@ export default function FieldOpsScreen({ navigation, route }) {
                               blockFarmId: bf.id || bf.code || ''
                             }));
                           }}
+                          activeOpacity={0.8}
                           style={{
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
+                            padding: 12,
                             borderRadius: RADIUS.md,
                             borderWidth: 1.5,
                             borderColor: isSelected ? COLORS.primary : '#E5E7EB',
-                            backgroundColor: isSelected ? COLORS.primaryBg : '#FFFFFF',
+                            backgroundColor: isSelected ? '#F0F8EC' : '#FFFFFF',
                             flexDirection: 'row',
                             alignItems: 'center',
-                            gap: 6
+                            gap: 10,
+                            ...SHADOW.card
                           }}
                         >
-                          <Ionicons 
-                            name={isSelected ? 'radio-button-on' : 'radio-button-off'} 
-                            size={14} 
-                            color={isSelected ? COLORS.primary : COLORS.textMuted} 
+                          <View style={{ width: 34, height: 34, borderRadius: RADIUS.sm, backgroundColor: isSelected ? COLORS.primary : '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="business" size={16} color={isSelected ? '#fff' : COLORS.textMuted} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13.5, fontWeight: isSelected ? '800' : '600', color: COLORS.text }}>
+                              {bf.name} {codeDisplay}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                              Cooperative Block Farm Cluster
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={20}
+                            color={isSelected ? COLORS.primary : '#D1D5DB'}
                           />
-                          <Text style={{ fontSize: 12, fontWeight: isSelected ? '800' : '600', color: isSelected ? COLORS.primary : COLORS.text }}>
-                            {bf.name}
-                          </Text>
                         </TouchableOpacity>
                       );
                     })}
-                  </ScrollView>
-                )}
-              </View>
-
-              {/* 2. Field Plot ID */}
-              <View style={{ gap: 6 }}>
-                <Text style={s.formLabel}>Field Plot ID <Text style={{ color: '#DC2626' }}>*</Text></Text>
-                {managerAssignForm.isEditing ? (
-                  <View style={[s.formInput, { backgroundColor: '#F4F7F2', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', fontFamily: 'monospace', color: COLORS.primary }}>
-                      {managerAssignForm.fieldId}
-                    </Text>
-                    <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.sm }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>Existing Plot</Text>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={[s.formInput, { backgroundColor: '#F4F7F2', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                    <Text style={{ fontFamily: 'monospace', fontWeight: '800', color: COLORS.primary, fontSize: 14 }}>
-                      Generated after enrollment
-                    </Text>
-                    <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 8, paddingVertical: 2, borderRadius: RADIUS.sm }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.textMuted }}>System generated</Text>
-                    </View>
                   </View>
                 )}
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  Cooperative cluster to which this parcel is anchored.
+                </Text>
               </View>
 
-              {/* 3. Assigned Field Owner */}
-              <View style={{ gap: 6 }}>
-                <Text style={s.formLabel}>Assigned Field Owner <Text style={{ color: '#DC2626' }}>*</Text></Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {users.filter(user => {
+              {/* 3. Assigned Field Owner (Dropdown with Assign Later option) */}
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
+                  Assigned Field Owner
+                </Text>
+
+                {(() => {
+                  const eligibleMembers = users.filter(user => {
                     const role = canonicalRole(user.role);
                     const userId = user.employeeId || user.id;
                     return String(user.status || 'ACTIVE').toUpperCase() !== 'ARCHIVED' && (
                       role === 'MEMBER_FARMER' || (role === 'FARM_MANAGER' && userId === sessionUserId)
                     );
-                  }).map(member => {
-                    const memberId = member.employeeId || member.id;
-                    const isSelected = managerAssignForm.userId === memberId;
-                    return (
-                      <TouchableOpacity
-                        key={memberId}
-                        onPress={() => setManagerAssignForm(prev => ({ ...prev, userId: memberId }))}
-                        style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: isSelected ? COLORS.primary : '#E5E7EB', backgroundColor: isSelected ? COLORS.primaryBg : '#FFFFFF' }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '800' : '600', color: isSelected ? COLORS.primary : COLORS.text }}>{member.name || member.displayName}</Text>
-                        <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>{member.contact || member.mobile || 'Registered member'}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+                  });
+                  const selectedOwner = managerAssignForm.userId ? users.find(u => {
+                    const uid = u.employeeId || u.id;
+                    return uid === managerAssignForm.userId || u.id === managerAssignForm.userId || u.employeeId === managerAssignForm.userId;
+                  }) : null;
 
-              {/* 4. Plot Area (Ha) */}
-              <View style={{ gap: 6 }}>
-                <Text style={s.formLabel}>Plot Area (Ha) <Text style={{ color: '#DC2626' }}>*</Text></Text>
-                <View style={[s.formInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                  <TextInput 
-                    style={{ flex: 1, fontSize: 14, fontWeight: '700', color: COLORS.text, padding: 0 }} 
-                    placeholder="e.g. 1.5" 
-                    keyboardType="numeric" 
-                    value={managerAssignForm.ha} 
-                    onChangeText={t => setManagerAssignForm({...managerAssignForm, ha: t})} 
-                  />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMuted }}>Ha</Text>
-                </View>
-              </View>
-
-              {/* 5. Soil Type Selector */}
-              <View style={{ gap: 6 }}>
-                <Text style={s.formLabel}>Soil Type</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {SOIL_TYPES.map(st => {
-                    const isSelected = managerAssignForm.soilType === st;
-                    return (
+                  return (
+                    <View>
+                      {/* Dropdown Selector Trigger */}
                       <TouchableOpacity
-                        key={st}
-                        onPress={() => setManagerAssignForm(prev => ({ ...prev, soilType: st }))}
+                        onPress={() => setShowOwnerDropdown(prev => !prev)}
+                        activeOpacity={0.8}
                         style={{
-                          paddingHorizontal: 12,
-                          paddingVertical: 7,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          backgroundColor: '#FFFFFF',
+                          borderWidth: 1.2,
+                          borderColor: showOwnerDropdown ? COLORS.primary : '#D1D5DB',
                           borderRadius: RADIUS.md,
-                          borderWidth: 1.5,
-                          borderColor: isSelected ? COLORS.primary : '#E5E7EB',
-                          backgroundColor: isSelected ? COLORS.primaryBg : '#FFFFFF'
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          minHeight: 50,
+                          ...SHADOW.sm
                         }}
                       >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '800' : '600', color: isSelected ? COLORS.primary : COLORS.text }}>
-                          {st}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 8 }}>
+                          <View style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
+                            backgroundColor: selectedOwner ? COLORS.primaryBg : '#F3F4F6',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <Ionicons
+                              name={selectedOwner ? "person" : "person-outline"}
+                              size={17}
+                              color={selectedOwner ? COLORS.primary : COLORS.textMuted}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            {selectedOwner ? (
+                              <View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: COLORS.text }} numberOfLines={1}>
+                                    {selectedOwner.name || selectedOwner.displayName}
+                                  </Text>
+                                  <View style={{
+                                    backgroundColor: canonicalRole(selectedOwner.role) === 'FARM_MANAGER' ? '#FEF3C7' : '#EBF7EE',
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 1.5,
+                                    borderRadius: RADIUS.xs
+                                  }}>
+                                    <Text style={{
+                                      fontSize: 9.5,
+                                      fontWeight: '800',
+                                      color: canonicalRole(selectedOwner.role) === 'FARM_MANAGER' ? '#B45309' : COLORS.primary
+                                    }}>
+                                      {canonicalRole(selectedOwner.role) === 'FARM_MANAGER' ? 'Manager' : 'Member'}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }} numberOfLines={1}>
+                                  {selectedOwner.contact || selectedOwner.mobile || (selectedOwner.employeeId || selectedOwner.id)}
+                                </Text>
+                              </View>
+                            ) : (
+                              <View>
+                                <Text style={{ fontSize: 13.5, fontWeight: '600', color: COLORS.textSecondary }}>
+                                  Unassigned (Can assign later)...
+                                </Text>
+                                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                                  No owner assigned · Tap to select
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <Ionicons
+                          name={showOwnerDropdown ? "chevron-up" : "chevron-down"}
+                          size={19}
+                          color={showOwnerDropdown ? COLORS.primary : COLORS.textMuted}
+                        />
                       </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+
+                      {/* Dropdown Options List */}
+                      {showOwnerDropdown && (
+                        <View style={{
+                          marginTop: 6,
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: RADIUS.md,
+                          borderWidth: 1.2,
+                          borderColor: '#D1D5DB',
+                          overflow: 'hidden',
+                          ...SHADOW.card,
+                          maxHeight: 250
+                        }}>
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250 }} showsVerticalScrollIndicator={true}>
+                            {/* Option 1: Unassigned (Can assign later) */}
+                            <TouchableOpacity
+                              onPress={() => {
+                                setManagerAssignForm(prev => ({ ...prev, userId: '' }));
+                                setShowOwnerDropdown(false);
+                              }}
+                              activeOpacity={0.8}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                padding: 12,
+                                backgroundColor: !managerAssignForm.userId ? '#F0F8EC' : '#FFFFFF',
+                                borderBottomWidth: 1,
+                                borderBottomColor: '#F3F4F6',
+                                gap: 10
+                              }}
+                            >
+                              <View style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 16,
+                                backgroundColor: !managerAssignForm.userId ? COLORS.primaryBg : '#F3F4F6',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={16}
+                                  color={!managerAssignForm.userId ? COLORS.primary : COLORS.textMuted}
+                                />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Text style={{ fontSize: 13, fontWeight: !managerAssignForm.userId ? '800' : '600', color: !managerAssignForm.userId ? COLORS.primary : COLORS.text }}>
+                                    Unassigned (Can assign later)
+                                  </Text>
+                                  <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs }}>
+                                    <Text style={{ fontSize: 9.5, fontWeight: '800', color: COLORS.textMuted }}>
+                                      Assign Later
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                                  Leave owner unallocated · Assign anytime later
+                                </Text>
+                              </View>
+                              {!managerAssignForm.userId && (
+                                <Ionicons name="checkmark-circle" size={18} color={COLORS.primary} />
+                              )}
+                            </TouchableOpacity>
+
+                            {/* Registered Member Options */}
+                            {eligibleMembers.map((member, idx) => {
+                              const memberId = member.employeeId || member.id;
+                              const isSelected = managerAssignForm.userId === memberId || managerAssignForm.userId === member.id || managerAssignForm.userId === member.employeeId;
+                              const role = canonicalRole(member.role);
+                              const isManagerRole = role === 'FARM_MANAGER';
+                              const isLast = idx === eligibleMembers.length - 1;
+
+                              return (
+                                <TouchableOpacity
+                                  key={memberId}
+                                  onPress={() => {
+                                    setManagerAssignForm(prev => ({ ...prev, userId: memberId }));
+                                    setShowOwnerDropdown(false);
+                                  }}
+                                  activeOpacity={0.8}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    padding: 12,
+                                    backgroundColor: isSelected ? '#F0F8EC' : '#FFFFFF',
+                                    borderBottomWidth: isLast ? 0 : 1,
+                                    borderBottomColor: '#F3F4F6',
+                                    gap: 10
+                                  }}
+                                >
+                                  <View style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 16,
+                                    backgroundColor: isSelected ? COLORS.primaryBg : '#F3F4F6',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}>
+                                    <Ionicons
+                                      name="person"
+                                      size={15}
+                                      color={isSelected ? COLORS.primary : COLORS.textMuted}
+                                    />
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                      <Text style={{ fontSize: 13, fontWeight: isSelected ? '800' : '600', color: isSelected ? COLORS.primary : COLORS.text }}>
+                                        {member.name || member.displayName}
+                                      </Text>
+                                      <View style={{ backgroundColor: isManagerRole ? '#FEF3C7' : '#EBF7EE', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs }}>
+                                        <Text style={{ fontSize: 9.5, fontWeight: '800', color: isManagerRole ? '#B45309' : COLORS.primary }}>
+                                          {isManagerRole ? 'Manager' : 'Member'}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                                      {member.contact || member.mobile || memberId}
+                                    </Text>
+                                  </View>
+                                  {isSelected && (
+                                    <Ionicons name="checkmark-circle" size={18} color={COLORS.primary} />
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  Select a registered Farm Member, assign yourself, or leave unassigned to assign later.
+                </Text>
+              </View>
+
+              {/* 4. Plot Area (Web Parity) */}
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
+                  Plot Area <Text style={{ color: '#DC2626' }}>*</Text>
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', borderWidth: 1.2, borderColor: '#D1D5DB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, minHeight: 46 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons name="scan-outline" size={17} color={COLORS.primary} />
+                    <TextInput 
+                      style={{ flex: 1, fontSize: 15, fontWeight: '800', color: COLORS.text, padding: 0 }} 
+                      placeholder="1.50" 
+                      placeholderTextColor={COLORS.textMuted}
+                      keyboardType="numeric" 
+                      value={managerAssignForm.ha} 
+                      onChangeText={t => setManagerAssignForm({...managerAssignForm, ha: t})} 
+                    />
+                  </View>
+                  <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>ha</Text>
+                  </View>
+                </View>
+                {/* Quick Preset Chips */}
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                  {['0.50', '1.00', '1.50', '2.00', '3.00'].map(val => (
+                    <TouchableOpacity
+                      key={val}
+                      onPress={() => setManagerAssignForm(prev => ({ ...prev, ha: val }))}
+                      style={{
+                        paddingHorizontal: 9,
+                        paddingVertical: 4,
+                        borderRadius: RADIUS.xs,
+                        backgroundColor: managerAssignForm.ha === val ? COLORS.primaryBg : '#F3F4F6',
+                        borderWidth: 1,
+                        borderColor: managerAssignForm.ha === val ? COLORS.primary : '#E5E7EB'
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: managerAssignForm.ha === val ? '800' : '600', color: managerAssignForm.ha === val ? COLORS.primary : COLORS.textMuted }}>
+                        {val} ha
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  Enter a valid area in hectares (&gt; 0).
+                </Text>
+              </View>
+
+              {/* 5. Crop Year Cycle (Web Parity) */}
+              <View style={{ gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>Crop Year Cycle</Text>
+                  <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs }}>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.textMuted }}>Preview only</Text>
+                  </View>
+                </View>
+                <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1.2, borderColor: '#E5E7EB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                  <Ionicons name="calendar-outline" size={17} color={COLORS.textMuted} />
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.textSecondary }}>
+                    {`${new Date().getFullYear()}–${new Date().getFullYear() + 1}`}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  Preview only. The server sets the canonical year when the field is enrolled.
+                </Text>
               </View>
 
             </View>
           </ScrollView>
 
-          <View style={s.sheetFooter}>
+          {/* Enhanced Sticky Footer (Web Parity) */}
+          <View style={{ paddingHorizontal: SPACING.lg, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#E5E7EB', backgroundColor: '#FFFFFF', flexDirection: 'row', gap: 10 }}>
             <TouchableOpacity 
-              style={[s.cancelBtn, isAssigningPlot && { opacity: 0.5 }]} 
+              style={{ flex: 1, minHeight: 48, borderWidth: 1.2, borderColor: '#D1D5DB', borderRadius: RADIUS.md, backgroundColor: '#F9FAFB', alignItems: 'center', justifyContent: 'center', opacity: isAssigningPlot ? 0.5 : 1 }} 
               disabled={isAssigningPlot}
-              onPress={() => setShowManagerAssignModal(false)}
+              onPress={() => {
+                setShowOwnerDropdown(false);
+                setShowManagerAssignModal(false);
+              }}
+              activeOpacity={0.8}
             >
-              <Text style={s.cancelBtnText}>Cancel</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.text }}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[s.submitBtn, isAssigningPlot && { opacity: 0.85, backgroundColor: COLORS.primaryDark }]} 
@@ -7374,8 +7678,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                 const rawFieldId = (managerAssignForm.fieldId || '').trim().toUpperCase();
                 const rawHa = (managerAssignForm.ha || '').trim();
 
-                if (!rawInput || !rawHa || (managerAssignForm.isEditing && !rawFieldId)) {
-                  Alert.alert('Required Fields', 'Please select a field owner and complete the land area.');
+                if (!rawHa || (managerAssignForm.isEditing && !rawFieldId)) {
+                  Alert.alert('Required Fields', 'Please complete the land area.');
                   return;
                 }
 
@@ -7392,14 +7696,24 @@ export default function FieldOpsScreen({ navigation, route }) {
                   return;
                 }
 
-                // 3. Strict User Existence Validation: Non-existing IDs are rejected
-                const matchedUser = findUserByIdOrContact(rawInput);
-                if (!matchedUser) {
-                  Alert.alert(
-                    'Farm Member Unavailable',
-                    'The selected Farm Member is no longer available. Refresh and select an authorized member again.'
-                  );
-                  return;
+                // 3. User Existence Validation: Non-existing non-empty IDs are rejected
+                let matchedUser = null;
+                let memberDisplayName = 'Unassigned';
+                let memberIdVal = null;
+                let memberContactVal = '';
+
+                if (rawInput && rawInput.toLowerCase() !== 'unassigned') {
+                  matchedUser = findUserByIdOrContact(rawInput);
+                  if (!matchedUser) {
+                    Alert.alert(
+                      'Farm Member Unavailable',
+                      'The selected Farm Member is no longer available. Refresh and select an authorized member again.'
+                    );
+                    return;
+                  }
+                  memberDisplayName = matchedUser.name || matchedUser.displayName || 'Unassigned';
+                  memberIdVal = matchedUser.employeeId || matchedUser.id || matchedUser.contact || null;
+                  memberContactVal = matchedUser.contact || matchedUser.mobile || '';
                 }
 
                 const existingIdx = fields.findIndex(f => f.id.toUpperCase() === rawFieldId);
@@ -7409,10 +7723,6 @@ export default function FieldOpsScreen({ navigation, route }) {
                     return;
                   }
                 }
-
-                const memberDisplayName = matchedUser.name;
-                const memberIdVal = matchedUser.employeeId || matchedUser.id || matchedUser.contact;
-                const memberContactVal = matchedUser.contact || matchedUser.mobile || '';
 
                 const existingField = existingIdx >= 0 ? fields[existingIdx] : null;
                 const activeFarmName = managerAssignForm.blockFarm || '';
@@ -7433,7 +7743,6 @@ export default function FieldOpsScreen({ navigation, route }) {
                   member: memberDisplayName,
                   memberContact: memberContactVal,
                   ha: parsedHa,
-                  soilType: managerAssignForm.soilType || 'Clay Loam',
                   synced: true,
                   lastSync: 'Just now'
                 };
@@ -7453,11 +7762,12 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                   setIsAssigningPlot(false);
                   setShowManagerAssignModal(false);
+                  setShowOwnerDropdown(false);
                   Alert.alert(
                     'Plot Allocated Successfully',
                     managerAssignForm.isEditing
-                      ? `Field plot ${rawFieldId} updated successfully and assigned to ${memberDisplayName} (${memberIdVal}).`
-                      : `Field plot ${result.field.id} (${parsedHa} Ha) successfully enrolled and assigned to ${memberDisplayName}.`
+                      ? `Field plot ${rawFieldId} updated successfully${memberIdVal ? ` and assigned to ${memberDisplayName} (${memberIdVal}).` : ' (Unassigned).'}`
+                      : `Field plot ${result.field.id} (${parsedHa} Ha) successfully enrolled${memberIdVal ? ` and assigned to ${memberDisplayName}.` : ' (Unassigned - can assign later).'}`
                   );
                   setManagerAssignForm({
                     userId: '',
@@ -7465,7 +7775,6 @@ export default function FieldOpsScreen({ navigation, route }) {
                     blockFarm: '',
                     blockFarmId: '',
                     ha: '1.5',
-                    soilType: 'Clay Loam',
                     isEditing: false
                   });
                 } catch (err) {
@@ -7564,7 +7873,10 @@ export default function FieldOpsScreen({ navigation, route }) {
                           const res = await approvePendingRegistration(u.contact, { area: u.area });
                           setPendingActionLoading(false);
                           if (res.success) {
-                            Alert.alert('Registration Approved', `Farm Member ${u.name} activated and allocated field ${res.fieldId}!`);
+                            Alert.alert(
+                              'Registration Approved',
+                              `Farm Member ${u.name} activated. Login ID: ${res.accountId}. Assigned field: ${res.fieldId}. Share the Login ID with the account owner.`
+                            );
                             setPendingUsersList([...pendingUsers]);
                           }
                         } catch (e) {
@@ -7972,20 +8284,20 @@ export default function FieldOpsScreen({ navigation, route }) {
                 statCountLabel = 'Displayed Archived Logs';
                 statCountValue = `${pastLogs.length} Records Shown`;
               } else {
-                const auditTotalCost = (auditLogs || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
+                const auditTotalCost = ((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
                 statCostLabel = t('compiled_audited_cost_lbl', 'Compiled Cost');
                 statCostValue = `₱${Number(auditTotalCost || 0).toLocaleString()}`;
                 statCostColor = COLORS.primary;
                 statCountLabel = t('verified_sra_audits_lbl', 'Verified Audits');
-                statCountValue = `${(auditLogs || []).length} Monthly Reports`;
+                statCountValue = `${((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).length} Monthly Reports`;
               }
             } else if (activeRole === 'SRA Admin' || logTab === 'audit_history') {
-              const auditTotalCost = (auditLogs || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
+              const auditTotalCost = ((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).reduce((sum, a) => sum + Number(a.totalCost || 0), 0);
               statCostLabel = t('compiled_audited_cost_lbl', 'Compiled Cost');
               statCostValue = `₱${Number(auditTotalCost || 0).toLocaleString()}`;
               statCostColor = COLORS.primary;
               statCountLabel = t('verified_sra_audits_lbl', 'Verified Audits');
-              statCountValue = `${(auditLogs || []).length} Monthly Reports`;
+              statCountValue = `${((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).length} Monthly Reports`;
             } else if (logTab === 'drafts') {
               statCostLabel = t('estimated_draft_cost_lbl', 'Estimated Draft Cost');
               statCostValue = `₱${Number(draftsTotalCost || 0).toLocaleString()}`;
@@ -8045,38 +8357,38 @@ export default function FieldOpsScreen({ navigation, route }) {
             }}>
               <TouchableOpacity
                 style={[
-                  { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: RADIUS.sm },
+                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                   logTab === 'submitted' && { backgroundColor: '#fff', ...SHADOW.card }
                 ]}
                 onPress={() => setLogTab('submitted')}
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 12, fontWeight: logTab === 'submitted' ? '800' : '600', color: logTab === 'submitted' ? COLORS.primary : COLORS.textMuted }}>
+                <Text style={{ fontSize: 12, fontWeight: logTab === 'submitted' ? '800' : '600', color: logTab === 'submitted' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
                   {t('tab_submitted', 'Submitted')} ({fieldLogs.length})
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
-                  { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: RADIUS.sm },
+                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                   logTab === 'drafts' && { backgroundColor: '#fff', ...SHADOW.card }
                 ]}
                 onPress={() => setLogTab('drafts')}
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 12, fontWeight: logTab === 'drafts' ? '800' : '600', color: logTab === 'drafts' ? COLORS.primary : COLORS.textMuted }}>
+                <Text style={{ fontSize: 12, fontWeight: logTab === 'drafts' ? '800' : '600', color: logTab === 'drafts' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
                   {t('tab_drafts', 'Drafts')} ({scopedDrafts.length})
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
-                  { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: RADIUS.sm },
+                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                   logTab === 'past' && { backgroundColor: '#fff', ...SHADOW.card }
                 ]}
                 onPress={() => setLogTab('past')}
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 12, fontWeight: logTab === 'past' ? '800' : '600', color: logTab === 'past' ? COLORS.primary : COLORS.textMuted }}>
-                  {t('tab_past', 'Past Crop Year Cycles')} ({pastLogs.length})
+                <Text style={{ fontSize: 12, fontWeight: logTab === 'past' ? '800' : '600', color: logTab === 'past' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
+                  {t('tab_past', 'Past Cycles')} ({pastLogs.length})
                 </Text>
               </TouchableOpacity>
             </View>
@@ -8093,38 +8405,38 @@ export default function FieldOpsScreen({ navigation, route }) {
               }}>
                 <TouchableOpacity
                   style={[
-                    { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: RADIUS.sm },
+                    { flex: 1, paddingVertical: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                     logTab === 'submitted' && { backgroundColor: '#fff', ...SHADOW.card }
                   ]}
                   onPress={() => setLogTab('submitted')}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: logTab === 'submitted' ? '800' : '600', color: logTab === 'submitted' ? COLORS.primary : COLORS.textMuted }} numberOfLines={1}>
+                  <Text style={{ fontSize: 12, fontWeight: logTab === 'submitted' ? '800' : '600', color: logTab === 'submitted' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
                     {t('tab_operations', 'Operations')} ({managerSubmittedLogs.length})
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
-                    { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: RADIUS.sm },
+                    { flex: 1, paddingVertical: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                     logTab === 'past' && { backgroundColor: '#fff', ...SHADOW.card }
                   ]}
                   onPress={() => setLogTab('past')}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: logTab === 'past' ? '800' : '600', color: logTab === 'past' ? COLORS.primary : COLORS.textMuted }} numberOfLines={1}>
-                    {t('tab_past', 'Past Crop Year Cycles')} ({pastLogs.length})
+                  <Text style={{ fontSize: 12, fontWeight: logTab === 'past' ? '800' : '600', color: logTab === 'past' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
+                    {t('tab_past', 'Past Cycles')} ({pastLogs.length})
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
-                    { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: RADIUS.sm },
+                    { flex: 1, paddingVertical: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
                     logTab === 'audit_history' && { backgroundColor: '#fff', ...SHADOW.card }
                   ]}
                   onPress={() => setLogTab('audit_history')}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: logTab === 'audit_history' ? '800' : '600', color: logTab === 'audit_history' ? COLORS.primary : COLORS.textMuted }} numberOfLines={1}>
-                    {t('tab_audits', 'Audits')} ({(auditLogs || []).length})
+                  <Text style={{ fontSize: 12, fontWeight: logTab === 'audit_history' ? '800' : '600', color: logTab === 'audit_history' ? COLORS.primary : COLORS.textMuted, textAlign: 'center' }} numberOfLines={1}>
+                    {t('tab_audits', 'Audits')} ({((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).length})
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -8391,7 +8703,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             ) : (
               <View style={{ gap: SPACING.md }}>
                 <Text style={s.sectionLabel}>{t('compiled_monthly_audit_title', 'Compiled Monthly Regulatory Audit')}</Text>
-                {Array.from(new Map((auditLogs || []).map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => (
+                {Array.from(new Map(((auditReports && auditReports.length > 0 ? auditReports : auditHistoryReports) || []).map(a => [a.reportId || a.id, a])).values()).map((audit, idx) => (
                   <View key={audit.reportId || audit.id || `audit-${idx}`} style={[s.auditCard, { marginBottom: 6 }]}>
                     {/* Header: Audit ID & Status */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -8450,17 +8762,21 @@ export default function FieldOpsScreen({ navigation, route }) {
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primary + '40', paddingVertical: 10, borderRadius: RADIUS.md }}
-                        onPress={() => {
-                          Alert.alert('Exporting PDF', `Downloading official monthly audit report for ${audit.month}...`, [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Download', onPress: () => Alert.alert('Success', `HUGPONG_${audit.month.replace(' ', '_')}_Audit_Report.pdf saved to Downloads.`) }
-                          ]);
-                        }}
+                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primary + '40', paddingVertical: 10, borderRadius: RADIUS.md, opacity: exportingAuditId ? 0.65 : 1 }}
+                        onPress={() => handleExportAuditPdf(audit)}
+                        disabled={Boolean(exportingAuditId)}
                         activeOpacity={0.8}
                       >
-                        <Ionicons name="download-outline" size={14} color={COLORS.primary} />
-                        <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.primary }}>{t('export_pdf_btn', 'Export PDF')}</Text>
+                        {exportingAuditId === (audit.reportId || audit.id || audit.periodKey || audit.period || audit.month || 'report') ? (
+                          <ActivityIndicator size="small" color={COLORS.primary} />
+                        ) : (
+                          <Ionicons name="download-outline" size={14} color={COLORS.primary} />
+                        )}
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.primary }}>
+                          {exportingAuditId === (audit.reportId || audit.id || audit.periodKey || audit.period || audit.month || 'report')
+                            ? 'Preparing PDF...'
+                            : t('export_pdf_btn', 'Export PDF')}
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -8516,6 +8832,27 @@ const s = StyleSheet.create({
 
   // Receipt Card Layout (Senior Accessible)
   receiptCard: { backgroundColor: '#fff', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOW.card },
+  sraSummaryCard: { marginBottom: SPACING.md, padding: 14, borderRadius: RADIUS.lg },
+  sraSummaryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
+  sraSummaryHeading: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sraSummaryIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.primaryBg },
+  sraSummaryTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 },
+  sraSummarySubtitle: { fontSize: 11.5, color: COLORS.textMuted, fontWeight: '600', marginTop: 1 },
+  sraAnalyticsButton: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#F5FAF2', borderWidth: 1, borderColor: '#CFE3C7', paddingHorizontal: 10, paddingVertical: 8, borderRadius: RADIUS.md, minHeight: 38 },
+  sraAnalyticsButtonText: { fontSize: 12, fontWeight: '800', color: COLORS.primary },
+  sraSummaryContent: { gap: 10 },
+  sraPrimaryMetric: { backgroundColor: '#F4F8F1', borderRadius: RADIUS.lg, borderWidth: 1, borderColor: '#DEE9D9', paddingHorizontal: 14, paddingVertical: 13 },
+  sraMetricLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sraMetricLabel: { fontSize: 10.5, fontWeight: '800', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.35 },
+  sraPrimaryMetricValue: { fontSize: 24, fontWeight: '900', color: COLORS.primaryDark, letterSpacing: -0.4, marginTop: 5 },
+  sraPrimaryMetricHint: { fontSize: 10.5, color: COLORS.textMuted, marginTop: 2 },
+  sraSupportingMetrics: { flexDirection: 'row', gap: 10 },
+  sraSupportingMetric: { flex: 1, minWidth: 0, backgroundColor: '#FAFCF8', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E7EEE3', paddingHorizontal: 12, paddingVertical: 11 },
+  sraSupportingMetricValue: { fontSize: 18, fontWeight: '900', color: COLORS.text, marginTop: 5 },
+  sraMetricUnit: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+  sraContextWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingTop: 1 },
+  sraContextChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#F8FAF6', borderRadius: RADIUS.full, borderWidth: 1, borderColor: '#E5EDE1', paddingHorizontal: 9, paddingVertical: 6 },
+  sraContextText: { fontSize: 11.5, fontWeight: '700', color: COLORS.textSecondary },
   // Search & Filter
   logSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 4 },
   logSearchInput: { flex: 1, fontSize: 13.5, color: COLORS.text, padding: 0 },

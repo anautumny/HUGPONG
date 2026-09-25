@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, LifeBuoy, Clock, ChevronDown, ChevronUp, User, MapPin, Wrench, Send } from 'lucide-react';
+import { Search, LifeBuoy, Clock, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, MapPin, Wrench, Send } from 'lucide-react';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Button from '../ui/Button';

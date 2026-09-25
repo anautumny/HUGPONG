@@ -149,7 +149,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       const current = existingUser.data();
       const actorId = String(req.session.user.employeeId || '').trim();
       if (current.status === 'ACTIVE' && current.approvedByUserId === actorId && canonicalRole(current.role) === role) {
-        return res.json({ success: true, replayed: true, data: publicUser(current, userId) });
+        return res.json({ success: true, replayed: true, accountId: userId, data: publicUser(current, userId) });
       }
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
@@ -168,7 +168,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         approvedAt: approved.approvedAt,
         updatedAt: approved.updatedAt
       });
-      return res.json({ success: true, data: publicUser(approved, userId) });
+      return res.json({ success: true, accountId: userId, data: publicUser(approved, userId) });
     }
     if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
     const phone = requiredString(req.body.phone, 'phone', { max: 20 }).replace(/\D/g, '');
@@ -207,7 +207,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       updatedAt: now
     });
     await batch.commit();
-    return res.status(201).json({ success: true, data: publicUser(payload, userId) });
+    return res.status(201).json({ success: true, accountId: userId, data: publicUser(payload, userId) });
   } catch (error) {
     const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
     return res.status(status).json({ success: false, error: error.message });

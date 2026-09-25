@@ -1,9 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { Search, Users } from 'lucide-react';
 import Input from '../ui/Input';
-import { formatActivity, formatPhilippineTime, syncStatusPresentation } from '../../services/telemetryService';
+import { activityAttentionPresentation, formatActivity, formatPhilippineTime, syncStatusPresentation } from '../../services/telemetryService';
 
-export default function SyncTelemetryTable({ subjects = [], isLoading = false }) {
+export default function SyncTelemetryTable({
+  subjects = [],
+  isLoading = false,
+  title = 'Member Synchronization',
+  description = 'Counts are the latest centrally reported device state, not a live inspection of an offline phone.',
+  emptyTitle = 'No assigned members found',
+  searchPlaceholder = 'Search members...',
+  showIcons = true,
+  statusMode = 'sync'
+}) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -14,11 +23,11 @@ export default function SyncTelemetryTable({ subjects = [], isLoading = false })
     <section className="rounded-2xl border border-border bg-white dark:bg-surface shadow-xs overflow-hidden">
       <div className="p-4 sm:p-5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="font-black text-hug-text">Member Synchronization</h2>
-          <p className="text-xs text-hug-muted mt-0.5">Counts are the latest centrally reported device state, not a live inspection of an offline phone.</p>
+          <h2 className="font-black text-hug-text">{title}</h2>
+          <p className="text-xs text-hug-muted mt-0.5">{description}</p>
         </div>
         <div className="w-full sm:w-64">
-          <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search members..." icon={Search} />
+          <Input value={search} onChange={event => setSearch(event.target.value)} placeholder={searchPlaceholder} icon={showIcons ? Search : undefined} />
         </div>
       </div>
 
@@ -27,11 +36,13 @@ export default function SyncTelemetryTable({ subjects = [], isLoading = false })
           <div key={index} className="h-24 animate-pulse bg-bg/40" />
         )) : filtered.length === 0 ? (
           <div className="py-12 text-center text-hug-muted">
-            <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm font-bold text-hug-text">No assigned members found</p>
+            {showIcons && <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />}
+            <p className="text-sm font-bold text-hug-text">{emptyTitle}</p>
           </div>
         ) : filtered.map(subject => {
-          const status = syncStatusPresentation(subject.sync?.state, subject.sync?.pendingMutationCount, subject.sync?.failedMutationCount);
+          const status = statusMode === 'activity'
+            ? activityAttentionPresentation(subject.activity)
+            : syncStatusPresentation(subject.sync?.state, subject.sync?.pendingMutationCount, subject.sync?.failedMutationCount);
           const tone = {
             success: 'text-success bg-success-bg',
             warning: 'text-amber-700 bg-amber-50',

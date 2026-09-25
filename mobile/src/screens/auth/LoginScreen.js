@@ -21,6 +21,7 @@ import {
 } from '../../services/networkService';
 import { API_UNAVAILABLE_MESSAGE } from '../../config/apiConfig';
 import CirclingRetryButton from '../../components/CirclingRetryButton';
+import LegalPolicyModal from '../../components/LegalPolicyModal';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
@@ -35,6 +36,7 @@ export default function LoginScreen({ navigation, route }) {
   const [deviceOnline, setDeviceOnline] = useState(isOnline());
   const [connectivityStatus, setConnectivityStatus] = useState(getConnectivityDetails().status);
   const [showOfflineGateModal, setShowOfflineGateModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
 
   // Security: Brute-Force Rate Limiting & Account Lockout
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -440,7 +442,7 @@ export default function LoginScreen({ navigation, route }) {
 
             <View style={s.securityNotice}>
               <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.primary} />
-              <Text style={s.securityNoticeText}>Encrypted &amp; SRA Certified Agricultural Gateway</Text>
+              <Text style={s.securityNoticeText}>Authenticated HUGPONG session</Text>
             </View>
 
           </View>
@@ -454,12 +456,17 @@ export default function LoginScreen({ navigation, route }) {
           </View>
 
           {/* Legal Compliance Footer Notice */}
-          <View style={s.legalNoticeRow}>
+          <TouchableOpacity
+            style={s.legalNoticeRow}
+            onPress={() => setShowLegalModal(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open privacy, terms, and compliance information"
+          >
             <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
             <Text style={s.legalNoticeText}>
-              Protected under Republic Act No. 10173 (Data Privacy Act of 2012)
+              Privacy, Terms &amp; Compliance
             </Text>
-          </View>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -742,6 +749,7 @@ export default function LoginScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
+      <LegalPolicyModal visible={showLegalModal} onClose={() => setShowLegalModal(false)} />
     </SafeAreaView>
   );
 }

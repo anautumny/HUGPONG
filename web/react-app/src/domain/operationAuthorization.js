@@ -37,6 +37,7 @@ export function getOperationCapabilities(user, field, takeoverSession = null, no
     canEdit: directOwner || takeover,
     canSubmit: directOwner || takeover,
     canDraft: directOwner,
+    canPlan: directOwner,
     requiresTakeover: manager && !ownField && !takeover,
     submissionSource: manager ? (ownField ? 'FIELD_OWNER' : (takeover ? 'MANAGER_TAKEOVER' : '')) : (directOwner ? 'MEMBER' : '')
   };

@@ -21,7 +21,7 @@ const emptyDashboard = () => ({
   prices: [], currentPrice: null, previousPrice: null,
   fields: [], scopedFields: [], blockFarms: [], assignedBlockFarm: null,
   operations: [], recentOperations: [], cropCycles: [],
-  supportTickets: [], auditReports: [], terminalDiagnostics: []
+  supportTickets: [], auditReports: [], terminalDiagnostics: [], activityMonitoringError: null
 });
 
 function terminalDiagnostic(data) {
@@ -73,9 +73,11 @@ async function readRecentOperations(force) {
 export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
   return subscribeToAuthenticatedLoader(async ({ force }) => {
     if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-      const [ticketsResult, diagnosticsResult] = await Promise.all([
+      const [ticketsResult, diagnosticsResult, telemetryResult] = await Promise.all([
         dashboardRead('Support tickets', '/api/tickets', force),
+        dashboardRead('System diagnostics', '/api/system-diagnostics', force).catch(() => ({ data: {} })),
         dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
+          .catch(() => ({ data: { subjects: [] } }))
       ]);
       return {
         ...emptyDashboard(),
@@ -83,15 +85,14 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
           (ticketsResult.data || []).map(ticket => fromTicket(ticket.id, ticket)),
           ['createdAt']
         ),
-        terminalDiagnostics: sortNewestFirst(
-          (diagnosticsResult.data || []).map(terminalDiagnostic),
-          ['updatedAt']
-        )
+        terminalDiagnostics: telemetryResult.data?.subjects || [],
+        systemDiagnostics: diagnosticsResult.data || {}
       };
     }
 
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
-    const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult] = await Promise.all([
+    const includeActivityMonitoring = roleKey === ROLE_KEYS.FARM_MANAGER;
+    const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult] = await Promise.all([
       dashboardRead('Official prices', '/api/prices', force),
       dashboardRead('Fields', '/api/fields', force),
       dashboardRead('Block farms', '/api/block-farms', force),
@@ -99,7 +100,12 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       readRecentOperations(force),
       includeAudits
         ? dashboardRead('Audit reports', '/api/audit-reports', force)
-        : Promise.resolve({ data: [] })
+        : Promise.resolve({ data: [] }),
+      includeActivityMonitoring
+        ? dashboardRead('Member activity', '/api/terminal-diagnostics', force)
+          .then(result => ({ result, error: null }))
+          .catch(error => ({ result: { data: { subjects: [] } }, error: error.message }))
+        : Promise.resolve({ result: { data: { subjects: [] } }, error: null })
     ]);
 
     const prices = sortNewestFirst(
@@ -135,7 +141,9 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       cropCycles: sortCropYearsNewestFirst(cyclesResult.data || []),
       operations,
       recentOperations: operations.slice(0, 5),
-      auditReports
+      auditReports,
+      terminalDiagnostics: activityResult.result.data?.subjects || [],
+      activityMonitoringError: activityResult.error
     };
   }, {
     onData: data => onUpdate({ ...data, isLoading: false, error: null }),
@@ -144,6 +152,8 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
     },
     resources: roleKey === ROLE_KEYS.SUPER_ADMIN
       ? ['tickets', 'terminal-diagnostics']
-      : ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports']
+      : roleKey === ROLE_KEYS.FARM_MANAGER
+        ? ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'terminal-diagnostics']
+        : ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports']
   });
 }

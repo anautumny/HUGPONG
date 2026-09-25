@@ -182,7 +182,6 @@ export const toField = value => {
     blockFarmId,
     memberUserId: value.memberUserId || value.memberId || null,
     areaHa: Number(value.areaHa ?? value.ha ?? 0),
-    soilType: String(value.soilType || '').trim(),
     currentCycleId,
     status,
     customStages: Array.isArray(value.customStages) ? value.customStages : [],
@@ -195,9 +194,10 @@ export const toField = value => {
 
 export const fromField = (id, value, cycle) => {
   const stageNumber = Number(cycle?.currentStageNumber);
+  const { soilType: _removedSoilType, ...fieldValue } = value;
   return {
     id,
-    ...value,
+    ...fieldValue,
     memberId: value.memberUserId || '',
     memberName: value.memberName || value.member || value.memberUserId || '',
     member: value.memberName || value.member || value.memberUserId || '',

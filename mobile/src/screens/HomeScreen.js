@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
+import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, cropCycles, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
 import OfflineBanner from '../components/OfflineBanner';
@@ -21,10 +21,10 @@ import { getItem, saveItem, STORAGE_KEYS } from '../services/storageService';
 import { safeAlert } from '../utils/dialogs';
 import { sortNewestFirst } from '../utils/dataHelpers';
 
-// Role-Specific Modular Views
 import MemberHomeView from './member/MemberHomeView';
 import ManagerHomeView from './manager/ManagerHomeView';
 import SRAHomeView from './sra/SRAHomeView';
+import PublishPriceModal from '../components/PublishPriceModal';
 
 const { width } = Dimensions.get('window');
 const BAR_COLORS = ['#B8D4A0', '#8FBF6A', '#6BA045', '#4A7C2F', '#2D5016'];
@@ -88,7 +88,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'trending-up',
         color: '#267326',
         title: 'New SRA Price Circular Broadcast',
-        msg: `HPCo Silay benchmark: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
+        msg: `HPCo Silay: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
         time: latest.effectiveDate,
         createdAt: latest.effectiveDate,
         unread: !readIds.has(priceNotifId),
@@ -145,12 +145,6 @@ export default function HomeScreen({ navigation }) {
   const { livePrice, liveMol, liveDate, liveChange, liveWeek } = priceData;
 
   const [showPriceModal, setShowPriceModal] = useState(false);
-  const [inputWeek, setInputWeek] = useState(() => calculateSRAWeekLabel(new Date()));
-  const [inputEffectiveDate, setInputEffectiveDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [inputBag, setInputBag] = useState(() => currentPrice.value ? String(currentPrice.value) : '');
-  const [inputMol, setInputMol] = useState(() => currentMarketObservation.value ? String(currentMarketObservation.value) : '');
-  const [inputCircular, setInputCircular] = useState('');
-  const [isPostingPrice, setIsPostingPrice] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
@@ -329,13 +323,6 @@ export default function HomeScreen({ navigation }) {
         Alert.alert('Offline Mode', 'You are currently offline. Please connect to the internet to broadcast official SRA weekly benchmark circulars.');
         return;
       }
-      const today = new Date().toISOString().split('T')[0];
-      const autoWeek = calculateSRAWeekLabel(today);
-      setInputBag(livePrice == null ? '' : String(livePrice));
-      setInputMol(liveMol == null ? '' : String(liveMol));
-      setInputWeek(autoWeek);
-      setInputEffectiveDate(today);
-      setInputCircular('');
       setShowPriceModal(true);
     }
   };
@@ -704,6 +691,7 @@ export default function HomeScreen({ navigation }) {
           <ManagerHomeView
             session={session}
             fields={fields}
+            cropCycles={cropCycles}
             blockFarms={blockFarms}
             navigation={navigation}
             onManualSync={handleManualSync}
@@ -721,237 +709,24 @@ export default function HomeScreen({ navigation }) {
 
       </ScrollView>
 
-      {/* ── SRA Price Edit Modal (Web Aligned) ── */}
-      <Modal visible={showPriceModal} transparent animationType="fade">
-        <View style={s.modalOverlay}>
-          <View style={s.modalCard}>
-            {/* Header with Regulatory Badge */}
-            <View style={s.modalHeader}>
-              <View style={{ flex: 1, paddingRight: 8 }}>
-                <View style={s.modalBadge}>
-                  <Text style={s.modalBadgeText}>{t('sra_publish_badge', 'SRA REGULATORY BROADCAST')}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <Ionicons name="trending-up" size={18} color={COLORS.primary} />
-                  <Text style={s.modalTitle}>Post Official SRA Price</Text>
-                </View>
-                <Text style={s.modalSub}>
-                  {t('sra_publish_sub', 'Publish official SRA circular price records to synchronize all block farms & mobile apps.')}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowPriceModal(false)} style={{ padding: 4 }} disabled={isPostingPrice}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 4 }}>
-              {/* Row: Week Label (Auto-detected) & Effective Date */}
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={[s.inputLabel, { marginTop: 0, marginBottom: 0 }]}>
-                      {t('sra_circ_week', 'Week Label')} <Text style={{ color: COLORS.danger }}>*</Text>
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#EBF3E8', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '700', color: COLORS.primary }}>Auto</Text>
-                    </View>
-                  </View>
-                  <TextInput
-                    style={s.input}
-                    value={inputWeek}
-                    onChangeText={setInputWeek}
-                    editable={!isPostingPrice}
-                    placeholder="e.g. Week 1 Sep"
-                  />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.inputLabel, { marginTop: 0, marginBottom: 4 }]}>
-                    {t('sra_effective_date', 'Effective Date')} <Text style={{ color: COLORS.danger }}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={s.input}
-                    value={inputEffectiveDate}
-                    onChangeText={(val) => {
-                      setInputEffectiveDate(val);
-                      if (val && val.length >= 8) {
-                        setInputWeek(calculateSRAWeekLabel(val));
-                      }
-                    }}
-                    editable={!isPostingPrice}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </View>
-              </View>
-
-              {/* Side-by-Side: Raw Sugar & Molasses */}
-              <View style={s.priceBoxContainer}>
-                {/* Raw Sugar */}
-                <View style={s.priceBoxItem}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>{t('sra_raw_sugar_price', 'Raw Sugar Price')}</Text>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.primary }}>₱ / Lkg</Text>
-                  </View>
-                  <View style={s.priceInputWrap}>
-                    <Text style={s.currencySymbol}>₱</Text>
-                    <TextInput
-                      style={s.priceInput}
-                      value={inputBag}
-                      onChangeText={setInputBag}
-                      editable={!isPostingPrice}
-                      keyboardType="numeric"
-                      placeholder={currentPrice.value ? String(currentPrice.value) : 'No prior price'}
-                    />
-                  </View>
-                  {(() => {
-                    const b = parseFloat(inputBag);
-                    const prev = currentPrice.value;
-                    if (!Number.isFinite(b)) return <Text style={s.priceDeltaText}>Enter an official price</Text>;
-                    if (prev == null) return <Text style={s.priceDeltaText}>No prior benchmark</Text>;
-                    const diff = b - prev;
-                    return (
-                      <Text style={s.priceDeltaText}>
-                        {diff === 0 ? 'Steady (₱0 / Lkg)' : `${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} / Lkg`}
-                      </Text>
-                    );
-                  })()}
-                </View>
-
-                {/* Molasses */}
-                <View style={s.priceBoxItem}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>Industrial Molasses Price</Text>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.success }}>₱ / MT</Text>
-                  </View>
-                  <View style={s.priceInputWrap}>
-                    <Text style={s.currencySymbol}>₱</Text>
-                    <TextInput
-                      style={s.priceInput}
-                      value={inputMol}
-                      onChangeText={setInputMol}
-                      editable={!isPostingPrice}
-                      keyboardType="numeric"
-                      placeholder={currentMarketObservation.value ? String(currentMarketObservation.value) : 'No prior price'}
-                    />
-                  </View>
-                  {(() => {
-                    const m = parseFloat(inputMol);
-                    const prevM = currentMarketObservation.value;
-                    if (!Number.isFinite(m)) return <Text style={s.priceDeltaText}>Enter an official price</Text>;
-                    if (prevM == null) return <Text style={s.priceDeltaText}>No prior benchmark</Text>;
-                    const diffM = m - prevM;
-                    return (
-                      <Text style={s.priceDeltaText}>
-                        {diffM === 0 ? 'Steady (₱0 / MT)' : `${diffM > 0 ? '+' : ''}₱${diffM.toLocaleString()} / MT`}
-                      </Text>
-                    );
-                  })()}
-                </View>
-              </View>
-
-              {/* Official Source / Circular Reference */}
-              <Text style={s.inputLabel}>
-                {t('sra_circ_source', 'Official Source / Circular Reference')} <Text style={{ color: COLORS.danger }}>*</Text>
-              </Text>
-              <TextInput
-                style={s.input}
-                value={inputCircular}
-                onChangeText={setInputCircular}
-                editable={!isPostingPrice}
-                placeholder="e.g. SRA Circular #105 (Official SRA Millsite Notice)"
-              />
-
-              {/* Informational Sync Banner */}
-              <View style={s.noticeBox}>
-                <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={{ marginTop: 1 }} />
-                <Text style={s.noticeText}>
-                  {t('sra_publish_notice', 'Publishing updates the live SRA official price ledger, syncs with Firestore cloud instantly, and updates all mobile app price cards in real time.')}
-                </Text>
-              </View>
-            </ScrollView>
-
-            {/* Action Buttons: Cancel + Publish Weekly Price */}
-            <View style={s.modalActionRow}>
-              <TouchableOpacity
-                onPress={() => setShowPriceModal(false)}
-                style={s.cancelBtn}
-                disabled={isPostingPrice}
-              >
-                <Text style={s.cancelBtnText}>{t('btn_cancel', 'Cancel')}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[s.publishBtn, isPostingPrice && { opacity: 0.6 }]}
-                disabled={isPostingPrice}
-                onPress={() => {
-                  if (isPostingPrice) return;
-                  const b = parseFloat(inputBag);
-                  const m = parseFloat(inputMol);
-                  const parsedDate = new Date(`${inputEffectiveDate}T00:00:00.000Z`);
-                  const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(inputEffectiveDate)
-                    && !Number.isNaN(parsedDate.getTime())
-                    && parsedDate.toISOString().slice(0, 10) === inputEffectiveDate;
-                  if (!Number.isFinite(b) || b <= 0 || !Number.isFinite(m) || m <= 0 || !inputWeek.trim() || !inputCircular.trim() || !canonicalDate) {
-                    Alert.alert(t('error_title', 'Error'), 'Enter both prices, a week label, an official circular/source, and an effective date in YYYY-MM-DD format.');
-                    return;
-                  }
-
-                  Alert.alert(
-                    'Publish SRA Sugar & Molasses Price?',
-                    `You are about to broadcast the official SRA Circular prices for ${inputWeek || 'Current Week'} (Effective: ${inputEffectiveDate}):\n\n• Raw Sugar: ₱${b.toLocaleString()}/Lkg\n• Molasses: ₱${m.toLocaleString()}/MT\n\nThis will update market benchmarks across all cooperative dashboards and mobile applications.`,
-                    [
-                      { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-                      {
-                        text: 'Publish Official Circular',
-                        onPress: async () => {
-                          if (isPostingPrice) return;
-                          setIsPostingPrice(true);
-                          try {
-                            const newPost = await publishSraPrice({
-                              sugarPricePerLkg: b,
-                              molassesPricePerMetricTon: m,
-                              weekLabel: inputWeek.trim(),
-                              circularNumber: inputCircular.trim(),
-                              source: inputCircular.trim(),
-                              effectiveDate: inputEffectiveDate
-                            });
-
-                            setPriceData({
-                              livePrice: b,
-                              liveMol: m,
-                              liveWeek: newPost.weekLabel,
-                              liveDate: newPost.effectiveDate,
-                              liveChange: b - (currentPrice.value || b)
-                            });
-
-                            setShowPriceModal(false);
-                            Alert.alert(
-                              'Official SRA price posted successfully.',
-                              `Official SRA benchmark for ${inputWeek || 'Current Week'} was posted and broadcast to all dashboards and price-monitoring areas.`
-                            );
-                          } catch (err) {
-                            console.warn('[HomeScreen] Error posting price:', err);
-                            Alert.alert('Unable to post official price', err.message || 'Could not broadcast price update.');
-                          } finally {
-                            setIsPostingPrice(false);
-                          }
-                        }
-                      }
-                    ]
-                  );
-                }}
-              >
-                {isPostingPrice ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
-                )}
-                <Text style={s.publishBtnText}>{isPostingPrice ? 'Posting official price...' : 'Post Official SRA Price'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* ── Post Official SRA Price Modal (Web Parity) ── */}
+      <PublishPriceModal
+        visible={showPriceModal}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={{
+          sugarPricePerLkg: livePrice || currentPrice?.value,
+          molassesPricePerMetricTon: liveMol || currentMarketObservation?.value
+        }}
+        onPublished={(newPost) => {
+          setPriceData({
+            livePrice: newPost.sugarPricePerLkg,
+            liveMol: newPost.molassesPricePerMetricTon,
+            liveWeek: newPost.weekLabel,
+            liveDate: newPost.effectiveDate,
+            liveChange: newPost.sugarPriceChange || (newPost.sugarPricePerLkg - (livePrice || currentPrice?.value || newPost.sugarPricePerLkg))
+          });
+        }}
+      />
 
       {/* ── Notifications Modal (Full Screen) ── */}
       <Modal visible={showNotifs} animationType="slide" onRequestClose={closeNotifs}>

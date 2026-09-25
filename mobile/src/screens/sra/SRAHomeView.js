@@ -33,7 +33,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
         ha: totalHa,
         totalHa,
         totalFarmHa: totalHa,
-        status: resolvedMgr === 'Pending Appointment' ? 'Pending Manager' : 'SRA Verified ✓'
+        status: resolvedMgr === 'Pending Appointment' ? 'Pending Manager' : null
       };
     });
   }, [safeFields, safeBlockFarms]);
@@ -57,34 +57,18 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 
       {/* ── District Summary Card (matches Manager style) ── */}
       <View style={s.summaryCard}>
-        <View style={s.summaryHeader}>
-          <View>
-            <Text style={s.districtName}>{t('district_name_title', 'District 3 · Silay')}</Text>
-            <Text style={s.adminTag}>{t('profile_admin_role', 'SRA Admin')}: {session?.name || 'SRA Admin'}</Text>
-          </View>
-          <View style={s.totalBadge}>
-            <Ionicons name="leaf" size={13} color={COLORS.primary} style={{ marginRight: 5 }} />
-            <Text style={s.totalHa}>{totalDistrictHa.toFixed(2)} Ha</Text>
-          </View>
-        </View>
-
-        <View style={s.quickStatsRow}>
-          <View style={s.statBox}>
-            <Text style={s.statNumber}>{blockFarmsList.length}</Text>
-            <Text style={s.statLabel}>{t('block_farms_count_lbl', 'Block Farms')}</Text>
-          </View>
-          <TouchableOpacity
-            style={s.statBox}
+        <Text style={s.eyebrow}>SRA REGULATORY WORKSPACE</Text>
+        <Text style={s.districtName}>{t('district_name_title', 'District 3 · Silay')}</Text>
+        <Text style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || 'SRA Admin'}</Text>
+        <View style={s.metrics}>
+          <Metric value={blockFarmsList.length} label={t('block_farms_count_lbl', 'Block Farms')} />
+          <Metric
+            value={totalPlots}
+            label={t('registered_plots_lbl', 'Registered Plots')}
             onPress={() => navigation.navigate('Field Ops')}
-            activeOpacity={0.7}
-          >
-            <Text style={[s.statNumber, { color: COLORS.primary }]}>{totalPlots}</Text>
-            <Text style={s.statLabel}>{t('registered_plots_lbl', 'Registered Plots')}</Text>
-          </TouchableOpacity>
-          <View style={s.statBox}>
-            <Text style={[s.statNumber, { color: complianceRate >= 80 ? COLORS.success : '#D97706' }]}>{complianceRate}%</Text>
-            <Text style={s.statLabel}>{t('compliance_lbl', 'Compliance')}</Text>
-          </View>
+          />
+          <Metric value={`${totalDistrictHa.toFixed(2)} Ha`} label={t('district_area_lbl', 'District Area')} />
+          <Metric value={`${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
         </View>
       </View>
 
@@ -110,9 +94,11 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             <View style={{ flex: 1 }}>
               <View style={s.plotTopRow}>
                 <Text style={s.plotName}>{farm.name}</Text>
-                <View style={s.statusBadge}>
-                  <Text style={s.statusText}>{farm.status}</Text>
-                </View>
+                {farm.status && (
+                  <View style={s.statusBadge}>
+                    <Text style={s.statusText}>{farm.status}</Text>
+                  </View>
+                )}
               </View>
               <Text style={s.plotManager}>{t('manager_label', 'Manager')}: {farm.manager}</Text>
               <Text style={s.plotMeta}>{farm.plots} {t('member_plots_count', 'Farm Member Fields')} · New Plant: {farm.ha} Ha · Total: {farm.totalFarmHa} Ha</Text>
@@ -122,17 +108,29 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
         ))}
       </View>
 
-      {/* ── Compliance Notice ── */}
-      <View style={s.complianceCard}>
-        <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
-        <View style={{ flex: 1 }}>
-          <Text style={s.complianceTitle}>{t('official_sra_desk', 'Official SRA Compliance Desk')}</Text>
-          <Text style={s.complianceBody}>
-            {t('sra_compliance_desk_body', 'Audit field operations, issue verified QR compliance certificates, and monitor district price benchmarks.')}
-          </Text>
-        </View>
-      </View>
+    </View>
+  );
+}
 
+function Metric({ value, label, onPress }) {
+  const content = (
+    <>
+      <Text style={s.metricValue}>{value}</Text>
+      <Text style={s.metricLabel} numberOfLines={2}>{label}</Text>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity style={s.metric} onPress={onPress} activeOpacity={0.7}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={s.metric}>
+      {content}
     </View>
   );
 }
@@ -142,46 +140,58 @@ const s = StyleSheet.create({
 
   // ── Summary Card ──
   summaryCard: {
-    backgroundColor: '#FFF',
-    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.xl,
     padding: SPACING.lg,
-    borderWidth: 1.2,
-    borderColor: '#E2EBDC',
     marginBottom: SPACING.md,
-    ...SHADOW.card,
+    ...SHADOW.sm,
   },
-  summaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.md,
+  eyebrow: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: COLORS.primary,
   },
-  districtName:  { fontSize: 18, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 },
-  adminTag:      { fontSize: 13, color: COLORS.textMuted, marginTop: 3 },
-  totalBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F8EC',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: RADIUS.full,
-    borderWidth: 1,
-    borderColor: '#C8E6C9',
+  districtName: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: COLORS.text,
+    marginTop: 4,
   },
-  totalHa:    { fontSize: 14.5, fontWeight: '900', color: COLORS.primary },
-
-  quickStatsRow: {
+  adminName: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 3,
+  },
+  metrics: {
     flexDirection: 'row',
-    backgroundColor: '#F7FAF5',
-    borderRadius: RADIUS.lg,
-    padding: SPACING.sm + 2,
     gap: 8,
-    borderWidth: 1,
-    borderColor: '#E5EDE0',
+    marginTop: 16,
   },
-  statBox:    { flex: 1, alignItems: 'center', paddingVertical: 4 },
-  statNumber: { fontSize: 20, fontWeight: '900', color: COLORS.text },
-  statLabel:  { fontSize: 11, color: COLORS.textMuted, fontWeight: '700', marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.3 },
+  metric: {
+    flex: 1,
+    minHeight: 74,
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  metricLabel: {
+    fontSize: 9.5,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    textAlign: 'center',
+  },
 
   // ── Section Header ──
   sectionHeader: {
@@ -213,20 +223,6 @@ const s = StyleSheet.create({
   statusText:   { fontSize: 11.5, fontWeight: '900', color: COLORS.primary },
   plotManager:  { fontSize: 13, color: COLORS.textSecondary, marginTop: 2, fontWeight: '700' },
   plotMeta:     { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
-
-  // ── Compliance Banner ──
-  complianceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
-    backgroundColor: '#F0F8EC',
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md + 2,
-    borderWidth: 1.2,
-    borderColor: '#C2E0B4',
-  },
-  complianceTitle: { fontSize: 14.5, fontWeight: '900', color: COLORS.primary },
-  complianceBody:  { fontSize: 12.5, color: COLORS.textSecondary, marginTop: 3, lineHeight: 18 },
 });
 
 export default React.memo(SRAHomeView);

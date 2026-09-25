@@ -13,10 +13,10 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../services/i18n';
 
 import AdminOfflineBarrier from '../components/AdminOfflineBarrier';
+import CustomBottomTabBar from '../components/CustomBottomTabBar';
 import {
   subscribeToNetwork,
   getNetworkStatus,
@@ -39,12 +39,6 @@ const getProfileScreen = () => require('../screens/ProfileScreen').default;
 const getSecurityScreen = () => require('../screens/SecurityScreen').default;
 const getSyncMonitorScreen = () => require('../screens/SyncMonitorScreen').default;
 
-const TAB_ICONS = {
-  Home: { active: 'home', inactive: 'home-outline' },
-  Planner: { active: 'construct', inactive: 'construct-outline' },
-  'Field Ops': { active: 'book', inactive: 'book-outline' },
-  Profile: { active: 'person', inactive: 'person-outline' },
-};
 
 function HomeNavigator() {
   return (
@@ -153,8 +147,6 @@ function MainTabs({ navigation }) {
   const hasShownOfflineNoticeRef = React.useRef(false);
   const adminOfflineLogoutRef = React.useRef(false);
   const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
-  const bottomInset = insets.bottom > 0 ? Math.min(insets.bottom, 16) : 0;
 
   React.useEffect(() => {
     const unsubSession = subscribe(() => {
@@ -206,56 +198,6 @@ function MainTabs({ navigation }) {
     }
   };
 
-  const screenOptions = React.useCallback(({ route }) => {
-    const isTabDisabled = !isOnline && (route.name === 'Home' || route.name === 'Profile');
-    const cfg = TAB_ICONS[route.name];
-
-    return {
-      headerShown: false,
-      tabBarShowLabel: false,
-      tabBarActiveTintColor: COLORS.primary,
-      tabBarInactiveTintColor: isTabDisabled ? '#A8B3A2' : COLORS.textMuted,
-      tabBarStyle: {
-        backgroundColor: COLORS.surface,
-        borderTopColor: COLORS.border,
-        borderTopWidth: 1,
-        height: 52 + bottomInset,
-        paddingTop: 4,
-        paddingBottom: bottomInset > 0 ? bottomInset : 4,
-        ...SHADOW.float,
-      },
-      tabBarItemStyle: {
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: 44,
-        opacity: isTabDisabled ? 0.35 : 1,
-      },
-      tabBarIcon: ({ focused }) => {
-        const activeColor = isTabDisabled ? '#A8B3A2' : COLORS.primary;
-        const inactiveColor = isTabDisabled ? '#A8B3A2' : COLORS.textMuted;
-        const iconColor = focused && !isTabDisabled ? activeColor : inactiveColor;
-        const iconName = focused && !isTabDisabled ? cfg.active : cfg.inactive;
-
-        return (
-          <View style={{
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 44,
-            height: 28,
-            borderRadius: 14,
-            backgroundColor: focused && !isTabDisabled ? '#E2EED9' : 'transparent',
-          }}>
-            <Ionicons
-              name={iconName}
-              size={22}
-              color={iconColor}
-            />
-          </View>
-        );
-      },
-    };
-  }, [bottomInset, isOnline]);
-
   // Strict Offline Barrier for SRA Admin to protect audit integrity
   if (!isOnline && role === 'SRA Admin') {
     return (
@@ -271,7 +213,15 @@ function MainTabs({ navigation }) {
     <>
       <Tab.Navigator
         initialRouteName={!isOnline ? 'Field Ops' : 'Home'}
-        screenOptions={screenOptions}
+        tabBar={(props) => (
+          <CustomBottomTabBar
+            {...props}
+            isOnline={isOnline}
+          />
+        )}
+        screenOptions={{
+          headerShown: false,
+        }}
       >
         <Tab.Screen
           name="Home"

@@ -90,14 +90,6 @@ export default function FieldDetailModal({
             </span>
           </div>
 
-          <div>
-            <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider block">
-              Soil Type
-            </span>
-            <span className="text-xs sm:text-sm font-bold text-hug-text mt-1 block truncate">
-              {field.soilType || 'Clay Loam'}
-            </span>
-          </div>
         </div>
 
         {cropCycles.length > 0 && (

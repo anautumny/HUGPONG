@@ -213,13 +213,17 @@ test('Field Ops initializes local logs before evaluating hook dependencies that 
   assert.match(fieldOps, /useState\(\(\) => Array\.isArray\(operationLogs\) \? \[\.\.\.operationLogs\] : \[\]\)/);
 });
 
-test('Android QR scanner uses the native device scanner and tightly cropped image decoding', () => {
+test('Android QR scanner keeps overlays outside the live preview and supports native and image fallbacks', () => {
   assert.match(liveQrScanner, /CameraView, scanFromURLAsync, useCameraPermissions/);
   assert.match(liveQrScanner, /import \* as ImagePicker from 'expo-image-picker'/);
-  assert.match(liveQrScanner, /hardwareAccelerated/);
   assert.match(liveQrScanner, /CameraView\.launchScanner/);
   assert.match(liveQrScanner, /CameraView\.onModernBarcodeScanned/);
   assert.match(liveQrScanner, /CameraView\.isModernBarcodeScannerAvailable/);
+  assert.match(liveQrScanner, /onBarcodeScanned=/);
+  assert.match(liveQrScanner, /barcodeScannerSettings=\{\{ barcodeTypes: \['qr'\] \}\}/);
+  assert.match(liveQrScanner, /onCameraReady=/);
+  assert.match(liveQrScanner, /onMountError=/);
+  assert.match(liveQrScanner, /style=\{styles\.cameraPreview\}/);
   assert.match(liveQrScanner, /Allow Camera/);
   assert.match(liveQrScanner, /Upload QR Image/);
   assert.match(liveQrScanner, /launchImageLibraryAsync/);
@@ -227,7 +231,8 @@ test('Android QR scanner uses the native device scanner and tightly cropped imag
   assert.match(liveQrScanner, /aspect: \[1, 1\]/);
   assert.match(liveQrScanner, /scanFromURLAsync/);
   assert.match(liveQrScanner, /scanLocked/);
-  assert.doesNotMatch(liveQrScanner, /onCameraReady=|onMountError=|onBarcodeScanned=|StyleSheet\.absoluteFillObject|TextInput|showManualInput|Animated|scanLaser|cameraFrame/);
+  assert.doesNotMatch(liveQrScanner, /hardwareAccelerated|StyleSheet\.absoluteFillObject|scanGuide|TextInput|showManualInput|Animated|scanLaser/);
+  assert.doesNotMatch(fieldOps, /SRA District Agronomic Benchmark/);
 });
 
 test('SRA receive workflow separates real scanning from online transfer-code lookup', () => {

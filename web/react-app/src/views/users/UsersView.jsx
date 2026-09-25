@@ -6,6 +6,7 @@ import { subscribeToFieldsData } from '../../services/fieldsService';
 import UserTable from '../../components/users/UserTable';
 import PendingApprovalsQueue from '../../components/users/PendingApprovalsQueue';
 import UserFormModal from '../../components/users/UserFormModal';
+import AccountIdConfirmationModal from '../../components/users/AccountIdConfirmationModal';
 import Button from '../../components/ui/Button';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
@@ -30,6 +31,7 @@ export default function UsersView() {
   // Modal & Dialog States
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [selectedUserForEdit, setSelectedUserForEdit] = useState(null);
+  const [accountIdNotice, setAccountIdNotice] = useState(null);
 
   const [toggleConfirmTarget, setToggleConfirmTarget] = useState(null);
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
@@ -96,10 +98,18 @@ export default function UsersView() {
 
   // Handle Approve Pending User
   const handleApprovePending = async (pendingUser) => {
-    return approveOrProvisionUser({
+    const result = await approveOrProvisionUser({
       id: pendingUser.id,
       role: pendingUser.canonicalRole || 'MEMBER_FARMER'
     });
+    if (result.success) {
+      setAccountIdNotice({
+        ...pendingUser,
+        ...result.data,
+        accountId: result.accountId || result.data?.id || pendingUser.id
+      });
+    }
+    return result;
   };
 
   // Handle Reject Pending User
@@ -242,6 +252,12 @@ export default function UsersView() {
         onSaved={() => {
           // Firestore snapshot / API auto-refreshes state
         }}
+        onCreated={setAccountIdNotice}
+      />
+
+      <AccountIdConfirmationModal
+        account={accountIdNotice}
+        onAcknowledge={() => setAccountIdNotice(null)}
       />
 
       {/* Toggle Account Status Confirm Dialog */}

@@ -37,7 +37,6 @@ const TEST_BLOCK_FARM = Object.freeze({
 const TEST_FIELD = Object.freeze({
   id: 'DEV-FLD-001',
   areaHa: 1,
-  soilType: 'Loam',
   cropType: 'Sugarcane',
   cropYear: '2026-2027',
   currentStageNumber: 1,
@@ -143,7 +142,6 @@ async function ensureField(managerToken) {
     body: {
       id: TEST_FIELD.id,
       areaHa: TEST_FIELD.areaHa,
-      soilType: TEST_FIELD.soilType,
       cropType: TEST_FIELD.cropType,
       currentStageNumber: TEST_FIELD.currentStageNumber,
       elapsedMonths: TEST_FIELD.elapsedMonths,

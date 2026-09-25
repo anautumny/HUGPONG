@@ -147,6 +147,8 @@ test('Super Admin web navigation and routes are governance-only', () => {
   const sectionStart = sidebar.lastIndexOf("} else if (roleKey === ROLE_KEYS.SUPER_ADMIN)");
   const superSection = sidebar.slice(sectionStart, sidebar.indexOf('return sections;', sectionStart));
   assert.doesNotMatch(superSection, /nav-super-prices|nav-super-analytics|nav-farm-field-registry/);
+  assert.match(superSection, /label: 'System Sync Monitor'[\s\S]{0,120}id: 'nav-system-sync'/);
   assert.match(app, /AGRICULTURAL_ROLES = \[ROLE_KEYS\.FARM_MANAGER, ROLE_KEYS\.SRA_ADMIN\]/);
   assert.match(app, /GOVERNANCE_ROLES = \[ROLE_KEYS\.SUPER_ADMIN\]/);
+  assert.match(app, /SYNC_MONITOR_ROLES = \[ROLE_KEYS\.FARM_MANAGER, ROLE_KEYS\.SUPER_ADMIN\]/);
 });

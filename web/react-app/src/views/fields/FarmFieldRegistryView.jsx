@@ -701,28 +701,22 @@ export default function FarmFieldRegistryView() {
 
       {/* 3. Role-Aware Summary KPI Cards (Rules 5 & 6: Unified dark-green accent, no rainbow colors) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {summaryCards.map((card, idx) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={idx}
-              className="bg-surface border border-border/80 rounded-2xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between"
-            >
-              <div className="flex items-center justify-between text-hug-muted mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider">{card.label}</span>
-                <div className="w-8 h-8 rounded-xl bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light flex items-center justify-center shrink-0">
-                  <Icon className="w-4 h-4" />
-                </div>
-              </div>
-              <div>
-                <div className="text-xl sm:text-2xl font-black text-hug-text tracking-tight truncate">
-                  {card.value}
-                </div>
-                <p className="text-[11px] text-hug-muted mt-0.5 truncate">{card.subtext}</p>
-              </div>
+        {summaryCards.map((card, idx) => (
+          <div
+            key={idx}
+            className="bg-surface border border-border/80 rounded-2xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between"
+          >
+            <div className="text-hug-muted mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider">{card.label}</span>
             </div>
-          );
-        })}
+            <div>
+              <div className="text-xl sm:text-2xl font-black text-hug-text tracking-tight truncate">
+                {card.value}
+              </div>
+              <p className="text-[11px] text-hug-muted mt-0.5 truncate">{card.subtext}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* 4. Active View Content */}

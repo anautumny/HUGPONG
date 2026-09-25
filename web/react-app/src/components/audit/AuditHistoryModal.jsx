@@ -53,6 +53,7 @@ export default function AuditHistoryModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Audit History"
+      subtitle="Certified monthly audits. The newest 20 load first, load more only when needed."
       size="xl"
       footer={
         <Button variant="secondary" size="md" onClick={onClose}>
@@ -61,10 +62,6 @@ export default function AuditHistoryModal({
       }
     >
       <div className="flex flex-col gap-4 text-xs">
-        {/* Subtitle */}
-        <p className="text-xs text-hug-muted -mt-2">
-          Certified monthly audits. The newest 20 load first; load more only when needed.
-        </p>
 
         {/* Filters */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -110,7 +107,7 @@ export default function AuditHistoryModal({
         </div>
 
         {/* History List */}
-        <div className="border border-border rounded-xl overflow-hidden max-h-[420px] overflow-y-auto">
+        <div className="border border-border rounded-xl overflow-x-auto overflow-y-auto max-h-[420px]">
           {filteredReports.length === 0 ? (
             <div className="py-12 px-4 text-center text-hug-muted flex flex-col items-center gap-2">
               <History className="w-8 h-8 opacity-30" />
@@ -118,8 +115,8 @@ export default function AuditHistoryModal({
               <p className="text-[11px]">Adjust your filter or search query.</p>
             </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-bg dark:bg-[#0C1015] text-hug-muted uppercase text-[10px] font-bold border-b border-border sticky top-0 z-10">
+            <table className="w-full min-w-[700px] text-left text-xs border-collapse">
+              <thead className="bg-bg dark:bg-[#0C1015] text-hug-muted uppercase text-[10px] font-bold border-b border-border sticky top-0 z-10 whitespace-nowrap">
                 <tr>
                   <th className="px-3.5 py-2.5">Period</th>
                   <th className="px-3.5 py-2.5">Block Farm</th>
@@ -138,27 +135,27 @@ export default function AuditHistoryModal({
 
                   return (
                     <tr key={report.id || report.reportId} className="hover:bg-bg/40">
-                      <td className="px-3.5 py-2.5 font-bold font-mono">
+                      <td className="px-3.5 py-2.5 font-bold font-mono whitespace-nowrap">
                         {report.periodKey || report.period || report.month}
                       </td>
-                      <td className="px-3.5 py-2.5 font-semibold">
+                      <td className="px-3.5 py-2.5 font-semibold whitespace-nowrap">
                         {getFarmName(report.blockFarmId)}
                       </td>
-                      <td className="px-3.5 py-2.5 font-mono text-hug-muted">
+                      <td className="px-3.5 py-2.5 font-mono text-hug-muted whitespace-nowrap">
                         {report.qrHash || report.id}
                       </td>
-                      <td className="px-3.5 py-2.5 text-center font-mono">
+                      <td className="px-3.5 py-2.5 text-center font-mono whitespace-nowrap">
                         {logs.length || report.totalLogs || 0}
                       </td>
-                      <td className="px-3.5 py-2.5 text-right font-mono font-bold">
+                      <td className="px-3.5 py-2.5 text-right font-mono font-bold whitespace-nowrap">
                         ₱{cost.toLocaleString()}
                       </td>
-                      <td className="px-3.5 py-2.5 text-center">
+                      <td className="px-3.5 py-2.5 text-center whitespace-nowrap">
                         <Badge variant={isCert ? 'success' : 'warning'} size="sm">
                           {isCert ? 'Certified' : 'Pending'}
                         </Badge>
                       </td>
-                      <td className="px-3.5 py-2.5 text-right">
+                      <td className="px-3.5 py-2.5 text-right whitespace-nowrap">
                         <Button
                           variant="ghost"
                           size="sm"

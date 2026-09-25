@@ -5,10 +5,34 @@ import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme';
 import { operationLogs } from '../../data/dataStore';
 import { sortOperationsNewestFirst } from '../../utils/dataHelpers';
 import { useTranslation } from '../../services/i18n';
+import { fetchAgriculturalSyncMonitor } from '../../services/telemetryService';
+import { SUGARCANE_STAGES } from '../../constants/cropStages';
 
-export default function ManagerHomeView({ session = {}, fields = [], blockFarms = [], navigation }) {
+function summarizeCropStages(cycles) {
+  const counts = new Map();
+  cycles.forEach(cycle => {
+    const stageNumber = Number(cycle.currentStageNumber);
+    if (!Number.isInteger(stageNumber)) return;
+    counts.set(stageNumber, (counts.get(stageNumber) || 0) + 1);
+  });
+
+  const summaries = [...counts.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([stageNumber, count]) => {
+      const stage = SUGARCANE_STAGES.find(item => item.stageNumber === stageNumber);
+      return `${count} ${stage?.shortName || `Stage ${stageNumber}`}`;
+    });
+
+  return summaries.length > 0
+    ? `Current stages: ${summaries.join(', ')}.`
+    : 'Current stages have not been recorded.';
+}
+
+export default function ManagerHomeView({ session = {}, fields = [], cropCycles = [], blockFarms = [], navigation }) {
   const { t } = useTranslation();
   const [showAllLogs, setShowAllLogs] = React.useState(false);
+  const [activityMonitor, setActivityMonitor] = React.useState(null);
+  const [activityError, setActivityError] = React.useState('');
   const managerUserId = session.employeeId || session.id || '';
   const managedFarms = blockFarms.filter(farm => farm.managerUserId === managerUserId);
   const managedFarmIds = new Set(managedFarms.map(farm => farm.id));
@@ -22,6 +46,44 @@ export default function ManagerHomeView({ session = {}, fields = [], blockFarms 
   ));
   const visibleLogs = showAllLogs ? logs : logs.slice(0, 3);
   const farmName = managedFarms.map(farm => farm.name).filter(Boolean).join(', ') || 'Unassigned Block Farm';
+  const activeCropCycles = cropCycles.filter(cycle => (
+    cycle.status === 'ACTIVE' && managedFields.some(field => field.currentCycleId === cycle.id)
+  ));
+  const cropCycleDescription = managedFields.length === 0
+    ? 'Register a member plot before starting a Crop Year Cycle.'
+    : activeCropCycles.length === 0
+      ? 'No active Crop Year Cycle is recorded for the assigned plots.'
+      : summarizeCropStages(activeCropCycles);
+  const memberActivity = activityMonitor?.subjects?.filter(account => !account.isSelf) || [];
+  const attentionAccounts = memberActivity.filter(account => account.activity?.attentionStatus === 'NEEDS_ATTENTION');
+  const criticalAccounts = memberActivity.filter(account => account.activity?.attentionStatus === 'CRITICAL');
+  const issueAccounts = [...criticalAccounts, ...attentionAccounts];
+  const issueNames = issueAccounts.map(account => account.displayName).filter(Boolean);
+  const activityTitle = criticalAccounts.length > 0
+    ? `${criticalAccounts.length} Critical Member Account${criticalAccounts.length === 1 ? '' : 's'}`
+    : attentionAccounts.length > 0
+      ? `${attentionAccounts.length} Member Account${attentionAccounts.length === 1 ? '' : 's'} Need Attention`
+      : 'Member Activity Status';
+  const activityDescription = activityError
+    ? 'Member activity status is unavailable. Open the monitor to retry.'
+    : issueNames.length > 0
+      ? `${issueNames.slice(0, 3).join(', ')}${issueNames.length > 3 ? ` and ${issueNames.length - 3} more` : ''}`
+      : 'All assigned members are within the expected activity window.';
+
+  const refreshMemberActivity = React.useCallback(async () => {
+    try {
+      setActivityMonitor(await fetchAgriculturalSyncMonitor());
+      setActivityError('');
+    } catch (error) {
+      setActivityError(error.message || 'Member activity status is unavailable.');
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', refreshMemberActivity);
+    if (navigation.isFocused?.()) refreshMemberActivity();
+    return unsubscribe;
+  }, [navigation, refreshMemberActivity]);
 
   return (
     <View style={s.container}>
@@ -30,17 +92,26 @@ export default function ManagerHomeView({ session = {}, fields = [], blockFarms 
         <Text style={s.farmName}>{farmName}</Text>
         <Text style={s.managerName}>Supervising: {session.name || 'Farm Manager'}</Text>
         <View style={s.metrics}>
-          <Metric icon="grid-outline" value={managedFields.length} label={t('active_plots', 'Active Plots')} />
-          <Metric icon="receipt-outline" value={logs.length} label={t('logged_ops', 'Logged Ops')} />
-          <Metric icon="leaf-outline" value={`${totalHectares.toFixed(2)} Ha`} label="Managed Area" />
+          <Metric value={managedFields.length} label={t('active_plots', 'Active Plots')} />
+          <Metric value={logs.length} label={t('logged_ops', 'Logged Ops')} />
+          <Metric value={`${totalHectares.toFixed(2)} Ha`} label="Managed Area" />
         </View>
+      </View>
+
+      <View style={s.cycleCard}>
+        <Text style={s.cycleLabel}>CROP YEAR CYCLES</Text>
+        <View style={s.cycleSummary}>
+          <Text style={s.cycleValue}>{activeCropCycles.length} Active</Text>
+          <Text style={s.cycleCoverage}>{activeCropCycles.length}/{managedFields.length} plots</Text>
+        </View>
+        <Text style={s.cycleDescription}>{cropCycleDescription}</Text>
       </View>
 
       <TouchableOpacity style={s.syncCard} onPress={() => navigation.navigate('SyncMonitor')} activeOpacity={0.8}>
         <View style={s.syncIcon}><Ionicons name="pulse-outline" size={21} color={COLORS.primary} /></View>
         <View style={{ flex: 1 }}>
-          <Text style={s.syncTitle}>Member Synchronization</Text>
-          <Text style={s.syncSub}>View centrally reported activity, successful sync times, and last-reported pending changes.</Text>
+          <Text style={s.syncTitle}>{activityTitle}</Text>
+          <Text style={s.syncSub}>{activityDescription}</Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
       </TouchableOpacity>
@@ -57,7 +128,6 @@ export default function ManagerHomeView({ session = {}, fields = [], blockFarms 
 
       {visibleLogs.length === 0 ? (
         <View style={s.emptyCard}>
-          <Ionicons name="document-text-outline" size={27} color={COLORS.textMuted} />
           <Text style={s.emptyTitle}>No submitted field operations yet</Text>
           <Text style={s.emptySub}>Activity from assigned Block Farm fields will appear here.</Text>
         </View>
@@ -65,7 +135,6 @@ export default function ManagerHomeView({ session = {}, fields = [], blockFarms 
         const field = managedFields.find(item => item.id === log.fieldId);
         return (
           <TouchableOpacity key={log.id} style={s.logCard} onPress={() => navigation.navigate('Field Ops')} activeOpacity={0.8}>
-            <View style={s.logIcon}><Ionicons name="leaf-outline" size={18} color={COLORS.primary} /></View>
             <View style={{ flex: 1 }}>
               <Text style={s.logTitle}>{log.activity || log.operationName || 'Field Operation'}</Text>
               <Text style={s.logMeta}>{field?.member || log.loggedBy || 'Farm Member'} · {log.fieldId}</Text>
@@ -85,10 +154,9 @@ export default function ManagerHomeView({ session = {}, fields = [], blockFarms 
   );
 }
 
-function Metric({ icon, value, label }) {
+function Metric({ value, label }) {
   return (
     <View style={s.metric}>
-      <Ionicons name={icon} size={15} color={COLORS.primary} />
       <Text style={s.metricValue}>{value}</Text>
       <Text style={s.metricLabel}>{label}</Text>
     </View>
@@ -103,8 +171,14 @@ const s = StyleSheet.create({
   managerName: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
   metrics: { flexDirection: 'row', gap: 8, marginTop: 16 },
   metric: { flex: 1, minHeight: 78, padding: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
-  metricValue: { marginTop: 3, fontSize: 15, fontWeight: '900', color: COLORS.text, textAlign: 'center' },
+  metricValue: { fontSize: 16, fontWeight: '900', color: COLORS.text, textAlign: 'center' },
   metricLabel: { fontSize: 9.5, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
+  cycleCard: { padding: 14, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg },
+  cycleLabel: { fontSize: 10, fontWeight: '800', color: COLORS.textMuted, letterSpacing: 0.7 },
+  cycleSummary: { marginTop: 6, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
+  cycleValue: { fontSize: 18, fontWeight: '900', color: COLORS.text },
+  cycleCoverage: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
+  cycleDescription: { marginTop: 5, fontSize: 11, lineHeight: 16, color: COLORS.textMuted },
   syncCard: { flexDirection: 'row', gap: 11, alignItems: 'center', padding: 14, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg },
   syncIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
   syncTitle: { fontSize: 14, fontWeight: '900', color: COLORS.text },

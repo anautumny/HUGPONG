@@ -37,6 +37,7 @@ import {
   AnalyticsEmptyState
 } from '../components/analytics/AnalyticsComponents';
 import { ScreenHeader, Card, PrimaryButton, SecondaryButton } from '../components/ui';
+import PublishPriceModal from '../components/PublishPriceModal';
 import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
 
 export default function AnalyticsScreen({ navigation, route }) {
@@ -589,87 +590,15 @@ export default function AnalyticsScreen({ navigation, route }) {
         isManager={isManager}
       />
 
-      {/* ── Post Official SRA Price Modal (SRA Admin) ── */}
-      <Modal visible={showPriceModal} transparent animationType="slide" onRequestClose={() => setShowPriceModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.modalCard}>
-            <View style={s.modalHeader}>
-              <View>
-                <Text style={s.modalTitle}>Publish Official SRA Price</Text>
-                <Text style={s.modalSub}>HPCo Silay Milling District Benchmark</Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowPriceModal(false)} style={{ padding: 4 }}>
-                <Ionicons name="close" size={22} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ gap: 12, marginVertical: 16 }}>
-              <View>
-                <Text style={s.inputLabel}>Effective Date (YYYY-MM-DD) *</Text>
-                <TextInput
-                  style={s.input}
-                  placeholder="2026-09-23"
-                  value={newEffectiveDate}
-                  onChangeText={value => {
-                    setNewEffectiveDate(value);
-                    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) setNewWeekLabel(calculateSRAWeekLabel(value));
-                  }}
-                />
-              </View>
-
-              <View>
-                <Text style={s.inputLabel}>Week Label *</Text>
-                <TextInput style={s.input} placeholder="Week 4 Sep" value={newWeekLabel} onChangeText={setNewWeekLabel} />
-              </View>
-
-              <View>
-                <Text style={s.inputLabel}>Raw Sugar (Class B) Price (₱/Lkg) *</Text>
-                <TextInput
-                  style={s.input}
-                  placeholder="e.g. 2650.00"
-                  keyboardType="numeric"
-                  value={newSugarPrice}
-                  onChangeText={setNewSugarPrice}
-                />
-              </View>
-
-              <View>
-                <Text style={s.inputLabel}>Molasses Price (₱/MT) *</Text>
-                <TextInput
-                  style={s.input}
-                  placeholder="e.g. 9500.00"
-                  keyboardType="numeric"
-                  value={newMolassesPrice}
-                  onChangeText={setNewMolassesPrice}
-                />
-              </View>
-
-              <View>
-                <Text style={s.inputLabel}>Official Circular Number *</Text>
-                <TextInput style={s.input} placeholder="e.g. SRA Circular #105" value={newCircularNumber} onChangeText={setNewCircularNumber} />
-              </View>
-
-              <View>
-                <Text style={s.inputLabel}>Official Source *</Text>
-                <TextInput style={s.input} placeholder="e.g. SRA Millsite Notice" value={newPriceSource} onChangeText={setNewPriceSource} />
-              </View>
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <SecondaryButton
-                title="Cancel"
-                onPress={() => setShowPriceModal(false)}
-                style={{ flex: 1 }}
-              />
-              <PrimaryButton
-                title="Publish Benchmark"
-                onPress={handlePublishPrice}
-                style={{ flex: 1.5 }}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* ── Post Official SRA Price Modal (SRA Admin - Web Parity) ── */}
+      <PublishPriceModal
+        visible={showPriceModal}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={pricesList[0]}
+        onPublished={() => {
+          setPricesList(getSortedPrices());
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -689,24 +618,25 @@ const s = StyleSheet.create({
     backgroundColor: '#EEF4EC',
     borderRadius: RADIUS.md,
     padding: 3,
-    gap: 4
+    gap: 3
   },
   segmentedTabBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    minHeight: 40,
+    gap: 4,
+    paddingVertical: 9,
+    paddingHorizontal: 2,
+    minHeight: 38,
     borderRadius: RADIUS.sm
   },
   segmentedTabBtnActive: {
     backgroundColor: '#FFFFFF',
-    ...SHADOW.xs
+    ...SHADOW.card
   },
   segmentedTabText: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     fontWeight: '700',
     color: COLORS.textMuted
   },

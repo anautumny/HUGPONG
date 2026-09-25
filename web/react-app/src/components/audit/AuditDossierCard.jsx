@@ -375,7 +375,7 @@ export default function AuditDossierCard({
             isCertified ? (
               <div className="flex items-center gap-1.5 bg-primary-bg text-primary dark:text-primary-light border border-primary/30 px-3.5 py-2 rounded-xl text-xs font-bold shadow-2xs">
                 <CheckCircle2 className="w-4 h-4 text-primary dark:text-primary-light" />
-                <span>✓ SRA Digital Seal Applied</span>
+                <span>SRA Digital Seal Applied</span>
               </div>
             ) : isPendingReview ? (
               <Button

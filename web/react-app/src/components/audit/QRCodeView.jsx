@@ -6,6 +6,7 @@ export default function QRCodeView({
   size = 140,
   color = '#000000',
   bgColor = '#ffffff',
+  errorCorrectionLevel = 'M',
   className = ''
 }) {
   const [svgContent, setSvgContent] = useState('');
@@ -27,7 +28,7 @@ export default function QRCodeView({
         dark: color,
         light: bgColor
       },
-      errorCorrectionLevel: 'M'
+      errorCorrectionLevel
     })
       .then(svg => {
         setSvgContent(svg);
@@ -37,7 +38,7 @@ export default function QRCodeView({
         console.warn('[QRCodeView] QR generation failed:', err);
         setError(err.message);
       });
-  }, [value, size, color, bgColor]);
+  }, [value, size, color, bgColor, errorCorrectionLevel]);
 
   if (!value) {
     return (

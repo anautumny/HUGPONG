@@ -18,23 +18,32 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const [scanMessage, setScanMessage] = useState('');
   const [scanLocked, setScanLocked] = useState(false);
   const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [systemScannerActive, setSystemScannerActive] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const permissionRequestedRef = useRef(false);
-  const automaticLaunchRef = useRef(false);
   const scanLockedRef = useRef(false);
+  const scanRearmTimerRef = useRef(null);
+  const lastScanRef = useRef({ data: '', scannedAt: 0 });
   const mountedRef = useRef(true);
 
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (scanRearmTimerRef.current) clearTimeout(scanRearmTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!visible) {
       permissionRequestedRef.current = false;
-      automaticLaunchRef.current = false;
       scanLockedRef.current = false;
+      lastScanRef.current = { data: '', scannedAt: 0 };
+      if (scanRearmTimerRef.current) clearTimeout(scanRearmTimerRef.current);
       setCameraError('');
       setScanMessage('');
       setScanLocked(false);
       setCameraBusy(false);
+      setCameraReady(false);
+      setSystemScannerActive(false);
       setUploadBusy(false);
       return;
     }
@@ -45,22 +54,32 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   }, [visible, permission, requestPermission]);
 
   const handleBarcodeScanned = useCallback(async ({ data }, source = 'camera') => {
-    if (scanLockedRef.current || !data) return;
+    const normalizedData = String(data || '').trim();
+    if (scanLockedRef.current || !normalizedData) return;
+    const scannedAt = Date.now();
+    if (lastScanRef.current.data === normalizedData && scannedAt - lastScanRef.current.scannedAt < 1500) return;
+    lastScanRef.current = { data: normalizedData, scannedAt };
     scanLockedRef.current = true;
     setScanLocked(true);
     setScanMessage('Validating audit report...');
     try {
-      const outcome = await onCodeDetected?.(data, { source });
+      const outcome = await onCodeDetected?.(normalizedData, { source });
       if (outcome?.continueScanning && mountedRef.current) {
         setScanMessage(outcome.message || 'This QR code is not a valid HUGPONG audit report.');
-        scanLockedRef.current = false;
-        setScanLocked(false);
+        scanRearmTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          scanLockedRef.current = false;
+          setScanLocked(false);
+        }, 650);
       }
     } catch (error) {
       if (!mountedRef.current) return;
       setScanMessage(error.message || 'This QR code is not a valid HUGPONG audit report.');
-      scanLockedRef.current = false;
-      setScanLocked(false);
+      scanRearmTimerRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
+        scanLockedRef.current = false;
+        setScanLocked(false);
+      }, 650);
     }
   }, [onCodeDetected]);
 
@@ -84,21 +103,28 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     }
 
     setCameraBusy(true);
+    setCameraReady(false);
+    setSystemScannerActive(true);
     try {
+      await new Promise(resolve => setTimeout(resolve, 120));
       await CameraView.launchScanner({ barcodeTypes: ['qr'] });
       if (mountedRef.current && !scanLockedRef.current) {
-        setScanMessage('Camera closed. Tap Open Camera to scan again.');
+        setScanMessage('System scanner closed. The live scanner is ready.');
       }
     } catch (error) {
       if (!mountedRef.current) return;
       const message = String(error?.message || '');
       if (/cancel/i.test(message)) {
-        setScanMessage('Camera closed. Tap Open Camera to scan again.');
+        setScanMessage('System scanner closed. The live scanner is ready.');
       } else {
         setCameraError(message || 'The device QR camera could not be opened. Upload a QR image instead.');
       }
     } finally {
-      if (mountedRef.current) setCameraBusy(false);
+      if (mountedRef.current) {
+        setCameraBusy(false);
+        setCameraReady(false);
+        setSystemScannerActive(false);
+      }
     }
   }, [cameraBusy, permission, requestPermission]);
 
@@ -109,12 +135,6 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     });
     return () => subscription.remove();
   }, [visible, handleBarcodeScanned]);
-
-  useEffect(() => {
-    if (!visible || !permission?.granted || automaticLaunchRef.current) return;
-    automaticLaunchRef.current = true;
-    openCamera();
-  }, [visible, permission?.granted, openCamera]);
 
   const retryPermission = async () => {
     permissionRequestedRef.current = true;
@@ -164,7 +184,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const permissionDenied = permission && !permission.granted;
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" hardwareAccelerated onRequestClose={onClose}>
+    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close scanner" style={styles.closeButton} onPress={onClose}>
@@ -196,18 +216,44 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             </>
           ) : (
             <>
-              <Text style={styles.heading}>Use Device QR Scanner</Text>
-              <Text style={styles.help}>This opens the phone's native camera scanner instead of an embedded black preview.</Text>
-              <TouchableOpacity
-                disabled={cameraBusy || scanLocked}
-                style={[styles.primaryButton, (cameraBusy || scanLocked) && styles.disabledButton]}
-                onPress={openCamera}
-              >
-                {cameraBusy
-                  ? <ActivityIndicator size="small" color="#FFFFFF" />
-                  : <Ionicons name="camera-outline" size={20} color="#FFFFFF" />}
-                <Text style={styles.primaryButtonText}>{cameraBusy ? 'Camera Open...' : 'Open Camera'}</Text>
-              </TouchableOpacity>
+              <Text style={styles.heading}>Scan Audit QR</Text>
+              <Text style={styles.help}>Keep the complete QR square inside the frame. Multi-part transfers continue scanning without closing the camera.</Text>
+              <View style={styles.cameraFrame}>
+                {!systemScannerActive ? (
+                  <CameraView
+                    style={styles.cameraPreview}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                    onBarcodeScanned={scanLocked ? undefined : result => handleBarcodeScanned(result, 'camera')}
+                    onCameraReady={() => {
+                      setCameraReady(true);
+                      setCameraError('');
+                    }}
+                    onMountError={error => {
+                      setCameraReady(false);
+                      setCameraError(error?.message || 'The camera preview could not be started.');
+                    }}
+                  />
+                ) : null}
+              </View>
+              {systemScannerActive || (!cameraReady && !cameraError) ? (
+                <View style={styles.cameraStatus}>
+                  <ActivityIndicator size="small" color="#2F6B3B" />
+                  <Text style={styles.cameraStatusText}>{systemScannerActive ? 'Opening system scanner...' : 'Starting camera...'}</Text>
+                </View>
+              ) : null}
+              {CameraView.isModernBarcodeScannerAvailable ? (
+                <TouchableOpacity
+                  disabled={cameraBusy || scanLocked}
+                  style={[styles.deviceScannerButton, (cameraBusy || scanLocked) && styles.disabledButton]}
+                  onPress={openCamera}
+                >
+                  {cameraBusy
+                    ? <ActivityIndicator size="small" color="#2F6B3B" />
+                    : <Ionicons name="scan-outline" size={18} color="#2F6B3B" />}
+                  <Text style={styles.deviceScannerButtonText}>{cameraBusy ? 'Opening...' : 'Use System Scanner'}</Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           )}
 
@@ -249,7 +295,7 @@ const styles = StyleSheet.create({
   closeButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   title: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   headerSpacer: { width: 42 },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   iconCircle: {
     width: 92,
     height: 92,
@@ -273,6 +319,41 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  cameraFrame: {
+    width: '100%',
+    maxWidth: 380,
+    aspectRatio: 1,
+    marginTop: 18,
+    overflow: 'hidden',
+    borderRadius: 18,
+    backgroundColor: '#111827',
+    borderWidth: 2,
+    borderColor: '#2F6B3B',
+  },
+  cameraPreview: { flex: 1, width: '100%', height: '100%' },
+  cameraStatus: {
+    minHeight: 28,
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  cameraStatusText: { color: '#2F6B3B', fontSize: 12, fontWeight: '700' },
+  deviceScannerButton: {
+    minHeight: 42,
+    marginTop: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#2F6B3B',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  deviceScannerButtonText: { color: '#2F6B3B', fontSize: 13, fontWeight: '800' },
   statusCard: { marginTop: 22, borderRadius: 10, backgroundColor: '#E7F1E3', paddingHorizontal: 14, paddingVertical: 11, maxWidth: 360 },
   errorCard: { backgroundColor: '#FDECEC' },
   statusText: { color: '#2F6B3B', fontSize: 13, lineHeight: 19, fontWeight: '700', textAlign: 'center' },

@@ -185,7 +185,7 @@ test('Farm Manager Field Operations exposes monthly audit compilation directly',
   const operations = fs.readFileSync(path.resolve(testDir, '../src/views/operations/OperationsView.jsx'), 'utf8');
   const auditCenter = fs.readFileSync(path.resolve(testDir, '../src/views/audit/AuditCenterView.jsx'), 'utf8');
 
-  assert.match(operations, /label: 'Compile Monthly Audit'[\s\S]*?to: '\/audit\?compile=1'/);
+  assert.match(operations, /label: 'Monthly Audit'[\s\S]*?to: '\/audit'/);
   assert.doesNotMatch(dashboard, /label: 'Compile Monthly Audit'/);
   assert.match(dashboard, /label: 'Field Operations'[\s\S]*?variant: 'primary'/);
   assert.match(dashboard, /label: 'Farm & Field Registry'[\s\S]*?variant: 'primary'/);

@@ -1,11 +1,9 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Folder,
   ClipboardList,
   UserCheck,
   MapPin,
-  Calendar,
   Layers,
   Activity,
   BarChart3,
@@ -17,6 +15,33 @@ import MetricSummaryRow from '../../components/dashboard/MetricSummaryRow';
 import RecentOperationsTable from '../../components/dashboard/RecentOperationsTable';
 import AttentionItemsCard from '../../components/dashboard/AttentionItemsCard';
 import { formatHectares } from '../../utils/formatters';
+import { SUGARCANE_STAGES } from '../../constants/cropStages';
+
+function accountNameList(accounts) {
+  const names = accounts.map(account => account.displayName).filter(Boolean);
+  if (names.length <= 3) return names.join(', ');
+  return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+}
+
+function summarizeCropStages(cycles) {
+  const counts = new Map();
+  cycles.forEach(cycle => {
+    const stageNumber = Number(cycle.currentStageNumber);
+    if (!Number.isInteger(stageNumber)) return;
+    counts.set(stageNumber, (counts.get(stageNumber) || 0) + 1);
+  });
+
+  const summaries = [...counts.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([stageNumber, count]) => {
+      const stage = SUGARCANE_STAGES.find(item => item.stageNumber === stageNumber);
+      return `${count} ${stage?.shortName || `Stage ${stageNumber}`}`;
+    });
+
+  return summaries.length > 0
+    ? `Current stages: ${summaries.join(', ')}.`
+    : 'Current stages have not been recorded.';
+}
 
 export default function FarmManagerDashboard({ data = {}, user = {} }) {
   const {
@@ -25,6 +50,9 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     assignedBlockFarm,
     scopedFields = [],
     recentOperations = [],
+    cropCycles = [],
+    terminalDiagnostics = [],
+    activityMonitoringError = null,
     isLoading = false
   } = data;
 
@@ -41,9 +69,66 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     ? Math.min(100, Math.round((totalCultivatedArea / declaredHa) * 100))
     : 0;
 
+  const activeCropCycles = useMemo(() => {
+    const currentCycleIds = new Set(scopedFields.map(field => field.currentCycleId).filter(Boolean));
+    return cropCycles.filter(cycle => cycle.status === 'ACTIVE' && currentCycleIds.has(cycle.id));
+  }, [cropCycles, scopedFields]);
+
+  const cropCycleDescription = scopedFields.length === 0
+    ? 'Register a member plot before starting a Crop Year Cycle.'
+    : activeCropCycles.length === 0
+      ? 'No active Crop Year Cycle is recorded for the assigned plots.'
+      : summarizeCropStages(activeCropCycles);
+
+  const memberActivity = useMemo(
+    () => terminalDiagnostics.filter(account => !account.isSelf),
+    [terminalDiagnostics]
+  );
+  const attentionAccounts = useMemo(
+    () => memberActivity.filter(account => account.activity?.attentionStatus === 'NEEDS_ATTENTION'),
+    [memberActivity]
+  );
+  const criticalAccounts = useMemo(
+    () => memberActivity.filter(account => account.activity?.attentionStatus === 'CRITICAL'),
+    [memberActivity]
+  );
+
   // Derive attention items
   const attentionItems = useMemo(() => {
     const items = [];
+
+    if (criticalAccounts.length > 0) {
+      items.push({
+        id: 'critical-member-activity',
+        title: `${criticalAccounts.length} Critical Member Account${criticalAccounts.length === 1 ? '' : 's'}`,
+        description: `Not active for at least 5 days: ${accountNameList(criticalAccounts)}.`,
+        type: 'danger',
+        to: '/sync',
+        actionLabel: 'Review Members'
+      });
+    }
+
+    if (attentionAccounts.length > 0) {
+      items.push({
+        id: 'member-activity-attention',
+        title: `${attentionAccounts.length} Member Account${attentionAccounts.length === 1 ? '' : 's'} Need Attention`,
+        description: `Not active for 3 to 4 days, or no activity date is available: ${accountNameList(attentionAccounts)}.`,
+        type: 'warning',
+        to: '/sync',
+        actionLabel: 'Review Members'
+      });
+    }
+
+    if (activityMonitoringError) {
+      items.push({
+        id: 'member-activity-unavailable',
+        title: 'Member Activity Status Unavailable',
+        description: activityMonitoringError,
+        type: 'warning',
+        to: '/sync',
+        actionLabel: 'Retry in Monitor'
+      });
+    }
 
     if (!assignedBlockFarm) {
       items.push({
@@ -68,7 +153,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     }
 
     return items;
-  }, [assignedBlockFarm, scopedFields, farmName]);
+  }, [assignedBlockFarm, scopedFields, farmName, attentionAccounts, criticalAccounts, activityMonitoringError]);
 
   const headerActions = [
     {
@@ -105,10 +190,11 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
       icon: Activity
     },
     {
-      label: 'Crop Year Cycle State',
-      value: 'Active',
-      subtext: 'Current Milling Season',
-      icon: Calendar
+      label: 'Member Activity Alerts',
+      value: attentionAccounts.length + criticalAccounts.length,
+      subtext: `${attentionAccounts.length} attention · ${criticalAccounts.length} critical`,
+      icon: UserCheck,
+      tone: criticalAccounts.length > 0 ? 'danger' : attentionAccounts.length > 0 ? 'warning' : undefined
     }
   ];
 
@@ -197,8 +283,8 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
         title="Operational Attention"
         items={attentionItems}
         isLoading={isLoading}
-        emptyTitle="All plots operational"
-        emptyDescription="No lagging member syncs or pending operational blockers detected for your block farm."
+        emptyTitle="No member accounts need attention"
+        emptyDescription="All assigned members are within the expected activity window and no operational blocker was detected."
       />
 
       {/* 5. Concise Analytics Preview Row */}
@@ -246,13 +332,15 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
           </div>
 
           <div className="p-3.5 rounded-xl bg-bg border border-border/60">
-            <span className="text-[11px] font-medium text-hug-muted block mb-1">Production Readiness</span>
+            <span className="text-[11px] font-medium text-hug-muted block mb-1">Crop Year Cycles</span>
             <div className="flex items-baseline justify-between">
-              <span className="text-base font-bold text-success">Active Milling</span>
-              <span className="text-xs text-hug-muted font-medium">Standard Cycle</span>
+              <span className="text-base font-bold text-hug-text">{activeCropCycles.length} Active</span>
+              <span className="text-xs text-hug-muted font-medium">
+                {activeCropCycles.length}/{scopedFields.length} plots
+              </span>
             </div>
             <p className="text-[11px] text-hug-muted mt-1.5">
-              Crop tracking updated based on scheduled milling calendar.
+              {cropCycleDescription}
             </p>
           </div>
         </div>

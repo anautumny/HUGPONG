@@ -4,15 +4,6 @@ import { Edit3 } from 'lucide-react';
 import { updateField } from '../../services/fieldsService';
 import { formatCropYearDisplay } from '../../utils/formatters';
 
-const SOIL_TYPES = [
-  'Clay Loam',
-  'Sandy Loam',
-  'Loam',
-  'Clay',
-  'Silt Loam',
-  'Sandy Clay Loam'
-];
-
 export default function FieldEditModal({
   isOpen = false,
   onClose,
@@ -24,7 +15,6 @@ export default function FieldEditModal({
   const [blockFarmId, setBlockFarmId] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
-  const [soilType, setSoilType] = useState('');
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,7 +25,6 @@ export default function FieldEditModal({
       setBlockFarmId(field.blockFarmId || '');
       setMemberUserId(field.memberUserId || '');
       setAreaHa(String(field.areaHa || field.ha || ''));
-      setSoilType(field.soilType || SOIL_TYPES[0]);
       setErrors({});
       setServerError(null);
     }
@@ -67,8 +56,7 @@ export default function FieldEditModal({
       const payload = {
         blockFarmId,
         memberUserId: memberUserId || null,
-        areaHa: numHa,
-        soilType
+        areaHa: numHa
       };
 
       await updateField(field.id, payload);
@@ -88,7 +76,7 @@ export default function FieldEditModal({
       onClose={onClose}
       size="md"
       title={`Edit Field ${field.id}`}
-      subtitle="Modify registered acreage, soil type, or field owner assignment."
+      subtitle="Modify registered acreage or field owner assignment."
       badge="Plot Configuration"
       icon={Edit3}
       preventBackdropClose={isSubmitting}
@@ -170,7 +158,7 @@ export default function FieldEditModal({
         </div>
 
         {/* Persistent parcel attributes */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div>
           <FormField
             id="edit-area-ha"
             label="Plot Area"
@@ -194,18 +182,6 @@ export default function FieldEditModal({
             />
           </FormField>
 
-          <FormField
-            id="edit-soil"
-            label="Soil Type"
-          >
-            <Select
-              id="edit-soil"
-              value={soilType}
-              onChange={(e) => setSoilType(e.target.value)}
-              disabled={isSubmitting}
-              options={SOIL_TYPES.map(s => ({ value: s, label: s }))}
-            />
-          </FormField>
         </div>
 
         {/* Crop Year Cycle is changed only through the renewal workflow. */}

@@ -14,7 +14,8 @@ export default function UserFormModal({
   initialUser = null,
   currentUser = null,
   blockFarms = [],
-  onSaved
+  onSaved,
+  onCreated
 }) {
   const isEditing = Boolean(initialUser);
 
@@ -181,6 +182,7 @@ export default function UserFormModal({
         const res = await approveOrProvisionUser(payload);
         if (res.success) {
           if (onSaved) onSaved(res.data);
+          if (onCreated) onCreated({ ...res.data, accountId: res.accountId || res.data?.id });
           onClose();
         } else {
           setFormError(res.error || 'Failed to provision account.');

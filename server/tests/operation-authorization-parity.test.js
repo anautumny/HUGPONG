@@ -27,6 +27,7 @@ test('server, Web, and Mobile share field-owner and takeover capability rules', 
   const mobileOwn = mobile.getOperationCapabilities(manager, ownField, null, now);
   for (const value of [serverOwn, webOwn, mobileOwn]) {
     assert.equal(value.canDraft, true);
+    assert.equal(value.canPlan, true);
     assert.equal(value.canCreate, true);
     assert.equal(value.requiresTakeover, false);
     assert.equal(value.submissionSource, 'FIELD_OWNER');
@@ -37,6 +38,7 @@ test('server, Web, and Mobile share field-owner and takeover capability rules', 
   const mobileViewOnly = mobile.getOperationCapabilities(manager, otherField, null, now);
   for (const value of [serverViewOnly, webViewOnly, mobileViewOnly]) {
     assert.equal(value.canDraft, false);
+    assert.equal(value.canPlan, false);
     assert.equal(value.canCreate, false);
     assert.equal(value.requiresTakeover, true);
   }
@@ -48,6 +50,7 @@ test('server, Web, and Mobile share field-owner and takeover capability rules', 
     assert.equal(value.canCreate, true);
     assert.equal(value.canEdit, true);
     assert.equal(value.canDraft, false);
+    assert.equal(value.canPlan, false);
     assert.equal(value.submissionSource, 'MANAGER_TAKEOVER');
   }
 });

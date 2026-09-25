@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { LogIn, Eye, EyeOff, Lock, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft } from 'lucide-react';
+import { LogIn, Eye, EyeOff, Lock, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { ROLE_KEYS } from '../utils/authRouting';
 import AccountRecoveryModal from '../components/auth/AccountRecoveryModal';
 import FirstLoginVerifyModal from '../components/auth/FirstLoginVerifyModal';
@@ -10,6 +11,13 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 export default function LoginView() {
   const { login, saveSession, isAuthenticated, isLoading, roleKey, sessionExpiredNotice, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+
+  const cycleTheme = () => {
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
+  };
   const navigate = useNavigate();
 
   const [identifier, setIdentifier] = useState('');
@@ -315,7 +323,7 @@ export default function LoginView() {
         {/* Security Gateway Badge */}
         <div className="flex items-center justify-center gap-2 pt-4 text-[11px] text-hug-muted border-t border-border mt-4">
           <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
-          <span>Encrypted Session &middot; SRA Certified Gateway</span>
+          <span>Authenticated HUGPONG session</span>
         </div>
 
       </div>
@@ -327,10 +335,12 @@ export default function LoginView() {
           <span>&middot;</span>
           <Link to="/terms" className="hover:text-primary transition-colors">Terms of Use</Link>
           <span>&middot;</span>
+          <Link to="/compliance" className="hover:text-primary transition-colors">Compliance</Link>
+          <span>&middot;</span>
           <Link to="/cookies" className="hover:text-primary transition-colors">Cookie Policy</Link>
         </div>
         <p className="text-[11px]">
-          Silay Sugar Regulatory Administration &middot; Cloud-Synchronized Network
+          HUGPONG Agricultural Platform &middot; Cloud-Synchronized Network
         </p>
       </div>
 

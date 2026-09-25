@@ -192,9 +192,10 @@ export function fromFieldDocument(id, value = {}, cycle = null) {
   const canonicalStageNumber = Number.isInteger(cycleStageNumber) && cycleStageNumber >= 1 && cycleStageNumber <= 6
     ? cycleStageNumber
     : null;
+  const { soilType: _removedSoilType, ...fieldValue } = value;
   return {
     id,
-    ...value,
+    ...fieldValue,
     memberId: value.memberUserId || '',
     memberName: value.memberName || value.member || value.memberUserId || '',
     member: value.memberName || value.member || value.memberUserId || '',
@@ -220,7 +221,6 @@ export function toFieldDocument(value = {}) {
     blockFarmId,
     memberUserId: value.memberUserId || value.memberId || null,
     areaHa: Number(value.areaHa ?? value.ha ?? 0),
-    soilType: String(value.soilType || '').trim(),
     currentCycleId,
     status,
     customStages: Array.isArray(value.customStages) ? value.customStages : [],
@@ -474,6 +474,15 @@ export function fromAuditReportDocument(id, value = {}) {
   const operations = Array.isArray(value.operationSnapshots) ? value.operationSnapshots : [];
   const fieldAreas = new Map();
   operations.forEach(item => fieldAreas.set(item.fieldId, Math.max(fieldAreas.get(item.fieldId) || 0, Number(item.areaHa || 0))));
+  const derivedFieldCount = Number(
+    value.fieldsReported ??
+    value.fieldCount ??
+    (Array.isArray(value.fieldSnapshots) && value.fieldSnapshots.length > 0
+      ? value.fieldSnapshots.length
+      : (fieldAreas.size > 0
+        ? fieldAreas.size
+        : (operations.length > 0 ? new Set(operations.map(item => item.fieldId).filter(Boolean)).size : 0)))
+  );
   return {
     id,
     ...value,
@@ -485,6 +494,10 @@ export function fromAuditReportDocument(id, value = {}) {
     logsCount: operations.length,
     totalCost: operations.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
     totalHectares: Number(value.hectaresAudited || Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0)),
+    fieldCount: derivedFieldCount,
+    fieldsReported: derivedFieldCount,
+    dateGenerated: value.dateGenerated || (value.compiledAt ? new Date(value.compiledAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (value.createdAt ? new Date(value.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')),
+    verifiedBy: value.verifiedBy || value.certifiedByName || value.certifiedByUserId || (canonicalAuditStatus(value.status) === 'CERTIFIED' ? 'SRA Regulatory Inspector' : null),
     operations,
     logs: operations,
     qrSignature: value.qrHash,

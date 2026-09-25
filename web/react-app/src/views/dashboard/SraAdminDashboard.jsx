@@ -274,6 +274,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
       <RecentOperationsTable
         operations={recentOperations}
         isLoading={isLoading}
+        showConsoleLink={false}
       />
 
       {/* 7. Publish Price Modal */}

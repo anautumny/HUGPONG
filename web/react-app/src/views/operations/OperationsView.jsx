@@ -631,8 +631,8 @@ export default function OperationsView() {
   // Header Actions
   const headerActions = useMemo(() => {
     const actions = isManager ? [{
-      label: 'Compile Monthly Audit',
-      to: '/audit?compile=1',
+      label: 'Monthly Audit',
+      to: '/audit',
       icon: FileCheck2,
       variant: 'primary'
     }] : [];

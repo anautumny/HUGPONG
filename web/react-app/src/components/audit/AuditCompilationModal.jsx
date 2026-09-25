@@ -508,7 +508,7 @@ export default function AuditCompilationModal({
             </p>
           </div>
           <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-sm">
-            <QRCodeView value={qrParts[qrPartIndex] || ''} size={190} color="#000000" bgColor="#FFFFFF" className="p-2" />
+            <QRCodeView value={qrParts[qrPartIndex] || ''} size={260} color="#000000" bgColor="#FFFFFF" className="p-2" />
             <strong className="text-xs text-hug-text">
               {qrParts.length > 1 ? `QR Part ${qrPartIndex + 1} of ${qrParts.length}` : 'One QR · Complete Report'}
             </strong>

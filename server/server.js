@@ -162,10 +162,10 @@ app.use((err, req, res, next) => {
 // Start Server
 const server = app.listen(port, host, () => {
   console.log('══════════════════════════════════════════════════════════');
-  console.log(`  🌾 HUGPONG Security Gateway & Express Backend`);
-  console.log(`  🚀 Server listening on ${host}:${port}`);
-  console.log(`  🔒 Authentication & Role Protection: ACTIVE`);
-  console.log(`  📦 Project: hugpong-ff`);
+console.log(`  HUGPONG Security Gateway & Express Backend`);
+console.log(`  Server listening on ${host}:${port}`);
+console.log(`  Authentication & Role Protection: ACTIVE`);
+console.log(`  Project: hugpong-ff`);
   console.log('══════════════════════════════════════════════════════════');
 });
 

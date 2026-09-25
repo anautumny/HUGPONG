@@ -7,11 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW, ANALYTICS_PALETTE } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, notifyDataUpdate, subscribe, getFieldCustomOperations, saveFieldFullPlan, saveLocalOperationDraft } from '../data/dataStore';
+import { getCurrentSession, fieldsStore, subscribe, getFieldCustomOperations, saveFieldFullPlan, saveLocalOperationDraft } from '../data/dataStore';
 import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations } from '../domain/operationCatalogue';
+import { getOperationCapabilities } from '../domain/operationAuthorization';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
-import { getNetworkStatus } from '../services/networkService';
-import { db } from '../firebase/config';
 import { useTranslation } from '../services/i18n';
 
 // ── 6 Official SRA Sugarcane Growth Stages Baseline Configuration ──
@@ -119,7 +118,6 @@ export default function PlannerScreen({ navigation }) {
   const { t, formatOperationName, formatStageName, formatPhaseMonth } = useTranslation();
   const [session, setSession] = useState(getCurrentSession());
   const [allFields, setAllFields] = useState([...fieldsStore]);
-  const isMember = session?.role === 'Farm Member';
 
   useEffect(() => {
     const unsub = subscribe(() => {
@@ -129,92 +127,23 @@ export default function PlannerScreen({ navigation }) {
     return unsub;
   }, []);
 
-  const [fieldScope, setFieldScope] = useState(isMember ? 'my' : 'all');
   const [showFieldPickerModal, setShowFieldPickerModal] = useState(false);
   const [fieldSearchQuery, setFieldSearchQuery] = useState('');
   const [pickerPage, setPickerPage] = useState(1);
 
-  const displayedFields = useMemo(() => {
-    const userId = session?.employeeId || session?.id || '';
-    if (isMember) {
-      return allFields.filter(field => 
-        field.memberUserId === userId ||
-        field.memberId === userId ||
-        field.member === session?.name ||
-        field.memberName === session?.name ||
-        (session?.fieldId && field.id === session?.fieldId)
-      );
-    }
-    if (session?.role === 'Farm Manager') {
-      if (!getNetworkStatus()) {
-        return allFields.filter(field => 
-          field.memberUserId === userId ||
-          field.memberId === userId ||
-          field.member === session?.name ||
-          field.memberName === session?.name ||
-          (session?.fieldId && field.id === session?.fieldId)
-        );
-      }
-      const managedFarmIds = new Set(
-        blockFarms
-          .filter(farm => 
-            farm.managerUserId === userId ||
-            farm.managerName === session?.name ||
-            farm.id === session?.blockFarmId ||
-            farm.name === session?.blockFarm ||
-            farm.name === session?.farm
-          )
-          .map(farm => farm.id)
-      );
-      if (session?.blockFarmId) managedFarmIds.add(session.blockFarmId);
-      return allFields.filter(field => 
-        managedFarmIds.has(field.blockFarmId) ||
-        field.managerUserId === userId ||
-        (session?.farm && (field.blockFarm === session.farm || field.blockFarmName === session.farm)) ||
-        (session?.blockFarm && (field.blockFarm === session.blockFarm || field.blockFarmName === session.blockFarm))
-      );
-    }
-    return allFields;
-  }, [session, isMember, fieldScope, allFields]);
+  const displayedFields = useMemo(
+    () => allFields.filter(field => getOperationCapabilities(session, field).canPlan),
+    [session, allFields]
+  );
 
   const [selectedField, setSelectedField] = useState(() => {
     const cur = getCurrentSession() || {};
-    const userId = cur.employeeId || cur.id || '';
-    if (cur.role === 'Farm Member' || !getNetworkStatus()) {
-      return fieldsStore.find(field => 
-        field.memberUserId === userId ||
-        field.memberId === userId ||
-        field.member === cur.name ||
-        field.memberName === cur.name ||
-        (cur.fieldId && field.id === cur.fieldId)
-      ) || null;
-    }
-    if (cur.role === 'Farm Manager') {
-      const managedFarmIds = new Set(
-        blockFarms
-          .filter(farm => 
-            farm.managerUserId === userId ||
-            farm.managerName === cur.name ||
-            farm.id === cur.blockFarmId ||
-            farm.name === cur.blockFarm ||
-            farm.name === cur.farm
-          )
-          .map(farm => farm.id)
-      );
-      if (cur.blockFarmId) managedFarmIds.add(cur.blockFarmId);
-      return fieldsStore.find(field => 
-        managedFarmIds.has(field.blockFarmId) ||
-        field.managerUserId === userId ||
-        (cur.farm && (field.blockFarm === cur.farm || field.blockFarmName === cur.farm))
-      ) || null;
-    }
-    return fieldsStore.length > 0 ? fieldsStore[0] : null;
+    return fieldsStore.find(field => getOperationCapabilities(cur, field).canPlan) || null;
   });
 
   useEffect(() => {
-    if (!selectedField && displayedFields.length > 0) {
-      setSelectedField(displayedFields[0]);
-    }
+    const selectedIsAllowed = displayedFields.some(field => field.id === selectedField?.id);
+    if (!selectedIsAllowed) setSelectedField(displayedFields[0] || null);
   }, [displayedFields, selectedField]);
 
   const [landArea, setLandArea] = useState(() => selectedField?.ha ? String(selectedField?.ha) : '');
@@ -266,26 +195,6 @@ export default function PlannerScreen({ navigation }) {
   const [newChildQty, setNewChildQty] = useState('2');
   const [newChildUnit, setNewChildUnit] = useState('bag');
   const [newChildRate, setNewChildRate] = useState('1600');
-
-  useEffect(() => {
-    const unsub = subscribe(() => {
-      const cur = getCurrentSession();
-      setSession({ ...cur });
-      if (cur.role === 'Farm Member') {
-        const uId = cur.employeeId || cur.id || '';
-        const defaultField = fields.find(field => 
-          field.memberUserId === uId ||
-          field.memberId === uId ||
-          field.member === cur.name ||
-          field.memberName === cur.name ||
-          (cur.fieldId && field.id === cur.fieldId)
-        ) || null;
-        setSelectedField(defaultField);
-        setLandArea(defaultField?.ha ? String(defaultField.ha) : '');
-      }
-    });
-    return unsub;
-  }, []);
 
   // When selected field changes, reload its operations map
   useEffect(() => {
@@ -592,14 +501,21 @@ export default function PlannerScreen({ navigation }) {
         {
           text: 'Reset All',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             const map = {};
             for (let i = 1; i <= 6; i++) {
               map[i] = getDefaultStageOperations(i);
             }
-            setStageOperationsMap(map);
-            if (selectedField?.id) saveFieldFullPlan(selectedField.id, map);
-            Alert.alert('Restored', 'All 6 stages restored to standard templates.');
+            try {
+              if (!selectedField?.id || !getOperationCapabilities(session, selectedField).canPlan) {
+                throw new Error('Farm plans can only be changed for your own assigned field.');
+              }
+              await saveFieldFullPlan(selectedField.id, map);
+              setStageOperationsMap(map);
+              Alert.alert('Restored', 'All 6 stages restored to standard templates.');
+            } catch (error) {
+              Alert.alert('Plan Not Changed', error.message || 'The selected field is not available for planning.');
+            }
           }
         }
       ]
@@ -613,6 +529,10 @@ export default function PlannerScreen({ navigation }) {
       Alert.alert('No Field Selected', 'Please select a field plot before saving a customized plan.');
       return;
     }
+    if (!getOperationCapabilities(session, selectedField).canPlan) {
+      Alert.alert('Plan Not Saved', 'Farm plans can only be changed for your own assigned field.');
+      return;
+    }
     setIsSavingPlan(true);
     try {
       await saveFieldFullPlan(targetFieldId, stageOperationsMap);
@@ -623,7 +543,7 @@ export default function PlannerScreen({ navigation }) {
       );
     } catch (e) {
       setIsSavingPlan(false);
-      Alert.alert('Error', 'Failed to save custom plan to database.');
+      Alert.alert('Plan Not Saved', e.message || 'Failed to save the custom plan.');
     }
   };
 
@@ -813,48 +733,22 @@ export default function PlannerScreen({ navigation }) {
               <Text style={s.pageSub}>{t('planner_page_sub', 'Select a growth stage below to inspect, customize, or dispatch operations.')}</Text>
             </View>
 
-            {/* Field Switcher & Toggle */}
+            {/* Planner is intentionally limited to the signed-in user's assigned field. */}
             <View style={{ marginBottom: 4 }}>
-              {!isMember && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' }}>
-                    Select Plot to Plan
-                  </Text>
-                  <View style={{ flexDirection: 'row', backgroundColor: '#EEF2E6', borderRadius: RADIUS.sm, padding: 2 }}>
-                    <TouchableOpacity
-                      style={[{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.xs }, fieldScope === 'my' && { backgroundColor: '#fff', ...SHADOW.card }]}
-                      onPress={() => {
-                        setFieldScope('my');
-                        const myF = fields.find(f => f.memberId === session.employeeId || f.member === session.name || f.memberName === session.name || (session.fieldId && f.id === session.fieldId));
-                        setSelectedField(myF || null);
-                      }}
-                    >
-                      <Text style={{ fontSize: 11, fontWeight: fieldScope === 'my' ? '800' : '600', color: fieldScope === 'my' ? COLORS.primary : COLORS.textMuted }}>
-                        My Plot ({allFields.filter(f => f.memberId === session.employeeId || f.member === session.name || f.memberName === session.name || (session.fieldId && f.id === session.fieldId)).length})
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.xs }, fieldScope === 'all' && { backgroundColor: '#fff', ...SHADOW.card }]}
-                      onPress={() => {
-                        setFieldScope('all');
-                        if (!selectedField && allFields.length > 0) {
-                          setSelectedField(allFields[0]);
-                        }
-                      }}
-                    >
-                      <Text style={{ fontSize: 11, fontWeight: fieldScope === 'all' ? '800' : '600', color: fieldScope === 'all' ? COLORS.primary : COLORS.textMuted }}>
-                        All Plots ({allFields.length})
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' }}>
+                  Your Plot
+                </Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>
+                  Owner planning only
+                </Text>
+              </View>
 
               {/* Field Chips with clean 3-item cut-off and +More modal button */}
               {displayedFields.length === 0 ? (
                 <View style={{ padding: 12, backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, marginBottom: SPACING.md }}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>No Personal Plots Assigned</Text>
-                  <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>You do not have a personal plot allocated. Switch to "All Plots" above to plan for block farm member plots.</Text>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>A plot assigned to your account is required before you can create or change a farm plan.</Text>
                 </View>
               ) : (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -SPACING.lg, marginBottom: 2 }} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 8 }}>
@@ -1081,7 +975,7 @@ export default function PlannerScreen({ navigation }) {
                       isSelected && { color: '#fff', fontWeight: '900' },
                       isDone && !isSelected && { color: '#16A34A', fontWeight: '700' }
                     ]}>
-                      {isDone ? '✓ ' : ''}{t('stage_word', 'Stage')} {stg.stageNum}
+                      {t('stage_word', 'Stage')} {stg.stageNum}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1876,7 +1770,7 @@ export default function PlannerScreen({ navigation }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
               <View>
                 <Text style={s.modalTitle}>Select Farm Plot to Plan</Text>
-                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>Choose any Block Farm field to customize its Crop Year Cycle</Text>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 2 }}>Choose one of your assigned plots</Text>
               </View>
               <TouchableOpacity onPress={() => setShowFieldPickerModal(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={24} color={COLORS.text} />
@@ -1907,7 +1801,7 @@ export default function PlannerScreen({ navigation }) {
 
             {/* Paginated Field List */}
             {(() => {
-              const filteredFields = fields.filter(f => {
+              const filteredFields = displayedFields.filter(f => {
                 if (!fieldSearchQuery.trim()) return true;
                 const q = fieldSearchQuery.toLowerCase();
                 return (

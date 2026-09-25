@@ -35,6 +35,28 @@ function isMillingOperation(log) {
   );
 }
 
+function accountId(user) {
+  return String(user?.employeeId || user?.userId || user?.id || '').trim();
+}
+
+function accountName(user) {
+  return String(user?.displayName || user?.name || accountId(user) || 'Authenticated User').trim();
+}
+
+function accountRole(user) {
+  return String(user?.role || user?.roleLabel || user?.canonicalRole || 'HUGPONG Account')
+    .trim()
+    .replace(/_/g, ' ');
+}
+
+function reportActorName(storedName, storedId, currentUser, fallback) {
+  if (String(storedName || '').trim()) return String(storedName).trim();
+  if (String(storedId || '').trim() && String(storedId).trim() === accountId(currentUser)) {
+    return accountName(currentUser);
+  }
+  return String(storedId || fallback).trim();
+}
+
 export default function PrintableAuditReport({
   report = null,
   blockFarms = [],
@@ -130,6 +152,12 @@ export default function PrintableAuditReport({
 
   const hash = report.qrHash || report.id || 'HUG-SRA-AUDIT';
   const isCertified = report.status === 'CERTIFIED';
+  const managerName = reportActorName(report.compiledByName, report.compiledByUserId, currentUser, 'Farm Manager');
+  const inspectorName = isCertified
+    ? reportActorName(report.certifiedByName || report.verifiedBy, report.certifiedByUserId, currentUser, 'SRA Admin')
+    : 'Awaiting Review';
+  const printedByName = accountName(currentUser);
+  const printedByRole = accountRole(currentUser);
 
   const handlePrint = () => {
     window.print();
@@ -365,7 +393,7 @@ export default function PrintableAuditReport({
         <div className="grid grid-cols-3 gap-8 text-center mb-3">
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <p className="font-bold text-[9px] uppercase m-0 text-black">
-              {report.compiledByUserId || currentUser?.name || 'Farm Manager'}
+              {managerName}
             </p>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               Farm Manager / President<br />
@@ -375,7 +403,7 @@ export default function PrintableAuditReport({
 
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <p className="font-bold text-[9px] uppercase m-0 text-black">
-              {isCertified ? (report.certifiedByUserId || 'SRA Admin') : 'Awaiting Review'}
+              {inspectorName}
             </p>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               SRA Agricultural Inspector<br />
@@ -385,11 +413,11 @@ export default function PrintableAuditReport({
 
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <p className="font-bold text-[9px] uppercase m-0 text-black">
-              Engr. Ramon Lacson
+              {printedByName}
             </p>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
-              SRA District Officer<br />
-              <span className="font-semibold">Silay Sugar Regulatory Administration</span>
+              Printed by {printedByRole}<br />
+              <span className="font-semibold">Authenticated HUGPONG Account</span>
             </p>
           </div>
         </div>
@@ -400,9 +428,10 @@ export default function PrintableAuditReport({
             <div className="p-1 bg-white border border-black inline-block">
               <QRCodeView
                 value={hash}
-                size={54}
+                size={96}
                 color="#000000"
                 bgColor="#ffffff"
+                errorCorrectionLevel="H"
               />
             </div>
             <div className="text-left font-mono text-[7.5px] text-black">

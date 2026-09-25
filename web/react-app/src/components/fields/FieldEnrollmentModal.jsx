@@ -3,15 +3,6 @@ import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Layers } from 'lucide-react';
 import { createField } from '../../services/fieldsService';
 
-const SOIL_TYPES = [
-  'Clay Loam',
-  'Sandy Loam',
-  'Loam',
-  'Clay',
-  'Silt Loam',
-  'Sandy Clay Loam'
-];
-
 const currentYear = new Date().getFullYear();
 const CROP_YEAR_PREVIEW = `${currentYear}–${currentYear + 1}`;
 
@@ -26,7 +17,6 @@ export default function FieldEnrollmentModal({
   const [blockFarmId, setBlockFarmId] = useState(defaultBlockFarmId);
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
-  const [soilType, setSoilType] = useState(SOIL_TYPES[0]);
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,7 +27,6 @@ export default function FieldEnrollmentModal({
     setBlockFarmId(defaultBlockFarmId);
     setMemberUserId('');
     setAreaHa('');
-    setSoilType(SOIL_TYPES[0]);
     setErrors({});
     setServerError(null);
   }, [isOpen, defaultBlockFarmId]);
@@ -71,8 +60,7 @@ export default function FieldEnrollmentModal({
       const payload = {
         blockFarmId: cleanBf,
         memberUserId: memberUserId || null,
-        areaHa: numHa,
-        soilType
+        areaHa: numHa
       };
 
       await createField(payload);
@@ -179,7 +167,7 @@ export default function FieldEnrollmentModal({
         </FormField>
 
         {/* 3. Persistent parcel attributes */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div>
           <FormField
             id="area-ha-input"
             label="Plot Area"
@@ -204,18 +192,6 @@ export default function FieldEnrollmentModal({
             />
           </FormField>
 
-          <FormField
-            id="soil-select"
-            label="Soil Type"
-          >
-            <Select
-              id="soil-select"
-              value={soilType}
-              onChange={(e) => setSoilType(e.target.value)}
-              disabled={isSubmitting}
-              options={SOIL_TYPES.map(s => ({ value: s, label: s }))}
-            />
-          </FormField>
         </div>
 
         {/* 4. Server-generated Crop Year Cycle */}

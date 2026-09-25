@@ -8,6 +8,9 @@ const SYNC_STATES = Object.freeze(['UP_TO_DATE', 'PENDING_SYNC', 'SYNCING', 'SYN
 const CONNECTION_STATES = Object.freeze(['ONLINE', 'OFFLINE', 'UNKNOWN']);
 const RECENT_ACTIVITY_MS = 15 * 60 * 1000;
 const STALE_SYNC_REPORT_MS = 72 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ATTENTION_INACTIVITY_MS = 3 * DAY_MS;
+const CRITICAL_INACTIVITY_MS = 5 * DAY_MS;
 
 function normalizePlatform(value) {
   const platform = String(value || '').trim().toUpperCase();
@@ -111,8 +114,46 @@ async function recordSyncTelemetry(db, {
 
 function validTime(value) {
   if (!value) return null;
-  const time = new Date(value).getTime();
+  const time = typeof value?.toMillis === 'function'
+    ? value.toMillis()
+    : typeof value?.toDate === 'function'
+      ? value.toDate().getTime()
+      : new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+function classifyAccountActivity({ lastActiveAt, accountCreatedAt } = {}, now = Date.now()) {
+  const lastActiveTime = validTime(lastActiveAt);
+  const accountCreatedTime = validTime(accountCreatedAt);
+  const referenceTime = lastActiveTime ?? accountCreatedTime;
+  const basedOn = lastActiveTime != null
+    ? 'LAST_ACTIVITY'
+    : accountCreatedTime != null
+      ? 'ACCOUNT_CREATED'
+      : 'NO_ACTIVITY_DATE';
+
+  if (referenceTime == null) {
+    return {
+      attentionStatus: 'NEEDS_ATTENTION',
+      inactiveDays: null,
+      monitoringSinceAt: null,
+      basedOn
+    };
+  }
+
+  const inactiveMs = Math.max(0, Number(now) - referenceTime);
+  const attentionStatus = inactiveMs >= CRITICAL_INACTIVITY_MS
+    ? 'CRITICAL'
+    : inactiveMs >= ATTENTION_INACTIVITY_MS
+      ? 'NEEDS_ATTENTION'
+      : 'WITHIN_WINDOW';
+
+  return {
+    attentionStatus,
+    inactiveDays: Math.floor(inactiveMs / DAY_MS),
+    monitoringSinceAt: new Date(referenceTime).toISOString(),
+    basedOn
+  };
 }
 
 function newestValue(records, field) {
@@ -144,6 +185,10 @@ function aggregateSubjectTelemetry(subject, records = [], now = Date.now()) {
     .filter(record => record.connectionState)
     .sort((a, b) => validTime(b.syncReportedAt) - validTime(a.syncReportedAt))[0];
   const connectionIsFresh = latestConnection && now - validTime(latestConnection.syncReportedAt) <= RECENT_ACTIVITY_MS;
+  const activityAttention = classifyAccountActivity({
+    lastActiveAt: activity?.value,
+    accountCreatedAt: subject.accountCreatedAt
+  }, now);
 
   return {
     userId: subject.userId,
@@ -156,7 +201,8 @@ function aggregateSubjectTelemetry(subject, records = [], now = Date.now()) {
       state: activityState,
       lastActiveAt: activity?.value || null,
       lastLoginAt: login?.value || null,
-      lastPlatform: activity?.record?.lastPlatform || activity?.record?.platform || null
+      lastPlatform: activity?.record?.lastPlatform || activity?.record?.platform || null,
+      ...activityAttention
     },
     sync: {
       state: syncState,
@@ -257,7 +303,8 @@ async function buildAgriculturalMonitor(db, identity) {
         role: user.role,
         isSelf: user.id === identity.userId,
         blockFarmId,
-        blockFarmName: farmMap.get(blockFarmId) || ''
+        blockFarmName: farmMap.get(blockFarmId) || '',
+        accountCreatedAt: user.createdAt || null
       }, telemetryMap.get(user.id) || []);
     })
     .sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.displayName.localeCompare(b.displayName));
@@ -271,6 +318,49 @@ async function buildAgriculturalMonitor(db, identity) {
   };
 }
 
+async function buildSystemMonitor(db, identity) {
+  if (identity.role !== ROLES.SUPER_ADMIN) {
+    throw Object.assign(new Error('System synchronization telemetry requires Super Admin access.'), { status: 403 });
+  }
+
+  const [userSnapshot, telemetrySnapshot] = await Promise.all([
+    db.collection(COLLECTIONS.USERS).where('status', '==', 'ACTIVE').get(),
+    db.collection(COLLECTIONS.TERMINAL_DIAGNOSTICS).get()
+  ]);
+  const telemetryMap = new Map();
+  for (const document of telemetrySnapshot.docs) {
+    const record = { id: document.id, ...document.data() };
+    if (!record.userId) continue;
+    if (!telemetryMap.has(record.userId)) telemetryMap.set(record.userId, []);
+    telemetryMap.get(record.userId).push(record);
+  }
+
+  const subjects = userSnapshot.docs
+    .map(document => ({ id: document.id, ...document.data() }))
+    .map(user => aggregateSubjectTelemetry({
+      userId: user.id,
+      displayName: user.displayName || 'HUGPONG User',
+      role: user.role,
+      isSelf: user.id === identity.userId,
+      accountCreatedAt: user.createdAt || null
+    }, telemetryMap.get(user.id) || []))
+    .sort((left, right) => {
+      const priority = { CRITICAL: 0, NEEDS_ATTENTION: 1, WITHIN_WINDOW: 2 };
+      const statusDelta = (priority[left.activity?.attentionStatus] ?? 3) - (priority[right.activity?.attentionStatus] ?? 3);
+      const leftReference = validTime(left.activity?.monitoringSinceAt) ?? Number.MAX_SAFE_INTEGER;
+      const rightReference = validTime(right.activity?.monitoringSinceAt) ?? Number.MAX_SAFE_INTEGER;
+      return statusDelta || leftReference - rightReference || left.displayName.localeCompare(right.displayName);
+    });
+
+  return {
+    scope: {
+      role: identity.role,
+      systemWide: true
+    },
+    subjects
+  };
+}
+
 module.exports = {
   SYNC_STATES,
   CONNECTION_STATES,
@@ -279,6 +369,8 @@ module.exports = {
   deviceDocumentId,
   recordActivity,
   recordSyncTelemetry,
+  classifyAccountActivity,
   aggregateSubjectTelemetry,
-  buildAgriculturalMonitor
+  buildAgriculturalMonitor,
+  buildSystemMonitor
 };

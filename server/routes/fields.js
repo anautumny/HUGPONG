@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { db } = require('../firebase-admin');
+const { admin, db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const {
@@ -23,6 +23,12 @@ const { assertFieldScope, assertBlockFarmScope } = require('../services/resource
 const { archiveFieldWithOperations } = require('../services/cropCycleOperations');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { createFieldId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
+const { operationAuthorization } = require('../domain/operationAuthorization');
+
+function withoutLegacySoilType(value = {}) {
+  const { soilType: _removedSoilType, ...field } = value;
+  return field;
+}
 
 async function assertManagerScope(blockFarmId, user) {
   const userId = String(user.employeeId || user.userId || '').trim();
@@ -73,7 +79,7 @@ router.get('/', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list fields.' });
     }
     const snapshot = await query.get();
-    const fields = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const fields = snapshot.docs.map(doc => ({ id: doc.id, ...withoutLegacySoilType(doc.data()) }));
     const memberIds = Array.from(new Set(fields.map(field => field.memberUserId).filter(Boolean)));
     const memberDocuments = await Promise.all(memberIds.map(memberId => (
       db.collection(COLLECTIONS.USERS).doc(memberId).get()
@@ -126,7 +132,6 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       blockFarmId,
       memberUserId,
       areaHa: finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
-      soilType: optionalString(req.body.soilType, { max: 120 }),
       cropYear: cropYearVal,
       currentCycleId: cycleId,
       status: 'ACTIVE',
@@ -192,7 +197,6 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
       blockFarmId,
       memberUserId,
       areaHa: req.body.areaHa === undefined ? existing.areaHa : finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
-      soilType: req.body.soilType === undefined ? existing.soilType : optionalString(req.body.soilType, { max: 120 }),
       updatedAt: nowIso()
     };
     const result = await db.runTransaction(async transaction => {
@@ -202,11 +206,16 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
       const alreadyApplied = latest.blockFarmId === update.blockFarmId
         && latest.memberUserId === update.memberUserId
         && latest.areaHa === update.areaHa
-        && latest.soilType === update.soilType;
-      if (alreadyApplied) return { replayed: true, record: latest };
+        && !Object.prototype.hasOwnProperty.call(latest, 'soilType');
+      if (alreadyApplied) return { replayed: true, record: withoutLegacySoilType(latest) };
       assertBaseVersion(latest.updatedAt, mutationContext, scope.fieldId, { id: scope.fieldId, ...latest });
-      transaction.update(scope.snapshot.ref, update);
-      return { replayed: false, record: { ...latest, ...update } };
+      transaction.update(scope.snapshot.ref, {
+        ...update,
+        ...(Object.prototype.hasOwnProperty.call(latest, 'soilType')
+          ? { soilType: admin.firestore.FieldValue.delete() }
+          : {})
+      });
+      return { replayed: false, record: { ...withoutLegacySoilType(latest), ...update } };
     });
     return res.json({ success: true, replayed: result.replayed, data: { id: scope.fieldId, ...result.record } });
   } catch (error) {
@@ -224,13 +233,15 @@ router.post('/:id/archive', requireAuth, requireRole([ROLES.FARM_MANAGER]), asyn
   }
 });
 
-router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
+router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.MEMBER_FARMER]), async (req, res) => {
   try {
     const fieldId = String(req.params.id || '').trim().toUpperCase();
     const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Field not found.' });
-    await assertManagerScope(snapshot.data().blockFarmId, req.session.user);
+    if (!operationAuthorization(req.session.user, { id: fieldId, ...snapshot.data() }).canPlan) {
+      return res.status(403).json({ success: false, error: 'Farm plans can only be changed for your own assigned field.' });
+    }
     const customOperations = req.body.customOperations;
     if (!customOperations || typeof customOperations !== 'object' || Array.isArray(customOperations)) {
       return res.status(400).json({ success: false, error: 'customOperations must be an object keyed by stage number.' });
@@ -240,6 +251,9 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });
       const latest = latestSnapshot.data();
+      if (!operationAuthorization(req.session.user, { id: fieldId, ...latest }).canPlan) {
+        throw Object.assign(new Error('Farm plans can only be changed for your own assigned field.'), { status: 403 });
+      }
       if (JSON.stringify(latest.customOperations || {}) === JSON.stringify(customOperations)) {
         return { replayed: true, updatedAt: latest.updatedAt };
       }

@@ -1,12 +1,11 @@
 import React from 'react';
-import { Clock, Layers3, MonitorSmartphone, RefreshCw } from 'lucide-react';
-import { formatActivity, formatPhilippineTime, syncStatusPresentation } from '../../services/telemetryService';
+import { activityAttentionPresentation, formatActivity, formatPhilippineTime } from '../../services/telemetryService';
 
-export default function SyncDiagnosticsSummary({ subject, localPending = 0, isLoading = false }) {
+export default function SyncDiagnosticsSummary({ subject, isLoading = false }) {
   if (isLoading) return <div className="h-44 rounded-2xl border border-border bg-white dark:bg-surface animate-pulse" />;
   if (!subject) return <div className="rounded-2xl border border-border bg-white dark:bg-surface p-5 text-sm text-hug-muted">Your activity has not been reported yet.</div>;
 
-  const status = syncStatusPresentation(subject.sync?.state, subject.sync?.pendingMutationCount, subject.sync?.failedMutationCount);
+  const status = activityAttentionPresentation(subject.activity);
   const tone = {
     success: 'bg-success-bg text-success border-success/30',
     warning: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -14,13 +13,11 @@ export default function SyncDiagnosticsSummary({ subject, localPending = 0, isLo
     info: 'bg-blue-50 text-blue-700 border-blue-200',
     muted: 'bg-bg text-hug-muted border-border'
   }[status.tone];
-  const platform = subject.activity?.lastPlatform;
   const details = [
-    { label: 'Last Active', value: formatActivity(subject.activity?.lastActiveAt), icon: Clock },
-    { label: 'Platform', value: platform ? platform[0] + platform.slice(1).toLowerCase() : 'Not reported', icon: MonitorSmartphone },
-    { label: 'Last Successful Sync', value: formatPhilippineTime(subject.sync?.lastSuccessfulSyncAt), icon: RefreshCw },
-    { label: 'Last Reported Pending', value: String(subject.sync?.pendingMutationCount ?? 0), icon: Layers3 },
-    { label: 'Pending in This Browser', value: String(localPending), icon: Layers3 }
+    { label: 'Last Active', value: formatActivity(subject.activity?.lastActiveAt) },
+    { label: 'Activity Status', value: status.label },
+    { label: 'Last Successful Sync', value: formatPhilippineTime(subject.sync?.lastSuccessfulSyncAt) },
+    { label: 'Last Sync Report', value: formatPhilippineTime(subject.sync?.lastReportedAt) }
   ];
 
   return (
@@ -32,16 +29,15 @@ export default function SyncDiagnosticsSummary({ subject, localPending = 0, isLo
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-bold ${tone}`}>{status.label}</span>
       </div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {details.map(({ label, value, icon: Icon }) => (
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {details.map(({ label, value }) => (
           <div key={label} className="rounded-xl bg-bg/60 dark:bg-black/10 border border-border/70 p-3">
-            <Icon className="w-4 h-4 text-primary mb-2" />
             <p className="text-[10px] uppercase tracking-wider font-bold text-hug-muted">{label}</p>
             <p className="text-sm font-extrabold text-hug-text mt-0.5">{value}</p>
           </div>
         ))}
       </div>
-      <p className="text-xs text-hug-muted mt-4">Activity and synchronization are reported independently. A Web login does not change Mobile Outbox status.</p>
+      <p className="text-xs text-hug-muted mt-4">An account not active for 3 days needs attention. At 5 days, it becomes critical.</p>
     </section>
   );
 }

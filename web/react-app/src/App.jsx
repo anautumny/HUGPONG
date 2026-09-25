@@ -10,6 +10,7 @@ const LandingView = lazy(() => import('./views/LandingView'));
 const LoginView = lazy(() => import('./views/LoginView'));
 const PrivacyPolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })));
 const TermsView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })));
+const ComplianceView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.ComplianceView })));
 const CookiePolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.CookiePolicyView })));
 const DashboardView = lazy(() => import('./views/dashboard/DashboardView'));
 const FarmFieldRegistryView = lazy(() => import('./views/fields/FarmFieldRegistryView'));
@@ -58,6 +59,7 @@ function RoleRoute({ allowed, children }) {
 const AGRICULTURAL_ROLES = [ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SRA_ADMIN];
 const GOVERNANCE_ROLES = [ROLE_KEYS.SUPER_ADMIN];
 const MANAGEMENT_ROLES = [ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SRA_ADMIN, ROLE_KEYS.SUPER_ADMIN];
+const SYNC_MONITOR_ROLES = [ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SUPER_ADMIN];
 
 export default function App() {
   return (
@@ -72,6 +74,7 @@ export default function App() {
               <Route path="/login" element={<LoginView />} />
               <Route path="/privacy" element={<PrivacyPolicyView />} />
               <Route path="/terms" element={<TermsView />} />
+              <Route path="/compliance" element={<ComplianceView />} />
               <Route path="/cookies" element={<CookiePolicyView />} />
 
               {/* Authenticated Application Shell */}
@@ -85,7 +88,7 @@ export default function App() {
                 <Route path="/prices" element={<RoleRoute allowed={[ROLE_KEYS.SRA_ADMIN]}><PricesView /></RoleRoute>} />
                 <Route path="/audit" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AuditCenterView /></RoleRoute>} />
                 <Route path="/users" element={<RoleRoute allowed={MANAGEMENT_ROLES}><UsersView /></RoleRoute>} />
-                <Route path="/sync" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><SyncView /></RoleRoute>} />
+                <Route path="/sync" element={<RoleRoute allowed={SYNC_MONITOR_ROLES}><SyncView /></RoleRoute>} />
                 <Route path="/support" element={<RoleRoute allowed={MANAGEMENT_ROLES}><TicketsView /></RoleRoute>} />
                 <Route path="/maintenance" element={<RoleRoute allowed={GOVERNANCE_ROLES}><MaintenanceView /></RoleRoute>} />
                 <Route path="/settings" element={<SettingsView />} />

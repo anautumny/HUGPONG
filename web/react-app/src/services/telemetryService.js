@@ -35,6 +35,14 @@ export async function reportWebActivity({ force = false, event = 'HEARTBEAT' } =
 
 export async function reportWebSync({ pendingMutationCount = 0, failedMutationCount = 0, syncState = 'UNKNOWN', syncSucceeded = false } = {}) {
   try {
+    let session = null;
+    try {
+      session = JSON.parse(sessionStorage.getItem('hugpong_session') || localStorage.getItem('hugpong_session') || '{}');
+    } catch {}
+    const roleUpper = String(session?.canonicalRole || session?.role || session?.roleKey || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+    if (roleUpper && roleUpper !== 'MEMBER_FARMER' && roleUpper !== 'FARM_MANAGER') {
+      return null;
+    }
     return await authenticatedRequest('/api/terminal-diagnostics/sync', {
       method: 'POST',
       headers: {
@@ -51,7 +59,7 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
       }
     });
   } catch (error) {
-    console.warn('[TelemetryService] Web sync report deferred:', error.message);
+    if (!error.message?.includes('Access Denied')) { console.warn('[TelemetryService] Web sync report deferred:', error.message); }
     return null;
   }
 }
@@ -77,6 +85,20 @@ export function syncStatusPresentation(state, pending = 0, failed = 0) {
   if (normalized === 'OFFLINE') return { label: 'Offline', tone: 'muted' };
   if (normalized === 'UP_TO_DATE') return { label: 'Up to Date', tone: 'success' };
   return { label: 'Not Reported', tone: 'muted' };
+}
+
+export function activityAttentionPresentation(activity = {}) {
+  const days = Number.isFinite(Number(activity.inactiveDays)) ? Number(activity.inactiveDays) : null;
+  if (activity.attentionStatus === 'CRITICAL') {
+    return { label: days == null ? 'Activity Unknown' : `${days} Days Inactive`, tone: 'danger' };
+  }
+  if (activity.attentionStatus === 'NEEDS_ATTENTION') {
+    return { label: days == null ? 'Activity Not Reported' : `${days} Days Inactive`, tone: 'warning' };
+  }
+  if (!activity.lastActiveAt && activity.basedOn === 'ACCOUNT_CREATED') {
+    return { label: 'New Account', tone: 'info' };
+  }
+  return { label: 'Within 3-Day Window', tone: 'success' };
 }
 
 export function formatPhilippineTime(value, fallback = 'Not reported') {

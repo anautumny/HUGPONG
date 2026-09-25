@@ -24,7 +24,9 @@ export default function Modal({
   const sizeClasses = {
     sm: 'max-w-md',
     md: 'max-w-lg sm:max-w-xl',
-    lg: 'max-w-2xl sm:max-w-3xl'
+    lg: 'max-w-2xl sm:max-w-3xl',
+    xl: 'max-w-4xl sm:max-w-5xl',
+    '2xl': 'max-w-6xl sm:max-w-7xl'
   };
 
   // Focus management & Escape handler
@@ -123,7 +125,7 @@ export default function Modal({
       >
         {/* Header */}
         {(title || badge || Icon) && (
-          <div className="flex items-start justify-between gap-3 border-b border-border/70 pb-3.5">
+          <div className="flex items-start justify-between gap-3 border-b border-border pb-3.5">
             <div className="flex items-start gap-3">
               {Icon && (
                 <div className="w-10 h-10 rounded-xl bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light flex items-center justify-center shrink-0 mt-0.5">
@@ -173,7 +175,7 @@ export default function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="pt-3.5 border-t border-border/70 flex items-center justify-end gap-2.5 flex-wrap">
+          <div className="pt-3.5 border-t border-border flex items-center justify-end gap-2.5 flex-wrap">
             {footer}
           </div>
         )}

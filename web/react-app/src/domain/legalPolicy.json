@@ -1,0 +1,151 @@
+{
+  "version": "2026-09-26",
+  "effectiveDate": "September 26, 2026",
+  "privacy": {
+    "title": "Privacy Policy & Data Protection Notice",
+    "subtitle": "How HUGPONG collects, uses, stores, and shares account and farm-operation data.",
+    "badge": "Privacy Notice",
+    "sections": [
+      {
+        "heading": "1. About This Notice",
+        "paragraphs": [
+          "HUGPONG is an agricultural operations platform. This notice explains how personal and operational data is handled and is intended to support responsible processing under Republic Act No. 10173, the Data Privacy Act of 2012, and its implementing rules.",
+          "References in the platform to SRA data, roles, circulars, prices, or reports do not mean that HUGPONG is operated, certified, or endorsed by the Sugar Regulatory Administration or the National Privacy Commission."
+        ]
+      },
+      {
+        "heading": "2. Information We Process",
+        "bullets": [
+          "Account information, such as your name, mobile number, user ID, role, and account status.",
+          "Farm and field information, such as block-farm assignments, plot identifiers, area, crop cycle, and cane variety.",
+          "Operational records, such as plans, activity logs, inputs, costs, harvest details, timestamps, and submitted reports.",
+          "Support and accountability records, such as tickets, audit events, approvals, amendments, and the identity of the account performing an action.",
+          "Technical data needed to operate the service, such as session, device, synchronization, and error information."
+        ]
+      },
+      {
+        "heading": "3. Why We Process Data",
+        "paragraphs": [
+          "We use this information to create and secure accounts, enforce role-based permissions, manage farms and field operations, synchronize offline work, prepare user-requested reports and QR records, provide support, and maintain system accountability. We do not sell personal data or use it for targeted advertising."
+        ]
+      },
+      {
+        "heading": "4. Access and Disclosure",
+        "paragraphs": [
+          "Information is available only to users whose assigned role and farm scope require it. It may also be processed by infrastructure and communications providers used to operate HUGPONG. Information may be disclosed to a public authority when an authorized user submits it, when the data subject requests it, or when disclosure is required by law."
+        ]
+      },
+      {
+        "heading": "5. Storage and Security",
+        "paragraphs": [
+          "The web and mobile clients may keep session details, preferences, cached records, drafts, and pending synchronization items in browser or device application storage. Local storage is not represented as end-to-end encrypted. Server-side passwords are stored as salted cryptographic hashes, and authenticated role checks are used to limit access. No storage or transmission method can guarantee absolute security."
+        ]
+      },
+      {
+        "heading": "6. Retention and Your Choices",
+        "paragraphs": [
+          "Records are kept while they are needed for account operation, farm history, support, security, or applicable record-keeping obligations. You may ask to be informed, access or correct your information, object to processing, and request deletion or blocking where the Data Privacy Act allows. Other rights, including data portability and damages, may apply when their legal conditions are met. Some records may need to be retained when deletion would conflict with a legal obligation or the integrity of an authorized audit history."
+        ]
+      },
+      {
+        "heading": "7. Platform Contact and Complaints",
+        "paragraphs": [
+          "HUGPONG Platform Governance is the contact for data processing performed through this platform. Submit a privacy request through the in-app Support Desk or through your organization or account administrator if you cannot sign in. You may also file a complaint with the National Privacy Commission through its official channels. HUGPONG does not publish an unverified Data Protection Officer address or telephone number."
+        ]
+      }
+    ]
+  },
+  "terms": {
+    "title": "Terms of Use & Operating Conditions",
+    "subtitle": "Rules for account access, operational records, offline synchronization, and responsible platform use.",
+    "badge": "Platform Terms",
+    "sections": [
+      {
+        "heading": "1. Acceptance and Authorized Access",
+        "paragraphs": [
+          "By creating an account or using HUGPONG, you agree to these terms and the Privacy Policy. Use is limited to registered users and to the permissions assigned to their account. A role label in HUGPONG does not by itself grant government authority or professional certification."
+        ]
+      },
+      {
+        "heading": "2. Accurate Records",
+        "paragraphs": [
+          "You are responsible for the accuracy of farm, field, plan, activity, cost, harvest, and approval information submitted through your account. HUGPONG records are platform records. They become official regulatory records only when the relevant authority accepts or issues them through an authorized process."
+        ]
+      },
+      {
+        "heading": "3. Account Security",
+        "paragraphs": [
+          "Keep passwords and one-time verification codes confidential. Do not share accounts, impersonate another person, bypass role restrictions, alter records without authority, or use the service for unlawful activity. Notify support or your account administrator if you suspect unauthorized access."
+        ]
+      },
+      {
+        "heading": "4. Offline Work and Synchronization",
+        "paragraphs": [
+          "Some mobile actions may be stored locally while offline and submitted after connectivity returns. Until the server accepts an action, it may remain pending, fail validation, or conflict with a newer record. Users must review synchronization results before relying on a pending entry."
+        ]
+      },
+      {
+        "heading": "5. Service Availability and Changes",
+        "paragraphs": [
+          "The service may be unavailable during maintenance, connectivity failures, or third-party outages. Features and these terms may be updated when the system changes. The current version and effective date are shown in this notice."
+        ]
+      }
+    ]
+  },
+  "compliance": {
+    "title": "Compliance & Regulatory Information",
+    "subtitle": "Important limits on regulatory references, prices, reports, and QR records shown in HUGPONG.",
+    "badge": "Regulatory Notice",
+    "sections": [
+      {
+        "heading": "1. Independent Platform Notice",
+        "paragraphs": [
+          "HUGPONG is a farm-management platform. Unless an authorized agreement expressly states otherwise, it is not an official SRA or NPC service and its availability does not establish government approval, certification, or endorsement."
+        ]
+      },
+      {
+        "heading": "2. Prices and Circulars",
+        "paragraphs": [
+          "Prices, circular references, benchmarks, and dates displayed in HUGPONG are informational records entered or published through the platform. Users should verify regulatory or market information against the identified source and the latest publication from the relevant authority before acting on it."
+        ]
+      },
+      {
+        "heading": "3. Reports, Statuses, and QR Records",
+        "paragraphs": [
+          "A generated report, verification status, audit entry, or QR code confirms only what the HUGPONG system recorded. It is not a government certificate, legal clearance, or guarantee of compliance unless it is separately issued or signed by the authority legally empowered to do so."
+        ]
+      },
+      {
+        "heading": "4. User Responsibility",
+        "paragraphs": [
+          "Users remain responsible for following applicable laws, cooperative rules, and regulator requirements outside the platform. When HUGPONG content conflicts with an official publication or directive, the official source controls."
+        ]
+      }
+    ]
+  },
+  "storage": {
+    "title": "Cookie & Local Storage Notice",
+    "subtitle": "How the web and mobile clients use essential browser and device storage.",
+    "badge": "Essential Storage",
+    "sections": [
+      {
+        "heading": "1. Essential Storage",
+        "paragraphs": [
+          "HUGPONG uses browser or device application storage for sign-in sessions, preferences, cached records, offline drafts, pending synchronization, and acknowledgement of notices. These items are needed for core features and offline behavior."
+        ]
+      },
+      {
+        "heading": "2. Tracking",
+        "paragraphs": [
+          "The current HUGPONG clients do not include advertising cookies or targeted-advertising pixels. Infrastructure providers may still process technical logs needed to deliver, secure, and diagnose the service."
+        ]
+      },
+      {
+        "heading": "3. Managing Local Data",
+        "paragraphs": [
+          "Signing out, clearing the application cache, clearing browser data, or uninstalling the mobile app may remove some local information. Server records are not necessarily removed by clearing local storage; use the Support Desk for an account or privacy request."
+        ]
+      }
+    ]
+  }
+}

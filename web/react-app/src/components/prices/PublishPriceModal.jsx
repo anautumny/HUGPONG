@@ -127,7 +127,7 @@ export default function PublishPriceModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Post Official SRA Price"
-      subtitle="Broadcast weekly domestic millsite sugar and molasses benchmark prices."
+      subtitle="Broadcast weekly domestic millsite sugar and molasses prices."
       icon={TrendingUp}
       badge="SRA Admin"
       size="md"

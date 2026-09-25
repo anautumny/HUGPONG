@@ -137,7 +137,7 @@ test('Field and Block Farm create endpoints return distinct server IDs and rejec
   const manager = { employeeId: '03000001', role: 'FARM_MANAGER' };
   const sra = { employeeId: '02000001', role: 'SRA_ADMIN' };
 
-  const fieldBody = { blockFarmId: 'BF-EXISTING', memberUserId: null, areaHa: 1.25, soilType: 'Loam' };
+  const fieldBody = { blockFarmId: 'BF-EXISTING', memberUserId: null, areaHa: 1.25 };
   const [fieldA, fieldB] = await Promise.all([
     invoke(fieldPost, fieldBody, manager),
     invoke(fieldPost, fieldBody, manager)
@@ -147,6 +147,7 @@ test('Field and Block Farm create endpoints return distinct server IDs and rejec
   assert.notEqual(fieldA.payload.data.field.id, fieldB.payload.data.field.id);
   assert.match(fieldA.payload.data.field.id, /^FLD-/);
   assert.equal(fieldA.payload.data.cycle.fieldId, fieldA.payload.data.field.id);
+  assert.equal(Object.prototype.hasOwnProperty.call(fieldA.payload.data.field, 'soilType'), false);
   assert.equal((await invoke(fieldPost, { ...fieldBody, id: 'FLD-MANUAL' }, manager)).statusCode, 400);
   assert.equal((await invoke(fieldPatch, { id: 'FLD-REWRITTEN' }, manager, { id: fieldA.payload.data.field.id })).statusCode, 400);
 

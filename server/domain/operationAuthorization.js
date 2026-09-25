@@ -41,6 +41,7 @@ function operationAuthorization(user, field, { managedBlockFarm = false, now = D
     canEdit: directOwner || takeover,
     canSubmit: directOwner || takeover,
     canDraft: directOwner,
+    canPlan: directOwner,
     requiresTakeover: manager && managedBlockFarm && !ownField && !takeover,
     submissionSource: manager ? (ownField ? 'FIELD_OWNER' : (takeover ? 'MANAGER_TAKEOVER' : '')) : (member && ownField ? 'MEMBER' : '')
   });

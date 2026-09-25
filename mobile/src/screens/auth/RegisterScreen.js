@@ -10,6 +10,7 @@ import { registerUser, blockFarms } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
 import { formatToE164 } from '../../services/smsService';
+import LegalPolicyModal from '../../components/LegalPolicyModal';
 
 const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
 
@@ -102,6 +103,7 @@ export default function RegisterScreen({ navigation }) {
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { score: 0, level: '', color: COLORS.border, pct: 0, hasMin: false, hasLetter: false, hasNum: false, hasUpper: false };
@@ -167,7 +169,7 @@ export default function RegisterScreen({ navigation }) {
         setCodeSent(true);
         setCountdown(60);
         Alert.alert(
-          '📱 SMS Code Dispatched',
+          'SMS Code Dispatched',
           `A 6-digit one-time SMS verification code has been dispatched to ${formatted}.\n\nPlease enter your code below to verify your mobile number.`,
           [{ text: 'Enter Code', onPress: () => {} }]
         );
@@ -235,7 +237,7 @@ export default function RegisterScreen({ navigation }) {
       }
 
       if (!consentAgreed) {
-        e.consent = 'Please agree to the Data Privacy Notice (RA 10173) to proceed.';
+        e.consent = 'Please acknowledge the Privacy Policy and Terms of Use to proceed.';
       }
     }
     setErrors(e);
@@ -253,8 +255,13 @@ export default function RegisterScreen({ navigation }) {
       if (!res?.success) {
         Alert.alert('Registration Error', res?.error || 'The account could not be created.');
       } else if (res.user) {
-        setRegisteredAccount(res.user);
-        setShowSuccessModal(true);
+        const accountId = res.accountId || res.user.accountId || res.user.employeeId || res.user.id;
+        if (!/^\d{8}$/.test(String(accountId || ''))) {
+          Alert.alert('Registration Error', 'The server did not return the permanent login ID. Please contact support before leaving this screen.');
+        } else {
+          setRegisteredAccount({ ...res.user, accountId });
+          setShowSuccessModal(true);
+        }
       } else {
         Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your Farm Member account is now active.`, [
           { text: 'Go to Dashboard', onPress: () => navigation.replace('MainTabs') }
@@ -437,7 +444,7 @@ export default function RegisterScreen({ navigation }) {
                 <View style={s.verifiedCard}>
                   <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
                   <View style={{ flex: 1 }}>
-                    <Text style={s.verifiedTitle}>{t('reg_verified_msg', 'Mobile Number Verified ✓')}</Text>
+                    <Text style={s.verifiedTitle}>{t('reg_verified_msg', 'Mobile Number Verified')}</Text>
                     <Text style={s.verifiedPhone}>+63 {form.contactNumber.slice(1)}</Text>
                   </View>
                   <TouchableOpacity 
@@ -547,7 +554,7 @@ export default function RegisterScreen({ navigation }) {
                     activeOpacity={0.8}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: consentAgreed }}
-                    accessibilityLabel="Consent to Data Privacy Act Republic Act 10173"
+                    accessibilityLabel="Acknowledge the Privacy Policy and Terms of Use"
                   >
                     <Ionicons
                       name={consentAgreed ? 'checkbox' : 'square-outline'}
@@ -555,8 +562,16 @@ export default function RegisterScreen({ navigation }) {
                       color={consentAgreed ? COLORS.primary : COLORS.textMuted}
                     />
                     <Text style={s.consentText}>
-                      I consent to the collection and processing of my agricultural and personal records in compliance with the <Text style={{ color: COLORS.primary, fontWeight: '700' }}>Philippine Data Privacy Act of 2012 (RA 10173)</Text>.
+                      I acknowledge the <Text style={{ color: COLORS.primary, fontWeight: '700' }}>HUGPONG Privacy Policy and Terms of Use</Text>, including the processing of account and farm-operation data described there.
                     </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setShowLegalModal(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Read privacy, terms, and compliance information"
+                    style={s.legalPolicyLink}
+                  >
+                    <Text style={s.legalPolicyLinkText}>Read Privacy, Terms &amp; Compliance</Text>
                   </TouchableOpacity>
                   {errors.consent ? <Text style={s.consentErr}>{errors.consent}</Text> : null}
                 </>
@@ -600,7 +615,7 @@ export default function RegisterScreen({ navigation }) {
             {/* Permanent User ID Display */}
             <View style={s.credIdBox}>
               <Text style={s.credIdLabel}>OFFICIAL PERMANENT USER ID</Text>
-              <Text selectable style={s.credIdVal}>{registeredAccount?.employeeId || 'Pending'}</Text>
+              <Text selectable style={s.credIdVal}>{registeredAccount?.accountId || registeredAccount?.employeeId}</Text>
               <Text style={s.credIdSub}>Immutable 8-digit Login Credential</Text>
             </View>
 
@@ -629,7 +644,7 @@ export default function RegisterScreen({ navigation }) {
               <TouchableOpacity
                 style={s.shareCredBtn}
                 onPress={async () => {
-                  const id = registeredAccount?.employeeId || 'Pending';
+                  const id = registeredAccount?.accountId || registeredAccount?.employeeId;
                   try {
                     await Share.share({
                       message: `HUGPONG Farm Member Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
@@ -660,6 +675,7 @@ export default function RegisterScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+      <LegalPolicyModal visible={showLegalModal} onClose={() => setShowLegalModal(false)} />
     </SafeAreaView>
   );
 }
@@ -732,5 +748,7 @@ const s = StyleSheet.create({
   proceedBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
   consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4, marginTop: 2 },
   consentText: { flex: 1, fontSize: 11.5, color: COLORS.textSecondary, lineHeight: 16 },
+  legalPolicyLink: { alignSelf: 'flex-start', minHeight: 36, justifyContent: 'center', paddingHorizontal: 30, marginTop: -6 },
+  legalPolicyLinkText: { fontSize: 11.5, fontWeight: '800', color: COLORS.primary, textDecorationLine: 'underline' },
   consentErr: { fontSize: 11, color: '#D9534F', marginTop: -2 },
 });

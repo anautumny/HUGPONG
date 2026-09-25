@@ -48,8 +48,10 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
         };
       case '/sync':
         return {
-          title: 'Sync Monitor',
-          subtitle: 'Network telemetry, offline replication, and outbox state'
+          title: roleKey === ROLE_KEYS.SUPER_ADMIN ? 'System Sync Monitor' : 'Sync Monitor',
+          subtitle: roleKey === ROLE_KEYS.SUPER_ADMIN
+            ? 'Platform-wide terminal activity and synchronization health'
+            : 'Network telemetry, offline replication, and outbox state'
         };
       case '/support':
         return {

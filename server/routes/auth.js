@@ -276,7 +276,7 @@ router.post('/register', async (req, res) => {
       updatedAt: now
     });
     await batch.commit();
-    return res.status(201).json({ success: true, pendingApproval: true, user: publicUser(user, userId) });
+    return res.status(201).json({ success: true, pendingApproval: true, accountId: userId, user: publicUser(user, userId) });
   } catch (error) {
     return res.status(400).json({ success: false, error: error.message });
   }

@@ -49,7 +49,7 @@ export function AnalyticsScopeCard({
             activeOpacity={0.7}
           >
             <Ionicons name="leaf-outline" size={13} color={COLORS.primary} />
-            <Text style={styles.scopeChipValueClean} numberOfLines={1}>{farmName}</Text>
+            <Text style={[styles.scopeChipValueClean, { maxWidth: 170 }]} numberOfLines={1}>{farmName}</Text>
           </TouchableOpacity>
         )}
         {season && (
@@ -453,7 +453,7 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
         <View style={styles.priceDivider} />
 
         <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>MOLASSES BENCHMARK (₱/MT)</Text>
+          <Text style={styles.priceBoxLabel}>MOLASSES (₱/MT)</Text>
           <Text style={[styles.priceBoxValue, { color: COLORS.text }]}>
             ₱{molassesPrice.toLocaleString()}
           </Text>

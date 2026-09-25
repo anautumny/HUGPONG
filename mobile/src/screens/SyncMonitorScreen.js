@@ -41,6 +41,14 @@ function statusLabel(sync = {}) {
   return 'Not Reported';
 }
 
+function activityStatusLabel(activity = {}) {
+  const days = Number.isFinite(Number(activity.inactiveDays)) ? Number(activity.inactiveDays) : null;
+  if (activity.attentionStatus === 'CRITICAL') return days == null ? 'Activity Unknown' : `${days} Days Inactive`;
+  if (activity.attentionStatus === 'NEEDS_ATTENTION') return days == null ? 'Activity Not Reported' : `${days} Days Inactive`;
+  if (!activity.lastActiveAt && activity.basedOn === 'ACCOUNT_CREATED') return 'New Account';
+  return 'Within 3-Day Window';
+}
+
 function StatusRow({ label, value }) {
   return (
     <View style={s.row}>
@@ -143,7 +151,7 @@ export default function SyncMonitorScreen({ navigation }) {
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={22} color={COLORS.text} /></TouchableOpacity>
         <View style={{ alignItems: 'center' }}>
-          <Text style={s.headerTitle}>{role === 'Farm Manager' ? 'Sync Monitor' : 'My Synchronization'}</Text>
+          <Text style={s.headerTitle}>{role === 'Farm Manager' ? 'Sync Monitor' : 'My Sync Status'}</Text>
           <Text style={s.headerSub}>{monitor?.scope?.blockFarms?.map(farm => farm.name).join(', ') || 'Personal device status'}</Text>
         </View>
         <View style={{ width: 22 }} />
@@ -156,7 +164,7 @@ export default function SyncMonitorScreen({ navigation }) {
             <View style={s.card}>
               <View style={s.cardHeading}>
                 <View>
-                  <Text style={s.eyebrow}>{role === 'Farm Manager' ? 'YOUR STATUS' : 'SYNCHRONIZATION'}</Text>
+                  <Text style={s.eyebrow}>{role === 'Farm Manager' ? 'YOUR STATUS' : 'SYNC STATUS'}</Text>
                   <Text style={s.name}>{own?.displayName || session?.name || 'Current user'}</Text>
                 </View>
                 <View style={[s.badge, ownSync.state === 'UP_TO_DATE' ? s.goodBadge : localPending > 0 ? s.warnBadge : s.neutralBadge]}>
@@ -179,17 +187,18 @@ export default function SyncMonitorScreen({ navigation }) {
 
             {role === 'Farm Manager' ? (
               <View>
-                <Text style={s.sectionTitle}>Member Synchronization</Text>
-                <Text style={s.sectionSub}>Latest centrally reported state. An offline member’s local queue cannot be inspected remotely.</Text>
+                <Text style={s.sectionTitle}>Member Activity Status</Text>
+                <Text style={s.sectionSub}>An account not active for 3 days needs attention. At 5 days, it becomes critical.</Text>
                 {members.length === 0 ? <Text style={s.emptyText}>No assigned active members found.</Text> : members.map(member => (
                   <View key={member.userId} style={s.memberCard}>
                     <View style={s.cardHeading}>
                       <Text style={s.memberName}>{member.displayName}</Text>
-                      <View style={[s.badge, member.sync?.state === 'UP_TO_DATE' ? s.goodBadge : member.sync?.state === 'PENDING_SYNC' ? s.warnBadge : s.neutralBadge]}>
-                        <Text style={s.badgeText}>{statusLabel(member.sync)}</Text>
+                      <View style={[s.badge, member.activity?.attentionStatus === 'CRITICAL' ? s.dangerBadge : member.activity?.attentionStatus === 'NEEDS_ATTENTION' ? s.warnBadge : member.activity?.attentionStatus === 'WITHIN_WINDOW' ? s.goodBadge : s.neutralBadge]}>
+                        <Text style={s.badgeText}>{activityStatusLabel(member.activity)}</Text>
                       </View>
                     </View>
                     <StatusRow label="Last Active" value={formatActivity(member.activity?.lastActiveAt)} />
+                    <StatusRow label="Activity Status" value={activityStatusLabel(member.activity)} />
                     <StatusRow label="Last Successful Sync" value={formatTime(member.sync?.lastSuccessfulSyncAt)} />
                     <StatusRow label="Last Reported" value={formatTime(member.sync?.lastReportedAt)} />
                   </View>
@@ -219,6 +228,7 @@ const s = StyleSheet.create({
   badge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   goodBadge: { backgroundColor: '#E9F8EC' },
   warnBadge: { backgroundColor: '#FFF3D6' },
+  dangerBadge: { backgroundColor: '#FDECEC' },
   neutralBadge: { backgroundColor: '#EEF1ED' },
   badgeText: { fontSize: 10.5, fontWeight: '900', color: COLORS.text },
   row: { minHeight: 39, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#EDF0EB', gap: 12 },

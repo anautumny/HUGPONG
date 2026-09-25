@@ -214,6 +214,12 @@ export default function Sidebar({
         header: 'System Telemetry & Health',
         items: [
           {
+            label: 'System Sync Monitor',
+            to: '/sync',
+            icon: RefreshCw,
+            id: 'nav-system-sync'
+          },
+          {
             label: 'Support & Tickets Desk',
             to: '/support',
             icon: LifeBuoy,

@@ -39,6 +39,7 @@ import {
 import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations, getOperationDefinition } from '../domain/operationCatalogue';
 import { SUGARCANE_STAGES } from '../constants/cropStages';
 import { canCreateSupportTicket, canonicalSupportRole, SUPPORT_TICKET_STATUS } from '../domain/supportTickets';
+import { getOperationCapabilities } from '../domain/operationAuthorization';
 import {
   cleanDataForFirestore,
   cleanupDuplicateLogs,
@@ -293,12 +294,14 @@ export const approvePendingRegistration = async (contact, options = {}) => {
     return fieldResult;
   }
 
+  let approvedAccountId = empId;
   try {
     const approvalOutcome = await commitExplicitMutation('user_approve', {
       id: empId,
       role: 'MEMBER_FARMER'
     }, { baseVersion: existingUserSnapshot?.updatedAt || applicant.updatedAt || null });
     const approved = approvalOutcome.response;
+    approvedAccountId = approved?.accountId || approved?.data?.id || empId;
     const activeUser = users.find(user => user.employeeId === empId);
     if (activeUser && approved.data) Object.assign(activeUser, fromUserDocument(empId, approved.data));
   } catch (error) {
@@ -310,7 +313,12 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   await saveItem(STORAGE_KEYS.USERS, users);
 
   notifyDataUpdate();
-  return { success: true, applicant, fieldId: fieldResult.field.id };
+  return {
+    success: true,
+    applicant,
+    accountId: approvedAccountId,
+    fieldId: fieldResult.field.id
+  };
 };
 
 export const rejectPendingRegistration = async (contact) => {
@@ -416,7 +424,6 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
           blockFarmId: resolvedBlockFarmId,
           memberUserId: matchedUser ? (matchedUser.employeeId || matchedUser.id) : null,
           areaHa: validation.parsedHa,
-          soilType: String(fieldData.soilType || '').trim(),
           cropType: fieldData.cycleType || 'Plant Cane (New Plant)',
           elapsedMonths: 0,
           batchNumber: 1
@@ -480,7 +487,6 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
     lastSync: fieldData.lastSync || currentF.lastSync || 'Just now',
     ...(currentF.variety ? { variety: currentF.variety } : {}),
-    soilType: fieldData.soilType || currentF.soilType || '',
     createdAt: fieldData.createdAt || currentF.createdAt || nowIso,
     updatedAt: nowIso,
     currentCycleId: resolvedCurrentCycleId,
@@ -978,6 +984,7 @@ export const registerUser = async (userData) => {
     });
     if (result.user) {
       const publicAccount = fromUserDocument(result.user.id, result.user);
+      publicAccount.accountId = result.accountId || result.user.id;
       const existing = pendingUsers.find(user => user.employeeId === publicAccount.employeeId);
       if (!existing) pendingUsers.push(publicAccount);
       notify();
@@ -1009,6 +1016,7 @@ export const getCurrentSession = () => CURRENT_SESSION || DEFAULT_GUEST_SESSION;
 export const getIsSynced = () => IS_SYNCED;
 
 const canReportAgriculturalSyncTelemetry = (session = CURRENT_SESSION) => {
+  if (!session?.employeeId && !session?.id) return false;
   const role = canonicalRole(session?.canonicalRole || session?.role || session?.roleKey);
   return role === ROLES.MEMBER_FARMER || role === ROLES.FARM_MANAGER;
 };
@@ -2026,39 +2034,43 @@ export const getFieldCustomOperations = (fieldId, stageNumber) => {
 export const saveFieldCustomOperations = async (fieldId, stageNumber, operations) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
-  if (field) {
-    const baseVersion = field.updatedAt || null;
-    if (!field.customOperations) field.customOperations = {};
-    field.customOperations[stageNumber] = (operations || []).map(op => ({
-      ...op,
-      isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group'),
-      inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
-      subItems: (op.subItems || []).map(si => ({ ...si }))
-    }));
-    field.updatedAt = new Date().toISOString();
-    await saveItem(STORAGE_KEYS.FIELDS, fields);
-    await commitExplicitMutation('custom_operations', {
-      fieldId: field.id,
-      customOperations: field.customOperations
-    }, { baseVersion });
-    notifyDataUpdate();
+  if (!field) throw new Error('Field not found. Refresh your assigned plot and try again.');
+  if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
+    throw new Error('Farm plans can only be changed for your own assigned field.');
   }
+  const baseVersion = field.updatedAt || null;
+  if (!field.customOperations) field.customOperations = {};
+  field.customOperations[stageNumber] = (operations || []).map(op => ({
+    ...op,
+    isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group'),
+    inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
+    subItems: (op.subItems || []).map(si => ({ ...si }))
+  }));
+  field.updatedAt = new Date().toISOString();
+  await saveItem(STORAGE_KEYS.FIELDS, fields);
+  await commitExplicitMutation('custom_operations', {
+    fieldId: field.id,
+    customOperations: field.customOperations
+  }, { baseVersion });
+  notifyDataUpdate();
 };
 
 export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
-  if (field) {
-    const baseVersion = field.updatedAt || null;
-    field.customOperations = { ...(fullPlanByStage || {}) };
-    field.updatedAt = new Date().toISOString();
-    await saveItem(STORAGE_KEYS.FIELDS, fields);
-    await commitExplicitMutation('custom_operations', {
-      fieldId: field.id,
-      customOperations: field.customOperations
-    }, { baseVersion });
-    notifyDataUpdate();
+  if (!field) throw new Error('Field not found. Refresh your assigned plot and try again.');
+  if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
+    throw new Error('Farm plans can only be changed for your own assigned field.');
   }
+  const baseVersion = field.updatedAt || null;
+  field.customOperations = { ...(fullPlanByStage || {}) };
+  field.updatedAt = new Date().toISOString();
+  await saveItem(STORAGE_KEYS.FIELDS, fields);
+  await commitExplicitMutation('custom_operations', {
+    fieldId: field.id,
+    customOperations: field.customOperations
+  }, { baseVersion });
+  notifyDataUpdate();
 };
 
 export const submitSupportTicket = async (ticket) => {

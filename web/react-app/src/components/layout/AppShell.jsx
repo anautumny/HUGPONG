@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import MobileBottomNav from './MobileBottomNav';
 
 const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
@@ -152,11 +153,14 @@ export default function AppShell() {
         {/* Page Content Outlet without forced card wrapping */}
         <main
           id="page-content"
-          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
+          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 pb-20 lg:pb-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
           tabIndex={-1}
         >
           <Outlet />
         </main>
+
+        {/* Responsive Mobile Bottom Navigation Bar (<= 1024px) */}
+        <MobileBottomNav onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
       </div>
     </div>
   );
