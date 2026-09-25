@@ -4,6 +4,7 @@ import { Layers, MapPin, User, Calendar, Sprout, Activity, ArrowRight } from 'lu
 import { useNavigate } from 'react-router-dom';
 import { formatHectares, formatDate, formatCropYearDisplay } from '../../utils/formatters';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
+import { STAGE_DISPLAY_LABELS } from '../../domain/presentationContract';
 
 export default function FieldDetailModal({
   isOpen = false,
@@ -82,10 +83,10 @@ export default function FieldDetailModal({
 
           <div>
             <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider block">
-              Variety
+              Sugarcane Variety (Crop Year Cycle)
             </span>
             <span className="text-xs sm:text-sm font-bold text-hug-text mt-1 block truncate">
-              {field.variety || 'Standard Cane'}
+              {field.variety || 'Not recorded yet'}
             </span>
           </div>
 
@@ -101,7 +102,7 @@ export default function FieldDetailModal({
 
         {cropCycles.length > 0 && (
           <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2">
-            <p className="text-xs font-bold uppercase tracking-wider text-hug-muted">Crop Year History</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-hug-muted">Crop Year Cycle History</p>
             {cropCycles.map(cycle => (
               <div key={cycle.id} className="flex items-center justify-between text-sm">
                 <span className="font-semibold text-hug-text">{formatCropYearDisplay(cycle.cropYear)}</span>
@@ -127,7 +128,7 @@ export default function FieldDetailModal({
               </p>
             )}
             <p className="text-[11px] text-hug-muted">
-              Member identity holds personal field stewardship.
+              Farm Member identity holds personal field stewardship.
             </p>
           </div>
 
@@ -160,7 +161,7 @@ export default function FieldDetailModal({
             </span>
           </div>
           <p className="text-sm font-bold text-hug-text">
-            Current Stage: {stageObj?.name || 'Not set'}
+            Current Stage: {STAGE_DISPLAY_LABELS[stageObj?.stageNumber] || 'Not set'}
           </p>
           <p className="text-xs text-hug-muted">
             {stageObj

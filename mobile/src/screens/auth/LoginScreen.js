@@ -12,7 +12,14 @@ import {
   verifyCurrentPhone
 } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
-import { isOnline, addNetworkListener } from '../../services/networkService';
+import {
+  isOnline,
+  addNetworkListener,
+  checkConnectivity,
+  getConnectivityDetails,
+  CONNECTIVITY_STATUS
+} from '../../services/networkService';
+import { API_UNAVAILABLE_MESSAGE } from '../../config/apiConfig';
 import CirclingRetryButton from '../../components/CirclingRetryButton';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
@@ -26,7 +33,8 @@ export default function LoginScreen({ navigation }) {
   const [errors, setErrors] = useState({});
   const [authError, setAuthError] = useState('');
   const [deviceOnline, setDeviceOnline] = useState(isOnline());
-  const [showOfflineGateModal, setShowOfflineGateModal] = useState(!isOnline());
+  const [connectivityStatus, setConnectivityStatus] = useState(getConnectivityDetails().status);
+  const [showOfflineGateModal, setShowOfflineGateModal] = useState(false);
 
   // Security: Brute-Force Rate Limiting & Account Lockout
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -51,8 +59,9 @@ export default function LoginScreen({ navigation }) {
   const [setupSigningOut, setSetupSigningOut] = useState(false);
 
   useEffect(() => {
-    const unsubNet = addNetworkListener((status) => {
+    const unsubNet = addNetworkListener((status, details) => {
       setDeviceOnline(status);
+      setConnectivityStatus(details.status);
       if (status) {
         setShowOfflineGateModal(false);
       }
@@ -92,11 +101,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleLogin = async () => {
-    if (!deviceOnline && !isOnline()) {
-      setShowOfflineGateModal(true);
-      return;
-    }
-
+    if (loading) return;
     if (lockoutSeconds > 0) {
       Alert.alert(
         'Account Temporarily Locked',
@@ -110,10 +115,26 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
 
     try {
+      const serverReachable = await checkConnectivity({ force: true });
+      if (!serverReachable) {
+        const connectivity = getConnectivityDetails();
+        if (connectivity.status === CONNECTIVITY_STATUS.NO_INTERNET) {
+          setShowOfflineGateModal(true);
+        } else {
+          setAuthError(API_UNAVAILABLE_MESSAGE);
+        }
+        return;
+      }
+
       const res = await authenticateUser(contactNumber, password);
-      setLoading(false);
 
       if (!res.success) {
+        if (res.isNetworkError) {
+          setAuthError(res.code === 'API_CONFIGURATION_ERROR'
+            ? res.error
+            : API_UNAVAILABLE_MESSAGE);
+          return;
+        }
         const nextAttempts = failedAttempts + 1;
         setFailedAttempts(nextAttempts);
 
@@ -154,8 +175,9 @@ export default function LoginScreen({ navigation }) {
 
       navigation.replace('MainTabs');
     } catch (error) {
+      setAuthError(API_UNAVAILABLE_MESSAGE);
+    } finally {
       setLoading(false);
-      setAuthError('Authentication service is unavailable. An online server login is required.');
     }
   };
 
@@ -302,13 +324,19 @@ export default function LoginScreen({ navigation }) {
           <View style={s.card}>
 
             {/* Offline First-Time Login Notice */}
-            {!deviceOnline ? (
+            {!deviceOnline && connectivityStatus !== CONNECTIVITY_STATUS.CHECKING ? (
               <View style={s.offlineBanner}>
                 <Ionicons name="cloud-offline-outline" size={20} color="#B45309" />
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.offlineBannerTitle}>You are currently offline</Text>
+                  <Text style={s.offlineBannerTitle}>
+                    {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
+                      ? 'No internet connection'
+                      : 'HUGPONG server unavailable'}
+                  </Text>
                   <Text style={s.offlineBannerText}>
-                    An active internet connection is required to sign in or register for the first time. Once signed in, you stay logged in offline.
+                    {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
+                      ? 'Connect to Wi-Fi or mobile data to sign in. Once signed in, your field work remains available offline.'
+                      : 'Your internet connection is active, but the HUGPONG server cannot be reached. Please retry shortly.'}
                   </Text>
                 </View>
               </View>
@@ -541,7 +569,7 @@ export default function LoginScreen({ navigation }) {
                 <View style={[s.modalAccountRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 4 }]}>
                   <Text style={s.modalAccountLbl}>User ID / Role</Text>
                   <Text style={[s.modalAccountVal, { color: COLORS.primary, fontWeight: '800' }]}>
-                    {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Member Farmer'})
+                    {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Farm Member'})
                   </Text>
                 </View>
               </View>
@@ -695,6 +723,9 @@ export default function LoginScreen({ navigation }) {
                 setDeviceOnline(online);
                 if (online) {
                   setShowOfflineGateModal(false);
+                } else if (getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE) {
+                  setShowOfflineGateModal(false);
+                  setAuthError(API_UNAVAILABLE_MESSAGE);
                 }
               }}
             />

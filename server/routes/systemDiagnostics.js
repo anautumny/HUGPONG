@@ -13,12 +13,12 @@ router.get('/', requireAuth, requireRole([ROLES.SUPER_ADMIN]), async (req, res) 
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
 
     const [users, blockFarms, fields, operations, cropCycles, prices] = await Promise.all([
-      db.collection(COLLECTIONS.USERS).get(),
-      db.collection(COLLECTIONS.BLOCK_FARMS).get(),
+      db.collection(COLLECTIONS.USERS).count().get(),
+      db.collection(COLLECTIONS.BLOCK_FARMS).count().get(),
       db.collection(COLLECTIONS.FIELDS).get(),
-      db.collection(COLLECTIONS.OPERATION_LOGS).get(),
+      db.collection(COLLECTIONS.OPERATION_LOGS).count().get(),
       db.collection(COLLECTIONS.CROP_CYCLES).get(),
-      db.collection(COLLECTIONS.SRA_PRICES).get()
+      db.collection(COLLECTIONS.SRA_PRICES).count().get()
     ]);
 
     const cycleSummary = summarizeCropYearCycles(cropCycles.docs, fields.docs);
@@ -26,11 +26,11 @@ router.get('/', requireAuth, requireRole([ROLES.SUPER_ADMIN]), async (req, res) 
     return res.json({
       success: true,
       data: {
-        users: users.size,
-        blockFarms: blockFarms.size,
+        users: users.data().count,
+        blockFarms: blockFarms.data().count,
         fields: fields.size,
-        operations: operations.size,
-        prices: prices.size,
+        operations: operations.data().count,
+        prices: prices.data().count,
         ...cycleSummary
       }
     });

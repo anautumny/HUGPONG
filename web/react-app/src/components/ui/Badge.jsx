@@ -53,7 +53,13 @@ export function StatusBadge({ status, size = 'sm', className = '' }) {
   const normalized = String(status).trim().toUpperCase();
 
   let variant = 'neutral';
-  let label = status;
+  const labels = {
+    ACTIVE: 'Active', ARCHIVED: 'Archived', CERTIFIED: 'Certified', COMPLETED: 'Completed',
+    SYNCED: 'Synced', UNSYNCED: 'Unsynced', PENDING: 'Pending', IN_PROGRESS: 'In Progress',
+    RETRYING: 'Retrying', FAILED: 'Failed', CONFLICT: 'Conflict', REJECTED: 'Rejected',
+    RESOLVED: 'Resolved', CLOSED: 'Closed', OFFLINE: 'Offline', ONLINE: 'Online'
+  };
+  let label = labels[normalized] || status;
   let dot = false;
 
   switch (normalized) {

@@ -1,6 +1,6 @@
 import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
-// HUGPONG Mobile — SRA Administrator Home View Component
+// HUGPONG Mobile — SRA Admin Home View Component
 // Role: SRA Admin · Silay Sugar Regulatory Administration
 // ══════════════════════════════════════════════════════════════
 
@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/dataStore';
+import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
@@ -44,8 +45,8 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 
   const complianceRate = React.useMemo(() => {
     if (!auditReports || auditReports.length === 0) return 100;
-    const certified = auditReports.filter(a => a.status === 'CERTIFIED').length;
-    return Math.round((certified / auditReports.length) * 100);
+    const actionable = auditReports.filter(a => canonicalAuditStatus(a.status) === AUDIT_STATUS.PENDING_REVIEW).length;
+    return actionable === 0 ? 100 : Math.max(0, Math.round(((auditReports.length - actionable) / auditReports.length) * 100));
   }, [auditReports]);
 
   return (
@@ -56,7 +57,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
         <View style={s.summaryHeader}>
           <View>
             <Text style={s.districtName}>{t('district_name_title', 'District 3 · Silay')}</Text>
-            <Text style={s.adminTag}>{t('profile_admin_role', 'Administrator')}: {session?.name || 'Administrator'}</Text>
+            <Text style={s.adminTag}>{t('profile_admin_role', 'SRA Admin')}: {session?.name || 'SRA Admin'}</Text>
           </View>
           <View style={s.totalBadge}>
             <Ionicons name="leaf" size={13} color={COLORS.primary} style={{ marginRight: 5 }} />
@@ -111,7 +112,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
                 </View>
               </View>
               <Text style={s.plotManager}>{t('manager_label', 'Manager')}: {farm.manager}</Text>
-              <Text style={s.plotMeta}>{farm.plots} {t('member_plots_count', 'Member Plots')} · New Plant: {farm.ha} Ha · Total: {farm.totalFarmHa} Ha</Text>
+              <Text style={s.plotMeta}>{farm.plots} {t('member_plots_count', 'Farm Member Fields')} · New Plant: {farm.ha} Ha · Total: {farm.totalFarmHa} Ha</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>

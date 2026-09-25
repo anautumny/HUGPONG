@@ -45,6 +45,42 @@ for (const envFile of envFiles) {
 let sessionSecret = process.env.SESSION_SECRET;
 const isProduction = process.env.NODE_ENV === 'production';
 const smsProvider = String(process.env.SMS_PROVIDER || 'semaphore').trim().toLowerCase();
+const host = String(process.env.HOST || '0.0.0.0').trim();
+const port = Number(process.env.PORT || '3000');
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '').trim();
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('PORT must be an integer between 1 and 65535.');
+}
+if (!host) {
+  throw new Error('HOST must not be empty.');
+}
+if (isProduction && ['localhost', '127.0.0.1', '::1'].includes(host.toLowerCase())) {
+  throw new Error('HOST must bind to an externally reachable interface in production.');
+}
+if (isProduction && !configuredCorsOrigins) {
+  throw new Error('CORS_ORIGINS must list the exact public web origin(s) in production.');
+}
+
+const corsOrigins = String(configuredCorsOrigins || 'http://localhost:3000,http://127.0.0.1:3000')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean)
+  .map(value => {
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch (_) {
+      throw new Error(`CORS_ORIGINS contains an invalid origin: ${value}`);
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== value) {
+      throw new Error(`CORS_ORIGINS must contain exact HTTP(S) origins without paths: ${value}`);
+    }
+    if (isProduction && parsed.protocol !== 'https:') {
+      throw new Error(`CORS_ORIGINS must use HTTPS in production: ${value}`);
+    }
+    return parsed.origin;
+  });
 
 if (!['console', 'semaphore'].includes(smsProvider)) {
   throw new Error('SMS_PROVIDER must be either "console" or "semaphore".');
@@ -83,9 +119,8 @@ module.exports = {
   smsProvider,
   semaphoreApiKey: process.env.SEMAPHORE_API_KEY || '',
   semaphoreSenderName: process.env.SEMAPHORE_SENDER_NAME || 'SEMAPHORE',
-  corsOrigins: String(process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean),
-  isProduction
+  corsOrigins,
+  isProduction,
+  host,
+  port
 };

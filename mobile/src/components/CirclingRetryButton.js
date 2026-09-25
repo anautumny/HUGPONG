@@ -44,7 +44,7 @@ export default function CirclingRetryButton({
 
     try {
       // Actively ping connection
-      const online = await checkConnectivity(3500);
+      const online = await checkConnectivity({ force: true });
       if (typeof onResult === 'function') {
         onResult(online);
       }

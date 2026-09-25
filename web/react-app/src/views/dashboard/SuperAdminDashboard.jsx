@@ -39,7 +39,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
       items.push({
         id: 'open-tickets',
         title: `${openTickets.length} Open Support Ticket${openTickets.length > 1 ? 's' : ''}`,
-        description: 'Field workers or managers submitted support issues requiring administrator review.',
+        description: 'Farm Members or Farm Managers submitted support issues requiring Super Admin review.',
         type: 'warning',
         to: '/support',
         actionLabel: 'Review Tickets'

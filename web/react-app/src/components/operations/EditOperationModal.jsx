@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { updateOperation } from '../../services/operationsService';
+import { STAGE_DISPLAY_LABELS } from '../../domain/presentationContract';
+import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
+import { meaningfulAmendmentChanges } from '../../domain/amendmentPresentation';
 import { Button, FormField, Input, Modal, Select, Textarea } from '../ui';
 
 const newLineItem = () => ({
@@ -25,6 +28,7 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
       operationName: operation.operationName || operation.activity || '',
       performedOn: operation.performedOn || operation.date || '',
       stageNumber: Number(operation.stageNumber || 1),
+      variety: operation.variety || '',
       areaHa: String(operation.areaHa ?? operation.hectares ?? ''),
       peopleCount: String(operation.peopleCount ?? operation.people ?? 0),
       totalCost: String(operation.totalCost ?? operation.cost ?? 0),
@@ -82,6 +86,10 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
       setError('Enter a valid operation cost.');
       return;
     }
+    if (form.stageNumber === 2 && !form.variety.trim()) {
+      setError('Sugarcane variety is required for a Planting-stage operation.');
+      return;
+    }
 
     const lineItems = (form.lineItems || []).map(item => ({
       lineItemId: item.lineItemId,
@@ -101,6 +109,7 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
       operationName: form.operationName.trim(),
       category: operation.category || 'General Care',
       stageNumber: Number(form.stageNumber),
+      variety: form.stageNumber === 2 ? form.variety.trim() : '',
       performedOn: form.performedOn,
       areaHa,
       peopleCount,
@@ -109,14 +118,24 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
       lineItems,
       isSupplemental: Boolean(operation.isSupplemental)
     };
+    const amendmentChanges = meaningfulAmendmentChanges({
+      operationName: { before: operation.operationName, after: changes.operationName },
+      performedOn: { before: operation.performedOn, after: changes.performedOn },
+      areaHa: { before: operation.areaHa, after: changes.areaHa },
+      peopleCount: { before: operation.peopleCount, after: changes.peopleCount },
+      quantity: { before: operation.quantity, after: changes.quantity },
+      totalCost: { before: operation.totalCost, after: changes.totalCost },
+      lineItems: { before: operation.lineItems || [], after: changes.lineItems },
+      variety: { before: operation.variety || '', after: changes.variety }
+    });
+    if (Object.keys(amendmentChanges).length === 0) {
+      setError('No meaningful changes were detected. Nothing was submitted.');
+      return;
+    }
     const amendment = {
       amendmentId: `AMD-WEB-${Date.now().toString(36).toUpperCase()}`,
       reason: reason.trim(),
-      changes: {
-        operationName: { before: operation.operationName, after: changes.operationName },
-        performedOn: { before: operation.performedOn, after: changes.performedOn },
-        totalCost: { before: operation.totalCost, after: changes.totalCost }
-      }
+      changes: amendmentChanges
     };
 
     setIsSaving(true);
@@ -178,14 +197,24 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
           <FormField label="Date Completed" required>
             <Input type="date" value={form.performedOn} onChange={event => setForm({ ...form, performedOn: event.target.value })} disabled={isSaving || Boolean(success)} />
           </FormField>
-          <FormField label="Crop Stage" required>
+          <FormField label="Stage at Recording" required>
             <Select
               value={String(form.stageNumber)}
-              onChange={event => setForm({ ...form, stageNumber: Number(event.target.value) })}
-              options={[1, 2, 3, 4, 5, 6].map(stage => ({ value: String(stage), label: `Stage ${stage}` }))}
-              disabled={isSaving || Boolean(success)}
+              options={[1, 2, 3, 4, 5, 6].map(stage => ({ value: String(stage), label: STAGE_DISPLAY_LABELS[stage] }))}
+              disabled
             />
           </FormField>
+          {form.stageNumber === 2 && (
+            <FormField label="Sugarcane Variety" required helperText="This correction also updates the owning Crop Year Cycle.">
+              <Select
+                value={form.variety}
+                onChange={event => setForm({ ...form, variety: event.target.value })}
+                placeholder="Select sugarcane variety..."
+                options={SUGARCANE_VARIETIES.map(value => ({ value, label: value }))}
+                disabled={isSaving || Boolean(success)}
+              />
+            </FormField>
+          )}
           <FormField label="Field Area" required>
             <Input type="number" min="0.01" step="0.01" suffix="ha" value={form.areaHa} onChange={event => setForm({ ...form, areaHa: event.target.value })} disabled={isSaving || Boolean(success)} />
           </FormField>

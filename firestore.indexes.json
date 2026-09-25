@@ -4,6 +4,31 @@
       "collectionGroup": "operation_logs",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "fieldId", "order": "ASCENDING" },
+        { "fieldPath": "performedOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "operation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "performedOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "operation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fieldId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "performedOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "operation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "archivedAt", "order": "DESCENDING" },
         { "fieldPath": "__name__", "order": "DESCENDING" }
@@ -82,6 +107,30 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "archivedAt", "order": "DESCENDING" },
         { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "blockFarmId", "order": "ASCENDING" },
+        { "fieldPath": "compiledAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "certifiedAt", "order": "DESCENDING" }
       ]
     }
   ],

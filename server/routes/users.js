@@ -17,6 +17,8 @@ const {
   nowIso
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
+const { assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
+const { resolveDirectoryAssignmentsFromDatabase } = require('../services/userDirectoryService');
 
 function createUserId(role) {
   const prefixes = {
@@ -112,10 +114,11 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
       const snapshot = await db.collection(COLLECTIONS.USERS).get();
       documents = snapshot.docs;
     }
-    const data = documents
+    const scopedUsers = documents
       .filter(doc => actorRole !== ROLES.SRA_ADMIN || canonicalRole(doc.data().role) !== ROLES.SUPER_ADMIN)
       .map(doc => publicUser(doc.data(), doc.id))
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')) || String(left.id || '').localeCompare(String(right.id || '')));
+    const data = await resolveDirectoryAssignmentsFromDatabase(db, scopedUsers);
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -130,12 +133,14 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     let role = canonicalRole(req.body.role || ROLES.MEMBER_FARMER);
     if (!role) throw new Error('role must be a canonical HUGPONG role.');
     if (actorRole === ROLES.FARM_MANAGER && role !== ROLES.MEMBER_FARMER) {
-      return res.status(403).json({ success: false, error: 'Farm Managers may approve only Member Farmer accounts.' });
+      return res.status(403).json({ success: false, error: 'Farm Managers may approve only Farm Member accounts.' });
     }
     if (actorRole === ROLES.SRA_ADMIN && role !== ROLES.FARM_MANAGER) {
       return res.status(403).json({ success: false, error: 'SRA Admins may approve only Farm Manager accounts.' });
     }
-    const userId = req.body.id ? requiredString(req.body.id, 'id', { max: 8 }) : createUserId(role);
+    const requestedUserId = req.body.id ? requiredString(req.body.id, 'id', { max: 8 }) : null;
+    const developmentSeedId = readDevelopmentSeedId(req);
+    const userId = requestedUserId || createUserId(role);
     if (!/^\d{8}$/.test(userId)) throw new Error('id must be an eight-digit HUGPONG user ID.');
     const userRef = db.collection(COLLECTIONS.USERS).doc(userId);
     const existingUser = await userRef.get();
@@ -165,6 +170,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       });
       return res.json({ success: true, data: publicUser(approved, userId) });
     }
+    if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
     const phone = requiredString(req.body.phone, 'phone', { max: 20 }).replace(/\D/g, '');
     if (!/^09\d{9}$/.test(phone)) throw new Error('phone must be an 11-digit Philippine mobile number.');
     const existing = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
@@ -211,6 +217,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
 router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
     const targetRef = db.collection(COLLECTIONS.USERS).doc(requiredString(req.params.userId, 'userId', { max: 80 }));
     const targetSnapshot = await targetRef.get();
     if (!targetSnapshot.exists) return res.status(404).json({ success: false, error: 'User was not found.' });
@@ -219,7 +226,7 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
     const targetRole = canonicalRole(req.body.role || current.role);
     if (!targetRole) throw new Error('role must be a canonical HUGPONG role.');
     if (actorRole === ROLES.FARM_MANAGER && targetRole !== ROLES.MEMBER_FARMER) {
-      return res.status(403).json({ success: false, error: 'Farm Managers may update only Member Farmer accounts.' });
+      return res.status(403).json({ success: false, error: 'Farm Managers may update only Farm Member accounts.' });
     }
     if (actorRole === ROLES.FARM_MANAGER) {
       await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), targetSnapshot.id, current.requestedBlockFarmId);

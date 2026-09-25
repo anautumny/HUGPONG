@@ -17,7 +17,7 @@ async function assertFieldScope(fieldId, user, allowedRoles = Object.values(ROLE
   if (!snapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });
   const field = snapshot.data();
   if (identity.role === ROLES.MEMBER_FARMER && field.memberUserId !== identity.userId) {
-    throw Object.assign(new Error('Member Farmers may mutate only their assigned field.'), { status: 403 });
+    throw Object.assign(new Error('Farm Members may mutate only their assigned field.'), { status: 403 });
   }
   if (identity.role === ROLES.FARM_MANAGER) {
     const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId).get();

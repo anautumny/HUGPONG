@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — Member Home View Component
-// Role: Sugarcane Block Farm Member
+// Role: Farm Member
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
@@ -10,6 +10,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
 import { formatCropYearDisplay } from '../../utils/dataHelpers';
+import { STAGE_DISPLAY_LABELS } from '../../domain/presentationContract';
 
 function MemberHomeView({
   session = {},
@@ -101,7 +102,7 @@ function MemberHomeView({
                 <Text style={s.stageLabel}>{t('current_stage', 'Current Stage')}</Text>
                 <Text style={s.stageValue}>
                   {currentStage
-                    ? (formatStageName ? formatStageName(currentStage.name) : currentStage.name)
+                    ? STAGE_DISPLAY_LABELS[currentStage.stageNumber]
                     : t('current_stage_unset', 'Current stage not set')}
                 </Text>
               </View>

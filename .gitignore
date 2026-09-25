@@ -79,6 +79,7 @@ ui-debug.log*
 .env.production.local
 !.env.example
 !.env.template
+!.env.*.example
 
 # ------------------------------------------------------------------------------
 # Caches, Test Coverage & Diagnostics

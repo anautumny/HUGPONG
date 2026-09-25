@@ -31,7 +31,7 @@ function platformRestrictionMessage(role, platform) {
   const canonical = canonicalRole(role);
   const normalizedPlatform = String(platform || '').trim().toLowerCase();
   if (canonical === ROLES.MEMBER_FARMER && normalizedPlatform === 'web') {
-    return 'Member Farmer accounts are restricted to the HUGPONG mobile application.';
+    return 'Farm Member accounts are restricted to the HUGPONG mobile application.';
   }
   if (canonical === ROLES.SUPER_ADMIN && normalizedPlatform === 'mobile') {
     return 'Super Admin access is restricted to the Web Management Console.';
@@ -48,7 +48,12 @@ async function resolveAssignments(userId, role) {
   if (!db) return { blockFarmId: '', fieldId: '' };
   if (role === ROLES.FARM_MANAGER) {
     const farms = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', userId).limit(1).get();
-    return { blockFarmId: farms.empty ? '' : farms.docs[0].id, fieldId: '' };
+    const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).limit(1).get();
+    const field = fields.empty ? null : fields.docs[0];
+    return {
+      blockFarmId: field ? field.data().blockFarmId : (farms.empty ? '' : farms.docs[0].id),
+      fieldId: field ? field.id : ''
+    };
   }
   if (role === ROLES.MEMBER_FARMER) {
     const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).limit(1).get();
@@ -222,7 +227,7 @@ router.post('/register', async (req, res) => {
   try {
     const role = canonicalRole(req.body?.role || ROLES.MEMBER_FARMER);
     if (role !== ROLES.MEMBER_FARMER) {
-      return res.status(403).json({ success: false, error: 'Self-registration is limited to Member Farmer accounts.' });
+      return res.status(403).json({ success: false, error: 'Self-registration is limited to Farm Member accounts.' });
     }
     const displayName = String(req.body?.displayName || '').trim();
     const phone = normalizeContact(req.body?.phone);

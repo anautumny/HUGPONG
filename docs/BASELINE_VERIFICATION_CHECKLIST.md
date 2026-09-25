@@ -9,7 +9,7 @@
 - [ ] Record tester, date/time, branch, commit, OS, browser, mobile platform/device, API URL, Firebase project, and network state.
 - [ ] Use a disposable non-production Firestore project or emulator. Current tests can permanently delete data.
 - [ ] Seed a known dataset and record its collection/document counts before testing.
-- [ ] Prepare one account for each canonical role: Member Farmer, Farm Manager, SRA Admin, Super Admin.
+- [ ] Prepare one account for each canonical role: Farm Member, Farm Manager, SRA Admin, Super Admin.
 - [ ] Capture request/response, console log, screenshot, and changed Firestore documents for every mutation.
 - [ ] Run web and mobile checks against the same starting dataset.
 - [ ] Repeat offline-capable mobile cases offline, reconnecting, and after a cold restart.
@@ -39,7 +39,7 @@
 - [ ] B-06 Web session survives reload and routes to the correct role dashboard.
 - [ ] B-07 Web logout clears local session data and server session.
 - [ ] B-08 New login requires the server; a previously authenticated web/Firebase session restores offline without rechecking a password locally.
-- [ ] B-09 Mobile login accepts valid Member Farmer, Farm Manager, and SRA Admin credentials.
+- [ ] B-09 Mobile login accepts valid Farm Member, Farm Manager, and SRA Admin credentials.
 - [ ] B-10 Mobile rejects Super Admin with the web-only message.
 - [ ] B-11 Invalid mobile credentials show an error; five failures trigger a 60-second UI lockout.
 - [ ] B-12 Mobile first-login password change meets the same password rules.
@@ -61,7 +61,7 @@
 
 ## C. Role access and scoping
 
-- [ ] C-01 Member Farmer sees only assigned fields, personal logs, personal analytics, planner, field ops, profile, and support/sync surfaces intended for the role.
+- [ ] C-01 Farm Member sees only assigned fields, personal logs, personal analytics, planner, field ops, profile, and support/sync surfaces intended for the role.
 - [ ] C-02 Farm Manager sees only the assigned block farm's fields, Members, operations, reports, and telemetry.
 - [ ] C-03 SRA Admin sees district oversight, report audit/certification, price publication, block farms, fields, and users.
 - [ ] C-04 Super Admin sees platform governance, district monitoring, history, telemetry, tickets, maintenance, and settings on web.
@@ -89,10 +89,10 @@
 
 ## E. Block farms and field plots
 
-- [ ] E-01 Create a block farm with name, code/ID, location, hectares, and optional manager.
+- [ ] E-01 Create a block farm with name, location, hectares, and optional manager; verify the server returns a unique permanent ID/code.
 - [ ] E-02 Edit a block farm and verify manager linkage remains symmetrical.
-- [ ] E-03 Enroll a field with valid ID, Member Farmer, hectares, farm, variety, soil, cycle, and crop year.
-- [ ] E-04 Reject blank/invalid field ID and hectares outside accepted limits.
+- [ ] E-03 Enroll a field with system-generated ID, Farm Member, hectares, Block Farm, and soil; verify its server-created Crop Year Cycle starts at Stage 1 with no variety until Planting.
+- [ ] E-04 Reject client-supplied Field IDs, identity changes, and hectares outside accepted limits.
 - [ ] E-05 Farm Manager cannot enroll or edit a field outside the assigned block farm.
 - [ ] E-06 Field/member links resolve consistently by permanent IDs, not display names.
 - [ ] E-07 Edit plot metadata and confirm web/mobile/Firestore converge.
@@ -117,8 +117,8 @@
 
 ## G. Drafts and operation submission
 
-- [ ] G-01 Member Farmer creates a draft while online.
-- [ ] G-02 Member Farmer creates a draft while offline and it survives restart.
+- [ ] G-01 Farm Member creates a draft while online.
+- [ ] G-02 Farm Member creates a draft while offline and it survives restart.
 - [ ] G-03 Edit and discard a draft without creating a submitted history record.
 - [ ] G-04 Submit one draft and verify identity, field, stage, date, operation ID/name, quantities, units, people, hectares, subitems, and total cost.
 - [ ] G-05 Batch-submit selected drafts and verify unique stable IDs and totals.
@@ -180,7 +180,7 @@
 - [ ] K-02 Price history sorts correctly and charts/time filters use actual records.
 - [ ] K-03 SRA Admin publishes a complete weekly price/circular online.
 - [ ] K-04 Invalid/empty/non-numeric price values are rejected server-side.
-- [ ] K-05 Member Farmer and Farm Manager cannot publish prices.
+- [ ] K-05 Farm Member and Farm Manager cannot publish prices.
 - [ ] K-06 Decide and test whether Super Admin oversight includes publication or read-only monitoring; approved role ownership currently favors SRA publication.
 - [ ] K-07 New price appears on both clients after synchronization.
 - [ ] K-08 All price mutation uses authenticated API. **Required; expected direct-write current FAIL.**

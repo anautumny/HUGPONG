@@ -132,7 +132,7 @@ export default function PriceHistoryTable({
                 onClick={() => handleSort('sugarPricePerLkg')}
               >
                 <div className="flex items-center gap-1.5">
-                  <span>Raw Sugar</span>
+                  <span>Raw Sugar (â‚±/Lkg)</span>
                   <ArrowUpDown className="w-3.5 h-3.5 text-hug-muted" />
                 </div>
               </th>
@@ -143,7 +143,7 @@ export default function PriceHistoryTable({
                 onClick={() => handleSort('molassesPricePerMetricTon')}
               >
                 <div className="flex items-center gap-1.5">
-                  <span>Molasses</span>
+                  <span>Molasses (â‚±/MT)</span>
                   <ArrowUpDown className="w-3.5 h-3.5 text-hug-muted" />
                 </div>
               </th>
@@ -206,14 +206,14 @@ export default function PriceHistoryTable({
                       <span className="font-extrabold text-primary dark:text-primary-light">
                         ₱{sugarPrice.toLocaleString()}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1">/ Lkg</span>
+                      <span className="text-[10px] text-hug-muted ml-1">/Lkg</span>
                     </td>
 
                     <td className="px-4 py-3.5 text-xs whitespace-nowrap">
                       <span className="font-bold text-hug-text">
                         ₱{molassesPrice.toLocaleString()}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1">/ MT</span>
+                      <span className="text-[10px] text-hug-muted ml-1">/MT</span>
                     </td>
 
                     <td className="px-4 py-3.5 whitespace-nowrap">

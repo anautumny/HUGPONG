@@ -14,6 +14,16 @@ import {
   writeArchiveClearViewPreference
 } from '../../services/archiveViewService';
 import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
+import { operationPresentation } from '../../domain/presentationContract';
+import { getOperationCapabilities, normalizeActorId } from '../../domain/operationAuthorization';
+import {
+  completeLocalDraftSubmission,
+  deleteLocalOperationDraft,
+  listLocalOperationDrafts,
+  saveLocalOperationDraft,
+  validateLocalDraftForSubmission
+} from '../../services/localOperationDrafts';
+import { amendmentEditor, amendmentSummary, formatAmendmentChanges, formatDate as formatAmendmentDate } from '../../domain/amendmentPresentation';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import EditOperationModal from '../../components/operations/EditOperationModal';
 import AddOperationModal from '../../components/operations/AddOperationModal';
@@ -51,8 +61,64 @@ import {
   UserCheck,
   MapPin,
   Users
+  , FileText, Trash2
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+
+function AmendmentHistory({ operation }) {
+  const summary = amendmentSummary(operation.amendments);
+  if (!summary.latest) return null;
+  return (
+    <details className="mt-3 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/20">
+      <summary className="cursor-pointer list-none p-3 flex items-center justify-between gap-3">
+        <div>
+          <span className="block text-xs font-black text-blue-800 dark:text-blue-300">Amended {summary.count} time{summary.count === 1 ? '' : 's'}</span>
+          <span className="block text-[11px] text-hug-muted mt-0.5">Last edited: {summary.editedAt} · Reason: {summary.latest.reason}</span>
+        </div>
+        <span className="text-xs font-bold text-blue-700 dark:text-blue-300">View Amendment History</span>
+      </summary>
+      <div className="border-t border-blue-200 dark:border-blue-900/60 p-3 space-y-3">
+        {operation.amendments.map((amendment, amendmentIndex) => {
+          const editor = amendmentEditor(amendment);
+          const changes = formatAmendmentChanges(amendment.changes);
+          return (
+            <section key={amendment.amendmentId || amendmentIndex} className="rounded-xl bg-white dark:bg-surface border border-border p-3 space-y-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <div>
+                  <span className="block text-xs font-black text-hug-text">Amendment #{amendmentIndex + 1}</span>
+                  <span className="block text-[11px] text-hug-muted">{editor.name} · {editor.role}</span>
+                </div>
+                <span className="text-[11px] text-hug-muted">{formatAmendmentDate(amendment.amendedAt, true)}</span>
+              </div>
+              <p className="text-xs text-hug-text"><strong>Reason:</strong> {amendment.reason}</p>
+              <div className="space-y-2">
+                {changes.map((change, changeIndex) => change.kind === 'group' ? (
+                  <div key={`${change.label}-${changeIndex}`}>
+                    <span className="text-xs font-black text-hug-text">{change.label}</span>
+                    <div className="mt-1 space-y-1.5">
+                      {change.items.map((item, itemIndex) => (
+                        <div key={`${item.label}-${itemIndex}`} className="rounded-lg bg-bg p-2 text-[11px] text-hug-text">
+                          <strong>{item.label}{item.action ? ` · ${item.action}` : ''}</strong>
+                          {item.before && <span className="block text-hug-muted mt-0.5">{item.before}</span>}
+                          {item.after && <span className="block text-primary font-semibold">→ {item.after}</span>}
+                          {(item.details || []).map((detail, detailIndex) => <span key={detailIndex} className="block text-hug-muted">{detail.label}: {detail.before} → {detail.after}</span>)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={`${change.field}-${changeIndex}`} className="text-xs text-hug-text">
+                    <strong>{change.label}</strong><span className="block text-hug-muted">{change.before} → <span className="text-primary font-bold">{change.after}</span></span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
 
 export default function OperationsView() {
   const { user, roleKey } = useAuth();
@@ -79,9 +145,10 @@ export default function OperationsView() {
     isLoading: true
   });
 
-  // Take Over Mode state: null by default (Manager does NOT automatically enter Take Over Mode)
+  // Manager Takeover state: null by default; it is never entered automatically.
   const [activeTakeOverFieldId, setActiveTakeOverFieldId] = useState(null);
   const [takeoverGrant, setTakeoverGrant] = useState(null);
+  const [takeoverExpiresAt, setTakeoverExpiresAt] = useState(0);
   const [authModalField, setAuthModalField] = useState(null);
   const [pendingAction, setPendingAction] = useState(null); // { type: 'ADD_OPERATION', field } | { type: 'EDIT_OPERATION', operation, field }
 
@@ -91,6 +158,43 @@ export default function OperationsView() {
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState('');
+  const [localDrafts, setLocalDrafts] = useState([]);
+  const [activeDraft, setActiveDraft] = useState(null);
+
+  const takeoverSession = activeTakeOverFieldId ? {
+    managerId: normalizeActorId(user),
+    fieldId: activeTakeOverFieldId,
+    grant: takeoverGrant,
+    expiresAt: takeoverExpiresAt
+  } : null;
+
+  useEffect(() => {
+    setLocalDrafts(listLocalOperationDrafts(user));
+  }, [user?.employeeId, user?.id, fieldsData.fields]);
+
+  useEffect(() => {
+    setActiveTakeOverFieldId(null);
+    setTakeoverGrant(null);
+    setTakeoverExpiresAt(0);
+  }, [user?.employeeId, user?.id]);
+
+  useEffect(() => {
+    if (!takeoverExpiresAt) return undefined;
+    const remaining = takeoverExpiresAt - Date.now();
+    if (remaining <= 0) {
+      setActiveTakeOverFieldId(null);
+      setTakeoverGrant(null);
+      setTakeoverExpiresAt(0);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setActiveTakeOverFieldId(null);
+      setTakeoverGrant(null);
+      setTakeoverExpiresAt(0);
+      setUpdateSuccess('Manager Takeover authorization expired.');
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [takeoverExpiresAt]);
 
   // Expandable field cards: map of fieldId -> boolean
   const [expandedFields, setExpandedFields] = useState({});
@@ -303,11 +407,12 @@ export default function OperationsView() {
     }));
   };
 
-  // Exit Take Over Mode
+  // Exit Manager Takeover mode
   const handleExitTakeOver = () => {
     setActiveTakeOverFieldId(null);
     setTakeoverGrant(null);
-    setUpdateSuccess('Exited Take Over Mode.');
+    setTakeoverExpiresAt(0);
+    setUpdateSuccess('Exited Manager Takeover Mode.');
   };
 
   // Entry point: Add Operation
@@ -316,15 +421,17 @@ export default function OperationsView() {
     // Auto-expand this field card
     setExpandedFields(prev => ({ ...prev, [field.id]: true }));
 
-    // If manager has not activated Take Over Mode for this specific field yet:
+    // If the manager has not activated Manager Takeover for this field yet:
     // Prompt password confirmation first!
-    if (isManager && activeTakeOverFieldId !== field.id) {
+    const capability = getOperationCapabilities(user, field, takeoverSession);
+    if (capability.requiresTakeover) {
       setPendingAction({ type: 'ADD_OPERATION', field });
       setAuthModalField(field);
       return;
     }
 
     // Otherwise proceed directly
+    setActiveDraft(null);
     setAddOperationField(field);
   };
 
@@ -336,9 +443,9 @@ export default function OperationsView() {
     // Auto-expand this field card
     setExpandedFields(prev => ({ ...prev, [field.id]: true }));
 
-    // If manager has not activated Take Over Mode for this specific field yet:
+    // If the manager has not activated Manager Takeover for this field yet:
     // Prompt password confirmation first!
-    if (isManager && activeTakeOverFieldId !== field.id) {
+    if (getOperationCapabilities(user, field, takeoverSession).requiresTakeover) {
       setPendingAction({ type: 'EDIT_OPERATION', operation, field });
       setAuthModalField(field);
       return;
@@ -351,7 +458,7 @@ export default function OperationsView() {
   const handleArchiveOperationClick = (operation, field) => {
     setUpdateSuccess('');
     if (operation.status === 'ARCHIVED') return;
-    if (isManager && activeTakeOverFieldId !== field?.id) {
+    if (getOperationCapabilities(user, field, takeoverSession).requiresTakeover) {
       setPendingAction({ type: 'ARCHIVE_OPERATION', operation, field });
       setAuthModalField(field);
       return;
@@ -360,9 +467,10 @@ export default function OperationsView() {
   };
 
   // Successful password confirmation handler
-  const handleAuthSuccess = (field, grant) => {
+  const handleAuthSuccess = (field, grant, expiresAt) => {
     setActiveTakeOverFieldId(field.id);
     setTakeoverGrant(grant);
+    setTakeoverExpiresAt(Number(expiresAt || 0));
     setAuthModalField(null);
 
     // Proceed to pending action if requested
@@ -376,6 +484,34 @@ export default function OperationsView() {
       }
       setPendingAction(null);
     }
+  };
+
+  const handleSaveLocalDraft = (form, existingId) => {
+    try {
+      const draft = saveLocalOperationDraft(user, addOperationField, form, existingId);
+      setLocalDrafts(listLocalOperationDrafts(user));
+      setActiveDraft(draft);
+      setAddOperationField(null);
+      setUpdateSuccess('Draft saved locally on this browser. It was not synchronized.');
+    } catch (error) {
+      setUpdateSuccess(error.message);
+    }
+  };
+
+  const handleContinueDraft = (draft, field) => {
+    const validation = validateLocalDraftForSubmission(user, field, draft);
+    if (!validation.valid) {
+      setUpdateSuccess(validation.error);
+      return;
+    }
+    setActiveDraft(draft);
+    setAddOperationField(field);
+  };
+
+  const handleDeleteDraft = draftId => {
+    deleteLocalOperationDraft(user, draftId);
+    setLocalDrafts(listLocalOperationDrafts(user));
+    setUpdateSuccess('Local draft deleted from this browser.');
   };
 
   // Filter history records
@@ -455,7 +591,7 @@ export default function OperationsView() {
     const actions = [];
     if (isManager && activeTakeOverFieldId) {
       actions.push({
-        label: 'Exit Take Over',
+        label: 'Exit Manager Takeover',
         icon: LogOut,
         onClick: handleExitTakeOver
       });
@@ -484,7 +620,7 @@ export default function OperationsView() {
             {val || row.activity || 'Field Operation'}
           </span>
           <span className="text-[11px] text-hug-muted font-medium">
-            {row.category || 'General Care'}
+            {row.category || 'General Care'}{row.variety ? ` · Variety: ${row.variety}` : ''}
           </span>
         </div>
       )
@@ -517,27 +653,38 @@ export default function OperationsView() {
     },
     {
       key: 'stageNumber',
-      header: 'Crop Stage',
-      width: '110px',
-      render: (val, operation) => (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-subtle text-hug-text border border-border">
-          Stage {operation.stageNumberAtRecord || val || 1}
-        </span>
-      )
+      header: 'Stage at Recording',
+      width: '145px',
+      render: (val, operation) => {
+        const presentation = operationPresentation(operation);
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-subtle text-hug-text border border-border">
+            {presentation.stageLabel || `Stage ${operation.stageNumberAtRecord || val || 1}`}
+          </span>
+        );
+      }
     },
     {
       key: 'submissionSource',
-      header: 'Source',
-      width: '130px',
-      render: (val) => (
-        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-          val === 'MANAGER_TAKEOVER'
-            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-            : 'text-hug-muted bg-surface-subtle'
-        }`}>
-          {val === 'MANAGER_TAKEOVER' ? 'Manager Takeover' : 'Member Log'}
-        </span>
-      )
+      header: 'Classification / Provenance',
+      width: '210px',
+      render: (_, row) => {
+        const presentation = operationPresentation(row);
+        const semanticBadges = presentation.badges.filter(badge => badge.dimension !== 'lifecycle');
+        return (
+          <div className="flex flex-wrap gap-1">
+            {semanticBadges.length ? semanticBadges.map(badge => (
+              <span key={badge.key} className="text-[11px] font-bold px-2 py-0.5 rounded-full border border-border bg-surface-subtle text-hug-text">
+                {badge.label}
+              </span>
+            )) : presentation.submissionSource === 'MEMBER' ? (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface-subtle text-hug-muted">Farm Member Entry</span>
+            ) : (
+              <span className="text-[11px] text-hug-muted">Provenance unavailable</span>
+            )}
+          </div>
+        );
+      }
     },
     {
       key: 'totalCost',
@@ -607,7 +754,7 @@ export default function OperationsView() {
         actions={headerActions}
       />
 
-      {/* Active Supervisory Takeover Banner (Rule 27 / Prompt Requirement) */}
+      {/* Active Manager Takeover banner */}
       {isManager && activeTakeOverField && (
         <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
           <div className="flex items-center gap-3">
@@ -617,14 +764,14 @@ export default function OperationsView() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs sm:text-sm font-black text-amber-950 dark:text-amber-200">
-                  Take Over Mode Active
+                  Manager Takeover Active
                 </span>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white dark:bg-surface border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300">
                   {activeTakeOverField.id}
                 </span>
               </div>
               <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5 font-medium">
-                Supervising: <strong>{activeTakeOverField.memberName || 'Member Farmer'}</strong> · {formatHectares(activeTakeOverField.areaHa || activeTakeOverField.ha)}. Operations logged or edited will be attributed to supervisor takeover.
+                Supervising: <strong>{activeTakeOverField.memberName || 'Farm Member'}</strong> · {formatHectares(activeTakeOverField.areaHa || activeTakeOverField.ha)}. Operations logged or edited will be attributed to Manager Takeover.
               </p>
             </div>
           </div>
@@ -637,7 +784,7 @@ export default function OperationsView() {
               icon={LogOut}
               className="border-amber-300 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40"
             >
-              Exit Take Over
+              Exit Manager Takeover
             </Button>
           </div>
         </div>
@@ -701,13 +848,15 @@ export default function OperationsView() {
             <div className="space-y-4 w-full">
               {fieldsData.fields.map(field => {
                 const fieldOperations = operationsByField.get(field.id) || [];
+                const fieldDrafts = localDrafts.filter(draft => draft.fieldId === field.id);
+                const capability = getOperationCapabilities(user, field, takeoverSession);
                 const cycle = field.cropCycle;
                 const cycleSummary = cycle
                   ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${cycle.currentStageNumber || field.stageNumber || 1}`, cycle.status]
                     .filter(Boolean).join(' · ')
                   : null;
 
-                const isTakeOverActiveForField = isManager && activeTakeOverFieldId === field.id;
+                const isTakeOverActiveForField = capability.takeover;
                 const isExpanded = Boolean(expandedFields[field.id]);
                 const activeOpsCount = fieldOperations.filter(o => o.status !== 'ARCHIVED').length;
 
@@ -730,13 +879,19 @@ export default function OperationsView() {
                           {isTakeOverActiveForField && (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                               <ShieldCheck className="w-3.5 h-3.5" />
-                              <span>Take Over Active</span>
+                              <span>Manager Takeover Active</span>
+                            </span>
+                          )}
+                          {capability.ownField && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-success-bg text-success border border-success/30">
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>Your Assigned Field</span>
                             </span>
                           )}
                         </div>
 
                         <div className="flex items-center gap-2 text-sm">
-                          <span className="font-bold text-hug-text">{field.memberName || 'Unassigned Member'}</span>
+                          <span className="font-bold text-hug-text">{field.memberName || 'Unassigned Farm Member'}</span>
                           {field.memberPhone && (
                             <span className="text-xs text-hug-muted font-mono">({field.memberPhone})</span>
                           )}
@@ -768,7 +923,7 @@ export default function OperationsView() {
                             icon={LogOut}
                             className="border-danger/40 text-danger hover:bg-danger-bg dark:hover:bg-danger/20"
                           >
-                            Exit Take Over
+                            Exit Manager Takeover
                           </Button>
                         )}
                       </div>
@@ -795,25 +950,47 @@ export default function OperationsView() {
                       </button>
 
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          icon={Plus}
-                          onClick={() => handleAddOperationClick(field)}
-                          title={
-                            !isTakeOverActiveForField && isManager
-                              ? 'Requires manager password confirmation to take over and record operation'
-                              : 'Record a new operation for this field'
-                          }
-                        >
-                          Add Operation
-                        </Button>
+                        {capability.canCreate ? (
+                          <Button variant="primary" size="sm" icon={Plus} onClick={() => handleAddOperationClick(field)}>
+                            Add Operation
+                          </Button>
+                        ) : capability.requiresTakeover ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            icon={ShieldCheck}
+                            onClick={() => { setPendingAction(null); setAuthModalField(field); }}
+                          >
+                            Manager Takeover
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
 
                     {/* Expandable Recorded Operations Section - Spacious and Full Width */}
                     {isExpanded && (
                       <div className="border-t border-border/70 pt-4 space-y-3 w-full">
+                        {fieldDrafts.length > 0 && (
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-2">
+                            <span className="text-xs uppercase font-black tracking-wider text-amber-800 dark:text-amber-300">
+                              Local-only drafts ({fieldDrafts.length})
+                            </span>
+                            {fieldDrafts.map(draft => (
+                              <div key={draft.id} className="flex items-center justify-between gap-3 rounded-xl bg-white dark:bg-surface border border-border p-3">
+                                <div className="min-w-0">
+                                  <span className="block text-sm font-bold text-hug-text truncate">{draft.form?.activityName || 'Untitled operation draft'}</span>
+                                  <span className="block text-[11px] text-hug-muted">Stored only in this browser · {formatDate(draft.updatedAt)}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" icon={FileText} onClick={() => handleContinueDraft(draft, field)}>Continue</Button>
+                                  <button type="button" className="p-2 text-danger" title="Delete local draft" onClick={() => handleDeleteDraft(draft.id)}>
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between">
                           <span className="text-xs uppercase font-black tracking-wider text-hug-muted">
                             Field Operation Logs
@@ -831,6 +1008,7 @@ export default function OperationsView() {
                           <div className="space-y-2.5 w-full">
                             {fieldOperations.map(operation => {
                               const isArchived = operation.status === 'ARCHIVED';
+                              const presentation = operationPresentation(operation);
                               return (
                                 <div
                                   key={operation.id}
@@ -847,16 +1025,17 @@ export default function OperationsView() {
                                         {operation.operationName || operation.activity || 'Field Operation'}
                                       </span>
                                       <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-white dark:bg-surface border border-border text-hug-text">
-                                        Stage at Recording: {operation.stageNumberAtRecord || operation.stageNumber || 1}
+                                        Stage at Recording: {presentation.stageLabel || `Stage ${operation.stageNumberAtRecord || operation.stageNumber || 1}`}
                                       </span>
-                                      {operation.submissionSource === 'MANAGER_TAKEOVER' ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                                          <UserCheck className="w-3 h-3" />
-                                          <span>Supervisor Takeover</span>
+                                      {presentation.badges.filter(badge => badge.dimension !== 'lifecycle').map(badge => (
+                                        <span key={badge.key} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-surface dark:bg-[#252B27] border border-border text-hug-text">
+                                          {badge.key === 'manager_takeover' && <UserCheck className="w-3 h-3" />}
+                                          <span>{badge.label}</span>
                                         </span>
-                                      ) : (
+                                      ))}
+                                      {presentation.submissionSource === 'MEMBER' && (
                                         <span className="px-2 py-0.5 rounded-md text-xs font-medium bg-surface dark:bg-[#252B27] border border-border text-hug-muted">
-                                          Member Farmer
+                                          Farm Member Entry
                                         </span>
                                       )}
                                       {isArchived ? (
@@ -865,7 +1044,7 @@ export default function OperationsView() {
                                         </span>
                                       ) : (
                                         <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-success-bg text-success border border-success/30">
-                                          Verified Active
+                                          Active
                                         </span>
                                       )}
                                     </div>
@@ -880,16 +1059,38 @@ export default function OperationsView() {
                                         <span className="font-semibold text-hug-muted">Crop Year Cycle:</span>
                                         <span>{formatCropYearDisplay(operation.cropYearCycle || cropYearByCycleId.get(operation.cycleId))}</span>
                                       </div>
+                                      {operation.variety && (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-semibold text-hug-muted">Sugarcane Variety:</span>
+                                          <span>{operation.variety}</span>
+                                        </div>
+                                      )}
                                       {operation.areaHa && (
                                         <div className="flex items-center gap-1.5">
                                           <MapPin className="w-3.5 h-3.5 text-hug-muted" />
                                           <span>{Number(operation.areaHa).toFixed(2)} ha treated</span>
                                         </div>
                                       )}
-                                      {operation.workersCount && (
+                                      {operation.peopleCount > 0 && (
                                         <div className="flex items-center gap-1.5">
                                           <Users className="w-3.5 h-3.5 text-hug-muted" />
-                                          <span>{operation.workersCount} laborers</span>
+                                          <span>{operation.peopleCount} laborers</span>
+                                        </div>
+                                      )}
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-semibold text-hug-muted">Recorded By:</span>
+                                        <span>{operation.submittedByUserId || 'Unknown'}</span>
+                                      </div>
+                                      {operation.updatedAt && (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-semibold text-hug-muted">Last Modified:</span>
+                                          <span>{formatDate(operation.updatedAt)}</span>
+                                        </div>
+                                      )}
+                                      {Array.isArray(operation.lineItems) && operation.lineItems.length > 0 && (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-semibold text-hug-muted">Materials / Activities:</span>
+                                          <span>{operation.lineItems.length}</span>
                                         </div>
                                       )}
                                       <div className="flex items-center gap-1.5">
@@ -913,28 +1114,25 @@ export default function OperationsView() {
                                         />
                                       </a>
                                     )}
+                                    <AmendmentHistory operation={operation} />
                                   </div>
 
                                   {/* Right: Actions */}
                                   <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      icon={Pencil}
-                                      disabled={isArchived}
-                                      onClick={() => handleEditOperationClick(operation, field)}
-                                      title={
-                                        isArchived
-                                          ? 'Archived operations cannot be edited.'
-                                          : !isTakeOverActiveForField && isManager
-                                            ? 'Requires manager password confirmation to take over and edit this operation'
-                                            : 'Edit this operation'
-                                      }
-                                    >
-                                      Edit
-                                    </Button>
+                                    {capability.canEdit && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        icon={Pencil}
+                                        disabled={isArchived}
+                                        onClick={() => handleEditOperationClick(operation, field)}
+                                        title={isArchived ? 'Archived operations cannot be edited.' : 'Edit this operation'}
+                                      >
+                                        Edit
+                                      </Button>
+                                    )}
 
-                                    {canArchive && !isArchived && (
+                                    {canArchive && capability.canEdit && !isArchived && (
                                       <button
                                         type="button"
                                         onClick={() => handleArchiveOperationClick(operation, field)}
@@ -1114,7 +1312,7 @@ export default function OperationsView() {
 
       {/* Modals & Dialogs */}
 
-      {/* 1. Supervisor Take Over Password Authorization Modal */}
+      {/* Manager Takeover password authorization modal */}
       <TakeOverAuthModal
         isOpen={Boolean(authModalField)}
         field={authModalField}
@@ -1130,11 +1328,22 @@ export default function OperationsView() {
       <AddOperationModal
         isOpen={Boolean(addOperationField)}
         field={addOperationField}
-        isTakeOver={isManager && activeTakeOverFieldId === addOperationField?.id}
-        takeoverGrant={takeoverGrant}
-        onClose={() => setAddOperationField(null)}
+        isTakeOver={Boolean(addOperationField && getOperationCapabilities(user, addOperationField, takeoverSession).takeover)}
+        takeoverGrant={addOperationField && getOperationCapabilities(user, addOperationField, takeoverSession).takeover ? takeoverGrant : null}
+        canSaveDraft={Boolean(addOperationField && getOperationCapabilities(user, addOperationField, takeoverSession).canDraft)}
+        initialDraft={activeDraft}
+        onSaveDraft={handleSaveLocalDraft}
+        validateBeforeSubmit={() => {
+          if (!activeDraft) return { valid: true };
+          const currentField = fieldsData.fields.find(field => field.id === activeDraft.fieldId);
+          return validateLocalDraftForSubmission(user, currentField, activeDraft);
+        }}
+        onClose={() => { setAddOperationField(null); setActiveDraft(null); }}
         onSuccess={() => {
+          if (activeDraft?.id) completeLocalDraftSubmission(user, activeDraft.id);
+          setLocalDrafts(listLocalOperationDrafts(user));
           setAddOperationField(null);
+          setActiveDraft(null);
           setUpdateSuccess('Operation recorded successfully and synchronized.');
         }}
       />
@@ -1142,7 +1351,11 @@ export default function OperationsView() {
       {/* 3. Edit Operation Modal */}
       <EditOperationModal
         operation={editTarget}
-        takeoverGrant={takeoverGrant}
+        takeoverGrant={editTarget && getOperationCapabilities(
+          user,
+          fieldsData.fields.find(field => field.id === editTarget.fieldId),
+          takeoverSession
+        ).takeover ? takeoverGrant : null}
         isOpen={Boolean(editTarget)}
         onClose={() => setEditTarget(null)}
         onUpdated={() => {

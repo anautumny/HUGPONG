@@ -375,7 +375,7 @@ export default function PrintableAuditReport({
 
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <p className="font-bold text-[9px] uppercase m-0 text-black">
-              {isCertified ? (report.certifiedByUserId || 'SRA Officer') : 'Awaiting Review'}
+              {isCertified ? (report.certifiedByUserId || 'SRA Admin') : 'Awaiting Review'}
             </p>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               SRA Agricultural Inspector<br />

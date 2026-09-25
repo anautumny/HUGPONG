@@ -117,7 +117,7 @@ export default function ProductionCostSection({
       ) : (
         <div className="space-y-3">
           <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted mb-2">
-            Comparative Expenditure by {isFarmManager ? 'Member Parcel' : 'Block Farm'}
+            Comparative Expenditure by {isFarmManager ? 'Farm Member Field' : 'Block Farm'}
           </h4>
 
           {breakdownByEntity.map((entity) => {

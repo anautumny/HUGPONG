@@ -18,7 +18,10 @@ import AuditHistoryModal from '../../components/audit/AuditHistoryModal';
 import PrintableAuditReport from '../../components/audit/PrintableAuditReport';
 import {
   subscribeToAuditReports,
-  certifyAuditReport
+  certifyAuditReport,
+  submitAuditReport,
+  returnAuditReport,
+  fetchAuditPage
 } from '../../services/auditService';
 import { subscribeToOperationsData } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
@@ -36,10 +39,16 @@ export default function AuditCenterView() {
   const [blockFarms, setBlockFarms] = useState([]);
 
   const [isCertifying, setIsCertifying] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReturning, setIsReturning] = useState(false);
   const [showCompileModal, setShowCompileModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [printReport, setPrintReport] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
+  const [historyReports, setHistoryReports] = useState([]);
+  const [historyCursor, setHistoryCursor] = useState(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const isFarmManager = roleKey === ROLE_KEYS.FARM_MANAGER;
   const isSraAdmin = roleKey === ROLE_KEYS.SRA_ADMIN;
@@ -62,6 +71,8 @@ export default function AuditCenterView() {
   useEffect(() => {
     const unsub = subscribeToAuditReports({
       blockFarmId: isFarmManager ? user?.blockFarmId : null,
+      view: isSraAdmin ? 'inbox' : 'manager',
+      limit: isSraAdmin ? 20 : 50,
       onUpdate: ({ reports: updatedReports, isLoading, error }) => {
         setReports(updatedReports);
         setIsLoadingReports(isLoading);
@@ -71,7 +82,7 @@ export default function AuditCenterView() {
         setSelectedReport(current => {
           if (!current && updatedReports.length > 0) {
             // Prefer pending report first
-            return updatedReports.find(r => r.status === 'PENDING') || updatedReports[0];
+            return updatedReports.find(r => ['PENDING_REVIEW', 'PENDING'].includes(r.status)) || updatedReports[0];
           }
           if (current) {
             const updated = updatedReports.find(r => r.id === current.id || r.reportId === current.id);
@@ -87,7 +98,22 @@ export default function AuditCenterView() {
     });
 
     return () => unsub();
-  }, [isFarmManager, user?.blockFarmId]);
+  }, [isFarmManager, isSraAdmin, user?.blockFarmId]);
+
+  const loadHistory = useCallback(async ({ append = false } = {}) => {
+    if (!isSraAdmin || isLoadingHistory) return;
+    setIsLoadingHistory(true);
+    try {
+      const response = await fetchAuditPage({ view: 'history', limit: 20, cursor: append ? historyCursor : null });
+      setHistoryReports(current => append ? [...current, ...(response.data || [])] : (response.data || []));
+      setHistoryCursor(response.nextCursor || null);
+      setHistoryHasMore(Boolean(response.hasMore));
+    } catch (error) {
+      showToast(error.message || 'Unable to load Audit History.', 'error');
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [isSraAdmin, isLoadingHistory, historyCursor]);
 
   // Subscribe to operations for compilation pre-flight
   useEffect(() => {
@@ -143,6 +169,32 @@ export default function AuditCenterView() {
     setSelectedReport(compiledData);
   };
 
+  const handleSubmitReport = async reportId => {
+    setIsSubmitting(true);
+    try {
+      const response = await submitAuditReport(reportId);
+      setSelectedReport(response.data);
+      showToast('Submitted to SRA. The audit is awaiting review.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Submission failed. The compiled audit remains saved.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReturnReport = async (reportId, reason, baseVersion) => {
+    setIsReturning(true);
+    try {
+      const response = await returnAuditReport(reportId, reason, baseVersion);
+      setSelectedReport(response.data);
+      showToast('Audit returned to the Farm Manager with the correction reason.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Unable to return this audit.', 'error');
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
   return (
     <div className="w-full">
       {/* Toast Notification (Hidden when printing) */}
@@ -176,14 +228,14 @@ export default function AuditCenterView() {
                 Regulatory Compliance
               </span>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
-                QR Audit Verifier
+                {isSraAdmin ? 'SRA Audits' : 'Monthly Regulatory Audit'}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
-              SRA QR Audit Verifier & Compliance Center
+              {isSraAdmin ? 'Audit Inbox & Certification' : 'Block Farm Monthly Audit'}
             </h1>
             <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-              Verify encrypted mobile field certificates and generate certified compliance audit reports.
+              {isSraAdmin ? 'Review submitted audits, import offline QR packages, and certify completed reports.' : 'Compile the assigned Block Farm, review the snapshot, then submit it to SRA.'}
             </p>
           </div>
 
@@ -204,10 +256,10 @@ export default function AuditCenterView() {
             <Button
               variant="primary"
               size="md"
-              onClick={() => setShowHistoryModal(true)}
+              onClick={() => { setShowHistoryModal(true); if (isSraAdmin) loadHistory(); }}
               icon={History}
             >
-              SRA Audit History
+              Audit History
             </Button>
           </div>
         </div>
@@ -216,10 +268,10 @@ export default function AuditCenterView() {
         <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-start">
           {/* Left Column: QR Verifier & Cloud Audit Queue */}
           <div className="flex flex-col gap-6 w-full">
-            <QRVerifierPanel
+            {isSraAdmin && <QRVerifierPanel
               reports={reports}
               onSelectReport={(report) => setSelectedReport(report)}
-            />
+            />}
 
             <AuditQueue
               reports={reports}
@@ -232,6 +284,7 @@ export default function AuditCenterView() {
                 setReportsError(null);
               }}
               blockFarms={blockFarms}
+              title={isSraAdmin ? 'Audit Inbox' : 'My Monthly Audits'}
             />
           </div>
 
@@ -244,6 +297,10 @@ export default function AuditCenterView() {
               onCertify={handleCertifyReport}
               onPrint={(report) => setPrintReport(report)}
               isCertifying={isCertifying}
+              isSubmitting={isSubmitting}
+              isReturning={isReturning}
+              onSubmit={handleSubmitReport}
+              onReturn={handleReturnReport}
             />
           </div>
         </div>
@@ -269,9 +326,12 @@ export default function AuditCenterView() {
         <AuditHistoryModal
           isOpen={showHistoryModal}
           onClose={() => setShowHistoryModal(false)}
-          reports={reports}
+          reports={isSraAdmin ? historyReports : reports.filter(report => report.status === 'CERTIFIED')}
           blockFarms={blockFarms}
           onSelectReport={(report) => setSelectedReport(report)}
+          onLoadMore={() => loadHistory({ append: true })}
+          hasMore={isSraAdmin && historyHasMore}
+          isLoading={isLoadingHistory}
         />
       </div>
 

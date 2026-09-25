@@ -1,186 +1,49 @@
-import React, { useState } from 'react';
-import { Layers, AlertCircle, RefreshCw } from 'lucide-react';
+import React from 'react';
+import { Inbox, AlertCircle, RefreshCw } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
+import { auditStatusLabel, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
-export default function AuditQueue({
-  reports = [],
-  selectedReportId = null,
-  onSelectReport,
-  isLoading = false,
-  error = null,
-  onRetry,
-  blockFarms = [],
-  className = ''
-}) {
-  const [filterStatus, setFilterStatus] = useState('ALL'); // 'ALL' | 'PENDING' | 'CERTIFIED'
-
-  const pendingCount = reports.filter(r => r.status === 'PENDING').length;
-  const certifiedCount = reports.filter(r => r.status === 'CERTIFIED').length;
-
-  const filteredReports = reports.filter(r => {
-    if (filterStatus === 'PENDING') return r.status === 'PENDING';
-    if (filterStatus === 'CERTIFIED') return r.status === 'CERTIFIED';
-    return true;
-  });
-
-  const getFarmName = (farmId) => {
-    if (!farmId) return 'Unassigned Block Farm';
-    const found = blockFarms.find(f => f.id === farmId);
-    return found?.name || farmId;
-  };
-
+export default function AuditQueue({ reports = [], selectedReportId = null, onSelectReport, isLoading = false, error = null, onRetry, blockFarms = [], className = '', title = 'Audit Inbox' }) {
+  const farmName = report => report.blockFarmName || blockFarms.find(farm => farm.id === report.blockFarmId)?.name || report.blockFarmId || 'Block Farm';
   return (
     <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs flex flex-col gap-4 ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success"></span>
-          </span>
-          <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-hug-text">
-            Cloud Audit Queue
-          </h3>
+          <Inbox className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-bold uppercase tracking-wider text-hug-text">{title}</h3>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
-            {pendingCount} Pending
-          </span>
-          <span className="text-[11px] font-mono text-hug-muted">
-            / {reports.length} Total
-          </span>
-        </div>
+        <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">{reports.length} {title === 'Audit Inbox' ? 'Awaiting Review' : 'Reports'}</span>
       </div>
-
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-1 bg-bg dark:bg-[#0C1015] p-1 rounded-xl border border-border/80 text-xs">
-        <button
-          type="button"
-          onClick={() => setFilterStatus('ALL')}
-          className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all cursor-pointer text-center ${
-            filterStatus === 'ALL'
-              ? 'bg-white dark:bg-surface text-hug-text shadow-2xs'
-              : 'text-hug-muted hover:text-hug-text'
-          }`}
-        >
-          All ({reports.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterStatus('PENDING')}
-          className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all cursor-pointer text-center ${
-            filterStatus === 'PENDING'
-              ? 'bg-white dark:bg-surface text-amber-700 dark:text-amber-400 shadow-2xs'
-              : 'text-hug-muted hover:text-hug-text'
-          }`}
-        >
-          Pending ({pendingCount})
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterStatus('CERTIFIED')}
-          className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all cursor-pointer text-center ${
-            filterStatus === 'CERTIFIED'
-              ? 'bg-white dark:bg-surface text-success shadow-2xs'
-              : 'text-hug-muted hover:text-hug-text'
-          }`}
-        >
-          Certified ({certifiedCount})
-        </button>
-      </div>
-
-      {/* Queue List Container */}
-      <div className="flex flex-col gap-2 max-h-[380px] overflow-y-auto pr-1">
-        {isLoading ? (
-          <div className="flex flex-col gap-2 py-4">
-            {[1, 2, 3].map(n => (
-              <div key={n} className="p-3 rounded-xl border border-border/60 bg-bg/40 animate-pulse flex flex-col gap-2">
-                <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-2/3"></div>
-                <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-1/2"></div>
-              </div>
-            ))}
+      <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1">
+        {isLoading && reports.length === 0 ? [1, 2, 3].map(key => <div key={key} className="h-20 rounded-xl bg-bg animate-pulse" />) : error ? (
+          <div className="p-4 rounded-xl bg-danger-bg border border-danger/30 text-xs text-danger text-center">
+            <AlertCircle className="w-5 h-5 mx-auto mb-2" /><p>{error}</p>
+            {onRetry && <Button variant="secondary" size="sm" onClick={onRetry} icon={RefreshCw}>Retry</Button>}
           </div>
-        ) : error ? (
-          <div className="p-4 rounded-xl bg-danger-bg dark:bg-danger/10 border border-danger/30 text-xs text-danger flex flex-col items-center gap-2 text-center">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <p className="font-semibold">Unable to load audit reports.</p>
-            <p className="text-[11px] text-hug-muted">{error}</p>
-            {onRetry && (
-              <Button variant="secondary" size="sm" onClick={onRetry} icon={RefreshCw}>
-                Retry
-              </Button>
-            )}
+        ) : reports.length === 0 ? (
+          <div className="py-10 text-center border border-dashed border-border rounded-xl">
+            <Inbox className="w-8 h-8 mx-auto text-hug-muted opacity-50" />
+            <p className="text-xs font-semibold text-hug-text mt-2">Inbox is clear</p>
+            <p className="text-[11px] text-hug-muted mt-1">No audits currently require SRA review.</p>
           </div>
-        ) : filteredReports.length === 0 ? (
-          <div className="py-8 px-4 text-center text-hug-muted flex flex-col items-center gap-2 border border-dashed border-border rounded-xl">
-            <Layers className="w-8 h-8 opacity-40 text-hug-muted" />
-            <p className="text-xs font-semibold text-hug-text">No audit reports available</p>
-            <p className="text-[11px] max-w-[200px]">
-              {filterStatus === 'PENDING'
-                ? 'All compiled reports have received SRA certification.'
-                : filterStatus === 'CERTIFIED'
-                ? 'No certified reports in this view yet.'
-                : 'No monthly audit packages have been compiled yet.'}
-            </p>
-          </div>
-        ) : (
-          filteredReports.map(report => {
-            const isCert = report.status === 'CERTIFIED';
-            const isSelected = selectedReportId === report.id || selectedReportId === report.reportId;
-            const farmName = getFarmName(report.blockFarmId);
-            const totalCost = Number(report.totalCost || 0);
-            const logsCount = Array.isArray(report.operationSnapshots)
-              ? report.operationSnapshots.length
-              : Number(report.totalLogs || report.logsCount || 0);
-
-            return (
-              <div
-                key={report.id || report.reportId}
-                onClick={() => onSelectReport && onSelectReport(report)}
-                className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 text-left ${
-                  isSelected
-                    ? 'border-primary bg-primary-bg/20 dark:bg-primary/10 shadow-xs ring-1 ring-primary'
-                    : isCert
-                    ? 'border-border bg-white dark:bg-surface hover:border-primary/50 hover:bg-bg/40'
-                    : 'border-amber-200 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 hover:border-amber-400 hover:bg-amber-50/80'
-                }`}
-              >
-                <div className="flex flex-col min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        isCert ? 'bg-success' : 'bg-warning'
-                      }`}
-                    />
-                    <span className="text-xs font-bold text-hug-text truncate">
-                      {report.period || report.month} · {farmName}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 mt-1 text-[10px] text-hug-muted font-mono flex-wrap">
-                    <span className="truncate max-w-[140px]">
-                      {report.qrHash || report.id}
-                    </span>
-                    <span>•</span>
-                    <span className="font-semibold text-hug-text">
-                      ₱{totalCost.toLocaleString()}
-                    </span>
-                    <span>•</span>
-                    <span>{logsCount} {logsCount === 1 ? 'log' : 'logs'}</span>
-                  </div>
+        ) : reports.map(report => {
+          const selected = selectedReportId === report.id || selectedReportId === report.reportId;
+          const status = canonicalAuditStatus(report.status);
+          return (
+            <button key={report.id || report.reportId} type="button" onClick={() => onSelectReport?.(report)}
+              className={`p-3.5 rounded-xl border text-left transition-all ${selected ? 'border-primary bg-primary-bg/30 ring-1 ring-primary' : 'border-border hover:border-primary/50 bg-white dark:bg-surface'}`}>
+              <div className="flex justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-hug-text truncate">{farmName(report)}</p>
+                  <p className="text-[11px] text-hug-muted mt-0.5">{new Date(`${report.periodKey || report.period}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
                 </div>
-
-                <div className="shrink-0">
-                  <Badge variant={isCert ? 'success' : 'warning'} size="sm">
-                    {isCert ? 'Certified' : 'Pending'}
-                  </Badge>
-                </div>
+                <Badge variant={status === 'RETURNED' ? 'danger' : 'warning'} size="sm">{auditStatusLabel(status)}</Badge>
               </div>
-            );
-          })
-        )}
+              <p className="text-[10px] text-hug-muted mt-2">{report.operationCount || report.operationSnapshots?.length || 0} Operations · {Number(report.hectaresAudited || 0).toFixed(2)} Ha · Submitted {report.submittedAt ? new Date(report.submittedAt).toLocaleDateString() : '—'}</p>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

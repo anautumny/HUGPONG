@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
+const { ROLE_DISPLAY_LABELS } = require('../domain/presentationContract');
 
 const COLLECTIONS = Object.freeze({
   USERS: 'users',
@@ -35,8 +36,8 @@ const USER_STATUSES = Object.freeze(['PENDING', 'ACTIVE', 'DISABLED']);
 const ENTITY_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const OPERATION_LOG_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const CROP_CYCLE_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
-const AUDIT_REPORT_STATUSES = Object.freeze(['PENDING', 'CERTIFIED']);
-const SUBMISSION_SOURCES = Object.freeze(['MEMBER', 'MANAGER_TAKEOVER']);
+const AUDIT_REPORT_STATUSES = Object.freeze(['COMPILED', 'PENDING_SUBMISSION', 'PENDING_REVIEW', 'RETURNED', 'CERTIFIED']);
+const SUBMISSION_SOURCES = Object.freeze(['MEMBER', 'FIELD_OWNER', 'MANAGER_TAKEOVER']);
 const TICKET_PRIORITIES = Object.freeze(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
 const TICKET_STATUSES = Object.freeze(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']);
 
@@ -44,6 +45,7 @@ const ROLE_ALIASES = Object.freeze({
   MEMBER_FARMER: ROLES.MEMBER_FARMER,
   MEMBER: ROLES.MEMBER_FARMER,
   'MEMBER FARMER': ROLES.MEMBER_FARMER,
+  'FARM MEMBER': ROLES.MEMBER_FARMER,
   FARM_MANAGER: ROLES.FARM_MANAGER,
   'FARM MANAGER': ROLES.FARM_MANAGER,
   MANAGER: ROLES.FARM_MANAGER,
@@ -66,11 +68,7 @@ function canonicalRole(value) {
 
 function publicRoleLabel(role) {
   const canonical = canonicalRole(role);
-  if (canonical === ROLES.MEMBER_FARMER) return 'Member Farmer';
-  if (canonical === ROLES.FARM_MANAGER) return 'Farm Manager';
-  if (canonical === ROLES.SRA_ADMIN) return 'SRA Admin';
-  if (canonical === ROLES.SUPER_ADMIN) return 'Super Admin';
-  return '';
+  return ROLE_DISPLAY_LABELS[canonical] || '';
 }
 
 function isRoleAllowedOnPlatform(role, platform) {
@@ -224,6 +222,8 @@ function amendments(value) {
   return value.map((item, index) => ({
     amendmentId: requiredString(item.amendmentId, `amendments[${index}].amendmentId`, { max: 120 }),
     amendedByUserId: requiredString(item.amendedByUserId, `amendments[${index}].amendedByUserId`, { max: 80 }),
+    amendedByName: optionalString(item.amendedByName, { max: 200 }),
+    amendedByRole: optionalString(item.amendedByRole, { max: 80 }),
     reason: requiredString(item.reason, `amendments[${index}].reason`, { max: 1000 }),
     amendedAt: isoTimestamp(item.amendedAt, `amendments[${index}].amendedAt`),
     changes: cleanObject(item.changes && typeof item.changes === 'object' ? item.changes : {})
@@ -277,6 +277,7 @@ function buildOperationLog(input, context = {}) {
     operationDefinitionId: requiredString(input.operationDefinitionId, 'operationDefinitionId', { max: 120 }),
     operationName: requiredString(input.operationName, 'operationName', { max: 300 }),
     category: requiredString(input.category, 'category', { max: 80 }),
+    variety: optionalString(input.variety, { max: 120 }),
     stageNumber: integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
     performedOn: calendarDate(input.performedOn, 'performedOn'),
     areaHa: finiteNumber(input.areaHa, 'areaHa', { min: 0.01, max: 500 }),
@@ -312,13 +313,15 @@ function buildOperationSnapshot(logId, log) {
     operationDefinitionId: log.operationDefinitionId,
     operationName: log.operationName,
     category: log.category,
+    variety: log.variety || '',
     stageNumber: log.stageNumber,
     performedOn: log.performedOn,
     areaHa: log.areaHa,
     peopleCount: log.peopleCount,
     quantity: log.quantity || null,
     totalCost: log.totalCost,
-    lineItems: Array.isArray(log.lineItems) ? log.lineItems : []
+    lineItems: Array.isArray(log.lineItems) ? log.lineItems : [],
+    amendments: amendments(log.amendments)
   };
 }
 

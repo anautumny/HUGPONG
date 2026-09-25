@@ -12,16 +12,28 @@ function snapshot(entries) {
 }
 
 function fakeDatabase(collections) {
-  function query(entries, constraints = []) {
+  function query(entries, constraints = [], ordering = null, maximum = null) {
     return {
       async get() {
-        return snapshot(entries.filter(([, data]) => constraints.every(({ field, operator, value }) => operator === 'in'
+        let matching = entries.filter(([, data]) => constraints.every(({ field, operator, value }) => operator === 'in'
           ? value.includes(data[field])
-          : data[field] === value)));
+          : data[field] === value));
+        if (ordering) {
+          matching = matching.sort((left, right) => String(right[1][ordering] || '').localeCompare(String(left[1][ordering] || '')));
+        }
+        if (maximum) matching = matching.slice(0, maximum);
+        return snapshot(matching);
       },
       where(field, operator, value) {
         assert.ok(operator === '==' || operator === 'in');
-        return query(entries, [...constraints, { field, operator, value }]);
+        return query(entries, [...constraints, { field, operator, value }], ordering, maximum);
+      },
+      orderBy(field, direction) {
+        assert.equal(direction, 'desc');
+        return query(entries, constraints, field, maximum);
+      },
+      limit(value) {
+        return query(entries, constraints, ordering, value);
       }
     };
   }
@@ -53,7 +65,7 @@ test('operation query service preserves Farm Manager assigned-farm scope', async
   assert.deepEqual(records.map(record => record.id), ['LOG-1']);
 });
 
-test('operation query service preserves Member Farmer own-field scope', async () => {
+test('operation query service preserves Farm Member own-field scope', async () => {
   const records = await listOperationRecords(database, { employeeId: 'MEM-2', role: 'MEMBER_FARMER' });
   assert.deepEqual(records.map(record => record.id), ['LOG-2']);
 });
@@ -66,4 +78,29 @@ test('operation query service preserves district-wide SRA read scope', async () 
 test('operation query service can exclude archived records at query time', async () => {
   const records = await listOperationRecords(database, { employeeId: 'SRA-1', role: 'SRA_ADMIN' }, { status: 'ACTIVE' });
   assert.deepEqual(records.map(record => record.id), ['LOG-1']);
+});
+
+test('operation query service applies a bounded newest-first server query', async () => {
+  const boundedDatabase = fakeDatabase({
+    operation_logs: {
+      'LOG-OLD': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-01' },
+      'LOG-NEW': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-20' },
+      'LOG-MID': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-10' }
+    }
+  });
+  const records = await listOperationRecords(
+    boundedDatabase,
+    { employeeId: 'SRA-1', role: 'SRA_ADMIN' },
+    { limit: '2' }
+  );
+  assert.deepEqual(records.map(record => record.id), ['LOG-NEW', 'LOG-MID']);
+});
+
+test('operation query service rejects invalid and caps excessive limits', async () => {
+  await assert.rejects(
+    listOperationRecords(database, { employeeId: 'SRA-1', role: 'SRA_ADMIN' }, { limit: '0' }),
+    error => error.status === 400
+  );
+  const records = await listOperationRecords(database, { employeeId: 'SRA-1', role: 'SRA_ADMIN' }, { limit: '500' });
+  assert.equal(records.length, 2);
 });

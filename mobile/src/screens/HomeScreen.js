@@ -10,7 +10,13 @@ import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getI
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
 import OfflineBanner from '../components/OfflineBanner';
-import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
+import {
+  subscribeToNetwork,
+  getNetworkStatus,
+  getConnectivityDetails,
+  checkConnectivity,
+  CONNECTIVITY_STATUS
+} from '../services/networkService';
 import { getItem, saveItem, STORAGE_KEYS } from '../services/storageService';
 import { safeAlert } from '../utils/dialogs';
 import { sortNewestFirst } from '../utils/dataHelpers';
@@ -31,7 +37,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   const allLogs = customLogs || operationLogs || [];
   const allDrafts = customDrafts || draftLogs || [];
 
-  const userRole = session?.role || 'Member Farmer';
+  const userRole = session?.role || 'Farm Member';
   const userId = session?.employeeId || session?.id || '';
   const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
   const managerFieldIds = fields.filter(field => managedFarmIds.has(field.blockFarmId)).map(field => field.id);
@@ -42,7 +48,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     return l.status === 'ACTIVE' && l.isDraft !== true;
   });
 
-  if (userRole === 'Member Farmer') {
+  if (userRole === 'Farm Member') {
     const memberFieldIds = new Set(fields.filter(field => field.memberUserId === userId).map(field => field.id));
     scopedLogs = scopedLogs.filter(log => memberFieldIds.has(log.fieldId));
   } else if (userRole === 'Farm Manager') {
@@ -57,7 +63,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
       type: 'sync',
       icon: 'cloud-offline-outline',
       color: '#D97706',
-      title: 'Offline Logs Pending Sync',
+      title: 'Unsynced Operations',
       msg: `${offlineLogsCount} field operation log(s) for your block farm are stored locally on your device. Connect to internet and tap to synchronize to Cloud Firestore.`,
       time: 'Ready to sync',
       createdAt: latestPending?.createdAt || latestPending?.localCreatedAt || latestPending?.timestamp || null,
@@ -90,9 +96,9 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     }
   }
 
-  // 3. Unsubmitted Drafts Alert (Only for Member and their Block Farm Manager)
-  if (userRole === 'Member Farmer' || userRole === 'Farm Manager') {
-    const scopedDrafts = userRole === 'Member Farmer'
+  // 3. Unsubmitted Drafts Alert (Only for Member and their Farm Manager)
+  if (userRole === 'Farm Member' || userRole === 'Farm Manager') {
+    const scopedDrafts = userRole === 'Farm Member'
       ? allDrafts.filter(d => fields.some(field => field.memberUserId === userId && field.id === d.fieldId))
       : allDrafts.filter(d => managerFieldIds.includes(d.fieldId) || d.authorName === session?.name);
 
@@ -104,7 +110,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'document-text-outline',
         color: '#0284C7',
         title: 'Unsubmitted Field Drafts',
-        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Member Farmer' ? 'your assigned plot(s)' : 'your managed block farm'}. Tap to review, edit, and record operations.`,
+        msg: `You have ${scopedDrafts.length} unsubmitted draft log(s) for ${userRole === 'Farm Member' ? 'your assigned plot(s)' : 'your managed block farm'}. Tap to review, edit, and record operations.`,
         time: `${scopedDrafts.length} draft${scopedDrafts.length !== 1 ? 's' : ''}`,
         createdAt: latestDraft?.createdAt || latestDraft?.timestamp || latestDraft?.date || null,
         badgeText: 'Review Drafts',
@@ -172,7 +178,7 @@ export default function HomeScreen({ navigation }) {
     if (isCheckingNet) return;
     setIsCheckingNet(true);
     try {
-      const online = await checkConnectivity(3500);
+      const online = await checkConnectivity({ force: true });
       if (online) {
         try {
           await performMobileSync('MANUAL_SYNC');
@@ -182,9 +188,12 @@ export default function HomeScreen({ navigation }) {
           t('connection_restored_msg', 'Connected to the internet! The dashboard, live price circulars, and weather telemetry are now active.')
         );
       } else {
+        const serverUnavailable = getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
         safeAlert(
-          t('offline_status', 'Still Offline'),
-          t('offline_recheck_msg', 'Could not establish an internet connection. Field operations and the Growth Stage Planner remain available offline.')
+          serverUnavailable ? 'HUGPONG Server Unavailable' : t('offline_status', 'Still Offline'),
+          serverUnavailable
+            ? 'Your internet connection is active, but HUGPONG is temporarily unavailable. Field operations and the Growth Stage Planner remain available offline.'
+            : t('offline_recheck_msg', 'Could not establish an internet connection. Field operations and the Growth Stage Planner remain available offline.')
         );
       }
     } catch (e) {
@@ -331,7 +340,7 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const isFieldRole = session?.role === 'Member Farmer' || session?.role === 'Farm Manager';
+  const isFieldRole = session?.role === 'Farm Member' || session?.role === 'Farm Manager';
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -605,7 +614,7 @@ export default function HomeScreen({ navigation }) {
             </View>
             <View style={s.statDivider} />
             <View style={s.statBox}>
-              <Text style={s.statLabel}>{t('stat_crop_year_peak', 'Crop Year Peak')}</Text>
+              <Text style={s.statLabel}>{t('stat_crop_year_peak', 'Crop Year Cycle Peak')}</Text>
               <Text style={s.statValue}>
                 {priceAnalytics.cropYearPeak > 0 ? `₱${Number(priceAnalytics.cropYearPeak).toLocaleString()}` : '—'}
               </Text>
@@ -646,7 +655,7 @@ export default function HomeScreen({ navigation }) {
               <View style={[s.syncBadge, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#E8F5E8' : '#FEF3C7' }]}>
                 <View style={[s.syncDot, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706' }]} />
                 <Text style={[s.syncBadgeText, { color: isOnline && synced && pendingSyncCount === 0 ? '#15803D' : '#B45309' }]}>
-                  {isOnline && synced && pendingSyncCount === 0 ? 'Fully Synced' : `${pendingSyncCount} Pending`}
+                  {isOnline && synced && pendingSyncCount === 0 ? 'Synced' : `${pendingSyncCount} Unsynced`}
                 </Text>
               </View>
             </View>
@@ -683,7 +692,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── 3. Role-Specific Modular Views ── */}
-        {session?.role === 'Member Farmer' && (
+        {session?.role === 'Farm Member' && (
           <MemberHomeView
             session={session}
             myFields={fields.filter(field => field.memberUserId === (session?.employeeId || session?.id))}

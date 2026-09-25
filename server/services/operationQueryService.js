@@ -2,6 +2,23 @@
 
 const { COLLECTIONS, ROLES, canonicalRole } = require('../schema/firestoreSchema');
 const { sortOperationsNewestFirst } = require('./recordOrdering');
+const { presentOperationRecord } = require('../domain/presentationContract');
+
+function normalizeOperationLimit(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    const error = new Error('Operation limit must be a positive integer.');
+    error.status = 400;
+    throw error;
+  }
+  return Math.min(parsed, 100);
+}
+
+function applyOperationLimit(query, limit) {
+  if (!limit) return query;
+  return query.orderBy('performedOn', 'desc').limit(limit);
+}
 
 async function getOperationActorScope(database, user) {
   const userId = String(user?.employeeId || user?.userId || '').trim();
@@ -36,28 +53,58 @@ async function getOperationActorScope(database, user) {
   return { role, userId, fieldIds: fieldSnapshot.docs.map(document => document.id) };
 }
 
+async function enrichAmendmentEditors(database, records) {
+  const editorIds = Array.from(new Set(records.flatMap(record =>
+    (record.amendments || []).map(amendment => String(amendment.amendedByUserId || '').trim())
+  ).filter(Boolean)));
+  const usersById = new Map();
+  for (let index = 0; index < editorIds.length; index += 100) {
+    const refs = editorIds.slice(index, index + 100).map(id => database.collection(COLLECTIONS.USERS).doc(id));
+    const snapshots = refs.length ? await database.getAll(...refs) : [];
+    snapshots.filter(snapshot => snapshot.exists).forEach(snapshot => usersById.set(snapshot.id, snapshot.data()));
+  }
+  return records.map(record => ({
+    ...record,
+    amendments: (record.amendments || []).map(amendment => {
+      const editor = usersById.get(String(amendment.amendedByUserId || '').trim());
+      return {
+        ...amendment,
+        amendedByName: editor?.displayName || editor?.name || amendment.amendedByName || '',
+        amendedByRole: editor?.role || amendment.amendedByRole || ''
+      };
+    })
+  }));
+}
+
 async function listOperationRecords(database, user, options = {}) {
   const scope = await getOperationActorScope(database, user);
   const requestedStatus = String(options.status || '').trim().toUpperCase();
   const status = ['ACTIVE', 'ARCHIVED'].includes(requestedStatus) ? requestedStatus : null;
+  const limit = normalizeOperationLimit(options.limit);
   if (scope.all) {
     let query = database.collection(COLLECTIONS.OPERATION_LOGS);
     if (status) query = query.where('status', '==', status);
+    query = applyOperationLimit(query, limit);
     const snapshot = await query.get();
-    return sortOperationsNewestFirst(snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
+    const records = await enrichAmendmentEditors(database, snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
+    return sortOperationsNewestFirst(records.map(presentOperationRecord));
   }
   const records = [];
   for (let index = 0; index < scope.fieldIds.length; index += 10) {
     const fieldIds = scope.fieldIds.slice(index, index + 10);
     let query = database.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', fieldIds);
     if (status) query = query.where('status', '==', status);
+    query = applyOperationLimit(query, limit);
     const snapshot = await query.get();
-    records.push(...snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
+    records.push(...snapshot.docs.map(document => presentOperationRecord({ id: document.id, ...document.data() })));
   }
-  return sortOperationsNewestFirst(records);
+  const enriched = await enrichAmendmentEditors(database, records);
+  const sorted = sortOperationsNewestFirst(enriched);
+  return limit ? sorted.slice(0, limit) : sorted;
 }
 
 module.exports = {
   getOperationActorScope,
-  listOperationRecords
+  listOperationRecords,
+  normalizeOperationLimit
 };

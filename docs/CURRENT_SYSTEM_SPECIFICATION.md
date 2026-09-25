@@ -20,7 +20,7 @@ The approved requirements take precedence over descriptive text and existing cod
 
 The controlling rules are:
 
-1. HUGPONG has exactly four business roles: **Member Farmer**, **Farm Manager**, **SRA Admin**, and **Super Admin**.
+1. HUGPONG has exactly four business roles: **Farm Member**, **Farm Manager**, **SRA Admin**, and **Super Admin**.
 2. Submitted operation logs are historical records. Their canonical lifecycle is **ACTIVE -> ARCHIVED** only. They are never permanently deleted.
 3. Farm Managers do not approve or certify individual operation logs.
 4. Certification belongs to the **SRA audit/report workflow**, not to the operation-log lifecycle.
@@ -31,7 +31,7 @@ Terminology aliases found in code are normalized as follows:
 
 | Canonical term | Current aliases |
 | --- | --- |
-| Member Farmer | `Member`, `member`, “Field Member” |
+| Farm Member | `Member`, `member`, “Field Member” |
 | Farm Manager | `Farm Manager`, `manager`, `farm_manager` |
 | SRA Admin | `SRA (Admin)`, `SRA Admin`, `admin`, `sra_admin` |
 | Super Admin | `Super Admin`, `superadmin`, `super_admin` |
@@ -89,7 +89,7 @@ Firestore is schemaless in this repository: no Firestore rules, indexes, emulato
 
 - A `block_farms` record may reference one Farm Manager by `farmManagerId`/`farmManagerName`.
 - A `users` record may reference a block farm and a field.
-- A `fields` record references a block farm and a Member Farmer.
+- A `fields` record references a block farm and a Farm Member.
 - An `operation_logs` record references a field and optionally a submitting user.
 - An `audit_reports` record represents a block farm and reporting period and contains or summarizes operation logs.
 - `audit_logs` records changes and workflow events, but enforcement of immutability is client-side and inconsistent.
@@ -116,7 +116,7 @@ Current code creates logs as `Recorded`, changes some to `Amended` or `Certified
 
 ## 4. Roles and responsibilities
 
-### Member Farmer
+### Farm Member
 
 Approved responsibility:
 
@@ -137,7 +137,7 @@ Observed implementation:
 
 Approved responsibility:
 
-- Manage plots and Member Farmer assignments within the assigned block farm.
+- Manage plots and Farm Member assignments within the assigned block farm.
 - Monitor operations and synchronization.
 - Record a supervisory operation/takeover when permitted, with actor attribution and audit history.
 - Compile active operation logs into a monthly audit/report dossier for SRA review.
@@ -295,7 +295,7 @@ Observed workflow:
 
 | Capability | Web | Mobile | Parity assessment |
 | --- | --- | --- | --- |
-| Member Farmer workspace | None | Yes | Missing on web, if web Member support is required |
+| Farm Member workspace | None | Yes | Missing on web, if web Member support is required |
 | Farm Manager workspace | Yes | Yes | Broad feature parity; implementations are independent |
 | SRA Admin workspace | Yes | Yes | Broad feature parity; implementations are independent |
 | Super Admin workspace | Yes | Explicitly blocked | Deliberate web-only implementation |

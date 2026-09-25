@@ -65,7 +65,7 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       authenticatedRead('/api/fields', { force }),
       authenticatedRead('/api/block-farms', { force }),
       authenticatedRead('/api/crop-cycles', { force }),
-      authenticatedRead('/api/logs', { force }),
+      authenticatedRead('/api/logs?limit=5', { force }),
       includeAudits
         ? authenticatedRead('/api/audit-reports', { force })
         : Promise.resolve({ data: [] })
@@ -110,6 +110,9 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
     onData: data => onUpdate({ ...data, isLoading: false, error: null }),
     onError: error => {
       if (onError) onError(error);
-    }
+    },
+    resources: roleKey === ROLE_KEYS.SUPER_ADMIN
+      ? ['tickets', 'terminal-diagnostics']
+      : ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports']
   });
 }

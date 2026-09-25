@@ -52,6 +52,12 @@ export async function saveItem(key, value) {
 
 export const setItem = saveItem;
 
+export function localDraftStorageKey(userId) {
+  const normalized = String(userId || '').trim();
+  if (!normalized) throw new Error('A signed-in user is required for local draft storage.');
+  return `${STORAGE_KEYS.DRAFTS}:${normalized}`;
+}
+
 /**
  * One-way cache epoch migration. Old replicas, sessions, drafts, and outboxes
  * must not survive the controlled development database reset and later replay

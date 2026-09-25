@@ -66,7 +66,7 @@ export async function checkSystemHealth() {
   }
 }
 
-export async function fetchSystemDiagnostics() {
+export async function fetchSystemDiagnostics({ force = false } = {}) {
   const response = await authenticatedRequest('/api/system-diagnostics');
   return response.data || {};
 }

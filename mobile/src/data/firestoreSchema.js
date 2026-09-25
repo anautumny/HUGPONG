@@ -11,6 +11,12 @@ export const COLLECTIONS = Object.freeze({
   TERMINAL_DIAGNOSTICS: 'terminal_diagnostics'
 });
 
+const canonicalAuditStatus = value => {
+  const status = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (['PENDING', 'SUBMITTED', 'VERIFIED'].includes(status)) return 'PENDING_REVIEW';
+  return ['COMPILED', 'PENDING_SUBMISSION', 'PENDING_REVIEW', 'RETURNED', 'CERTIFIED'].includes(status) ? status : 'COMPILED';
+};
+
 export const ROLES = Object.freeze({
   MEMBER_FARMER: 'MEMBER_FARMER',
   FARM_MANAGER: 'FARM_MANAGER',
@@ -19,7 +25,7 @@ export const ROLES = Object.freeze({
 });
 
 const ROLE_LABELS = Object.freeze({
-  [ROLES.MEMBER_FARMER]: 'Member Farmer',
+  [ROLES.MEMBER_FARMER]: 'Farm Member',
   [ROLES.FARM_MANAGER]: 'Farm Manager',
   [ROLES.SRA_ADMIN]: 'SRA Admin',
   [ROLES.SUPER_ADMIN]: 'Super Admin'
@@ -44,6 +50,7 @@ export function isRoleAllowedOnPlatform(role, platform) {
 const ROLE_ALIASES = Object.freeze({
   MEMBER: ROLES.MEMBER_FARMER,
   'MEMBER FARMER': ROLES.MEMBER_FARMER,
+  'FARM MEMBER': ROLES.MEMBER_FARMER,
   MEMBER_FARMER: ROLES.MEMBER_FARMER,
   'FARM MANAGER': ROLES.FARM_MANAGER,
   FARM_MANAGER: ROLES.FARM_MANAGER,
@@ -87,7 +94,8 @@ export function fromUserDocument(id, value = {}) {
     approvedByUserId: value.approvedByUserId,
     approvedAt: value.approvedAt,
     createdAt: value.createdAt,
-    updatedAt: value.updatedAt
+    updatedAt: value.updatedAt,
+    assignment: value.assignment || null
   };
 }
 
@@ -166,6 +174,7 @@ export function toCycleDocument(field = {}, cycle = {}) {
     fieldId: String(field.id || cycle.fieldId || '').trim().toUpperCase(),
     sequenceNumber,
     cropType: cycle.cropType || field.cycleType || 'Plant Cane (New Plant)',
+    variety: String(cycle.variety || '').trim(),
     cropYear: formatCropYear(cycle.cropYear || field.cropYear || ''),
     currentStageNumber: Number(cycle.currentStageNumber || field.stageNumber || 1),
     elapsedMonths: Number(cycle.elapsedMonths ?? field.month ?? 0),
@@ -193,7 +202,9 @@ export function fromFieldDocument(id, value = {}, cycle = null) {
     batchMonth: Number(cycle?.batchNumber || 1),
     cycleNumber: Number(cycle?.sequenceNumber || 1),
     cycleType: cycle?.cropType || '',
-    cropYear: formatCropYear(cycle?.cropYear || value.cropYear || '')
+    cropYear: formatCropYear(cycle?.cropYear || value.cropYear || ''),
+    variety: String(cycle?.variety || value.variety || '').trim(),
+    varietySource: cycle?.variety ? 'CROP_YEAR_CYCLE' : (value.variety ? 'LEGACY_FIELD' : '')
   };
 }
 
@@ -207,7 +218,6 @@ export function toFieldDocument(value = {}) {
     blockFarmId,
     memberUserId: value.memberUserId || value.memberId || null,
     areaHa: Number(value.areaHa ?? value.ha ?? 0),
-    variety: String(value.variety || '').trim(),
     soilType: String(value.soilType || '').trim(),
     currentCycleId,
     status,
@@ -236,6 +246,8 @@ function canonicalAmendments(value) {
   return value.map(item => ({
       amendmentId: item.amendmentId,
       amendedByUserId: item.amendedByUserId || '',
+      amendedByName: item.amendedByName || '',
+      amendedByRole: item.amendedByRole || '',
       reason: item.reason || '',
       amendedAt: item.amendedAt,
       changes: item.changes && typeof item.changes === 'object' ? item.changes : {}
@@ -284,10 +296,11 @@ export function toOperationLogDocument(value = {}, context = {}) {
       ? null
       : Number(context.stageNumberAtRecord ?? value.stageNumberAtRecord),
     submittedByUserId,
-    submissionSource: context.submissionSource || value.submissionSource || 'MEMBER',
+    submissionSource: context.submissionSource || value.submissionSource || '',
     operationDefinitionId: value.operationDefinitionId || value.sraOperationId || 'CUSTOM',
     operationName: String(value.operationName || value.activity || '').trim(),
     category: String(value.category || '').trim(),
+    variety: String(value.variety || '').trim(),
     stageNumber: Number(value.stageNumber || 1),
     performedOn: value.performedOn || value.isoDate || String(value.date || '').slice(0, 10),
     areaHa: Number(value.areaHa ?? value.hectares ?? value.ha ?? 0),
@@ -346,13 +359,15 @@ export function operationSnapshot(id, value) {
     operationDefinitionId: log.operationDefinitionId,
     operationName: log.operationName,
     category: log.category,
+    variety: log.variety,
     stageNumber: log.stageNumber,
     performedOn: log.performedOn,
     areaHa: log.areaHa,
     peopleCount: log.peopleCount,
     quantity: log.quantity,
     totalCost: log.totalCost,
-    lineItems: log.lineItems
+    lineItems: log.lineItems,
+    amendments: log.amendments
   };
 }
 
@@ -377,17 +392,19 @@ export function toAuditReportDocument(value = {}, context = {}) {
       operationDefinitionId: item.operationDefinitionId || 'CUSTOM',
       operationName: String(item.operationName || '').trim(),
       category: String(item.category || '').trim(),
+      variety: String(item.variety || '').trim(),
       stageNumber: Number(item.stageNumber || 1),
       performedOn: item.performedOn,
       areaHa: Number(item.areaHa || 0),
       peopleCount: Number(item.peopleCount || 0),
       quantity: item.quantity && typeof item.quantity === 'object' ? item.quantity : null,
       totalCost: Number(item.totalCost || 0),
-      lineItems: canonicalLineItems(item)
+      lineItems: canonicalLineItems(item),
+      amendments: canonicalAmendments(item.amendments)
     };
     return operationSnapshot(item.id || item.operationLogId, item);
   });
-  const status = String(context.status || value.status || 'PENDING').replace(/\s+SRA$/i, '').toUpperCase();
+  const status = canonicalAuditStatus(context.status || value.status || 'COMPILED');
   const blockFarmId = String(value.blockFarmId || '').trim().toUpperCase();
   const period = toReportPeriod(value.period || value.month);
   const qrHash = value.qrHash || value.qrSignature || '';
@@ -400,7 +417,8 @@ export function toAuditReportDocument(value = {}, context = {}) {
   return {
     blockFarmId,
     period,
-    status: status === 'CERTIFIED' ? 'CERTIFIED' : 'PENDING',
+    periodKey: period,
+    status,
     qrHash,
     compiledByUserId,
     compiledAt: value.compiledAt || value.createdAt || new Date().toISOString(),
@@ -409,7 +427,17 @@ export function toAuditReportDocument(value = {}, context = {}) {
     certifiedByUserId,
     certifiedAt,
     createdAt: value.createdAt || value.compiledAt || new Date().toISOString(),
-    updatedAt: context.updatedAt || value.updatedAt || new Date().toISOString()
+    updatedAt: context.updatedAt || value.updatedAt || new Date().toISOString(),
+    reportVersion: Number(value.reportVersion || 1),
+    rootReportId: value.rootReportId || '',
+    integrityHash: value.integrityHash || qrHash,
+    operationCount: Number(value.operationCount || operationSnapshots.length),
+    fieldCount: Number(value.fieldCount || new Set(operationSnapshots.map(item => item.fieldId)).size),
+    hectaresAudited: Number(value.hectaresAudited || 0),
+    totalCost: Number(value.totalCost || operationSnapshots.reduce((sum, item) => sum + Number(item.totalCost || 0), 0)),
+    submittedAt: value.submittedAt || null,
+    submissionMethod: value.submissionMethod || null,
+    returnReason: value.returnReason || ''
   };
 }
 
@@ -420,12 +448,14 @@ export function fromAuditReportDocument(id, value = {}) {
   return {
     id,
     ...value,
+    status: canonicalAuditStatus(value.status),
     reportId: id,
-    month: value.period,
+    periodKey: value.periodKey || value.period,
+    month: value.periodKey || value.period,
     totalLogs: operations.length,
     logsCount: operations.length,
     totalCost: operations.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
-    totalHectares: Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0),
+    totalHectares: Number(value.hectaresAudited || Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0)),
     operations,
     logs: operations,
     qrSignature: value.qrHash,

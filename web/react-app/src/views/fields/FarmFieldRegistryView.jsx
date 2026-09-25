@@ -331,7 +331,7 @@ export default function FarmFieldRegistryView() {
           icon: MapPin
         },
         {
-          label: 'Enrolled Member Plots',
+          label: 'Enrolled Farm Member Fields',
           value: totalDistrictPlots,
           subtext: 'Registered parcel records',
           icon: Layers
@@ -386,7 +386,7 @@ export default function FarmFieldRegistryView() {
     },
     {
       key: 'memberName',
-      header: 'Assigned Member Farmer',
+      header: 'Assigned Farm Member',
       render: (val, row) => (
         <div>
           <span className="font-bold text-hug-text block">{val || 'Unassigned'}</span>
@@ -561,7 +561,7 @@ export default function FarmFieldRegistryView() {
     },
     {
       key: 'plots',
-      header: 'Enrolled Member Plots',
+      header: 'Enrolled Farm Member Fields',
       width: '180px',
       render: (_, row) => {
         const farmPlots = blockFarmsState.fields.filter(f => f.blockFarmId === row.id);
@@ -738,7 +738,7 @@ export default function FarmFieldRegistryView() {
                     setFieldSearchQuery(e.target.value);
                     setFieldCurrentPage(1);
                   }}
-                  placeholder="Search by Field ID, Member Farmer, Crop Variety..."
+                  placeholder="Search by Field ID, Farm Member, Crop Variety..."
                   icon={Search}
                   className="w-full"
                 />
@@ -795,7 +795,7 @@ export default function FarmFieldRegistryView() {
             }
             emptySubtext={
               isFarmManager
-                ? 'Click "Add Field" to enroll member farmers and plot coordinates.'
+                ? 'Click "Add Field" to enroll Farm Members and field coordinates.'
                 : 'Enrolled parcels will display here once registered by farm managers.'
             }
             currentPage={fieldCurrentPage}

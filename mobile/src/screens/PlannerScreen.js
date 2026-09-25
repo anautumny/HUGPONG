@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW, ANALYTICS_PALETTE } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, DRAFT_LOGS, notifyDataUpdate, subscribe, getFieldCustomOperations, saveFieldFullPlan, saveDraftLogs } from '../data/dataStore';
+import { getCurrentSession, fields, fieldsStore, blockFarms, draftLogs, notifyDataUpdate, subscribe, getFieldCustomOperations, saveFieldFullPlan, saveLocalOperationDraft } from '../data/dataStore';
 import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations } from '../domain/operationCatalogue';
 import { generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus } from '../services/networkService';
@@ -119,7 +119,7 @@ export default function PlannerScreen({ navigation }) {
   const { t, formatOperationName, formatStageName, formatPhaseMonth } = useTranslation();
   const [session, setSession] = useState(getCurrentSession());
   const [allFields, setAllFields] = useState([...fieldsStore]);
-  const isMember = session?.role === 'Member Farmer';
+  const isMember = session?.role === 'Farm Member';
 
   useEffect(() => {
     const unsub = subscribe(() => {
@@ -180,7 +180,7 @@ export default function PlannerScreen({ navigation }) {
   const [selectedField, setSelectedField] = useState(() => {
     const cur = getCurrentSession() || {};
     const userId = cur.employeeId || cur.id || '';
-    if (cur.role === 'Member Farmer' || !getNetworkStatus()) {
+    if (cur.role === 'Farm Member' || !getNetworkStatus()) {
       return fieldsStore.find(field => 
         field.memberUserId === userId ||
         field.memberId === userId ||
@@ -271,7 +271,7 @@ export default function PlannerScreen({ navigation }) {
     const unsub = subscribe(() => {
       const cur = getCurrentSession();
       setSession({ ...cur });
-      if (cur.role === 'Member Farmer') {
+      if (cur.role === 'Farm Member') {
         const uId = cur.employeeId || cur.id || '';
         const defaultField = fields.find(field => 
           field.memberUserId === uId ||
@@ -637,8 +637,13 @@ export default function PlannerScreen({ navigation }) {
     const isStageDone = isStageCompletedInField(currentStage.stageNum);
 
     const executeSend = async (isSupplemental) => {
-      const draftLog = createDraftLogForOp(op, isSupplemental);
-      await saveDraftLogs();
+      let draftLog;
+      try {
+        draftLog = await createDraftLogForOp(op, isSupplemental);
+      } catch (error) {
+        Alert.alert('Draft Not Saved', error.message || 'Drafts can only be saved for your own currently assigned field.');
+        return;
+      }
 
       const subtitle = isSupplemental
         ? `"${op.name}" (₱ ${fmt(draftLog.cost)}) created as a SUPPLEMENTAL Draft Log for ${draftLog.fieldId}. Submitting this in Field Ops will not overwrite or rewind the field's current stage.`
@@ -678,7 +683,7 @@ export default function PlannerScreen({ navigation }) {
   };
 
   // Helper to create and insert a draft log object
-  const createDraftLogForOp = (op, isSupplemental = false) => {
+  const createDraftLogForOp = async (op, isSupplemental = false) => {
     const fieldId = selectedField?.id || '';
     const draftId = generateDraftId(fieldId);
     let subItems = [];
@@ -727,8 +732,7 @@ export default function PlannerScreen({ navigation }) {
       isSupplemental: Boolean(isSupplemental),
     };
 
-    DRAFT_LOGS.unshift(draftLog);
-    return draftLog;
+    return saveLocalOperationDraft(draftLog);
   };
 
   // Send entire stage plan to Drafts
@@ -746,11 +750,10 @@ export default function PlannerScreen({ navigation }) {
       try {
         const targetFieldId = (selectedField?.id || '').trim().toUpperCase();
         const createdIds = [];
-        currentOperations.forEach(op => {
-          const d = createDraftLogForOp(op, isSupplemental);
+        for (const op of currentOperations) {
+          const d = await createDraftLogForOp(op, isSupplemental);
           createdIds.push(d.id);
-        });
-        await saveDraftLogs();
+        }
 
         const subtitle = isSupplemental
           ? `All ${currentOperations.length} operations for Stage ${currentStage.stageNum} transferred as SUPPLEMENTAL Drafts. Field stage progression will be preserved.`
@@ -1886,7 +1889,7 @@ export default function PlannerScreen({ navigation }) {
                 <Ionicons name="search-outline" size={16} color={COLORS.textMuted} />
                 <TextInput
                   style={{ flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.text, padding: 0 }}
-                  placeholder="Search by Field ID, Member, or Stage..."
+                  placeholder="Search by Field ID, Farm Member, or Stage..."
                   placeholderTextColor={COLORS.textMuted}
                   value={fieldSearchQuery}
                   onChangeText={t => {

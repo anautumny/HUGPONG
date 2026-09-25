@@ -11,7 +11,7 @@ export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
 
   try {
     const cleanContact = (session.contact || '').replace(/\D/g, '');
-    const userRole = session.role || 'Member Farmer';
+    const userRole = session.role || 'Farm Member';
     
     // Generate deterministic device ID based on user contact or role
     const deviceSuffix = cleanContact ? cleanContact.slice(-4) : (session.employeeId ? session.employeeId.slice(-4) : '01');

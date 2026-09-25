@@ -3,9 +3,17 @@ import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing } fro
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount } from '../data/dataStore';
-import { subscribeToNetwork, getNetworkStatus, checkConnectivity } from '../services/networkService';
+import {
+  subscribeToNetwork,
+  getNetworkStatus,
+  getConnectivityDetails,
+  checkConnectivity,
+  CONNECTIVITY_STATUS
+} from '../services/networkService';
 import { useTranslation } from '../services/i18n';
 import { safeAlert } from '../utils/dialogs';
+import { useNavigation } from '@react-navigation/native';
+import { syncResultMessage } from '../domain/syncPresentation';
 
 const LOGO = require('../../assets/HUGPONG LOGO.png');
 
@@ -16,6 +24,7 @@ const LOGO = require('../../assets/HUGPONG LOGO.png');
  */
 function AppHeader({ right }) {
   const { t } = useTranslation();
+  const navigation = useNavigation();
   const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
   const [isOnline, setIsOnline] = useState(getNetworkStatus());
@@ -70,7 +79,7 @@ function AppHeader({ right }) {
     startSpinAnimation();
 
     try {
-      const online = await checkConnectivity(3500);
+      const online = await checkConnectivity({ force: true });
       if (online) {
         setSyncStatusText(t('syncing_progress', 'Syncing...'));
         const result = await performMobileSync('MANUAL_SYNC');
@@ -79,14 +88,20 @@ function AppHeader({ right }) {
         setPendingCount(remaining);
         safeAlert(
           remaining === 0 ? t('sync_status_synced', 'Online & Synced') : 'Sync Incomplete',
-          remaining === 0
-            ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
-            : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${remaining} remain queued.`
+          syncResultMessage(result),
+          remaining > 0 ? [
+            { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
+            { text: 'Try Again', onPress: () => handleSync() },
+            { text: 'Close', style: 'cancel' }
+          ] : undefined
         );
       } else {
+        const serverUnavailable = getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
         safeAlert(
-          t('offline_status', 'Still Offline'),
-          t('offline_recheck_msg', 'Could not establish an internet connection. Your sugarcane logs remain safe and intact in local device storage.')
+          serverUnavailable ? 'HUGPONG Server Unavailable' : t('offline_status', 'Still Offline'),
+          serverUnavailable
+            ? 'Your internet connection is active, but HUGPONG is temporarily unavailable. Your records remain safe in local storage.'
+            : t('offline_recheck_msg', 'Could not establish an internet connection. Your sugarcane logs remain safe and intact in local device storage.')
         );
       }
     } catch (err) {
@@ -142,9 +157,12 @@ function AppHeader({ right }) {
       setPendingCount(remaining);
       safeAlert(
         remaining === 0 ? t('sync_status_synced', 'Sync Successful') : 'Sync Incomplete',
-        remaining === 0
-          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
-          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${remaining} remain queued.`
+        syncResultMessage(result),
+        remaining > 0 ? [
+          { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
+          { text: 'Try Again', onPress: () => handleSync() },
+          { text: 'Close', style: 'cancel' }
+        ] : undefined
       );
     } catch (err) {
       safeAlert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');
@@ -160,7 +178,7 @@ function AppHeader({ right }) {
     outputRange: ['0deg', '360deg'],
   });
 
-  const isFieldRole = session?.role === 'Member Farmer' || session?.role === 'Farm Manager';
+  const isFieldRole = session?.role === 'Farm Member' || session?.role === 'Farm Manager';
   const liveCount = getPendingSyncCount(session);
   const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
   const isFullySynced = isOnline && safeCount === 0;

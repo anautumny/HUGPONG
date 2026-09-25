@@ -51,9 +51,10 @@ test('successful operation reconciliation clears every local unsynchronized mark
   assert.match(dataStore, /cleanupDuplicateLogs\(operationLogs\)/);
 });
 
-test('pending count deduplicates an operation and its outbox envelope', () => {
-  assert.match(dataStore, /const pendingKeys = new Set\(getOutboxQueue\(\)/);
-  assert.match(dataStore, /pendingKeys\.add\(`operation_logs\/\$\{log\.id\}`\)/);
+test('pending count counts canonical mutations while avoiding a second count for their local operation overlay', () => {
+  assert.match(dataStore, /const queue = getOutboxQueue\(\)/);
+  assert.match(dataStore, /item\.mutationId \|\| item\.outboxId/);
+  assert.match(dataStore, /if \(!representedByMutation\) pendingKeys\.add\(`local-operation:\$\{log\.id\}`\)/);
   assert.match(dataStore, /return pendingKeys\.size/);
   assert.doesNotMatch(homeScreen, /offlineLogsCount\s*=.*\+.*outboxCount/);
 });
@@ -65,9 +66,12 @@ test('field sync badges derive status from the durable queue instead of removed 
   assert.doesNotMatch(fieldOps, /safeField\??\.synced|field\.synced|selectedField\??\.synced/);
 });
 
-test('automatic sync uses persistent NetInfo reachability instead of screen lifecycle polling', () => {
+test('automatic sync requires both NetInfo reachability and the configured gateway health check', () => {
   assert.match(networkService, /NetInfo\.addEventListener/);
-  assert.match(networkService, /isConnected === true && state\.isInternetReachable === true/);
+  assert.match(networkService, /isConnected === true && state\.isInternetReachable !== false/);
+  assert.match(networkService, /probeServerConnectivity\(\)/);
+  assert.match(networkService, /SERVER_UNAVAILABLE/);
+  assert.match(networkService, /setTimeout/);
   assert.doesNotMatch(networkService, /setInterval|clients3\.google/);
   assert.match(networkService, /NETWORK_RESTORED/);
 });
@@ -76,9 +80,9 @@ test('mobile startup tolerates an older APK without the NetInfo native module', 
   const authService = read('mobile/src/services/authService.js');
   assert.doesNotMatch(networkService, /^import NetInfo/m);
   assert.match(networkService, /try \{\s*const netInfoModule = require\('@react-native-community\/netinfo'\)/);
-  assert.match(networkService, /if \(NetInfo\?\.fetch\)/);
+  assert.match(networkService, /NetInfo\?\.fetch/);
   assert.match(networkService, /probeServerConnectivity\(\)/);
-  assert.match(authService, /fetchWithHostFallback\('\/health'/);
+  assert.match(authService, /fetchFromApi\('\/health'/);
 });
 
 test('startup, foreground, reconnect, post-mutation, and manual triggers converge on one sync function', () => {
@@ -97,7 +101,7 @@ test('concurrent triggers reuse single-flight promises and release locks in fina
 });
 
 test('startup migration recovers stale syncing entries as retryable', () => {
-  assert.match(outboxCore, /item\?\.status === 'syncing' \? 'retryable'/);
+  assert.match(outboxCore, /status === 'syncing'.*return 'retryable'/);
   assert.match(syncEngine, /migrateOutbox\(savedOutbox\)/);
 });
 
@@ -141,11 +145,12 @@ test('clearing the mobile data cache preserves the authenticated session pair', 
   assert.match(resetFlow, /multiSave\(preservedAuth\)/);
 });
 
-test('mobile API discovery prefers the active Metro host and retains emulator fallback', () => {
-  assert.match(authService, /NativeModules\?\.SourceCode\?\.scriptURL/);
-  assert.match(authService, /resolveMetroApiUrl\(\)/);
-  assert.match(authService, /http:\/\/10\.0\.2\.2:3000/);
-  assert.match(authService, /for \(const origin of origins\)/);
+test('mobile API requests use one configured origin without runtime host discovery', () => {
+  const apiConfig = read('mobile/src/config/apiConfig.js');
+  assert.match(apiConfig, /process\.env\.EXPO_PUBLIC_API_BASE_URL/);
+  assert.match(apiConfig, /must use HTTPS in production/);
+  assert.match(authService, /getApiBaseUrl\(\)/);
+  assert.doesNotMatch(authService, /NativeModules|SourceCode|resolveMetroApiUrl|10\.0\.2\.2|localhost|for \(const origin of origins\)/);
 });
 
 test('new operation forms cannot attach photos while legacy evidence remains schema-readable', () => {
@@ -266,8 +271,9 @@ test('operation submission has a synchronous duplicate-tap lock and processing U
 test('manual sync summaries remain honest when records remain', () => {
   assert.match(homeScreen, /Sync Incomplete/);
   assert.match(homeScreen, /result\.remainingCount/);
-  assert.match(read('mobile/src/components/AppHeader.js'), /failed, and \$\{remaining\} remain queued/);
-  assert.match(read('mobile/src/screens/SyncMonitorScreen.js'), /result\.failedCount/);
+  assert.match(read('mobile/src/components/AppHeader.js'), /syncResultMessage\(result\)/);
+  assert.match(read('mobile/src/screens/SyncMonitorScreen.js'), /getOutboxDiagnostics/);
+  assert.match(read('mobile/src/domain/syncPresentation.js'), /Reason:/);
 });
 
 test('server log creation remains idempotent by stable client operation ID', () => {

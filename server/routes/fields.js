@@ -22,6 +22,7 @@ const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { assertFieldScope, assertBlockFarmScope } = require('../services/resourceScope');
 const { archiveFieldWithOperations } = require('../services/cropCycleOperations');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
+const { createFieldId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
 
 async function assertManagerScope(blockFarmId, user) {
   const userId = String(user.employeeId || user.userId || '').trim();
@@ -36,6 +37,22 @@ async function assertMemberAssignmentScope(memberUserId, blockFarmId, excludedFi
   const assignments = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', memberUserId).get();
   const outsideAssignment = assignments.docs.find(doc => doc.id !== excludedFieldId && doc.data().status === 'ACTIVE' && doc.data().blockFarmId !== blockFarmId);
   if (outsideAssignment) throw new Error('memberUserId already has an ACTIVE assignment outside this block farm.');
+}
+
+async function assertAssignableFieldOwner(memberUserId, blockFarmId, user) {
+  if (!memberUserId) return;
+  const owner = await db.collection(COLLECTIONS.USERS).doc(memberUserId).get();
+  if (!owner.exists || owner.data().status !== 'ACTIVE') {
+    throw new Error('memberUserId must reference an ACTIVE Farm Member or the current Farm Manager.');
+  }
+  const ownerRole = canonicalRole(owner.data().role);
+  const actorId = String(user.employeeId || user.userId || '').trim();
+  const isMember = ownerRole === ROLES.MEMBER_FARMER;
+  const isCurrentManager = ownerRole === ROLES.FARM_MANAGER && memberUserId === actorId;
+  if (!isMember && !isCurrentManager) {
+    throw new Error('memberUserId must reference an ACTIVE Farm Member or the current Farm Manager.');
+  }
+  if (isCurrentManager) await assertManagerScope(blockFarmId, user);
 }
 
 router.get('/', requireAuth, async (req, res) => {
@@ -68,8 +85,15 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     readMutationContext(req);
-    const fieldId = requiredString(req.body.id, 'id', { max: 80 }).toUpperCase();
-    if (!/^[A-Z0-9_-]{3,80}$/.test(fieldId)) throw new Error('id contains unsupported characters.');
+    const developmentSeedId = readDevelopmentSeedId(req);
+    if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'fieldId'], 'Field');
+    if (String(req.body.variety || '').trim()) {
+      throw new Error('Sugarcane variety is captured by a Planting operation, not during field enrollment.');
+    }
+    if (req.body.currentStageNumber != null && Number(req.body.currentStageNumber) !== CROP_STAGE_MIN) {
+      throw new Error('New fields always start at the first Crop Year Cycle stage.');
+    }
+    const fieldId = developmentSeedId || createFieldId();
     const blockFarmId = requiredString(req.body.blockFarmId, 'blockFarmId', { max: 80 }).toUpperCase();
     await assertManagerScope(blockFarmId, req.session.user);
     const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
@@ -77,31 +101,18 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
 
     const memberUserId = nullableId(req.body.memberUserId);
     if (memberUserId) {
-      const member = await db.collection(COLLECTIONS.USERS).doc(memberUserId).get();
-      if (!member.exists || canonicalRole(member.data().role) !== ROLES.MEMBER_FARMER) {
-        throw new Error('memberUserId must reference a Member Farmer.');
-      }
+      await assertAssignableFieldOwner(memberUserId, blockFarmId, req.session.user);
       await assertMemberAssignmentScope(memberUserId, blockFarmId);
     }
 
     const now = nowIso();
     const cycleId = createCycleId(fieldId, 1);
-    const existingField = await db.collection(COLLECTIONS.FIELDS).doc(fieldId).get();
-    if (existingField.exists) {
-      const current = existingField.data();
-      if (current.blockFarmId === blockFarmId && current.memberUserId === memberUserId && current.currentCycleId === cycleId) {
-        const currentCycle = await db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId).get();
-        return res.json({ success: true, replayed: true, data: { field: { id: fieldId, ...current }, cycle: currentCycle.exists ? { id: cycleId, ...currentCycle.data() } : null } });
-      }
-      return res.status(409).json({ success: false, error: 'Field ID already belongs to another field.' });
-    }
     const annual = cropYearParts(null, now);
     const cropYearVal = annual.cropYear;
     const field = {
       blockFarmId,
       memberUserId,
       areaHa: finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
-      variety: optionalString(req.body.variety, { max: 120 }),
       soilType: optionalString(req.body.soilType, { max: 120 }),
       cropYear: cropYearVal,
       currentCycleId: cycleId,
@@ -118,14 +129,11 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       farmMemberId: memberUserId,
       sequenceNumber: 1,
       cropType: optionalString(req.body.cropType, { max: 120 }),
+      variety: '',
       cropYear: cropYearVal,
       cropYearStart: annual.cropYearStart,
       cropYearEnd: annual.cropYearEnd,
-      currentStageNumber: integer(
-        req.body.currentStageNumber == null ? CROP_STAGE_MIN : req.body.currentStageNumber,
-        'currentStageNumber',
-        { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }
-      ),
+      currentStageNumber: CROP_STAGE_MIN,
       elapsedMonths: finiteNumber(req.body.elapsedMonths == null ? 0 : req.body.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 }),
       batchNumber: integer(req.body.batchNumber == null ? 1 : req.body.batchNumber, 'batchNumber', { min: 1, max: 9999 }),
       status: 'ACTIVE',
@@ -149,6 +157,10 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
 router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    assertNoClientIdentity(req.body, ['id', 'fieldId'], 'Field');
+    if (Object.prototype.hasOwnProperty.call(req.body, 'variety')) {
+      throw new Error('Sugarcane variety belongs to a Crop Year Cycle and can be corrected only through a Planting operation amendment.');
+    }
     const scope = await assertFieldScope(req.params.id, req.session.user, [ROLES.FARM_MANAGER]);
     const existing = scope.field;
     const mutationContext = readMutationContext(req);
@@ -160,17 +172,13 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
     }
     const memberUserId = req.body.memberUserId === undefined ? existing.memberUserId : nullableId(req.body.memberUserId);
     if (memberUserId) {
-      const member = await db.collection(COLLECTIONS.USERS).doc(memberUserId).get();
-      if (!member.exists || canonicalRole(member.data().role) !== ROLES.MEMBER_FARMER || member.data().status !== 'ACTIVE') {
-        throw new Error('memberUserId must reference an ACTIVE Member Farmer.');
-      }
+      await assertAssignableFieldOwner(memberUserId, blockFarmId, req.session.user);
       await assertMemberAssignmentScope(memberUserId, blockFarmId, scope.fieldId);
     }
     const update = {
       blockFarmId,
       memberUserId,
       areaHa: req.body.areaHa === undefined ? existing.areaHa : finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
-      variety: req.body.variety === undefined ? existing.variety : optionalString(req.body.variety, { max: 120 }),
       soilType: req.body.soilType === undefined ? existing.soilType : optionalString(req.body.soilType, { max: 120 }),
       updatedAt: nowIso()
     };
@@ -181,7 +189,6 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
       const alreadyApplied = latest.blockFarmId === update.blockFarmId
         && latest.memberUserId === update.memberUserId
         && latest.areaHa === update.areaHa
-        && latest.variety === update.variety
         && latest.soilType === update.soilType;
       if (alreadyApplied) return { replayed: true, record: latest };
       assertBaseVersion(latest.updatedAt, mutationContext, scope.fieldId, { id: scope.fieldId, ...latest });

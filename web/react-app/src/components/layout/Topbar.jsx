@@ -44,7 +44,7 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
       case '/users':
         return {
           title: roleKey === ROLE_KEYS.SUPER_ADMIN ? 'User Directory Monitor' : 'User Management',
-          subtitle: 'Directory of cooperative farmers, managers, and staff'
+          subtitle: 'Directory of Farm Members, Farm Managers, and staff'
         };
       case '/sync':
         return {

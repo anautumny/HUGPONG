@@ -15,6 +15,9 @@ const {
   cropYearParts
 } = require('../schema/firestoreSchema');
 const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
+const { getOperationDefinition } = require('../domain/operationCatalogue');
+const { canonicalSugarcaneVariety } = require('../domain/sugarcaneVarieties');
+const { operationAuthorization } = require('../domain/operationAuthorization');
 const { assertBaseVersion } = require('./mutationContext');
 
 const MAX_ATOMIC_ROLLOVER_LOGS = 497;
@@ -37,7 +40,8 @@ function cycleClosedConflict(cycleId, fieldId) {
 function actor(user) {
   return {
     actorId: String(user?.employeeId || user?.userId || '').trim(),
-    actorRole: canonicalRole(user?.role || user?.roleKey)
+    actorRole: canonicalRole(user?.role || user?.roleKey),
+    actorName: String(user?.name || user?.displayName || '').trim()
   };
 }
 
@@ -52,22 +56,27 @@ async function readAuthorizedField(transaction, database, fieldId, user, action)
   const fieldSnapshot = await transaction.get(fieldRef);
   if (!fieldSnapshot.exists) throw serviceError('The referenced field does not exist.', 404);
   const field = fieldSnapshot.data();
-
-  if (identity.actorRole === ROLES.MEMBER_FARMER && field.memberUserId !== identity.actorId) {
-    throw serviceError(`Member Farmers may ${action} only for their assigned field.`, 403);
-  }
-  if (identity.actorRole === ROLES.FARM_MANAGER) {
-    if (!user?.takeoverGrant || user.takeoverGrant.fieldId !== normalizedFieldId || user.takeoverGrant.actorId !== identity.actorId) {
-      throw serviceError('A recent password verification for this field is required for manager takeover changes.', 403);
-    }
+  let managedBlockFarm = false;
+  if (identity.actorRole === ROLES.FARM_MANAGER && field.memberUserId !== identity.actorId) {
     const farmRef = database.collection(COLLECTIONS.BLOCK_FARMS).doc(field.blockFarmId);
     const farmSnapshot = await transaction.get(farmRef);
-    if (!farmSnapshot.exists || farmSnapshot.data().managerUserId !== identity.actorId) {
+    managedBlockFarm = Boolean(farmSnapshot.exists && farmSnapshot.data().managerUserId === identity.actorId);
+    if (!managedBlockFarm) {
       throw serviceError(`Farm Managers may ${action} only within their assigned block farm.`, 403);
     }
   }
 
-  return { ...identity, fieldId: fieldSnapshot.id, field, fieldRef };
+  const authorization = operationAuthorization(user, { id: fieldSnapshot.id, ...field }, { managedBlockFarm });
+  if (!authorization.canCreate) {
+    if (identity.actorRole === ROLES.MEMBER_FARMER) {
+      throw serviceError(`Farm Members may ${action} only for their assigned field.`, 403);
+    }
+    throw serviceError('A valid takeover authorization for this field is required for manager changes.', 403, {
+      code: 'TAKEOVER_AUTHORIZATION_REQUIRED', fieldId: normalizedFieldId
+    });
+  }
+
+  return { ...identity, fieldId: fieldSnapshot.id, field, fieldRef, authorization };
 }
 
 async function readActiveCurrentCycle(transaction, database, fieldAccess, cycleId) {
@@ -114,21 +123,38 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
 
     const access = await readAuthorizedField(transaction, database, fieldId, user, 'record operations');
     const activeCycle = await readActiveCurrentCycle(transaction, database, access, cycleId);
+    const selectedStageNumber = integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX });
+    const definition = validateOperationForStage(input, access.field, selectedStageNumber);
+    const variety = plantingVariety(input, selectedStageNumber);
+    const existingCycleVariety = String(activeCycle.cycle.variety || '').trim();
+    if (variety && existingCycleVariety && variety !== existingCycleVariety) {
+      throw serviceError('This Crop Year Cycle already has a different sugarcane variety. Use an operation amendment to correct it.', 409, {
+        code: 'CYCLE_VARIETY_CONFLICT', variety: existingCycleVariety
+      });
+    }
     const payload = buildOperationLog({
       ...input,
       fieldId,
       cycleId,
       blockFarmId: access.field.blockFarmId,
       cropYearCycle: normalizeCropYear(activeCycle.cycle.cropYear),
-      stageNumberAtRecord: activeCycle.cycle.currentStageNumber,
+      operationDefinitionId: definition.id,
+      operationName: definition.name,
+      category: definition.category,
+      stageNumber: selectedStageNumber,
+      stageNumberAtRecord: selectedStageNumber,
+      variety,
       status: 'ACTIVE',
       archivedAt: null,
       archivedByUserId: null,
       createdAt: input.createdAt || timestamp,
       updatedAt: timestamp,
-      submissionSource: access.actorRole === ROLES.FARM_MANAGER ? 'MANAGER_TAKEOVER' : 'MEMBER',
+      submissionSource: access.authorization.submissionSource,
       photoEvidence: null
     }, { submittedByUserId: access.actorId, now: timestamp });
+    if (variety && !existingCycleVariety) {
+      transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
+    }
     transaction.create(targetRef, payload);
     return { replayed: false, id: logId, record: payload };
   });
@@ -152,7 +178,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     const access = await readAuthorizedField(transaction, database, existing.fieldId, user, 'amend operations');
     const activeCycle = await readActiveCurrentCycle(transaction, database, access, existing.cycleId);
     if (access.actorRole === ROLES.MEMBER_FARMER && existing.submittedByUserId !== access.actorId) {
-      throw serviceError('Member Farmers may amend only operations they submitted.', 403);
+      throw serviceError('Farm Members may amend only operations they submitted.', 403);
     }
     if (amendment.amendmentId && (existing.amendments || []).some(item => item.amendmentId === amendment.amendmentId)) {
       return { replayed: true, id: snapshot.id, record: existing };
@@ -160,7 +186,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     assertBaseVersion(existing.updatedAt, mutationContext, snapshot.id, { id: snapshot.id, ...existing });
 
     const requested = changes && typeof changes === 'object' ? changes : {};
-    const immutable = ['fieldId', 'cycleId', 'blockFarmId', 'cropYearCycle', 'stageNumberAtRecord', 'submittedByUserId', 'submissionSource', 'createdAt'];
+    const immutable = ['fieldId', 'cycleId', 'blockFarmId', 'cropYearCycle', 'stageNumber', 'stageNumberAtRecord', 'submittedByUserId', 'submissionSource', 'createdAt'];
     for (const key of immutable) {
       if (requested[key] != null && requested[key] !== existing[key]) {
         throw serviceError(`${key} is immutable for submitted operation logs.`, 409);
@@ -173,9 +199,30 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       throw serviceError('Archive metadata cannot be changed through an amendment.', 409);
     }
 
+    const fixedStageNumber = Number(existing.stageNumberAtRecord || existing.stageNumber || activeCycle.cycle.currentStageNumber);
+    const definition = validateOperationForStage({
+      operationDefinitionId: requested.operationDefinitionId || existing.operationDefinitionId,
+      operationName: requested.operationName || existing.operationName,
+      category: requested.category || existing.category
+    }, access.field, fixedStageNumber);
+    let variety = String(existing.variety || '').trim();
+    if (fixedStageNumber === 2) {
+      if (Object.prototype.hasOwnProperty.call(requested, 'variety')) {
+        variety = validatedSugarcaneVariety(requested.variety);
+      }
+    } else if (String(requested.variety || '').trim()) {
+      throw serviceError('Sugarcane variety may be corrected only on Planting-stage operations.');
+    }
+
+    const amendmentId = amendment.amendmentId || `AMD-${Date.now().toString(36).toUpperCase()}`;
     const merged = {
       ...existing,
       ...requested,
+      operationDefinitionId: definition.id,
+      operationName: definition.name,
+      category: definition.category,
+      stageNumber: fixedStageNumber,
+      variety: fixedStageNumber === 2 ? variety : '',
       status: 'ACTIVE',
       fieldId: existing.fieldId,
       cycleId: existing.cycleId,
@@ -192,8 +239,12 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       amendments: [
         ...(existing.amendments || []),
         {
-          amendmentId: amendment.amendmentId || `AMD-${Date.now().toString(36).toUpperCase()}`,
+          amendmentId,
           amendedByUserId: access.actorId,
+          amendedByName: access.actorName,
+          amendedByRole: access.actorRole,
+          authorizationMode: access.authorization.submissionSource,
+          takeoverFieldId: access.authorization.takeover ? access.fieldId : null,
           reason: String(amendment.reason).trim(),
           amendedAt: timestamp,
           changes: amendment.changes || {}
@@ -201,7 +252,21 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       ]
     };
     const payload = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    if (fixedStageNumber === 2 && variety && variety !== String(activeCycle.cycle.variety || '').trim()) {
+      transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
+    }
     transaction.set(ref, payload);
+    const auditEventId = `OP-AMEND-${normalizedLogId}-${amendmentId}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 500);
+    const auditEventRef = database.collection(COLLECTIONS.AUDIT_LOGS).doc(auditEventId);
+    transaction.create(auditEventRef, {
+      eventType: 'OPERATION_LOG_CORRECTION',
+      actorUserId: access.actorId,
+      entityType: 'OPERATION_LOG',
+      entityId: normalizedLogId,
+      details: `Amended operation record ${normalizedLogId}. Reason: ${String(amendment.reason).trim()}`,
+      outcome: 'SUCCESS',
+      createdAt: timestamp
+    });
     return { replayed: false, id: snapshot.id, record: payload };
   });
 }
@@ -231,7 +296,7 @@ async function archiveOperationRecords(database, logIds, user, timestamp = nowIs
         accessByField.set(log.fieldId, access);
       }
       if (access.actorRole === ROLES.MEMBER_FARMER && log.submittedByUserId !== access.actorId) {
-        throw serviceError('Member Farmers may archive only operations they submitted.', 403);
+        throw serviceError('Farm Members may archive only operations they submitted.', 403);
       }
       if (log.status === 'ACTIVE' && !cycleById.has(log.cycleId)) {
         cycleById.set(log.cycleId, await readActiveCurrentCycle(transaction, database, access, log.cycleId));
@@ -383,6 +448,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       farmMemberId: field.memberUserId || null,
       sequenceNumber: nextSequence,
       cropType: requiredString(input.cropType || oldCycle.cropType, 'cropType', { max: 120 }),
+      variety: '',
       cropYear: nextCropYear.cropYear,
       cropYearStart: nextCropYear.cropYearStart,
       cropYearEnd: nextCropYear.cropYearEnd,
@@ -463,6 +529,7 @@ async function createInitialFieldCycle(database, fieldId, input, user, timestamp
       farmMemberId: field.memberUserId || null,
       sequenceNumber,
       cropType: requiredString(input.cropType || 'Plant Cane (New Plant)', 'cropType', { max: 120 }),
+      variety: '',
       cropYear: annual.cropYear,
       cropYearStart: annual.cropYearStart,
       cropYearEnd: annual.cropYearEnd,
@@ -481,6 +548,52 @@ async function createInitialFieldCycle(database, fieldId, input, user, timestamp
     transaction.update(fieldRef, { currentCycleId: cycleId, cropYear: annual.cropYear, updatedAt: timestamp });
     return { cycleId, cycle, field: updatedField };
   });
+}
+
+function customOperationForStage(field, operationDefinitionId, stageNumber) {
+  const id = String(operationDefinitionId || '').trim();
+  if (id.toUpperCase() === 'CUSTOM') return true;
+  const configured = field?.customOperations?.[String(stageNumber)] || [];
+  return configured.some(operation => String(operation.id || '').trim() === id);
+}
+
+function validateOperationForStage(input, field, stageNumber) {
+  const operationDefinitionId = requiredString(input.operationDefinitionId, 'operationDefinitionId', { max: 120 });
+  const canonical = getOperationDefinition(operationDefinitionId);
+  if (canonical && canonical.stageNumber !== stageNumber) {
+    throw serviceError(`${canonical.id} belongs to Stage ${canonical.stageNumber}, not Stage ${stageNumber}.`, 400, {
+      code: 'INVALID_STAGE_OPERATION', operationDefinitionId: canonical.id, stageNumber
+    });
+  }
+  if (!canonical && !customOperationForStage(field, operationDefinitionId, stageNumber)) {
+    throw serviceError('The selected custom operation is not configured for this field and stage.', 400, {
+      code: 'INVALID_STAGE_OPERATION', operationDefinitionId, stageNumber
+    });
+  }
+  return canonical || {
+    id: operationDefinitionId,
+    name: requiredString(input.operationName, 'operationName', { max: 300 }),
+    category: requiredString(input.category || 'General Care', 'category', { max: 80 }),
+    stageNumber
+  };
+}
+
+function plantingVariety(input, stageNumber) {
+  const value = String(input.variety || '').trim();
+  if (stageNumber === 2) return validatedSugarcaneVariety(value);
+  if (value) throw serviceError('Sugarcane variety may be recorded only for Planting-stage operations.');
+  return '';
+}
+
+function validatedSugarcaneVariety(value) {
+  const requiredValue = requiredString(value, 'variety', { max: 120 });
+  const canonicalValue = canonicalSugarcaneVariety(requiredValue);
+  if (!canonicalValue) {
+    throw serviceError('variety must be selected from the authorized sugarcane variety catalogue.', 400, {
+      code: 'INVALID_SUGARCANE_VARIETY'
+    });
+  }
+  return canonicalValue;
 }
 
 async function archiveFieldWithOperations(database, fieldId, user, timestamp = nowIso(), mutationContext = null) {

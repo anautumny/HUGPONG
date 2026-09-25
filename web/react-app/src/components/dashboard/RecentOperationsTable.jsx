@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ClipboardList, ArrowRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { StatusBadge } from '../ui';
+import { operationPresentation } from '../../domain/presentationContract';
 
 export default function RecentOperationsTable({
   operations = [],
@@ -72,6 +73,7 @@ export default function RecentOperationsTable({
             <tbody className="divide-y divide-border/50">
               {operations.slice(0, 5).map((op) => {
                 const isCompleted = (op.status || 'ACTIVE').toUpperCase() === 'ACTIVE' || (op.status || '').toUpperCase() === 'COMPLETED';
+                const presentation = operationPresentation(op);
                 return (
                   <tr
                     key={op.id}
@@ -87,6 +89,11 @@ export default function RecentOperationsTable({
                           Field {op.fieldId}
                         </span>
                       )}
+                      {presentation.badges.filter(badge => !['lifecycle'].includes(badge.dimension)).map(badge => (
+                        <span key={badge.key} className="inline-flex mt-1 mr-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[10px] text-hug-muted">
+                          {badge.label}
+                        </span>
+                      ))}
                     </td>
                     <td className="px-5 py-3.5 whitespace-nowrap">
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-bg dark:bg-[#0C1015] text-hug-text border border-border/70">

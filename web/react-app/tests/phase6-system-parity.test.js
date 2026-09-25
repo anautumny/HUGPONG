@@ -55,7 +55,7 @@ test('server, web, and Android share collection, role, and platform contracts', 
   assert.deepEqual(plain(mobileSchema.COLLECTIONS), publicCollections);
 
   const aliases = [
-    'MEMBER', 'Member Farmer', 'MEMBER_FARMER',
+    'MEMBER', 'Farm Member', 'MEMBER_FARMER',
     'MANAGER', 'Farm Manager', 'FARM_MANAGER',
     'ADMIN', 'SRA Admin', 'SRA_ADMIN',
     'SUPERADMIN', 'Super Admin', 'SUPER_ADMIN'

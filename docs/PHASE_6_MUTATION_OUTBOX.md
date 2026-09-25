@@ -27,12 +27,12 @@ Reconnect and manual sync call only the outbox flusher. The former broad `/api/c
 - After a predecessor succeeds, its authoritative `updatedAt` becomes the dependent mutation's `baseVersion`.
 - Express compares supplied base versions inside the protected field, crop-cycle, operation-log, and audit-certification paths.
 - A stale base version returns HTTP 409 with the current server version/state.
-- Operation creation uses a stable operation ID. Amendments use stable amendment IDs. Crop-cycle rollover and the other create endpoints retain their existing idempotent replay behavior.
+- Operation creation uses a stable operation ID. Amendments use stable amendment IDs. New Field enrollment is deliberately outside the outbox because no canonical Field/Cycle relationship exists until the server responds; existing Field updates and archives continue to use their permanent ID.
 - An `ARCHIVED` operation cannot be amended, recreated as `ACTIVE`, or targeted through a stale archived crop cycle.
 
 ## Outbox mutation types
 
-The mobile outbox dispatches explicit field create/update/archive, crop-stage update, crop-cycle rollover, operation create/amend/archive, price publication, custom stage/operation changes, ticket creation, audit event/report/certification, and user approval commands. Authentication, OTP, session, and telemetry transport are not offline domain mutations and are not persisted in the mutation outbox.
+The mobile outbox dispatches explicit field update/archive, crop-stage update, crop-cycle rollover, operation create/amend/archive, price publication, custom stage/operation changes, ticket creation, audit event/report/certification, and user approval commands. New Field enrollment requires connectivity and directly reconciles the server-issued Field and Cycle IDs. Authentication, OTP, session, and telemetry transport are not offline domain mutations and are not persisted in the mutation outbox.
 
 ## Verification
 

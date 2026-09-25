@@ -14,6 +14,7 @@ const {
   finiteNumber,
   nowIso
 } = require('../schema/firestoreSchema');
+const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -46,8 +47,10 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const developmentSeedId = readDevelopmentSeedId(req);
+    if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'blockFarmId', 'code'], 'Block Farm');
     const name = requiredString(req.body.name, 'name', { max: 200 });
-    const blockFarmId = requiredString(req.body.id, 'id', { max: 80 }).toUpperCase();
+    const blockFarmId = developmentSeedId || createBlockFarmId();
     const managerUserId = nullableId(req.body.managerUserId);
     if (managerUserId) {
       const manager = await db.collection(COLLECTIONS.USERS).doc(managerUserId).get();
@@ -57,7 +60,7 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
     }
     const now = nowIso();
     const payload = {
-      code: requiredString(req.body.code, 'code', { max: 40 }).toUpperCase(),
+      code: blockFarmId,
       name,
       location: requiredString(req.body.location, 'location', { max: 300 }),
       declaredAreaHa: finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 }),
@@ -79,6 +82,7 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const blockFarmId = String(req.params.id || '').trim().toUpperCase();
+    assertNoClientIdentity(req.body, ['id', 'blockFarmId', 'code'], 'Block Farm');
     const ref = db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId);
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Block farm not found.' });
@@ -91,7 +95,7 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
       }
     }
     const payload = {
-      code: req.body.code === undefined ? existing.code : requiredString(req.body.code, 'code', { max: 40 }).toUpperCase(),
+      code: existing.code || blockFarmId,
       name: req.body.name === undefined ? existing.name : requiredString(req.body.name, 'name', { max: 200 }),
       location: req.body.location === undefined ? existing.location : requiredString(req.body.location, 'location', { max: 300 }),
       declaredAreaHa: req.body.declaredAreaHa === undefined ? existing.declaredAreaHa : finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 }),

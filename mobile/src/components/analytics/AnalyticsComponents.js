@@ -409,7 +409,7 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
       <Card style={styles.priceCard}>
         <AnalyticsEmptyState
           title="No official price circular available"
-          subtitle="Prices will appear after an SRA Administrator publishes a complete official circular."
+          subtitle="Prices will appear after an SRA Admin publishes a complete official circular."
         />
         {canPost && (
           <TouchableOpacity style={styles.postPriceBtn} onPress={onPostPricePress} activeOpacity={0.7}>
@@ -445,19 +445,19 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
 
       <View style={styles.priceGrid}>
         <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B)</Text>
+          <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B, â‚±/Lkg)</Text>
           <Text style={styles.priceBoxValue}>₱{sugarPrice.toLocaleString()}</Text>
-          <Text style={styles.priceBoxUnit}>per Lkg (50-kg bag)</Text>
+          <Text style={styles.priceBoxUnit}>â‚±/Lkg</Text>
         </View>
 
         <View style={styles.priceDivider} />
 
         <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>MOLASSES BENCHMARK</Text>
+          <Text style={styles.priceBoxLabel}>MOLASSES BENCHMARK (â‚±/MT)</Text>
           <Text style={[styles.priceBoxValue, { color: COLORS.text }]}>
             ₱{molassesPrice.toLocaleString()}
           </Text>
-          <Text style={styles.priceBoxUnit}>per Metric Ton (MT)</Text>
+          <Text style={styles.priceBoxUnit}>â‚±/MT</Text>
         </View>
       </View>
     </Card>

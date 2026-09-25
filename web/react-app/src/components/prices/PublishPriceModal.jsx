@@ -61,6 +61,7 @@ export default function PublishPriceModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setFormError(null);
     setSuccessMessage(null);
 
@@ -110,9 +111,7 @@ export default function PublishPriceModal({
         if (typeof onPublished === 'function') {
           onPublished(result.data);
         }
-        setTimeout(() => {
-          onClose();
-        }, 800);
+        onClose();
       } else {
         setFormError(result.error || 'Failed to publish SRA price circular.');
       }

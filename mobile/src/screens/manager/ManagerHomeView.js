@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — Farm Manager Home View Component
-// Role: Block Farm Manager
+// Role: Farm Manager
 // ══════════════════════════════════════════════════════════════
 
 import React, { useState } from 'react';
@@ -10,6 +10,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { operationLogs, users } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { sortOperationsNewestFirst } from '../../utils/dataHelpers';
+import { operationPresentation } from '../../domain/presentationContract';
 
 function ManagerHomeView({
   session = {},
@@ -47,7 +48,7 @@ function ManagerHomeView({
 
     const formatted = sorted.map(log => {
       const f = fieldMap[log.fieldId];
-      const memberName = f?.member || (log.loggedBy ? log.loggedBy.replace(/\s*\(.*?\)/, '') : 'Block Member');
+      const memberName = f?.member || (log.loggedBy ? log.loggedBy.replace(/\s*\(.*?\)/, '') : 'Farm Member');
       const opName = log.activity || log.operationName || 'Field Operation';
       const cost = Number(log.totalCost || log.cost || 0);
       const stageName = log.stageName ? log.stageName.split(':')[0].trim() : (f ? f.stage : '');
@@ -58,7 +59,8 @@ function ManagerHomeView({
         opName,
         cost,
         displayDate: log.period || log.date || 'Recent',
-        stageShort: stageName
+        stageShort: stageName,
+        presentation: operationPresentation(log)
       };
     });
 
@@ -84,7 +86,7 @@ function ManagerHomeView({
       if (isCritical || isLagging || offlineCount > 0 || isOffline) {
         list.push({
           id: f.id,
-          name: member?.name || member?.displayName || f.memberName || f.member || 'Block Member',
+          name: member?.name || member?.displayName || f.memberName || f.member || 'Farm Member',
           phone: member?.phone || member?.contact || f.contact || '',
           ha: String(f.ha || f.areaHa || 0),
           stage: f.stage ? f.stage.split(':')[0] : 'In Progress',
@@ -102,7 +104,7 @@ function ManagerHomeView({
   const handleCallMember = (m) => {
     const cleanPhone = (m.phone || '').replace(/[^0-9+]/g, '');
     Alert.alert(
-      `${t('btn_call_member', 'Call Member')}: ${m.name}`,
+      `${t('btn_call_member', 'Call Farm Member')}: ${m.name}`,
       `${t('profile_mobile_contact', 'Mobile')}: ${m.phone || '0917-000-0004'}\n${t('field_plot', 'Plot')}: ${m.id} (${m.ha} Ha)\n${t('status', 'Status')}: ${m.statusLabel}\n\nDirect carrier dialer without SMS charges.`,
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
@@ -202,7 +204,7 @@ function ManagerHomeView({
                 </View>
               </View>
               <Text style={s.sectionSubtitle}>
-                {t('sync_attention_sub', 'Member plots requiring offline sync follow-up')}
+                {t('sync_attention_sub', 'Farm Member fields requiring offline sync follow-up')}
               </Text>
             </View>
             <TouchableOpacity onPress={() => navigation.navigate('SyncMonitor')} activeOpacity={0.7} style={{ minHeight: 36, justifyContent: 'center' }}>
@@ -246,7 +248,7 @@ function ManagerHomeView({
                   activeOpacity={0.7}
                 >
                   <Ionicons name="call-outline" size={15} color={COLORS.text} />
-                  <Text style={s.attentionCallBtnText}>{t('btn_call_member', 'Call Member')}</Text>
+                  <Text style={s.attentionCallBtnText}>{t('btn_call_member', 'Call Farm Member')}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -255,7 +257,7 @@ function ManagerHomeView({
                   activeOpacity={0.7}
                 >
                   <Ionicons name="shield-checkmark-outline" size={15} color={COLORS.primary} />
-                  <Text style={s.attentionTakeoverBtnText}>{t('btn_take_over', 'Take Over Plot')}</Text>
+                  <Text style={s.attentionTakeoverBtnText}>{t('btn_take_over', 'Manager Takeover')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -271,7 +273,7 @@ function ManagerHomeView({
             <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
           </View>
           <View style={{ flex: 1, paddingRight: 8 }}>
-            <Text style={s.allSyncedTitle}>{t('all_members_healthy_title', 'All Member Plots Synced & Healthy')}</Text>
+            <Text style={s.allSyncedTitle}>{t('all_members_healthy_title', 'All Farm Member Fields Synced & Healthy')}</Text>
             <Text style={s.allSyncedSub}>{t('all_members_healthy_sub', 'No member plots require offline sync intervention.')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
@@ -330,6 +332,15 @@ function ManagerHomeView({
             {/* Middle row: Activity / Operation Name */}
             <View style={s.logMidRow}>
               <Text style={s.opNameText} numberOfLines={1}>{item.opName}</Text>
+              {item.presentation?.badges?.filter(badge => badge.dimension !== 'lifecycle').length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                  {item.presentation.badges.filter(badge => badge.dimension !== 'lifecycle').map(badge => (
+                    <View key={badge.key} style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#DDE5D8', backgroundColor: '#F7FAF5' }}>
+                      <Text style={{ fontSize: 9.5, fontWeight: '800', color: COLORS.textSecondary }}>{badge.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             {/* Bottom row: Stage badge + Cost + Arrow */}

@@ -78,7 +78,7 @@ export function PrivacyPolicyView() {
         <p>We process only information strictly necessary for sugar block farm governance and milling allocation:</p>
         <ul className="list-disc list-inside space-y-1 pl-2">
           <li><strong>Identity & Credentials:</strong> Official display name, mobile telephone number, authorized employee ID, and salted cryptographic password hashes.</li>
-          <li><strong>Agronomic Records:</strong> Field plot coordinates, hectare measurements, cane variety (e.g. VMC 84-524), crop year, planting cycle, and fertilizer logs.</li>
+          <li><strong>Agronomic Records:</strong> Field plot coordinates, hectare measurements, cane variety (e.g. PHIL 2006-2289), crop year, planting cycle, and fertilizer logs.</li>
           <li><strong>Audit Trail:</strong> Cryptographic operation records, digital timestamps, and verification identifiers.</li>
         </ul>
       </section>
@@ -100,7 +100,7 @@ export function PrivacyPolicyView() {
       <section className="space-y-2">
         <h2 className="text-base font-bold text-hug-text">5. Rights of the Data Subject</h2>
         <p>
-          Under RA 10173, registered farmers and administrators possess the right to be informed, to access, to dispute inaccuracies, and to lodge inquiries with the SRA District Data Protection Officer.
+          Under RA 10173, registered Farm Members and authorized admins possess the right to be informed, to access, to dispute inaccuracies, and to lodge inquiries with the SRA District Data Protection Officer.
         </p>
       </section>
     </LegalLayout>
@@ -118,7 +118,7 @@ export function TermsView() {
       <section className="space-y-2">
         <h2 className="text-base font-bold text-hug-text">1. Scope of Authorization</h2>
         <p>
-          HUGPONG is an official digital governance and agricultural management system for Silay sugarcane block farms. Access is restricted to registered Member Farmers, certified Farm Managers, SRA District Administrators, and Platform Governance personnel.
+          HUGPONG is an official digital governance and agricultural management system for Silay sugarcane block farms. Access is restricted to registered Farm Members, certified Farm Managers, SRA Admins, and Platform Governance personnel.
         </p>
       </section>
 

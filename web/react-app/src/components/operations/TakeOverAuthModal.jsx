@@ -19,7 +19,7 @@ export default function TakeOverAuthModal({
   const handleVerify = async (e) => {
     e.preventDefault();
     if (!password.trim()) {
-      setError('Account password is required to authorize take over.');
+      setError('Account password is required to authorize Manager Takeover.');
       return;
     }
 
@@ -49,7 +49,7 @@ export default function TakeOverAuthModal({
       isOpen={isOpen}
       onClose={onClose}
       size="sm"
-      title="Authorize Field Take Over"
+      title="Authorize Manager Takeover"
       subtitle="Enter manager password to supervise this field"
       badge="Supervisor Override"
       icon={Lock}
@@ -66,7 +66,7 @@ export default function TakeOverAuthModal({
             isLoading={isVerifying}
             loadingText="Verifying password..."
           >
-            Authorize Take Over
+            Authorize Manager Takeover
           </Button>
         </>
       }
@@ -82,7 +82,7 @@ export default function TakeOverAuthModal({
               {field.id}
             </span>
             <p className="text-xs text-hug-muted mt-0.5">
-              Assigned to: <strong>{field.memberName || 'Member'}</strong>
+              Assigned to: <strong>{field.memberName || 'Farm Member'}</strong>
             </p>
           </div>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">

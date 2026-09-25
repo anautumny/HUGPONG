@@ -173,9 +173,14 @@ export function StatusBadge({
   label,
   style
 }) {
-  const isSuccess = status === 'success' || status === 'active' || status === 'completed' || status === 'recorded';
-  const isPending = status === 'pending' || status === 'offline';
-  const isWarning = status === 'warning' || status === 'amended';
+  const normalized = String(status || '').trim().toLowerCase();
+  const isSuccess = ['success', 'active', 'completed', 'recorded', 'synced'].includes(normalized);
+  const isPending = ['pending', 'offline', 'unsynced', 'retrying'].includes(normalized);
+  const isWarning = normalized === 'warning' || normalized === 'amended';
+  const labels = {
+    active: 'Active', archived: 'Archived', synced: 'Synced', unsynced: 'Unsynced',
+    pending: 'Pending', retrying: 'Retrying', failed: 'Failed', conflict: 'Conflict', amended: 'Amended'
+  };
 
   const badgeBg = isSuccess ? '#F2FBF2' : isPending ? '#FFFBF0' : isWarning ? '#EBF3FB' : '#F3F4F6';
   const badgeBorder = isSuccess ? '#D5ECD5' : isPending ? '#FEF0D0' : isWarning ? '#CCE0F5' : '#E5E7EB';
@@ -184,7 +189,7 @@ export function StatusBadge({
   return (
     <View style={[styles.badgeBase, { backgroundColor: badgeBg, borderColor: badgeBorder }, style]}>
       <Text style={[styles.badgeText, { color: badgeColor }]}>
-        {label || status.toUpperCase()}
+        {label || labels[normalized] || String(status)}
       </Text>
     </View>
   );

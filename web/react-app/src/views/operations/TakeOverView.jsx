@@ -6,7 +6,8 @@ import {
   createOperation
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
-import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
+import { SRA_OPERATIONS_CATALOGUE, getOperationsForStage } from '../../domain/operationCatalogue';
+import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import {
@@ -55,15 +56,16 @@ export default function TakeOverView() {
   const [takeoverGrant, setTakeoverGrant] = useState(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  // Take Over Form State
-  const [selectedStageNumber, setSelectedStageNumber] = useState(1);
-  const [selectedOpId, setSelectedOpId] = useState('SRA-02');
+  // Manager Takeover form state
+  const [selectedStageNumber, setSelectedStageNumber] = useState(null);
+  const [selectedOpId, setSelectedOpId] = useState('');
   const [inputMode, setInputMode] = useState('group'); // 'group' or 'direct'
   const [performedOn, setPerformedOn] = useState(new Date().toISOString().slice(0, 10));
-  const [activityName, setActivityName] = useState('Land Preparation (Disc Plowing & Furrowing)');
+  const [activityName, setActivityName] = useState('');
   const [areaHa, setAreaHa] = useState('');
   const [workersCount, setWorkersCount] = useState('');
-  const [advanceStage, setAdvanceStage] = useState(true);
+  const [advanceStage] = useState(false);
+  const [variety, setVariety] = useState('');
 
   // Group Mode sub-items
   const [subItems, setSubItems] = useState([]);
@@ -116,26 +118,20 @@ export default function TakeOverView() {
   // Synchronize stage and area from currentField when field changes
   useEffect(() => {
     if (currentField) {
-      const stage = Number(currentField.stageNumber || 1);
-      setSelectedStageNumber(stage);
+      setSelectedStageNumber(null);
+      setSelectedOpId('');
+      setActivityName('');
+      setVariety(String(currentField.cropCycle?.variety || ''));
       setAreaHa(currentField.areaHa ? String(currentField.areaHa) : (currentField.ha ? String(currentField.ha) : ''));
     }
   }, [currentField?.id]);
 
-  // Initialize with standard template on mount
-  useEffect(() => {
-    if (selectedOpId) {
-      handleTemplateSelect(selectedOpId);
-    }
-  }, []);
-
   // Handle stage change
   const handleStageSelect = (stageNum) => {
     setSelectedStageNumber(stageNum);
-    const tmpl = SRA_OPERATIONS_CATALOGUE.find(o => o.stageNumber === stageNum);
-    if (tmpl) {
-      handleTemplateSelect(tmpl.id);
-    }
+    setSelectedOpId('');
+    setActivityName('');
+    setSubItems([]);
   };
 
   // Handle template selection
@@ -222,9 +218,10 @@ export default function TakeOverView() {
     return ha > 0 ? totalCost / ha : 0;
   }, [totalCost, areaHa]);
 
-  // Submit Take Over Log
+  // Submit Manager Takeover log
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setServerError(null);
 
     // If supervisor is not authorized yet, prompt auth modal first!
@@ -233,8 +230,12 @@ export default function TakeOverView() {
       return;
     }
 
-    if (!selectedFieldId || !activityName.trim()) {
-      setServerError('Please provide an activity title and ensure a field is selected.');
+    if (!selectedFieldId || !selectedStageNumber || !selectedOpId || !activityName.trim()) {
+      setServerError('Select a stage and its operation, then provide an activity title.');
+      return;
+    }
+    if (selectedStageNumber === 2 && !variety.trim()) {
+      setServerError('Sugarcane variety is required for a Planting-stage operation.');
       return;
     }
 
@@ -261,6 +262,7 @@ export default function TakeOverView() {
         operationName: activityName.trim(),
         category: SRA_OPERATIONS_CATALOGUE.find(o => o.id === selectedOpId)?.category || 'General Care',
         stageNumber: Number(selectedStageNumber) || 1,
+        variety: selectedStageNumber === 2 ? variety.trim() : '',
         performedOn,
         areaHa: numArea,
         peopleCount: Number(workersCount) || 0,
@@ -300,13 +302,10 @@ export default function TakeOverView() {
 
       setIsSubmitting(false);
       setSubmitSuccess(true);
-      setTimeout(() => {
-        setSubmitSuccess(false);
-        navigate('/operations');
-      }, 2000);
+      navigate('/operations');
     } catch (err) {
       console.error('[TakeOver] Submit error:', err);
-      setServerError(err.message || 'Unable to record take over operation.');
+      setServerError(err.message || 'Unable to record Manager Takeover operation.');
       setIsSubmitting(false);
     }
   };
@@ -332,7 +331,7 @@ export default function TakeOverView() {
           Access Restricted
         </h2>
         <p className="text-xs text-hug-muted">
-          Take Over Mode is authorized exclusively for Farm Managers managing an assigned Block Farm.
+          Manager Takeover is authorized exclusively for Farm Managers managing an assigned Block Farm.
         </p>
         <Button variant="secondary" onClick={() => navigate('/dashboard')}>
           Return to Dashboard
@@ -341,7 +340,7 @@ export default function TakeOverView() {
     );
   }
 
-  const currentStageObj = SUGARCANE_STAGES.find(s => s.stageNumber === selectedStageNumber) || SUGARCANE_STAGES[0];
+  const currentStageObj = SUGARCANE_STAGES.find(s => s.stageNumber === selectedStageNumber) || null;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -349,11 +348,11 @@ export default function TakeOverView() {
       <CompactDashboardHeader
         category="Supervisory Intervention"
         badge="Manager Override"
-        title="Farm Manager Take Over Mode"
+        title="Manager Takeover Mode"
         subtitle="Record supervisory operations and stage completions for member parcels in the authoritative SRA audit ledger."
         actions={[
           {
-            label: 'Exit Take Over',
+            label: 'Exit Manager Takeover',
             icon: ArrowLeft,
             onClick: handleExit
           }
@@ -369,14 +368,14 @@ export default function TakeOverView() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs sm:text-sm font-black text-amber-950 dark:text-amber-200">
-                Take Over Mode Active
+                Manager Takeover Active
               </span>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white dark:bg-surface border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300">
                 {currentField?.id || 'No Parcel Selected'}
               </span>
             </div>
             <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5 font-medium">
-              Recording for: <strong>{currentField?.memberName || 'Member Farmer'}</strong> · {currentField?.blockFarmName || 'Managed Block Farm'} ({formatHectares(currentField?.areaHa || currentField?.ha)})
+              Recording for: <strong>{currentField?.memberName || 'Farm Member'}</strong> · {currentField?.blockFarmName || 'Managed Block Farm'} ({formatHectares(currentField?.areaHa || currentField?.ha)})
             </p>
           </div>
         </div>
@@ -401,7 +400,7 @@ export default function TakeOverView() {
         </div>
       </div>
 
-      {/* Field Plot Selector for Take Over */}
+      {/* Field selector for Manager Takeover */}
       <div className="bg-white dark:bg-surface p-4 rounded-2xl border border-border shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex-1 max-w-lg">
           <label htmlFor="takeover-field-selector" className="text-xs font-bold text-hug-text mb-1.5 block">
@@ -437,7 +436,7 @@ export default function TakeOverView() {
       {submitSuccess && (
         <div className="p-4 rounded-xl bg-success-bg dark:bg-success/20 border border-success/30 flex items-center gap-2.5 text-xs font-bold text-success animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 shrink-0" />
-          <span>Takeover operation recorded successfully and stamped with your supervisor signature. Redirecting to ledger...</span>
+          <span>Manager Takeover operation recorded successfully and stamped with your manager signature. Redirecting to ledger...</span>
         </div>
       )}
 
@@ -448,7 +447,7 @@ export default function TakeOverView() {
         </div>
       )}
 
-      {/* 3. Main 2-Column Take Over Layout */}
+      {/* Main Manager Takeover layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Crop Cycle Stages (5 cols) */}
         <div className="lg:col-span-5 space-y-3">
@@ -508,14 +507,14 @@ export default function TakeOverView() {
                 Target Operation Template
               </span>
               <h4 className="text-sm font-black text-hug-text mt-0.5">
-                {currentStageObj.name}
+                {currentStageObj?.name || 'Select a crop stage'}
               </h4>
               <p className="text-xs text-hug-muted mt-0.5">
-                {currentStageObj.description}
+                {currentStageObj?.description || 'The operation list will be filtered to the chosen stage.'}
               </p>
             </div>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary text-white">
-              Stage {selectedStageNumber}
+              {selectedStageNumber ? `Stage ${selectedStageNumber}` : 'No stage'}
             </span>
           </div>
 
@@ -523,21 +522,49 @@ export default function TakeOverView() {
           <FormField
             id="takeover-op-select"
             label="Operation"
-            badge="14 SRA templates + custom"
+            badge="Stage-matched templates + custom"
           >
             <Select
               id="takeover-op-select"
               value={selectedOpId}
               onChange={(e) => handleTemplateSelect(e.target.value)}
+              disabled={!selectedStageNumber}
+              placeholder="Select an operation..."
               options={[
                 { value: 'CUSTOM', label: 'CUSTOM: Enter a Custom Operation' },
-                ...SRA_OPERATIONS_CATALOGUE.map(o => ({
+                ...getOperationsForStage(selectedStageNumber).map(o => ({
                   value: o.id,
-                  label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
+                  label: `${o.id}: ${o.name}`
                 }))
               ]}
             />
           </FormField>
+
+          {selectedStageNumber === 2 && (
+            <FormField
+              id="takeover-variety"
+              label="Sugarcane Variety"
+              required
+              helperText={currentField?.cropCycle?.variety ? 'Stored on this Crop Year Cycle. Correct it through an amendment.' : 'Captured with the Planting operation.'}
+            >
+              <Select
+                id="takeover-variety"
+                value={variety}
+                onChange={(event) => setVariety(event.target.value)}
+                disabled={Boolean(currentField?.cropCycle?.variety)}
+                placeholder="Select sugarcane variety..."
+                options={SUGARCANE_VARIETIES.map(value => ({ value, label: value }))}
+              />
+            </FormField>
+          )}
+
+          {!selectedOpId && (
+            <p className="text-xs text-hug-muted rounded-xl border border-dashed border-border p-4 text-center">
+              Select an operation to continue with details, costs, and submission.
+            </p>
+          )}
+
+          <fieldset disabled={!selectedOpId} className={!selectedOpId ? 'hidden' : 'contents'}>
 
           {/* Input Mode Selector */}
           <div className="p-3 bg-bg dark:bg-[#0C1015] rounded-xl border border-border flex items-center justify-between">
@@ -771,6 +798,7 @@ export default function TakeOverView() {
               Record Supervisory Operation &amp; Save Progress
             </Button>
           </div>
+          </fieldset>
         </div>
       </div>
 
@@ -792,9 +820,9 @@ export default function TakeOverView() {
         isOpen={exitConfirmOpen}
         onCancel={() => setExitConfirmOpen(false)}
         onConfirm={confirmExit}
-        title="Exit Take Over Mode?"
+        title="Exit Manager Takeover Mode?"
         message="Any unsaved operation inputs will be discarded. The member field will be unselected."
-        confirmText="Exit Take Over"
+        confirmText="Exit Manager Takeover"
         cancelText="Stay Here"
         type="warning"
       />

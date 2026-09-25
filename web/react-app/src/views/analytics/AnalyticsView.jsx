@@ -24,7 +24,7 @@ import { canonicalStoredCropYear, uniqueCropYears } from '../../utils/formatters
 
 export default function AnalyticsView() {
   const { user } = useAuth();
-  const isFarmManager = user?.role === 'FARM_MANAGER';
+  const isFarmManager = user?.canonicalRole === 'FARM_MANAGER' || user?.role === 'FARM_MANAGER' || user?.role === 'Farm Manager';
 
   // Data states
   const [fields, setFields] = useState([]);
@@ -37,12 +37,14 @@ export default function AnalyticsView() {
   const [isFieldsLoading, setIsFieldsLoading] = useState(true);
   const [isOpsLoading, setIsOpsLoading] = useState(true);
   const [isPricesLoading, setIsPricesLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [errors, setErrors] = useState({ fields: null, operations: null, prices: null });
+  const error = errors.fields || errors.operations || errors.prices;
 
   // Filter states
   const [selectedSeason, setSelectedSeason] = useState('ALL');
   const [cycleFilterInitialized, setCycleFilterInitialized] = useState(false);
   const [selectedFarmId, setSelectedFarmId] = useState('ALL');
+  const [selectedFieldId, setSelectedFieldId] = useState('ALL');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
   const [priceTimeframe, setPriceTimeframe] = useState('weekly');
 
@@ -56,10 +58,12 @@ export default function AnalyticsView() {
         setCropCycles(data.cropCycles || []);
         setBlockFarms(data.blockFarms || []);
         setIsFieldsLoading(false);
+        setErrors(current => ({ ...current, fields: null }));
       },
       onError: (err) => {
         console.warn('[AnalyticsView] Fields err:', err.message);
         setIsFieldsLoading(false);
+        setErrors(current => ({ ...current, fields: err.message || 'Field analytics are temporarily unavailable.' }));
       }
     });
 
@@ -69,10 +73,12 @@ export default function AnalyticsView() {
       onUpdate: (data) => {
         setOperations(data.operations || []);
         setIsOpsLoading(false);
+        setErrors(current => ({ ...current, operations: null }));
       },
       onError: (err) => {
         console.warn('[AnalyticsView] Ops err:', err.message);
         setIsOpsLoading(false);
+        setErrors(current => ({ ...current, operations: err.message || 'Operation analytics are temporarily unavailable.' }));
       }
     });
 
@@ -81,10 +87,12 @@ export default function AnalyticsView() {
       onUpdate: (data) => {
         setPrices(data.prices || []);
         setIsPricesLoading(false);
+        setErrors(current => ({ ...current, prices: null }));
       },
       onError: (err) => {
         console.warn('[AnalyticsView] Prices err:', err.message);
         setIsPricesLoading(false);
+        setErrors(current => ({ ...current, prices: err.message || 'Price analytics are temporarily unavailable.' }));
       }
     });
 
@@ -134,10 +142,21 @@ export default function AnalyticsView() {
     return Array.from(periods).sort().reverse();
   }, [cycleScopedOperations]);
 
+  const availableFields = useMemo(() => fields.filter(field =>
+    selectedFarmId === 'ALL' || field.blockFarmId === selectedFarmId
+  ), [fields, selectedFarmId]);
+
+  useEffect(() => {
+    if (selectedFieldId !== 'ALL' && !availableFields.some(field => field.id === selectedFieldId)) {
+      setSelectedFieldId('ALL');
+    }
+  }, [availableFields, selectedFieldId]);
+
   // Reset Filters handler
   const handleResetFilters = () => {
     setSelectedSeason(currentSeason || 'ALL');
     setSelectedFarmId('ALL');
+    setSelectedFieldId('ALL');
     setSelectedPeriod('ALL');
   };
 
@@ -147,9 +166,10 @@ export default function AnalyticsView() {
       fields,
       cropCycles,
       selectedFarmId,
+      selectedParcelId: selectedFieldId,
       selectedSeason
     });
-  }, [fields, cropCycles, selectedFarmId, selectedSeason]);
+  }, [fields, cropCycles, selectedFarmId, selectedFieldId, selectedSeason]);
 
   const productionCostData = useMemo(() => {
     return selectProductionCost({
@@ -157,28 +177,31 @@ export default function AnalyticsView() {
       fields,
       blockFarms,
       selectedFarmId,
+      selectedParcelId: selectedFieldId,
       selectedPeriod,
       isFarmManager
     });
-  }, [cycleScopedOperations, fields, blockFarms, selectedFarmId, selectedPeriod, isFarmManager]);
+  }, [cycleScopedOperations, fields, blockFarms, selectedFarmId, selectedFieldId, selectedPeriod, isFarmManager]);
 
   const costBreakdownData = useMemo(() => {
     return selectOperationalCostBreakdown({
       operations: cycleScopedOperations,
       fields,
       selectedFarmId,
+      selectedParcelId: selectedFieldId,
       selectedPeriod
     });
-  }, [cycleScopedOperations, fields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOperations, fields, selectedFarmId, selectedFieldId, selectedPeriod]);
 
   const operationsAnalyticsData = useMemo(() => {
     return selectFarmOperationsAnalytics({
       operations: cycleScopedOperations,
       fields,
       selectedFarmId,
+      selectedParcelId: selectedFieldId,
       selectedPeriod
     });
-  }, [cycleScopedOperations, fields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOperations, fields, selectedFarmId, selectedFieldId, selectedPeriod]);
 
   const priceTrendsData = useMemo(() => {
     return selectPriceTrends({
@@ -284,6 +307,9 @@ export default function AnalyticsView() {
         blockFarms={blockFarms}
         selectedFarmId={selectedFarmId}
         onFarmChange={setSelectedFarmId}
+        fields={availableFields}
+        selectedFieldId={selectedFieldId}
+        onFieldChange={setSelectedFieldId}
         periods={availablePeriods}
         selectedPeriod={selectedPeriod}
         onPeriodChange={setSelectedPeriod}

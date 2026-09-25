@@ -6,9 +6,10 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { fromReport } from './firestoreSchema';
+import { fromReport, reportPeriod } from './firestoreSchema';
 import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 import { sortNewestFirst } from '../utils/recordOrdering';
+import { createAuditQrPayload, decodeAuditQrPayload } from '../domain/auditWorkflow';
 
 /**
  * Real-time subscription to audit reports collection
@@ -17,8 +18,12 @@ import { sortNewestFirst } from '../utils/recordOrdering';
  * @param {Function} [options.onError]
  * @param {string} [options.blockFarmId] - Optional client filter for Farm Manager scope
  */
-export function subscribeToAuditReports({ onUpdate, onError, blockFarmId = null }) {
-  return subscribeToAuthenticatedResource('/api/audit-reports', {
+export function subscribeToAuditReports({ onUpdate, onError, blockFarmId = null, view = null, limit = 20 }) {
+  const params = new URLSearchParams();
+  if (view) params.set('view', view);
+  if (limit) params.set('limit', String(limit));
+  const path = `/api/audit-reports${params.toString() ? `?${params}` : ''}`;
+  return subscribeToAuthenticatedResource(path, {
     onData: response => {
       let reports = (response.data || []).map(item => fromReport(item.id, item));
       if (blockFarmId) reports = reports.filter(report => report.blockFarmId === blockFarmId);
@@ -41,13 +46,26 @@ export async function fetchAuditReports() {
   return authenticatedRequest('/api/audit-reports');
 }
 
+export async function fetchAuditPage({ view = 'inbox', limit = 20, cursor = null } = {}) {
+  const params = new URLSearchParams({ view, limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return authenticatedRequest(`/api/audit-reports?${params}`);
+}
+
+export async function fetchNextAuditPeriod(blockFarmId = null) {
+  const suffix = blockFarmId ? `?blockFarmId=${encodeURIComponent(blockFarmId)}` : '';
+  return authenticatedRequest(`/api/audit-reports/next-period${suffix}`);
+}
+
 /**
  * Farm Manager: Compile active operations for a block farm and period into an audit report
  */
-export async function compileAuditReport({ blockFarmId, period, operationLogIds, id = null }) {
+export async function compileAuditReport({ blockFarmId, periodKey, operationLogIds = [], id = null }) {
+  const canonicalPeriodKey = reportPeriod(periodKey);
+  if (!canonicalPeriodKey) throw new Error('Select a valid audit month and year before compiling.');
   const payload = {
     blockFarmId: String(blockFarmId || '').trim().toUpperCase(),
-    period: String(period || '').trim(),
+    periodKey: canonicalPeriodKey,
     operationLogIds: Array.isArray(operationLogIds) ? operationLogIds : []
   };
   if (id) payload.id = id;
@@ -69,12 +87,43 @@ export async function certifyAuditReport(reportId, { certificationNotes = '' } =
   });
 }
 
+export async function submitAuditReport(reportId) {
+  return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(reportId)}/submit`, {
+    method: 'POST', body: { submissionMethod: 'CLOUD' }
+  });
+}
+
+export async function returnAuditReport(reportId, returnReason, baseVersion = null) {
+  return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(reportId)}/return`, {
+    method: 'POST', body: { returnReason }, baseVersion
+  });
+}
+
+export async function verifyAuditQr(payload) {
+  return authenticatedRequest('/api/audit-reports/qr/verify', { method: 'POST', body: { payload } });
+}
+
+export async function importAuditQr(payload) {
+  return authenticatedRequest('/api/audit-reports/qr/import', { method: 'POST', body: { payload } });
+}
+
+export { createAuditQrPayload, decodeAuditQrPayload };
+
 /**
  * Extract canonical HUGPONG audit hash or report ID from raw QR text or URL
  */
 export function extractAuditHash(rawText) {
   if (!rawText) return null;
   const str = String(rawText).trim();
+
+  if (str.startsWith('{')) {
+    try {
+      const payload = decodeAuditQrPayload(str);
+      return payload.reportId;
+    } catch {
+      return null;
+    }
+  }
 
   // Match HUG-... hash (e.g. HUG-202609-XXXX or HUG-XXXX)
   const hugMatch = str.match(/(HUG-[A-Z0-9-]+)/i);

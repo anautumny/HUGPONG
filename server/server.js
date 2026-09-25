@@ -8,14 +8,14 @@ const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { sessionSecret, corsOrigins, isProduction } = require('./config');
+const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
 const {
   LEGACY_ROLE_DASHBOARD_REDIRECTS,
   LEGACY_LEGAL_PAGE_REDIRECTS
 } = require('./domain/legacyWebRoutes');
 
 // Initialize Firebase Admin SDK
-const { isInitialized } = require('./firebase-admin');
+require('./firebase-admin');
 
 // Import Route Handlers
 const authRoutes = require('./routes/auth');
@@ -33,9 +33,8 @@ const telemetryRoutes = require('./routes/telemetry');
 const systemDiagnosticsRoutes = require('./routes/systemDiagnostics');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// CORS configuration (enables credentials for session cookies across localhost ports)
+// Credentialed browser requests are restricted to explicitly configured origins.
 app.use(cors({
   origin: (origin, callback) => {
     // Native mobile requests have no browser Origin header.
@@ -117,13 +116,10 @@ if (fs.existsSync(reactDistPath)) {
 
 // ── Health Check & System Status ────────────────────────────
 app.get('/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({
-    status: 'healthy',
-    platform: 'HUGPONG Security Gateway',
-    firebaseAdmin: isInitialized ? 'connected' : 'unavailable',
-    authenticated: !!(req.session && req.session.user),
-    user: req.session ? req.session.user : null,
-    uptime: process.uptime()
+    success: true,
+    status: 'healthy'
   });
 });
 
@@ -150,7 +146,7 @@ if (fs.existsSync(reactDistPath)) {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: `Endpoint not found: ${req.method} ${req.originalUrl}`
+    error: isProduction ? 'Endpoint not found.' : `Endpoint not found: ${req.method} ${req.originalUrl}`
   });
 });
 
@@ -159,15 +155,15 @@ app.use((err, req, res, next) => {
   console.error('[HUGPONG Server Error]', err);
   res.status(500).json({
     success: false,
-    error: err.message || 'Internal Server Error'
+    error: isProduction ? 'Internal Server Error' : (err.message || 'Internal Server Error')
   });
 });
 
 // Start Server
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(port, host, () => {
   console.log('══════════════════════════════════════════════════════════');
   console.log(`  🌾 HUGPONG Security Gateway & Express Backend`);
-  console.log(`  🚀 Server running on: http://localhost:${PORT}`);
+  console.log(`  🚀 Server listening on ${host}:${port}`);
   console.log(`  🔒 Authentication & Role Protection: ACTIVE`);
   console.log(`  📦 Project: hugpong-ff`);
   console.log('══════════════════════════════════════════════════════════');
@@ -175,8 +171,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n[HUGPONG Server Error] Port ${PORT} is already in use by another process.`);
-    console.error(`To free port ${PORT}, close the conflicting process or run run-web.bat.\n`);
+    console.error(`\n[HUGPONG Server Error] Port ${port} is already in use by another process.`);
+    console.error(`To free port ${port}, close the conflicting process or run run-web.bat.\n`);
     process.exit(1);
   } else {
     console.error('[HUGPONG Server Error]', err);

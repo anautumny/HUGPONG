@@ -85,7 +85,7 @@ export default function PendingApprovalsQueue({
                     {p.id}
                   </span>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-bg dark:bg-gray-800 text-hug-text border border-border">
-                    {p.role || p.canonicalRole || 'Member Farmer'}
+                    {p.role || p.canonicalRole || 'Farm Member'}
                   </span>
                 </div>
 

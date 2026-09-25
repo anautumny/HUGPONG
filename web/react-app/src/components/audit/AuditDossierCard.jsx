@@ -14,21 +14,28 @@ import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import QRCodeView from './QRCodeView';
+import Textarea from '../ui/Textarea';
+import { AUDIT_STATUS, auditStatusLabel, canonicalAuditStatus, createAuditQrPayload } from '../../domain/auditWorkflow';
 
 export default function AuditDossierCard({
   report = null,
   blockFarms = [],
   currentUser = null,
   onCertify,
+  onReturn,
+  onSubmit,
   onPrint,
   isCertifying = false,
+  isReturning = false,
+  isSubmitting = false,
   className = ''
 }) {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [certificationNotes, setCertificationNotes] = useState('');
+  const [returnReason, setReturnReason] = useState('');
 
   // Check role authorization: ONLY SRA_ADMIN has certification authority
-  const userRole = (currentUser?.canonicalRole || currentUser?.role || '').toUpperCase();
+  const userRole = (currentUser?.canonicalRole || currentUser?.role || '').toUpperCase().replace(/[\s-]+/g, '_');
   const isSraAdmin = userRole === 'SRA_ADMIN';
 
   if (!report) {
@@ -43,13 +50,16 @@ export default function AuditDossierCard({
           Awaiting Audit Validation
         </h4>
         <p className="text-xs sm:text-sm text-hug-muted max-w-sm leading-relaxed">
-          Select a verification code from the Cloud Audit Queue or enter an encrypted hash in the verifier to inspect the certified audit report.
+          Select an Audit Inbox item, a compiled report, or a certified History item to review its immutable snapshot.
         </p>
       </div>
     );
   }
 
-  const isCertified = report.status === 'CERTIFIED';
+  const status = canonicalAuditStatus(report.status);
+  const isCertified = status === AUDIT_STATUS.CERTIFIED;
+  const isPendingReview = status === AUDIT_STATUS.PENDING_REVIEW;
+  const isCompiled = status === AUDIT_STATUS.COMPILED || status === AUDIT_STATUS.PENDING_SUBMISSION;
   const farm = blockFarms.find(f => f.id === report.blockFarmId);
   const farmName = farm?.name || report.blockFarmName || report.blockFarmId || 'District Block Farm';
 
@@ -107,14 +117,14 @@ export default function AuditDossierCard({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-primary pb-5">
         <div className="flex items-start gap-3.5">
           <QRCodeView
-            value={report.qrHash || report.id}
+            value={createAuditQrPayload(report)}
             size={72}
             className="shrink-0 hidden sm:inline-flex"
           />
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg sm:text-xl font-black text-primary dark:text-primary-light uppercase tracking-wide">
-                SRA Audit Certificate
+                {isCertified ? 'SRA Audit Certificate' : isPendingReview ? 'Audit Review' : 'Monthly Regulatory Audit'}
               </h3>
             </div>
             <p className="text-xs font-semibold text-hug-muted uppercase tracking-wider mt-0.5">
@@ -140,7 +150,7 @@ export default function AuditDossierCard({
             ) : (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                Pending SRA Certification
+                {auditStatusLabel(status)}
               </span>
             )}
           </Badge>
@@ -172,7 +182,7 @@ export default function AuditDossierCard({
             <User className="w-3 h-3" /> Compiled By
           </span>
           <p className="text-xs sm:text-sm font-bold text-hug-text truncate" title={report.compiledByUserId}>
-            {report.compiledByUserId || 'Farm Manager'}
+            {report.compiledByName || report.compiledByUserId || 'Farm Manager'}
           </p>
         </div>
 
@@ -199,10 +209,10 @@ export default function AuditDossierCard({
 
         <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs">
           <span className="text-[10px] text-hug-muted uppercase font-semibold block mb-1">
-            Certification State
+            Certification
           </span>
           <strong className={`text-lg sm:text-xl font-black ${isCertified ? 'text-primary dark:text-primary-light' : 'text-amber-600 dark:text-amber-400'}`}>
-            {isCertified ? `${totalLogs} / ${totalLogs}` : `0 / ${totalLogs}`}
+            {isCertified ? 'Certified' : isPendingReview ? 'Awaiting Review' : auditStatusLabel(status)}
           </strong>
         </div>
 
@@ -356,8 +366,8 @@ export default function AuditDossierCard({
           <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
           <span>
             {isCertified
-              ? `Officially certified by SRA Officer on ${formatDate(report.certifiedAt)}.`
-              : 'Official agronomic compliance record awaiting authorized SRA review.'}
+              ? `Officially certified by SRA Admin on ${formatDate(report.certifiedAt)}.`
+              : isPendingReview ? 'Integrity-protected snapshot awaiting authorized SRA review.' : 'Compiled snapshot saved and ready for Farm Manager submission.'}
           </span>
         </div>
 
@@ -369,7 +379,7 @@ export default function AuditDossierCard({
                 <CheckCircle2 className="w-4 h-4 text-primary dark:text-primary-light" />
                 <span>✓ SRA Digital Seal Applied</span>
               </div>
-            ) : (
+            ) : isPendingReview ? (
               <Button
                 variant="primary"
                 size="md"
@@ -380,20 +390,43 @@ export default function AuditDossierCard({
               >
                 Issue SRA Digital Seal
               </Button>
-            )
+            ) : null
+          )}
+
+          {!isSraAdmin && isCompiled && (
+            <Button variant="primary" size="md" onClick={() => onSubmit?.(report.id || report.reportId)} isLoading={isSubmitting} loadingText="Submitting..." icon={ShieldCheck}>
+              Submit to SRA
+            </Button>
           )}
 
           {/* Printable Report View Button */}
-          <Button
+          {isCertified && <Button
             variant="secondary"
             size="md"
             onClick={() => onPrint && onPrint(report)}
             icon={Printer}
           >
             Print Audit Document
-          </Button>
+          </Button>}
         </div>
       </div>
+
+      {status === AUDIT_STATUS.RETURNED && report.returnReason && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <strong className="block mb-1">Returned for Correction</strong>
+          {report.returnReason}
+        </div>
+      )}
+
+      {isSraAdmin && isPendingReview && (
+        <div className="rounded-xl border border-border bg-bg p-4 flex flex-col gap-2">
+          <label className="text-xs font-bold text-hug-text" htmlFor="audit-return-reason">Return for correction</label>
+          <Textarea id="audit-return-reason" value={returnReason} onChange={event => setReturnReason(event.target.value)} placeholder="Explain what the Farm Manager must correct." rows={3} />
+          <Button variant="secondary" size="md" disabled={!returnReason.trim() || isReturning} isLoading={isReturning} loadingText="Returning..." onClick={() => onReturn?.(report.id || report.reportId, returnReason.trim(), report.updatedAt)}>
+            Return Audit
+          </Button>
+        </div>
+      )}
 
       {/* Standardized Batch 5 Certification ConfirmDialog */}
       <ConfirmDialog

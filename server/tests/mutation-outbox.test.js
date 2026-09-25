@@ -66,6 +66,42 @@ test('duplicate retry with the same key does not append a second mutation', () =
   assert.equal(retried.queue.length, 1);
 });
 
+test('migration removes acknowledged residue and duplicate logical amendments', () => {
+  const base = {
+    type: 'operation_amendment',
+    payload: { id: 'LOG-1', amendment: { amendmentId: 'AMD-1' } },
+    status: 'queued'
+  };
+  const migrated = migrateOutbox([
+    { ...base, mutationId: 'MUT-AMD-1' },
+    { ...base, mutationId: 'MUT-AMD-DUPLICATE' },
+    { mutationId: 'MUT-ACKNOWLEDGED', type: 'operation_log', payload: { id: 'LOG-DONE' }, status: 'synced' }
+  ]);
+
+  assert.deepEqual(migrated.map(item => item.mutationId), ['MUT-AMD-1']);
+});
+
+test('different queued commands for one mutable entity are not incorrectly collapsed', () => {
+  const first = createMutationEnvelope('stage_update', { cycleId: 'CYC-1', stageNumber: 2 }, { mutationId: 'MUT-STAGE-1' });
+  const second = createMutationEnvelope('stage_update', { cycleId: 'CYC-1', stageNumber: 3 }, { mutationId: 'MUT-STAGE-2' }, [first]);
+  const queue = appendUniqueMutation(appendUniqueMutation([], first).queue, second);
+
+  assert.equal(queue.inserted, true);
+  assert.equal(queue.queue.length, 2);
+  assert.equal(queue.queue[1].dependsOnMutationId, 'MUT-STAGE-1');
+});
+
+test('an operation create and its amendment remain two visible queue mutations', () => {
+  const create = createMutationEnvelope('operation_log', { id: 'LOG-1' }, { mutationId: 'MUT-CREATE-1' });
+  const amend = createMutationEnvelope('operation_amendment', {
+    id: 'LOG-1', amendment: { amendmentId: 'AMD-1' }
+  }, { mutationId: 'MUT-AMEND-1' }, [create]);
+  const queue = appendUniqueMutation(appendUniqueMutation([], create).queue, amend);
+
+  assert.equal(queue.queue.length, 2);
+  assert.deepEqual(queue.queue.map(item => item.type), ['operation_log', 'operation_amendment']);
+});
+
 test('a stale cached record cannot manufacture an upload', () => {
   const staleCache = [{ id: 'LOG-CACHE-ONLY', cycleId: 'CYC-OLD', status: 'ACTIVE' }];
   const queue = [createMutationEnvelope('operation_log', {
@@ -117,6 +153,16 @@ test('partial queue failure removes only acknowledged items', async () => {
   assert.equal(result.remainingCount, 1);
   assert.equal(result.queue[0].mutationId, 'MUT-PARTIAL-2');
   assert.equal(result.queue[0].status, 'authorization');
+  assert.equal(result.success, false);
+  assert.deepEqual(result.remainingItems, [{
+    mutationId: 'MUT-PARTIAL-2',
+    entityKey: 'operation_logs/LOG-PARTIAL-2',
+    type: 'operation_log',
+    status: 'authorization',
+    retryCount: 1,
+    lastError: 'Forbidden',
+    dependsOnMutationId: null
+  }]);
 });
 
 test('takeover credentials are never serialized into a durable mutation envelope', () => {
@@ -236,4 +282,46 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
   assert.match(webSource, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
   assert.match(webSource, /fromOperation\(item\.id, item\)/);
   assert.doesNotMatch(webSource, /onSnapshot|collection\(db/);
+});
+
+test('runtime outbox replay uses bounded batches without losing remaining mutations', async () => {
+  const queue = Array.from({ length: 12 }, (_, index) => createMutationEnvelope('operation_log', {
+    id: `LOG-BATCH-${index}`,
+    fieldId: 'FLD-1',
+    cycleId: 'CYC-1',
+    status: 'ACTIVE'
+  }, { mutationId: `MUT-BATCH-${index}` }));
+  const result = await drainMutationQueue(
+    queue,
+    async item => ({ success: true, data: { id: item.payload.id } }),
+    () => {},
+    { batchSize: 10, applyBackoff: true }
+  );
+  assert.equal(result.attemptedCount, 10);
+  assert.equal(result.processedCount, 10);
+  assert.equal(result.remainingCount, 2);
+  assert.deepEqual(result.queue.map(item => item.mutationId), ['MUT-BATCH-10', 'MUT-BATCH-11']);
+});
+
+test('runtime outbox replay defers transient failures until exponential backoff expires', async () => {
+  const mutation = createMutationEnvelope('operation_log', {
+    id: 'LOG-BACKOFF-1', fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE'
+  }, { mutationId: 'MUT-BACKOFF-1' });
+  const failed = await drainMutationQueue(
+    [mutation],
+    async () => { throw new Error('Gateway unavailable'); },
+    () => {},
+    { batchSize: 10, applyBackoff: true }
+  );
+  assert.equal(failed.attemptedCount, 1);
+  assert.ok(Date.parse(failed.queue[0].nextAttemptAt) > Date.now());
+
+  const deferred = await drainMutationQueue(
+    failed.queue,
+    async () => ({ success: true }),
+    () => {},
+    { batchSize: 10, applyBackoff: true }
+  );
+  assert.equal(deferred.attemptedCount, 0);
+  assert.equal(deferred.remainingCount, 1);
 });

@@ -33,12 +33,14 @@ npm.cmd run bootstrap:dev-test-accounts
 
 The explicit command refuses to run if a different Super Admin already exists, if any reserved ID/phone belongs to another record, or if the development gates above are absent. It can re-run only while the reserved accounts still use `DEVELOPMENT_TEST_PASSWORD`; it deliberately never resets a password. After a role completes first-login password change, use that client account for manual testing rather than re-running the bootstrap.
 
+Reserved `DEV-*` Block Farm/Field IDs and fixed development user IDs are accepted only through this gated non-production bootstrap request. Ordinary Web/Mobile creation remains server-generated and cannot submit a canonical ID.
+
 | Role | User ID | Phone | Scope created |
 | --- | --- | --- | --- |
 | Super Admin | `01000001` | `09170000001` | System-wide |
 | SRA Admin | `02000001` | `09170000002` | `block_farms/DEV-BF-001` |
 | Farm Manager | `03000001` | `09170000003` | Manager of `block_farms/DEV-BF-001` |
-| Member Farmer | `04000001` | `09170000004` | `fields/DEV-FLD-001` |
+| Farm Member | `04000001` | `09170000004` | `fields/DEV-FLD-001` |
 
 The sole Block Farm is `DEV-BF-001`; the sole Field is `DEV-FLD-001`. No operation logs, prices, analytics, audit reports, tickets, or other sample records are created. The persisted canonical links are `block_farms.managerUserId`, `fields.blockFarmId`, and `fields.memberUserId`; the account-creation request's Block Farm value is validation input only and is not duplicated on the user document.
 
@@ -58,7 +60,7 @@ After a successful login, verify that closing and reopening the client restores 
 - Super Admin: login succeeds and the complete user directory is available.
 - SRA Admin: login succeeds and `DEV-BF-001` is accessible; an attempted Super-Admin-only ticket mutation is denied.
 - Farm Manager: login succeeds and sees `DEV-FLD-001`; creating a field under an unassigned Block Farm is denied by the backend.
-- Member Farmer: login succeeds and lists only `DEV-FLD-001`; the user-directory endpoint is denied.
+- Farm Member: login succeeds and lists only `DEV-FLD-001`; the user-directory endpoint is denied.
 - For each role, also try an incorrect password and a nonexistent ID: both must be rejected.
 
 The bootstrap command performs the API checks above automatically after it creates/reuses the topology. It does not replace client-level first-login, Firebase session restoration, or OTP entry testing; perform those interactions in each client after the command succeeds.

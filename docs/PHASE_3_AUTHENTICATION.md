@@ -18,7 +18,7 @@ Date: 2026-09-16
 
 1. Login resolves an eight-digit user ID directly or an indexed normalized phone query; it never downloads the user collection for password comparison.
 2. Registration OTP, first-login phone OTP, and administrator personnel-phone OTP values are generated, stored, expired, attempt-limited, and verified by Express. Codes are never returned to clients.
-3. Self-registration can create only a pending Member Farmer account and requires server-verified phone possession.
+3. Self-registration can create only a pending Farm Member account and requires server-verified phone possession.
 4. Password confirmation, password change, and phone change use authenticated Express endpoints.
 5. First-login password change remains mandatory when `requiresPasswordChange` is true.
 6. The nonfunctional client-side forgot-password simulation was disabled. Password recovery still requires an authorized administrator; no unauthenticated password-reset mutation exists.

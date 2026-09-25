@@ -39,7 +39,10 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
     onData: data => onUpdate({ ...data, isLoading: false, error: null }),
     onError: error => {
       if (onError) onError(error);
-    }
+    },
+    resources: isManager
+      ? ['block-farms', 'fields']
+      : ['block-farms', 'fields', 'users']
   });
 }
 

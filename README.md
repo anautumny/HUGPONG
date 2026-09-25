@@ -19,12 +19,6 @@ The crop-cycle contract contains exactly six stages: Land Preparation, Planting,
 2. Run `run-web.bat` to build and serve the React production console at `http://localhost:3000`.
 3. Run `run-mobile.bat` to start Expo.
 
-For Expo Go on a physical phone, keep the phone and computer on the same network and configure `mobile/.env` with the computer's LAN API address, for example:
-
-```text
-EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:3000
-```
-
-Use `http://10.0.2.2:3000` only for an Android emulator. Restart Expo after changing the environment file.
+The mobile app has one required, non-secret API setting: `EXPO_PUBLIC_API_BASE_URL`. Supply an explicit development origin in an uncommitted `mobile/.env`; production builds must receive the public HTTPS API origin from the build service environment. The app never guesses, probes, or caches alternate hosts. See [`docs/MOBILE_API_CONNECTIVITY_AND_DEPLOYMENT.md`](docs/MOBILE_API_CONNECTIVITY_AND_DEPLOYMENT.md).
 
 Development reset and test-account creation are explicit, separately gated server scripts. Runtime login screens do not contain mock-session or role-bypass controls.

@@ -53,7 +53,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [priceTimeframe, setPriceTimeframe] = useState('weekly');
 
   // Filter scopes
-  const isMember = session?.role === 'Member Farmer';
+  const isMember = session?.role === 'Farm Member';
   const isManager = session?.role === 'Farm Manager';
   const isSRA = session?.role === 'SRA Admin';
 
@@ -184,12 +184,13 @@ export default function AnalyticsScreen({ navigation, route }) {
         fields: scopedFields,
         cropCycles: allCropCycles,
         selectedFarmId: selectedFarmId,
+        selectedParcelId: selectedFieldId,
         selectedSeason: selectedSeason
       });
     } catch (e) {
       return { totalPlots: 0, totalAcreageHa: 0, stagesDistribution: [], activePlots: [] };
     }
-  }, [scopedFields, allCropCycles, selectedFarmId, selectedSeason]);
+  }, [scopedFields, allCropCycles, selectedFarmId, selectedFieldId, selectedSeason]);
 
   const productionCost = useMemo(() => {
     try {
@@ -213,12 +214,13 @@ export default function AnalyticsScreen({ navigation, route }) {
         operations: cycleScopedOps,
         fields: scopedFields,
         selectedFarmId: selectedFarmId,
+        selectedParcelId: selectedFieldId,
         selectedPeriod: selectedPeriod
       });
     } catch (e) {
       return { grandTotalCost: 0, categories: [], topCategory: null };
     }
-  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedFieldId, selectedPeriod]);
 
   const operationsAnalytics = useMemo(() => {
     try {
@@ -226,12 +228,13 @@ export default function AnalyticsScreen({ navigation, route }) {
         operations: cycleScopedOps,
         fields: scopedFields,
         selectedFarmId: selectedFarmId,
+        selectedParcelId: selectedFieldId,
         selectedPeriod: selectedPeriod
       });
     } catch (e) {
       return { totalOps: 0, totalHa: 0, byActivity: [], byMonth: [], mostFrequent: null };
     }
-  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedPeriod]);
+  }, [cycleScopedOps, scopedFields, selectedFarmId, selectedFieldId, selectedPeriod]);
 
   const priceTrends = useMemo(() => {
     return selectPriceTrends({
@@ -620,7 +623,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               </View>
 
               <View>
-                <Text style={s.inputLabel}>Raw Sugar (Class B) Price / Lkg (50-kg bag) *</Text>
+                <Text style={s.inputLabel}>Raw Sugar (Class B) Price (â‚±/Lkg) *</Text>
                 <TextInput
                   style={s.input}
                   placeholder="e.g. 2650.00"
@@ -631,7 +634,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               </View>
 
               <View>
-                <Text style={s.inputLabel}>Molasses Price / Metric Ton (MT) *</Text>
+                <Text style={s.inputLabel}>Molasses Price (â‚±/MT) *</Text>
                 <TextInput
                   style={s.input}
                   placeholder="e.g. 9500.00"

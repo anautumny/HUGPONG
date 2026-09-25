@@ -3,6 +3,7 @@
 const { FieldPath } = require('firebase-admin/firestore');
 const { COLLECTIONS } = require('../schema/firestoreSchema');
 const { getOperationActorScope } = require('./operationQueryService');
+const { presentOperationRecord } = require('../domain/presentationContract');
 
 const ARCHIVE_PAGE_SIZE = 25;
 const MAX_ARCHIVE_PAGE_SIZE = 100;
@@ -114,7 +115,8 @@ async function listArchivedOperationPage(database, user, options = {}) {
     const data = searchSnapshots
       .flatMap(snapshot => snapshot.docs.map(document => ({ id: document.id, ...document.data() })))
       .filter(record => matchesFilters(record, filters))
-      .slice(0, 1);
+      .slice(0, 1)
+      .map(presentOperationRecord);
     return { data, hasMore: false, nextCursor: null, pageSize: limit };
   }
 
@@ -153,7 +155,7 @@ async function listArchivedOperationPage(database, user, options = {}) {
     recordsById.set(document.id, { id: document.id, ...document.data() });
   }));
   const ordered = Array.from(recordsById.values()).sort(compareArchivedNewestFirst);
-  const data = ordered.slice(0, limit);
+  const data = ordered.slice(0, limit).map(presentOperationRecord);
   return {
     data,
     hasMore: ordered.length > limit,

@@ -7,22 +7,69 @@
  */
 
 import { signInWithCustomTokenSilently } from './firebaseClient';
+import { friendlyErrorMessage } from '../domain/presentationContract';
 
 const READ_CACHE_TTL_MS = 5000;
+const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
 
-function clearReadCache() {
-  readCache.clear();
+function resourceName(path) {
+  return String(path || '')
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/^\/api\//, '')
+    .split(/[/?#]/)[0];
+}
+
+const RELATED_RESOURCES = Object.freeze({
+  'block-farms': ['block-farms', 'fields', 'users', 'audit-events'],
+  fields: ['fields', 'crop-cycles', 'logs', 'audit-events'],
+  'crop-cycles': ['crop-cycles', 'fields', 'logs', 'audit-events'],
+  logs: ['logs', 'fields', 'crop-cycles', 'audit-events'],
+  prices: ['prices', 'audit-events'],
+  tickets: ['tickets', 'audit-events'],
+  users: ['users', 'fields', 'block-farms', 'audit-events'],
+  'audit-reports': ['audit-reports', 'audit-events'],
+  'audit-events': ['audit-events'],
+  telemetry: ['terminal-diagnostics'],
+  'terminal-diagnostics': ['terminal-diagnostics']
+});
+
+export function affectedResources(path) {
+  const primary = resourceName(path);
+  return RELATED_RESOURCES[primary] || (primary ? [primary] : []);
+}
+
+function clearReadCache(resources = []) {
+  const affected = new Set(resources);
+  if (!affected.size) {
+    readCache.clear();
+    return;
+  }
+  for (const path of readCache.keys()) {
+    if (affected.has(resourceName(path))) readCache.delete(path);
+  }
 }
 
 function announceServerMutation(path) {
-  clearReadCache();
+  const resources = affectedResources(path);
+  clearReadCache(resources);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('hugpong:server-mutation', {
-      detail: { path }
+      detail: { path, resources }
     }));
   }
+}
+
+function canRefreshInBackground() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  return true;
+}
+
+function mutationAffects(event, resources) {
+  const changed = new Set(event?.detail?.resources || affectedResources(event?.detail?.path));
+  return resources.some(resource => changed.has(resource));
 }
 
 export function createMutationContext(path, body, suppliedBaseVersion = null) {
@@ -48,23 +95,47 @@ export async function authenticatedRequest(path, options = {}) {
     };
   }
 
-  const response = await fetch(path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {})
-    },
-    body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
-    credentials: 'include'
-  });
+  const controller = new AbortController();
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Math.max(1000, Number(options.timeoutMs))
+    : REQUEST_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener?.('abort', abortFromCaller, { once: true });
+  let response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      },
+      body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
+      credentials: 'include',
+      signal: controller.signal
+    });
+  } catch (cause) {
+    const timedOut = cause?.name === 'AbortError' && !options.signal?.aborted;
+    const error = new Error(timedOut
+      ? 'The server is taking too long to respond. Check your connection and try again.'
+      : 'Unable to reach HUGPONG. Check your connection and try again.');
+    error.code = timedOut ? 'API_REQUEST_TIMEOUT' : 'API_UNREACHABLE';
+    error.isNetworkError = true;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener?.('abort', abortFromCaller);
+  }
 
   const result = await response.json().catch(() => ({}));
 
   if (!response.ok || !result.success) {
-    const error = new Error(result.error || 'Request was rejected by the server.');
+    const errorCode = result.code || result.data?.code || '';
+    const error = new Error(friendlyErrorMessage(errorCode, result.error || 'Request was rejected by the server.'));
     error.status = response.status;
     error.data = result.data;
+    error.code = errorCode;
     throw error;
   }
 
@@ -103,6 +174,10 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
   return request;
 }
 
+export function peekAuthenticatedRead(path) {
+  return readCache.get(path)?.value || null;
+}
+
 export function subscribeToAuthenticatedResource(path, {
   onData,
   onError,
@@ -110,6 +185,7 @@ export function subscribeToAuthenticatedResource(path, {
 } = {}) {
   let active = true;
   let inFlight = false;
+  const resources = affectedResources(path);
 
   const refresh = async ({ force = false } = {}) => {
     if (!active || inFlight) return;
@@ -124,12 +200,20 @@ export function subscribeToAuthenticatedResource(path, {
     }
   };
 
+  const cached = peekAuthenticatedRead(path);
+  if (cached && typeof onData === 'function') onData(cached);
   refresh();
   const timer = intervalMs > 0
-    ? setInterval(() => refresh({ force: true }), intervalMs)
+    ? setInterval(() => {
+      if (canRefreshInBackground()) refresh();
+    }, intervalMs)
     : null;
-  const handleFocus = () => refresh({ force: true });
-  const handleMutation = () => refresh({ force: true });
+  const handleFocus = () => {
+    if (canRefreshInBackground()) refresh({ force: true });
+  };
+  const handleMutation = event => {
+    if (mutationAffects(event, resources)) refresh({ force: true });
+  };
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleFocus);
     window.addEventListener('hugpong:server-mutation', handleMutation);
@@ -147,7 +231,8 @@ export function subscribeToAuthenticatedResource(path, {
 export function subscribeToAuthenticatedLoader(load, {
   onData,
   onError,
-  intervalMs = 30000
+  intervalMs = 30000,
+  resources = []
 } = {}) {
   let active = true;
   let inFlight = false;
@@ -167,10 +252,16 @@ export function subscribeToAuthenticatedLoader(load, {
 
   refresh();
   const timer = intervalMs > 0
-    ? setInterval(() => refresh({ force: true }), intervalMs)
+    ? setInterval(() => {
+      if (canRefreshInBackground()) refresh();
+    }, intervalMs)
     : null;
-  const handleFocus = () => refresh({ force: true });
-  const handleMutation = () => refresh({ force: true });
+  const handleFocus = () => {
+    if (canRefreshInBackground()) refresh({ force: true });
+  };
+  const handleMutation = event => {
+    if (!resources.length || mutationAffects(event, resources)) refresh({ force: true });
+  };
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleFocus);
     window.addEventListener('hugpong:server-mutation', handleMutation);
@@ -189,6 +280,7 @@ export function subscribeToAuthenticatedLoader(load, {
 export default {
   request: authenticatedRequest,
   read: authenticatedRead,
+  peek: peekAuthenticatedRead,
   createMutationContext,
   subscribeToAuthenticatedResource,
   subscribeToAuthenticatedLoader

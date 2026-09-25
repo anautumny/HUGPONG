@@ -39,7 +39,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
   // Pending audit reports awaiting certification
   const pendingAudits = useMemo(() => {
-    return auditReports.filter(r => (r.status || 'PENDING').toUpperCase() === 'PENDING');
+    return auditReports.filter(r => ['PENDING', 'PENDING_REVIEW'].includes((r.status || '').toUpperCase()));
   }, [auditReports]);
 
   // Derive regulatory attention items

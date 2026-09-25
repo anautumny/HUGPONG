@@ -107,13 +107,13 @@ export default function CurrentPriceBanner({
         <div className="bg-surface-subtle rounded-xl p-4 border border-border flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-0.5">
-              Raw Sugar (Domestic Millsite)
+              Raw Sugar (Domestic Millsite, â‚±/Lkg)
             </span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-2xl sm:text-3xl font-black text-primary dark:text-primary-light">
                 ₱{sugarPrice.toLocaleString()}
               </span>
-              <span className="text-xs text-hug-muted font-medium">/ Lkg bag</span>
+              <span className="text-xs text-hug-muted font-medium">/Lkg</span>
             </div>
           </div>
 
@@ -142,13 +142,13 @@ export default function CurrentPriceBanner({
         <div className="bg-surface-subtle rounded-xl p-4 border border-border flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-0.5">
-              Industrial Molasses (Millsite)
+              Industrial Molasses (Millsite, â‚±/MT)
             </span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-2xl sm:text-3xl font-black text-hug-text">
                 ₱{molassesPrice.toLocaleString()}
               </span>
-              <span className="text-xs text-hug-muted font-medium">/ Metric Ton</span>
+              <span className="text-xs text-hug-muted font-medium">/MT</span>
             </div>
           </div>
 

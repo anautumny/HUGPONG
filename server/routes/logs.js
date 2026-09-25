@@ -19,7 +19,10 @@ const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthoriza
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const data = await listOperationRecords(db, req.session.user, { status: req.query.status });
+    const data = await listOperationRecords(db, req.session.user, {
+      status: req.query.status,
+      limit: req.query.limit
+    });
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message });

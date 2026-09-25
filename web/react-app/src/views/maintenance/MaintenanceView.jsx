@@ -26,16 +26,9 @@ export default function MaintenanceView() {
     activeCropYears: []
   });
 
-  const loadSystemInventory = async () => {
-    setCounts(prev => ({
-      ...prev,
-      cropCycles: null,
-      activeCropCycles: null,
-      archivedCropCycles: null,
-      activeCropYears: []
-    }));
+  const loadSystemInventory = async ({ force = false } = {}) => {
     try {
-      const inventory = await fetchSystemDiagnostics();
+      const inventory = await fetchSystemDiagnostics({ force });
       setCounts(inventory);
       setErrors(prev => ({ ...prev, inventory: null }));
     } catch (err) {
@@ -66,7 +59,11 @@ export default function MaintenanceView() {
   useEffect(() => {
     runHealthCheck();
     loadSystemInventory();
-    const inventoryTimer = setInterval(loadSystemInventory, 15000);
+    const inventoryTimer = setInterval(() => {
+      if (document.visibilityState !== 'hidden' && navigator.onLine !== false) {
+        loadSystemInventory({ force: true });
+      }
+    }, 60000);
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({

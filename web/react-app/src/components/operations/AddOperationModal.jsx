@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Modal,
   FormField,
@@ -11,7 +11,8 @@ import {
   createOperation
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
-import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
+import { SRA_OPERATIONS_CATALOGUE, getOperationsForStage } from '../../domain/operationCatalogue';
+import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { formatCurrency, formatHectares } from '../../utils/formatters';
 import {
@@ -28,8 +29,12 @@ export default function AddOperationModal({
   isOpen,
   onClose,
   onSuccess,
-  isTakeOver = true,
-  takeoverGrant = null
+  isTakeOver = false,
+  takeoverGrant = null,
+  canSaveDraft = false,
+  initialDraft = null,
+  onSaveDraft = null,
+  validateBeforeSubmit = null
 }) {
   const [selectedStageNumber, setSelectedStageNumber] = useState(1);
   const [selectedOpId, setSelectedOpId] = useState('SRA-02');
@@ -41,6 +46,7 @@ export default function AddOperationModal({
   const [areaHa, setAreaHa] = useState('');
   const [workersCount, setWorkersCount] = useState('');
   const [advanceStage, setAdvanceStage] = useState(false);
+  const [variety, setVariety] = useState('');
 
   // Group Mode sub-items
   const [subItems, setSubItems] = useState([]);
@@ -54,6 +60,7 @@ export default function AddOperationModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
+  const submissionLockRef = useRef(false);
 
   // Reset and synchronize form when opened or field changes
   useEffect(() => {
@@ -67,15 +74,34 @@ export default function AddOperationModal({
     setWorkersCount('');
     setPerformedOn(new Date().toISOString().slice(0, 10));
     setAdvanceStage(false);
+    setVariety(String(field.cropCycle?.variety || ''));
     setServerError(null);
     setValidationErrors({});
+
+    if (initialDraft?.form) {
+      const draft = initialDraft.form;
+      setSelectedStageNumber(Number(draft.selectedStageNumber || currentStage));
+      setSelectedOpId(draft.selectedOpId || 'CUSTOM');
+      setInputMode(draft.inputMode || 'direct');
+      setActivityName(draft.activityName || '');
+      setPerformedOn(draft.performedOn || new Date().toISOString().slice(0, 10));
+      setAreaHa(String(draft.areaHa || defaultHa));
+      setWorkersCount(String(draft.workersCount || ''));
+      setAdvanceStage(Boolean(draft.advanceStage));
+      setVariety(draft.variety || '');
+      setSubItems(Array.isArray(draft.subItems) ? draft.subItems : []);
+      setDirectQty(String(draft.directQty || ''));
+      setDirectUnit(draft.directUnit || 'ha');
+      setDirectRate(String(draft.directRate || ''));
+      return;
+    }
 
     // Find default template for this stage or fallback to first template
     const stageTemplate = SRA_OPERATIONS_CATALOGUE.find(o => o.stageNumber === currentStage) || SRA_OPERATIONS_CATALOGUE[0];
     if (stageTemplate) {
       applyTemplate(stageTemplate);
     }
-  }, [isOpen, field?.id]);
+  }, [isOpen, field?.id, initialDraft?.id]);
 
   const applyTemplate = (tmpl) => {
     if (!tmpl) return;
@@ -103,10 +129,9 @@ export default function AddOperationModal({
   const handleStageChange = (newStageNum) => {
     const num = Number(newStageNum);
     setSelectedStageNumber(num);
-    const tmpl = SRA_OPERATIONS_CATALOGUE.find(o => o.stageNumber === num);
-    if (tmpl) {
-      applyTemplate(tmpl);
-    }
+    setSelectedOpId('');
+    setActivityName('');
+    setSubItems([]);
   };
 
   const handleTemplateChange = (opId) => {
@@ -179,12 +204,22 @@ export default function AddOperationModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submissionLockRef.current) return;
     setServerError(null);
+    if (typeof validateBeforeSubmit === 'function') {
+      const preflight = validateBeforeSubmit();
+      if (preflight && preflight.valid === false) {
+        setServerError(preflight.error || 'This operation is no longer authorized for submission.');
+        return;
+      }
+    }
     const errors = {};
 
     if (!activityName.trim()) {
       errors.activityName = 'Activity name is required.';
     }
+    if (!selectedOpId) errors.operation = 'Select an operation for this stage.';
+    if (selectedStageNumber === 2 && !variety.trim()) errors.variety = 'Sugarcane variety is required for Planting.';
 
     if (!performedOn) {
       errors.performedOn = 'Completion date is required.';
@@ -214,6 +249,7 @@ export default function AddOperationModal({
     }
 
     setValidationErrors({});
+    submissionLockRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -227,6 +263,7 @@ export default function AddOperationModal({
       }
 
       const payload = {
+        ...(initialDraft?.submittedOperationId ? { id: initialDraft.submittedOperationId } : {}),
         fieldId: field.id,
         cycleId,
         blockFarmId: field.blockFarmId,
@@ -236,11 +273,12 @@ export default function AddOperationModal({
         operationName: activityName.trim(),
         category: SRA_OPERATIONS_CATALOGUE.find(o => o.id === selectedOpId)?.category || 'General Care',
         stageNumber: Number(selectedStageNumber) || 1,
+        variety: selectedStageNumber === 2 ? variety.trim() : '',
         performedOn,
         areaHa: numArea,
         peopleCount: numWorkers,
         totalCost,
-        submissionSource: isTakeOver ? 'MANAGER_TAKEOVER' : 'MEMBER',
+        submissionSource: isTakeOver ? 'MANAGER_TAKEOVER' : 'FIELD_OWNER',
         isSupplemental: false,
         lineItems: inputMode === 'group' ? subItems.map(item => ({
           lineItemId: item.lineItemId,
@@ -274,6 +312,7 @@ export default function AddOperationModal({
       }
 
       setIsSubmitting(false);
+      submissionLockRef.current = false;
       if (typeof onSuccess === 'function') {
         onSuccess(payload);
       }
@@ -282,10 +321,20 @@ export default function AddOperationModal({
       console.error('[AddOperationModal] Submit error:', err);
       setServerError(err.message || 'Unable to record operation.');
       setIsSubmitting(false);
+      submissionLockRef.current = false;
     }
   };
 
   const currentStageObj = SUGARCANE_STAGES.find(s => s.stageNumber === selectedStageNumber) || SUGARCANE_STAGES[0];
+
+  const handleSaveDraft = () => {
+    if (!canSaveDraft || typeof onSaveDraft !== 'function') return;
+    onSaveDraft({
+      selectedStageNumber, selectedOpId, inputMode, activityName, performedOn,
+      areaHa, workersCount, advanceStage, variety, subItems,
+      directQty, directUnit, directRate
+    }, initialDraft?.id || null);
+  };
 
   return (
     <Modal
@@ -293,8 +342,8 @@ export default function AddOperationModal({
       onClose={onClose}
       size="lg"
       title="Add Field Operation"
-      subtitle={`${field.id} · ${field.memberName || 'Assigned Member'} (${formatHectares(field.areaHa || field.ha)})`}
-      badge={isTakeOver ? 'Supervisor Takeover' : 'Field Operation'}
+      subtitle={`${field.id} · ${field.memberName || 'Assigned Farm Member'} (${formatHectares(field.areaHa || field.ha)})`}
+      badge={isTakeOver ? 'Manager Takeover' : 'Field Operation'}
       icon={Plus}
       isLoading={isSubmitting}
       preventBackdropClose={isSubmitting}
@@ -304,6 +353,11 @@ export default function AddOperationModal({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
+          {canSaveDraft && (
+            <Button variant="outline" onClick={handleSaveDraft} disabled={isSubmitting}>
+              Save Draft
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={handleSubmit}
@@ -322,7 +376,7 @@ export default function AddOperationModal({
           <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-300">
             <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <p className="font-medium">
-              Take Over Mode Active: This operation will be stamped with your supervisor signature in the authoritative SRA audit ledger.
+              Manager Takeover Active: This operation will be stamped with your manager signature in the authoritative SRA audit ledger.
             </p>
           </div>
         )}
@@ -341,6 +395,7 @@ export default function AddOperationModal({
               id="add-op-stage-select"
               value={selectedStageNumber}
               onChange={(e) => handleStageChange(e.target.value)}
+              disabled={!isTakeOver}
               options={SUGARCANE_STAGES.map(s => ({
                 value: s.stageNumber,
                 label: `Stage ${s.stageNumber}: ${s.shortName}`
@@ -351,22 +406,44 @@ export default function AddOperationModal({
           <FormField
             id="add-op-template-select"
             label="Operation"
-            badge="14 SRA templates + custom"
+            badge="Stage-matched templates + custom"
+            error={validationErrors.operation}
           >
             <Select
               id="add-op-template-select"
               value={selectedOpId}
               onChange={(e) => handleTemplateChange(e.target.value)}
+              disabled={!selectedStageNumber}
+              placeholder="Select an operation..."
               options={[
                 { value: 'CUSTOM', label: 'CUSTOM: Enter a Custom Operation' },
-                ...SRA_OPERATIONS_CATALOGUE.map(o => ({
+                ...getOperationsForStage(selectedStageNumber).map(o => ({
                   value: o.id,
-                  label: `${o.id}: ${o.name} (Stage ${o.stageNumber})`
+                  label: `${o.id}: ${o.name}`
                 }))
               ]}
             />
           </FormField>
         </div>
+
+        {selectedStageNumber === 2 && (
+          <FormField
+            id="add-op-variety"
+            label="Sugarcane Variety"
+            required
+            helperText={field.cropCycle?.variety ? 'Stored on this Crop Year Cycle. Use an amendment to correct it.' : 'Captured when the Planting operation is recorded.'}
+            error={validationErrors.variety}
+          >
+            <Select
+              id="add-op-variety"
+              value={variety}
+              onChange={(event) => setVariety(event.target.value)}
+              disabled={Boolean(field.cropCycle?.variety)}
+              placeholder="Select sugarcane variety..."
+              options={SUGARCANE_VARIETIES.map(value => ({ value, label: value }))}
+            />
+          </FormField>
+        )}
 
         {/* Activity Name & Date Completed */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">

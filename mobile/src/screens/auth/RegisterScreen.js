@@ -11,10 +11,10 @@ import { useTranslation } from '../../services/i18n';
 import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
 import { formatToE164 } from '../../services/smsService';
 
-const ROLES = ['Member Farmer', 'Farm Manager', 'SRA Admin'];
+const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
 
 const ROLE_DESCRIPTIONS = {
-  'Member Farmer': 'Logs weekly/monthly field operations',
+  'Farm Member': 'Logs weekly/monthly field operations',
   'Farm Manager': 'Reviews logs & compiles SRA reports',
   'SRA Admin': 'Scans QR & audits monthly reports',
 };
@@ -85,7 +85,7 @@ export default function RegisterScreen({ navigation }) {
     firstName: '',
     middleInitial: '',
     lastName: '',
-    role: 'Member Farmer',
+    role: 'Farm Member',
     blockFarm: '',
     contactNumber: '',
     password: '', 
@@ -134,7 +134,7 @@ export default function RegisterScreen({ navigation }) {
   }, [countdown]);
 
   const stepTitles = [
-    { title: t('reg_step_personal', 'Personal Info'), sub: t('reg_step_personal_sub', 'Enter your official farmer identity') },
+    { title: t('reg_step_personal', 'Personal Info'), sub: t('reg_step_personal_sub', 'Enter your official Farm Member identity') },
     { title: t('reg_step_farm', 'Select Block Farm'), sub: t('reg_step_farm_sub', 'Assign your sugarcane block farm cooperative') },
     { 
       title: t('reg_step_contact', 'Contact Number'), 
@@ -256,7 +256,7 @@ export default function RegisterScreen({ navigation }) {
         setRegisteredAccount(res.user);
         setShowSuccessModal(true);
       } else {
-        Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your farmer member account is now active.`, [
+        Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your Farm Member account is now active.`, [
           { text: 'Go to Dashboard', onPress: () => navigation.replace('MainTabs') }
         ]);
       }
@@ -313,7 +313,7 @@ export default function RegisterScreen({ navigation }) {
           <TouchableOpacity style={s.backBtn} onPress={back}>
             <Ionicons name="arrow-back" size={20} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={s.navTitle} numberOfLines={1}>{t('reg_nav_title', 'Member Registration')}</Text>
+          <Text style={s.navTitle} numberOfLines={1}>{t('reg_nav_title', 'Farm Member Registration')}</Text>
           
           <View style={{ width: 36 }} />
         </View>
@@ -578,7 +578,7 @@ export default function RegisterScreen({ navigation }) {
           <View style={s.adminNoteBox}>
             <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
             <Text style={s.adminNoteText}>
-              {t('reg_admin_note', 'Are you a Farm Manager or SRA Officer? Your accounts are provisioned directly by the SRA District Administrator. Please contact your coordinator.')}
+              {t('reg_admin_note', 'Are you a Farm Manager or SRA Admin? Your accounts are provisioned directly by the SRA District Admin. Please contact your coordinator.')}
             </Text>
           </View>
         </ScrollView>
@@ -594,7 +594,7 @@ export default function RegisterScreen({ navigation }) {
 
             <Text style={s.successTitle}>Registration Submitted</Text>
             <Text style={s.successSub}>
-              Your Farm Member account is pending approval. You can sign in after an authorized Farm Manager or administrator activates it.
+              Your Farm Member account is pending approval. You can sign in after an authorized Farm Manager or SRA Admin activates it.
             </Text>
 
             {/* Permanent User ID Display */}
@@ -632,11 +632,11 @@ export default function RegisterScreen({ navigation }) {
                   const id = registeredAccount?.employeeId || 'Pending';
                   try {
                     await Share.share({
-                      message: `HUGPONG Farmer Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
-                      title: 'HUGPONG Farmer Credentials'
+                      message: `HUGPONG Farm Member Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
+                      title: 'HUGPONG Farm Member Credentials'
                     });
                   } catch (e) {
-                    Alert.alert('Farmer User ID', id);
+                    Alert.alert('Farm Member User ID', id);
                   }
                 }}
                 activeOpacity={0.8}

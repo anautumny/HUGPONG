@@ -33,6 +33,7 @@ export function selectCropFieldProgress({
   fields = [],
   cropCycles = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedSeason = 'ALL'
 }) {
   const cycleMap = new Map();
@@ -48,6 +49,7 @@ export function selectCropFieldProgress({
   // Filter fields by scope and season
   const scopedFields = fields.filter(f => {
     if (selectedFarmId !== 'ALL' && f.blockFarmId !== selectedFarmId) return false;
+    if (selectedParcelId !== 'ALL' && f.id !== selectedParcelId) return false;
     const cycle = cycleForField(f);
     const cropYear = canonicalStoredCropYear(cycle?.cropYear || f.cropYear || '');
     if (selectedSeason !== 'ALL' && (!cycle || cropYear !== canonicalStoredCropYear(selectedSeason))) return false;
@@ -90,7 +92,7 @@ export function selectCropFieldProgress({
         blockFarmName: f.blockFarmName || f.blockFarmId,
         memberName: f.memberName || f.memberUserId,
         areaHa: ha,
-        variety: f.variety || 'VMC 84-524',
+        variety: String(cycle?.variety || f.variety || '').trim() || 'Not recorded yet',
         stageNumber: validStage
       });
     }
@@ -123,6 +125,7 @@ export function selectProductionCost({
   fields = [],
   blockFarms = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedPeriod = 'ALL',
   isFarmManager = false
 }) {
@@ -139,6 +142,8 @@ export function selectProductionCost({
       if (!date.startsWith(selectedPeriod)) return false;
     }
 
+    if (selectedParcelId !== 'ALL' && op.fieldId !== selectedParcelId) return false;
+
     // Farm scope filter
     const field = fieldMap.get(op.fieldId);
     if (selectedFarmId !== 'ALL') {
@@ -154,6 +159,7 @@ export function selectProductionCost({
   const relevantFieldIds = new Set(filteredOps.map(op => op.fieldId));
   const relevantFields = fields.filter(f => {
     if (selectedFarmId !== 'ALL' && f.blockFarmId !== selectedFarmId) return false;
+    if (selectedParcelId !== 'ALL' && f.id !== selectedParcelId) return false;
     return relevantFieldIds.has(f.id);
   });
   const totalAuditedHa = relevantFields.reduce((sum, f) => sum + (Number(f.areaHa || f.hectares || 0)), 0);
@@ -165,9 +171,12 @@ export function selectProductionCost({
   // If SRA Admin / Super Admin -> breakdown by Block Farm
   let breakdownByEntity = [];
 
-  if (isFarmManager) {
+  if (isFarmManager || selectedParcelId !== 'ALL') {
     // Member field breakdown
-    const scopedFields = fields.filter(f => selectedFarmId === 'ALL' || f.blockFarmId === selectedFarmId);
+    const scopedFields = fields.filter(f =>
+      (selectedFarmId === 'ALL' || f.blockFarmId === selectedFarmId)
+      && (selectedParcelId === 'ALL' || f.id === selectedParcelId)
+    );
     breakdownByEntity = scopedFields.map(f => {
       const fOps = filteredOps.filter(op => op.fieldId === f.id);
       const cost = fOps.reduce((sum, op) => sum + (Number(op.totalCost != null ? op.totalCost : op.cost) || 0), 0);
@@ -175,7 +184,7 @@ export function selectProductionCost({
       const costPerHa = ha > 0 ? Math.round(cost / ha) : 0;
       return {
         id: f.id,
-        name: `${f.id} · ${f.memberName || f.memberUserId || 'Member'}`,
+        name: `${f.id} · ${f.memberName || f.memberUserId || 'Farm Member'}`,
         type: 'field',
         totalCost: cost,
         areaHa: ha,
@@ -225,17 +234,18 @@ export function selectOperationalCostBreakdown({
   operations = [],
   fields = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedPeriod = 'ALL'
 }) {
   const fieldMap = new Map(fields.map(f => [f.id, f]));
 
   const categoryDefinitions = [
-    { key: 'prep', label: 'Land Preparation', color: '#2D5016', badgeClass: 'bg-primary-bg text-primary dark:text-primary-light' },
-    { key: 'plant', label: 'Planting & Seedcane', color: '#3E7345', badgeClass: 'bg-bg text-hug-text border border-border' },
-    { key: 'fert', label: 'Fertilization & Lime', color: '#5B8C5A', badgeClass: 'bg-bg text-hug-text border border-border' },
-    { key: 'weed', label: 'Cultivation & Weeding', color: '#4B5563', badgeClass: 'bg-bg text-hug-text border border-border' },
-    { key: 'maint', label: 'Crop Maintenance', color: '#6B7280', badgeClass: 'bg-bg text-hug-text border border-border' },
-    { key: 'harvest', label: 'Harvesting & Hauling', color: '#9CA3AF', badgeClass: 'bg-bg text-hug-text border border-border' }
+    { key: 'prep', label: 'Land Preparation', color: '#2D5016' },
+    { key: 'plant', label: 'Planting & Seedcane', color: '#3E7345' },
+    { key: 'fert', label: 'Fertilization & Lime', color: '#5B8C5A' },
+    { key: 'weed', label: 'Cultivation & Weeding', color: '#4B5563' },
+    { key: 'maint', label: 'Crop Maintenance', color: '#6B7280' },
+    { key: 'harvest', label: 'Harvesting & Hauling', color: '#9CA3AF' }
   ];
 
   const catMap = new Map(categoryDefinitions.map(c => [c.key, { ...c, totalCost: 0, opsCount: 0, percentOfTotal: 0 }]));
@@ -255,6 +265,7 @@ export function selectOperationalCostBreakdown({
       const field = fieldMap.get(op.fieldId);
       if (!field || field.blockFarmId !== selectedFarmId) return;
     }
+    if (selectedParcelId !== 'ALL' && op.fieldId !== selectedParcelId) return;
 
     const catKey = String(op.category || 'prep').toLowerCase();
     const entry = catMap.get(catKey) || catMap.get('prep');
@@ -292,6 +303,7 @@ export function selectFarmOperationsAnalytics({
   operations = [],
   fields = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedPeriod = 'ALL'
 }) {
   const fieldMap = new Map(fields.map(f => [f.id, f]));
@@ -314,6 +326,7 @@ export function selectFarmOperationsAnalytics({
       const field = fieldMap.get(op.fieldId);
       if (!field || field.blockFarmId !== selectedFarmId) return;
     }
+    if (selectedParcelId !== 'ALL' && op.fieldId !== selectedParcelId) return;
 
     totalOps += 1;
     totalPeopleCount += Number(op.peopleCount || op.people || 0);

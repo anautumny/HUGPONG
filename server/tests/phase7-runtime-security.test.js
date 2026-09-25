@@ -35,7 +35,7 @@ test('manager takeover grants are signed, actor-bound, field-bound, and short-li
   assert.equal(verifyTakeoverGrant(`${grant.slice(0, -1)}0`, { actorId: '03000001', fieldId: 'FLD-1', now: issuedAt + 1 }), null);
 });
 
-test('takeover authorization denies wrong role, missing grant, and another manager block farm', async () => {
+test('takeover authorization denies wrong role and another manager block farm while own-field requests reach server authorization', async () => {
   const documents = {
     'fields/FLD-1': { blockFarmId: 'BF-1' },
     'block_farms/BF-1': { managerUserId: '03000001' }
@@ -63,8 +63,8 @@ test('takeover authorization denies wrong role, missing grant, and another manag
   const response = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
   let nextCalled = false;
   attachTakeoverAuthorization({ session: { user: { employeeId: '03000001', role: ROLES.FARM_MANAGER } }, headers: {} }, response, () => { nextCalled = true; });
-  assert.equal(nextCalled, false);
-  assert.equal(response.statusCode, 403);
+  assert.equal(nextCalled, true);
+  assert.equal(response.statusCode, 200);
 
   const wrongRoleResponse = { ...response, statusCode: 200, body: null };
   requireRole([ROLES.FARM_MANAGER])(
@@ -75,14 +75,17 @@ test('takeover authorization denies wrong role, missing grant, and another manag
   assert.equal(wrongRoleResponse.statusCode, 403);
 });
 
-test('takeover mutations require the server-verified grant on every manager write path', () => {
+test('manager write paths attach optional verified grants and central service distinguishes ownership from takeover', () => {
   const logs = read('../routes/logs.js');
   const cycles = read('../routes/cropCycles.js');
   const operations = read('../services/cropCycleOperations.js');
   assert.equal((logs.match(/attachTakeoverAuthorization/g) || []).length, 4);
   assert.equal((cycles.match(/attachTakeoverAuthorization/g) || []).length, 4);
-  assert.match(operations, /user\.takeoverGrant\.fieldId !== normalizedFieldId/);
-  assert.match(operations, /user\.takeoverGrant\.actorId !== identity\.actorId/);
+  assert.match(operations, /operationAuthorization\(user/);
+  assert.match(operations, /TAKEOVER_AUTHORIZATION_REQUIRED/);
+  const middleware = read('../middleware/takeoverAuthorization.js');
+  assert.match(middleware, /if \(!rawGrant\) return next\(\)/);
+  assert.match(middleware, /verifyTakeoverGrant/);
 });
 
 test('Firestore read rules enforce operational scope and exclude Super Admin from agriculture', () => {
@@ -115,8 +118,8 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   const home = read('../../mobile/src/screens/HomeScreen.js');
   const operationsView = read('../../web/react-app/src/views/operations/OperationsView.jsx');
   const managerDashboard = read('../../web/react-app/src/views/dashboard/FarmManagerDashboard.jsx');
-  assert.match(fieldOps, /isFullyCompleted && activeRole === 'Member Farmer'/);
-  assert.doesNotMatch(fieldOps, /SRA Admin Cycle Renewal|SRA Administrator, or authorized via Supervisor Takeover/);
+  assert.match(fieldOps, /isFullyCompleted && activeRole === 'Farm Member'/);
+  assert.doesNotMatch(fieldOps, /SRA Admin Cycle Renewal|SRA Admin, or authorized via Manager Takeover/);
   assert.doesNotMatch(analyticsComponents, /2650|9500|priceRecord\?\.sugarPrice\b|priceRecord\?\.molassesPrice\b/);
   assert.match(analyticsComponents, /No official price circular available/);
   assert.match(analyticsScreen, /newEffectiveDate/);
@@ -125,8 +128,8 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   assert.match(analyticsScreen, /newPriceSource/);
   assert.match(analyticsScreen, /m <= 0/);
   assert.match(analyticsScreen, /Incomplete Circular/);
-  assert.match(analyticsComponents, /per Lkg \(50-kg bag\)/);
-  assert.match(analyticsComponents, /per Metric Ton \(MT\)/);
+  assert.match(analyticsComponents, /\/Lkg/);
+  assert.match(analyticsComponents, /\/MT/);
   assert.match(home, /\/Lkg/);
   assert.match(home, /\/MT/);
   assert.doesNotMatch(home, /latest\.(?:price|molasses|week|date)\b/);

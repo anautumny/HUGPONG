@@ -57,6 +57,7 @@ export function selectCropFieldProgress({
   fields = [],
   cropCycles = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedSeason = 'ALL'
 }) {
   const cycleMap = new Map();
@@ -71,6 +72,7 @@ export function selectCropFieldProgress({
 
   const scopedFields = fields.filter(f => {
     if (selectedFarmId !== 'ALL' && f.blockFarmId !== selectedFarmId) return false;
+    if (selectedParcelId !== 'ALL' && f.id !== selectedParcelId) return false;
     const cycle = cycleForField(f);
     const cropYear = canonicalStoredCropYear(cycle?.cropYear || f.cropYear || '');
     if (selectedSeason !== 'ALL' && (!cycle || cropYear !== canonicalStoredCropYear(selectedSeason))) return false;
@@ -112,7 +114,7 @@ export function selectCropFieldProgress({
         blockFarmName: f.blockFarmName || f.blockFarmId,
         memberName: f.memberName || f.memberUserId || f.member,
         areaHa: ha,
-        variety: f.variety || 'VMC 84-524',
+        variety: String(cycle?.variety || f.variety || '').trim() || 'Not recorded yet',
         stageNumber: validStage
       });
     }
@@ -192,7 +194,7 @@ export function selectProductionCost({
       const costPerHa = ha > 0 ? Math.round(cost / ha) : 0;
       return {
         id: f.id,
-        name: `${f.id} · ${f.memberName || f.memberUserId || f.member || 'Member'}`,
+        name: `${f.id} · ${f.memberName || f.memberUserId || f.member || 'Farm Member'}`,
         type: 'field',
         totalCost: cost,
         areaHa: ha,
@@ -239,6 +241,7 @@ export function selectOperationalCostBreakdown({
   operations = [],
   fields = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedPeriod = 'ALL'
 }) {
   const fieldMap = new Map(fields.map(f => [f.id, f]));
@@ -269,6 +272,7 @@ export function selectOperationalCostBreakdown({
       const field = fieldMap.get(op.fieldId);
       if (!field || field.blockFarmId !== selectedFarmId) return;
     }
+    if (selectedParcelId !== 'ALL' && op.fieldId !== selectedParcelId) return;
 
     const catKey = String(op.category || 'prep').toLowerCase();
     const entry = catMap.get(catKey) || catMap.get('prep');
@@ -304,6 +308,7 @@ export function selectFarmOperationsAnalytics({
   operations = [],
   fields = [],
   selectedFarmId = 'ALL',
+  selectedParcelId = 'ALL',
   selectedPeriod = 'ALL'
 }) {
   const fieldMap = new Map(fields.map(f => [f.id, f]));
@@ -326,6 +331,7 @@ export function selectFarmOperationsAnalytics({
       const field = fieldMap.get(op.fieldId);
       if (!field || field.blockFarmId !== selectedFarmId) return;
     }
+    if (selectedParcelId !== 'ALL' && op.fieldId !== selectedParcelId) return;
 
     totalOps += 1;
     totalPeopleCount += Number(op.peopleCount || op.people || 0);

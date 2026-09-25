@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { QrCode, Upload, ShieldCheck, AlertCircle, Search } from 'lucide-react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
-import { extractAuditHash, decodeQRCodeFromImage } from '../../services/auditService';
+import { decodeQRCodeFromImage, verifyAuditQr, importAuditQr } from '../../services/auditService';
 
 export default function QRVerifierPanel({
   reports = [],
@@ -14,43 +14,25 @@ export default function QRVerifierPanel({
   const [feedback, setFeedback] = useState(null); // { type: 'success'|'error'|'info', message: string }
   const fileInputRef = useRef(null);
 
-  const performVerification = (rawInput) => {
-    const code = extractAuditHash(rawInput);
-    if (!code) {
-      setFeedback({
-        type: 'error',
-        message: 'Invalid verification code. Please enter a valid audit hash (e.g. HUG-202609-...) or report ID.'
-      });
-      return;
-    }
-
+  const performVerification = async (rawInput) => {
     setIsProcessing(true);
-    setFeedback({ type: 'info', message: 'Verifying cryptographic audit hash signature...' });
-
-    setTimeout(() => {
+    setFeedback({ type: 'info', message: 'Verifying audit identity and integrity...' });
+    try {
+      const verified = await verifyAuditQr(rawInput);
+      const imported = verified.data.alreadyImported ? verified : await importAuditQr(rawInput);
+      const report = imported.data.report;
+      setFeedback({
+        type: 'success',
+        message: imported.data.alreadyImported
+          ? 'Audit Already Imported. The existing HUGPONG record has been opened.'
+          : 'Integrity verified. The audit is now in the SRA Audit Inbox.'
+      });
+      onSelectReport?.(report);
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message || 'The QR audit could not be verified.' });
+    } finally {
       setIsProcessing(false);
-      const matched = reports.find(r =>
-        (r.qrHash && r.qrHash.toUpperCase() === code) ||
-        (r.qrSignature && r.qrSignature.toUpperCase() === code) ||
-        (r.reportId && r.reportId.toUpperCase() === code) ||
-        (r.id && r.id.toUpperCase() === code)
-      );
-
-      if (matched) {
-        setFeedback({
-          type: 'success',
-          message: `Audit record verified: ${matched.period || matched.month} (${matched.status === 'CERTIFIED' ? 'Certified' : 'Pending Certification'}).`
-        });
-        if (onSelectReport) {
-          onSelectReport(matched);
-        }
-      } else {
-        setFeedback({
-          type: 'error',
-          message: `Audit record not found for code "${code}". No matching compiled report was found in the repository.`
-        });
-      }
-    }, 350);
+    }
   };
 
   const handleManualSubmit = (e) => {
@@ -71,10 +53,9 @@ export default function QRVerifierPanel({
 
     try {
       const rawText = await decodeQRCodeFromImage(file);
-      const code = extractAuditHash(rawText) || rawText;
-      setInputCode(code);
-      setFeedback({ type: 'info', message: `QR Code decoded: ${code}` });
-      performVerification(code);
+      setInputCode(rawText);
+      setFeedback({ type: 'info', message: 'QR decoded. Checking authoritative audit integrity...' });
+      await performVerification(rawText);
     } catch (err) {
       setFeedback({
         type: 'error',
@@ -98,7 +79,7 @@ export default function QRVerifierPanel({
           </h3>
         </div>
         <p className="text-xs text-hug-muted leading-relaxed">
-          Farmers compile certified field operation logs into an encrypted QR dossier. Verify by uploading a photo / screenshot, or entering the audit hash code.
+          Scan or upload a compiled HUGPONG audit package. Decoding, integrity verification, SRA review, and certification remain separate states.
         </p>
       </div>
 
@@ -135,15 +116,15 @@ export default function QRVerifierPanel({
       <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
         <div>
           <label htmlFor="manual-qr-input" className="block text-xs font-semibold text-hug-text mb-1.5">
-            Audit Hash Code
+            Audit QR Package
           </label>
           <Input
             id="manual-qr-input"
             type="text"
             value={inputCode}
-            onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-            placeholder="e.g. HUG-202609-A3F9"
-            className="font-mono uppercase tracking-wider text-sm"
+            onChange={(e) => setInputCode(e.target.value)}
+            placeholder="Paste the HUGPONG audit QR payload"
+            className="font-mono text-xs"
             disabled={isProcessing}
           />
         </div>
@@ -157,7 +138,7 @@ export default function QRVerifierPanel({
           loadingText="Verifying code..."
           icon={Search}
         >
-          Verify Audit Code
+          Verify / Import Audit
         </Button>
       </form>
 

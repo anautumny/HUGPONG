@@ -20,7 +20,6 @@ export default function UsersView() {
   const [users, setUsers] = useState([]);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [blockFarms, setBlockFarms] = useState([]);
-  const [fields, setFields] = useState([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -56,7 +55,6 @@ export default function UsersView() {
       user,
       onUpdate: (data) => {
         setBlockFarms(data.blockFarms || []);
-        setFields(data.fields || []);
       }
     });
 
@@ -114,8 +112,8 @@ export default function UsersView() {
     if (isFarmManager) {
       return {
         badge: 'Cooperative Management',
-        title: 'Member Farmer Directory',
-        subtitle: 'Manage and onboard registered cooperative member farmers and plot allocations.'
+        title: 'Farm Member Directory',
+        subtitle: 'Manage and onboard registered cooperative Farm Members and field allocations.'
       };
     } else if (isSraAdmin) {
       return {
@@ -127,7 +125,7 @@ export default function UsersView() {
       return {
         badge: 'Central Administration',
         title: 'System User & Credentials Directory',
-        subtitle: 'Global personnel directory across Super Admin, SRA Admin, Farm Managers, and Member Farmers.'
+        subtitle: 'Global personnel directory across Super Admin, SRA Admin, Farm Managers, and Farm Members.'
       };
     }
   };
@@ -162,7 +160,7 @@ export default function UsersView() {
             onClick={handleOpenCreate}
             icon={UserPlus}
           >
-            {isFarmManager ? 'Onboard Member' : 'Provision Personnel'}
+            {isFarmManager ? 'Onboard Farm Member' : 'Provision Personnel'}
           </Button>
         </div>
       </div>
@@ -217,8 +215,6 @@ export default function UsersView() {
       {activeTab === 'directory' ? (
         <UserTable
           users={users}
-          blockFarms={blockFarms}
-          fields={fields}
           isLoading={isLoading}
           currentUser={user}
           onEditUser={handleEditUser}

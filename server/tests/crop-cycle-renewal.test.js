@@ -132,9 +132,9 @@ function operation(overrides = {}) {
     cycleId: OLD_CYCLE_ID,
     submittedByUserId: USER.employeeId,
     submissionSource: 'MEMBER',
-    operationDefinitionId: 'OP-LAND-PREP',
+    operationDefinitionId: 'SRA-02',
     operationName: 'Land Preparation',
-    category: 'LAND_PREPARATION',
+    category: 'prep',
     stageNumber: 1,
     performedOn: '2026-09-16',
     areaHa: 1,
@@ -185,7 +185,7 @@ function database() {
     },
     [COLLECTIONS.OPERATION_LOGS]: {
       'LOG-A': operation(),
-      'LOG-B': operation({ operationDefinitionId: 'OP-WEED', operationName: 'Weeding' }),
+      'LOG-B': operation({ operationDefinitionId: 'SRA-08', operationName: 'Weeding Operations (Hilamon & Herbicides)', category: 'weed', stageNumber: 4 }),
       'LOG-ALREADY-ARCHIVED': operation({
         status: 'ARCHIVED',
         archivedAt: '2026-09-15T08:00:00.000Z',
@@ -394,7 +394,7 @@ test('new operations receive server-derived lifecycle snapshots and discard clie
   assert.equal(result.record.cycleId, OLD_CYCLE_ID);
   assert.equal(result.record.blockFarmId, 'BLK-TEST-001');
   assert.equal(result.record.cropYearCycle, '2025-2026');
-  assert.equal(result.record.stageNumberAtRecord, 6);
+  assert.equal(result.record.stageNumberAtRecord, 1);
   assert.equal(result.record.photoEvidence, null);
 });
 
@@ -410,6 +410,109 @@ test('operations before and after rollover remain linked to their original Crop 
   assert.equal(created.record.cycleId, NEW_CYCLE_ID);
   assert.equal(created.record.cropYearCycle, '2026-2027');
   assert.equal(created.record.stageNumberAtRecord, 1);
+});
+
+test('server rejects invalid stage-operation combinations', async () => {
+  const db = database();
+  await assert.rejects(
+    createOperationRecord(db, {
+      id: 'LOG-WRONG-STAGE',
+      ...operation({ operationDefinitionId: 'SRA-03', operationName: 'Client supplied name', category: 'plant', stageNumber: 3, variety: 'PHIL 2006-2289' })
+    }, USER, NOW),
+    error => error.status === 400 && error.data?.code === 'INVALID_STAGE_OPERATION'
+  );
+  assert.equal(db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-WRONG-STAGE'), undefined);
+});
+
+test('Manager Takeover accepts valid historical-stage pairs and rejects mismatches', async () => {
+  const manager = {
+    employeeId: '03000001',
+    role: 'FARM_MANAGER',
+    takeoverGrant: { actorId: '03000001', fieldId: FIELD_ID }
+  };
+  const db = database();
+  const created = await createOperationRecord(db, {
+    id: 'LOG-TAKEOVER-STAGE-5',
+    ...operation({ operationDefinitionId: 'SRA-09', operationName: 'Ignored', category: 'fert', stageNumber: 5 })
+  }, manager, NOW);
+  assert.equal(created.record.stageNumberAtRecord, 5);
+  assert.equal(created.record.submissionSource, 'MANAGER_TAKEOVER');
+
+  await assert.rejects(
+    createOperationRecord(db, {
+      id: 'LOG-TAKEOVER-WRONG-STAGE',
+      ...operation({ operationDefinitionId: 'SRA-09', operationName: 'Ignored', category: 'fert', stageNumber: 4 })
+    }, manager, NOW),
+    error => error.data?.code === 'INVALID_STAGE_OPERATION'
+  );
+});
+
+test('Farm Manager records on their own assigned field without a takeover grant', async () => {
+  const manager = { employeeId: '03000001', role: 'FARM_MANAGER' };
+  const db = database();
+  db.collections.get(COLLECTIONS.FIELDS).get(FIELD_ID).memberUserId = manager.employeeId;
+  const created = await createOperationRecord(db, {
+    id: 'LOG-MANAGER-OWN-FIELD',
+    ...operation({ operationDefinitionId: 'SRA-02', stageNumber: 1 })
+  }, manager, NOW);
+  assert.equal(created.record.submittedByUserId, manager.employeeId);
+  assert.equal(created.record.submissionSource, 'FIELD_OWNER');
+});
+
+test('Planting variety is required and atomically owned by operation and Crop Year Cycle', async () => {
+  const db = database();
+  await assert.rejects(
+    createOperationRecord(db, {
+      id: 'LOG-PLANTING-NO-VARIETY',
+      ...operation({ operationDefinitionId: 'SRA-03', operationName: 'Ignored', category: 'plant', stageNumber: 2 })
+    }, USER, NOW),
+    /variety is required/
+  );
+  await assert.rejects(
+    createOperationRecord(database(), {
+      id: 'LOG-PLANTING-UNKNOWN-VARIETY',
+      ...operation({ operationDefinitionId: 'SRA-03', stageNumber: 2, variety: 'Other / Local High Yield' })
+    }, USER, NOW),
+    error => error.data?.code === 'INVALID_SUGARCANE_VARIETY'
+  );
+
+  const created = await createOperationRecord(db, {
+    id: 'LOG-PLANTING',
+    ...operation({ operationDefinitionId: 'SRA-03', operationName: 'Ignored client title', category: 'wrong', stageNumber: 2, variety: 'PHIL 2006-2289' })
+  }, USER, NOW);
+  assert.equal(created.record.operationName, 'Cost of Planting Material (Seedcane acquisition)');
+  assert.equal(created.record.category, 'plant');
+  assert.equal(created.record.variety, 'PHIL 2006-2289');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).variety, 'PHIL 2006-2289');
+});
+
+test('variety correction uses amendment history and does not rewrite a later cycle', async () => {
+  const db = database();
+  await createOperationRecord(db, {
+    id: 'LOG-PLANTING',
+    ...operation({ operationDefinitionId: 'SRA-04', operationName: 'Planting', category: 'plant', stageNumber: 2, variety: 'PHIL 2006-2289' })
+  }, USER, NOW);
+  await amendOperationRecord(db, 'LOG-PLANTING', { variety: 'PHIL 99-1793' }, {
+    amendmentId: 'AMD-VARIETY',
+    reason: 'Correct seedcane variety',
+    changes: { variety: { before: 'PHIL 2006-2289', after: 'PHIL 99-1793' } }
+  }, USER, '2026-09-17T08:01:00.000Z');
+  assert.equal(db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-PLANTING').variety, 'PHIL 99-1793');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).variety, 'PHIL 99-1793');
+
+  await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, '2026-09-17T08:02:00.000Z');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).variety, 'PHIL 99-1793');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, NEW_CYCLE_ID).variety, '');
+});
+
+test('non-Planting operations cannot carry a sugarcane variety', async () => {
+  await assert.rejects(
+    createOperationRecord(database(), {
+      id: 'LOG-NON-PLANT-VARIETY',
+      ...operation({ variety: 'PHIL 2006-2289' })
+    }, USER, NOW),
+    /only for Planting-stage operations/
+  );
 });
 
 test('field with no active cycle can transactionally create one using the server year', async () => {

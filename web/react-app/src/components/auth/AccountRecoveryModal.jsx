@@ -32,7 +32,7 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
           </div>
           <div>
             <h3 className="text-base font-extrabold text-hug-text">Account Recovery &amp; Lost SIM</h3>
-            <p className="text-xs text-hug-muted">HUGPONG Security &amp; Member Assistance</p>
+            <p className="text-xs text-hug-muted">HUGPONG Security &amp; Farm Member Assistance</p>
           </div>
         </div>
 
@@ -67,7 +67,7 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
               Because HUGPONG protects official land tenure, sugarcane allocations, and financial subsidies, online password recovery requires verified identity. Please visit your:
             </p>
             <ul className="list-disc list-inside space-y-1 text-[11px] font-medium text-hug-text2 pl-1">
-              <li><strong>Assigned Block Farm Manager</strong></li>
+              <li><strong>Assigned Farm Manager</strong></li>
               <li><strong>SRA District Regulatory Officer</strong></li>
             </ul>
             <p className="text-[11px] text-hug-muted">

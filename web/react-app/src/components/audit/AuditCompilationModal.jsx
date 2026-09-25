@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileCheck2,
   Calendar,
@@ -10,9 +10,8 @@ import {
 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
-import Select from '../ui/Select';
 import QRCodeView from './QRCodeView';
-import { compileAuditReport } from '../../services/auditService';
+import { compileAuditReport, fetchNextAuditPeriod, createAuditQrPayload } from '../../services/auditService';
 
 export default function AuditCompilationModal({
   isOpen = false,
@@ -33,42 +32,29 @@ export default function AuditCompilationModal({
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
   const [compiledResult, setCompiledResult] = useState(null);
+  const [periodInfo, setPeriodInfo] = useState(null);
+  const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
 
-  // Generate period options (Current month + last 5 months)
-  const periodOptions = useMemo(() => {
-    const list = [];
-    const now = new Date();
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      list.push({
-        value: val,
-        label: i === 0 ? `${label} (Current Month)` : label
-      });
-    }
-    return list;
-  }, []);
+  useEffect(() => {
+    if (!isOpen || !blockFarm?.id) return;
+    let active = true;
+    setIsLoadingPeriod(true);
+    fetchNextAuditPeriod(blockFarm.id)
+      .then(response => {
+        if (!active || !response.data) return;
+        setSelectedPeriod(response.data.periodKey);
+        setPeriodInfo(response.data);
+      })
+      .catch(error => active && setCompileError(error.message || 'Unable to determine the reporting period.'))
+      .finally(() => active && setIsLoadingPeriod(false));
+    return () => { active = false; };
+  }, [isOpen, blockFarm?.id]);
 
   // Pre-flight calculation for eligible logs
   const farmFieldIds = useMemo(() => {
     if (!blockFarm?.id) return new Set();
     return new Set(fields.filter(f => f.blockFarmId === blockFarm.id).map(f => f.id));
   }, [blockFarm, fields]);
-
-  // Already compiled log IDs for this farm and period
-  const alreadyCompiledIds = useMemo(() => {
-    if (!blockFarm?.id) return new Set();
-    const periodReports = existingReports.filter(
-      r => r.blockFarmId === blockFarm.id && r.period === selectedPeriod
-    );
-    const ids = new Set();
-    periodReports.forEach(r => {
-      const logs = Array.isArray(r.operationSnapshots) ? r.operationSnapshots : [];
-      logs.forEach(item => ids.add(item.operationLogId || item.id));
-    });
-    return ids;
-  }, [blockFarm, existingReports, selectedPeriod]);
 
   // Active logs belonging to this block farm and matching the selected period
   const matchingMonthLogs = useMemo(() => {
@@ -80,10 +66,7 @@ export default function AuditCompilationModal({
     });
   }, [operations, farmFieldIds, selectedPeriod]);
 
-  // Filter out any logs that were already submitted in a previous audit report for this period
-  const eligibleLogs = useMemo(() => {
-    return matchingMonthLogs.filter(log => !alreadyCompiledIds.has(log.id));
-  }, [matchingMonthLogs, alreadyCompiledIds]);
+  const eligibleLogs = matchingMonthLogs;
 
   // Compute pre-flight metrics
   const totalExpenditure = useMemo(() => {
@@ -131,7 +114,7 @@ export default function AuditCompilationModal({
     try {
       const response = await compileAuditReport({
         blockFarmId: blockFarm.id,
-        period: selectedPeriod,
+        periodKey: selectedPeriod,
         operationLogIds: eligibleLogs.map(l => l.id)
       });
 
@@ -166,7 +149,7 @@ export default function AuditCompilationModal({
         variant="primary"
         size="md"
         onClick={handleCompile}
-        disabled={isCompiling || eligibleLogs.length === 0}
+        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0}
         isLoading={isCompiling}
         loadingText="Compiling report..."
         icon={FileCheck2}
@@ -182,7 +165,7 @@ export default function AuditCompilationModal({
       onClick={handleClose}
       icon={ArrowRight}
     >
-      Done / View in Audit Queue
+      Done / Review Compiled Audit
     </Button>
   );
 
@@ -205,19 +188,16 @@ export default function AuditCompilationModal({
                 Active Crop Year Cycle Audit Batch
               </span>
               <p className="text-[11px] text-hug-muted mt-0.5">
-                Automatically bundles all uncompiled ACTIVE operations into an immutable SRA QR dossier.
+                Automatically prepares the oldest unresolved monthly Block Farm audit.
               </p>
             </div>
 
-            <div className="w-full sm:w-56 shrink-0">
-              <label htmlFor="compile-period-select" className="sr-only">Report Month</label>
-              <Select
-                id="compile-period-select"
-                value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value)}
-                options={periodOptions}
-                disabled={isCompiling}
-              />
+            <div className="w-full sm:w-56 shrink-0 rounded-xl border border-border bg-white dark:bg-surface px-3 py-2">
+              <span className="block text-[10px] uppercase font-bold text-hug-muted">Reporting Period</span>
+              <span className="block text-sm font-bold text-hug-text">
+                {isLoadingPeriod ? 'Detecting...' : new Date(`${selectedPeriod}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </span>
+              {periodInfo?.isCarryover && <span className="text-[10px] font-semibold text-amber-700">Oldest unresolved month</span>}
             </div>
           </div>
 
@@ -233,7 +213,7 @@ export default function AuditCompilationModal({
           <div className="px-3 py-2 rounded-xl bg-primary-bg/30 dark:bg-primary/10 border border-primary/20 text-hug-text flex items-center justify-between">
             <span className="font-semibold text-[11px]">
               {eligibleLogs.length > 0
-                ? `${eligibleLogs.length} ACTIVE operation record(s) ready for the ${selectedPeriod} audit report.`
+                ? `${eligibleLogs.length} synchronized operation record(s) ready for the ${selectedPeriod} audit report.`
                 : matchingMonthLogs.length > 0
                 ? `All operations for ${selectedPeriod} are already included in an audit report.`
                 : `No ACTIVE operations are recorded for ${selectedPeriod}.`}
@@ -258,7 +238,7 @@ export default function AuditCompilationModal({
               <span className="text-xs font-black text-hug-text block mt-0.5">
                 {totalAreaHa.toFixed(2)} Ha
               </span>
-              <span className="text-[10px] text-hug-muted">{auditedPlotsCount} Member Plots</span>
+              <span className="text-[10px] text-hug-muted">{auditedPlotsCount} Farm Member Fields</span>
             </div>
 
             <div className="p-3 bg-bg rounded-xl border border-border">
@@ -327,7 +307,7 @@ export default function AuditCompilationModal({
               <strong className="font-bold block mb-0.5">
                 Official Regulatory Submission Notice:
               </strong>
-              Compiling this monthly package produces a cryptographically sealed SRA QR envelope, generates an immutable audit hash, and sends the dossier directly to the <strong>SRA District Cloud Audit Queue</strong> for regulatory certification.
+              Compiling creates an immutable monthly snapshot for review. It is <strong>not submitted</strong> until you choose Submit to SRA.
             </div>
           </div>
         </div>
@@ -342,14 +322,14 @@ export default function AuditCompilationModal({
               Monthly Operations Audit Compiled!
             </h4>
             <p className="text-xs text-hug-muted mt-0.5 max-w-sm">
-              Package sealed with cryptographic signature and queued for SRA District review.
+              Package sealed and saved. Review it before submitting to SRA.
             </p>
           </div>
 
           {/* QR Code and Hash Envelope */}
           <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-xs shadow-2xs">
             <QRCodeView
-              value={compiledResult?.qrHash || compiledResult?.id}
+              value={compiledResult ? createAuditQrPayload(compiledResult) : ''}
               size={150}
               className="p-2"
             />

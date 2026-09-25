@@ -94,7 +94,7 @@ test('a server-issued bearer authenticates but cannot cross a role guard', () =>
   const user = {
     employeeId: '04000001',
     name: 'Member',
-    role: 'Member Farmer',
+    role: 'Farm Member',
     roleKey: 'member',
     phoneVerified: true,
     requiresPasswordChange: false
@@ -124,7 +124,7 @@ test('web role routing uses exact canonical mappings without substring collision
     'sra-admin': 'admin',
     'Farm Manager': 'manager',
     FARM_MANAGER: 'manager',
-    'Member Farmer': 'member',
+    'Farm Member': 'member',
     MEMBER_FARMER: 'member'
   };
   for (const [input, expected] of Object.entries(aliases)) {
@@ -356,7 +356,7 @@ test('role platforms are enforced by auth for both web and mobile', () => {
   );
   assert.match(
     authRouteSource,
-    /Member Farmer accounts are restricted to the HUGPONG mobile application\./,
+    /Farm Member accounts are restricted to the HUGPONG mobile application\./,
     'auth routes must reject MEMBER_FARMER on the web'
   );
 

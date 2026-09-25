@@ -1,73 +1,38 @@
-import { NativeModules, Platform } from 'react-native';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth } from '../firebase/config';
 import { STORAGE_KEYS, getItem, saveItem } from './storageService';
+import { friendlyErrorMessage } from '../domain/presentationContract';
+import {
+  API_BASE_URL,
+  API_ENVIRONMENT,
+  API_REQUEST_TIMEOUT_MS,
+  getApiBaseUrl,
+  logApiDiagnostic
+} from '../config/apiConfig';
 
-const API_REQUEST_TIMEOUT_MS = 6000;
-
-function normalizeOrigin(value) {
-  const origin = String(value || '').trim().replace(/\/$/, '');
-  return /^https?:\/\//i.test(origin) ? origin : null;
-}
-
-function resolveMetroApiUrl() {
-  const scriptUrl = NativeModules?.SourceCode?.scriptURL;
-  const match = String(scriptUrl || '').match(/^https?:\/\/([^/:]+)(?::\d+)?\//i);
-  return match?.[1] ? `http://${match[1]}:3000` : null;
-}
-
-function resolveDefaultApiUrl() {
-  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
-  if (envUrl) {
-    const trimmed = String(envUrl).replace(/\/$/, '');
-    if (Platform.OS === 'android' && (trimmed === 'http://localhost:3000' || trimmed === 'http://127.0.0.1:3000')) {
-      return 'http://10.0.2.2:3000';
-    }
-    return trimmed;
+async function fetchFromApi(path, options = {}) {
+  const origin = getApiBaseUrl();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${origin}${path}`, { ...options, signal: controller.signal });
+  } catch (cause) {
+    logApiDiagnostic(`${options.method || 'GET'} ${path} could not reach ${origin}.`, cause);
+    const error = new Error('Unable to connect to HUGPONG. Check your internet connection and try again.');
+    error.code = cause?.name === 'AbortError' ? 'API_REQUEST_TIMEOUT' : 'API_UNREACHABLE';
+    error.isNetworkError = true;
+    if (API_ENVIRONMENT === 'development') error.cause = cause;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 }
 
-export const API_BASE_URL = resolveDefaultApiUrl();
-
-function apiOriginCandidates() {
-  const candidates = [
-    resolveMetroApiUrl(),
-    API_BASE_URL,
-    Platform.OS === 'android' ? 'http://10.0.2.2:3000' : null,
-    'http://localhost:3000'
-  ].map(normalizeOrigin).filter(Boolean);
-  return [...new Set(candidates)];
-}
-
-async function fetchWithHostFallback(path, options) {
-  const fetchWithTimeout = async (origin) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
-    try {
-      return await fetch(`${origin}${path}`, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  const origins = apiOriginCandidates();
-  let lastError = null;
-  for (const origin of origins) {
-    try {
-      return await fetchWithTimeout(origin);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  const error = new Error(`Could not reach the HUGPONG server. Tried ${origins.join(', ')}. Check that the server is running and the device can reach this computer.`);
-  error.cause = lastError;
-  throw error;
-}
+export { API_BASE_URL };
 
 export async function probeServerConnectivity() {
   try {
-    const response = await fetchWithHostFallback('/health', {
+    const response = await fetchFromApi('/health', {
       method: 'GET',
       headers: { 'x-client-platform': 'mobile' }
     });
@@ -80,9 +45,11 @@ export async function probeServerConnectivity() {
 async function parseResponse(response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.success) {
-    const error = new Error(data.error || `Authentication request failed (${response.status}).`);
+    const errorCode = data.code || data.data?.code || '';
+    const error = new Error(friendlyErrorMessage(errorCode, data.error || `Request failed (${response.status}).`));
     error.status = response.status;
     error.data = data.data;
+    error.code = errorCode;
     throw error;
   }
   return data;
@@ -94,7 +61,7 @@ export async function signInToFirebase(customToken) {
 }
 
 export async function publicAuthRequest(path, body) {
-  const response = await fetchWithHostFallback(path, {
+  const response = await fetchFromApi(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -108,7 +75,7 @@ export async function publicAuthRequest(path, body) {
 export async function authenticatedRequest(path, options = {}) {
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
   if (!token) throw new Error('No authenticated server session is available.');
-  const response = await fetchWithHostFallback(path, {
+  const response = await fetchFromApi(path, {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -145,7 +112,7 @@ export async function verifyPasswordWithServer(password, authorization = {}) {
 export async function refreshMobileSessionFromFirebase() {
   if (!auth?.currentUser) throw new Error('Firebase authentication must be restored before synchronization.');
   const firebaseIdToken = await auth.currentUser.getIdToken(true);
-  const response = await fetchWithHostFallback('/auth/mobile-session', {
+  const response = await fetchFromApi('/auth/mobile-session', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

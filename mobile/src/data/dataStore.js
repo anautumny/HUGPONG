@@ -1,8 +1,9 @@
-import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema } from '../services/storageService';
+import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
 import { publishTerminalTelemetry } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
+import { AppState } from 'react-native';
 import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConnectivity } from '../services/networkService';
 import {
   loginWithServer,
@@ -19,6 +20,7 @@ import {
 import {
   ROLES,
   canonicalRole,
+  roleLabel,
   createCycleId,
   fromAuditReportDocument,
   fromBlockFarmDocument,
@@ -34,7 +36,7 @@ import {
   toSupportTicketDocument,
   formatCropYear
 } from './firestoreSchema';
-import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations } from '../domain/operationCatalogue';
+import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations, getOperationDefinition } from '../domain/operationCatalogue';
 import { SUGARCANE_STAGES } from '../constants/cropStages';
 import {
   cleanDataForFirestore,
@@ -54,6 +56,9 @@ export {
 } from '../utils/dataHelpers';
 
 export const commitExplicitMutation = async (type, payload, options = {}) => {
+  if (type === 'audit_certification' && !getNetworkStatus()) {
+    throw new Error('Final SRA certification requires a live connection. You may review the QR package offline and certify after reconnecting.');
+  }
   if (options.takeoverGrant && !getNetworkStatus()) {
     throw new Error('Farm Manager Takeover changes require a live server connection and cannot be stored for later replay.');
   }
@@ -84,6 +89,14 @@ const stripCredentialFields = (value = {}) => {
     safe[key] = fieldValue;
   });
   return safe;
+};
+
+const normalizeSessionUser = (value = {}) => {
+  const safe = stripCredentialFields(value);
+  const normalizedRole = canonicalRole(safe.canonicalRole || safe.role || safe.roleKey);
+  return normalizedRole
+    ? { ...safe, canonicalRole: normalizedRole, role: roleLabel(normalizedRole) }
+    : safe;
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -172,7 +185,7 @@ export const resolveAssignmentRequest = (requestId, approved = true) => {
       const member = users.find(user => (user.id || user.employeeId) === req.memberUserId);
       if (!f || !member || canonicalRole(member.role) !== 'MEMBER_FARMER') {
         req.status = 'Rejected';
-        req.error = 'Assignment requires an existing field and Member Farmer.';
+        req.error = 'Assignment requires an existing field and Farm Member.';
         notifyDataUpdate();
         return req;
       }
@@ -196,8 +209,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
   if (!assignedFarm) return { success: false, message: 'Select an existing block farm before approving this registration.' };
 
-  // Determine plot ID & Hectares
-  const assignedPlotId = options.fieldId || applicant.fieldId || generateNextFieldId(assignedFarm.name, fields, blockFarms);
+  // The API creates the canonical Field ID after approval details are validated.
   const rawHa = options.area || applicant.area;
   const assignedHa = parseFloat(String(rawHa || '').replace(/[^0-9.]/g, ''));
   if (!Number.isFinite(assignedHa) || assignedHa <= 0) {
@@ -221,7 +233,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
       employeeId: empId,
       name: applicant.name,
       contact: cleanContact,
-      role: applicant.role || 'Member Farmer',
+      role: applicant.role || 'Farm Member',
       roleKey: 'member',
       status: 'Active',
       phoneVerified: true,
@@ -237,15 +249,12 @@ export const approvePendingRegistration = async (contact, options = {}) => {
 
   // Allocate through the canonical field writer so a new field and its first
   // crop cycle are persisted together with a stable currentCycleId.
-  const existingField = fields.find(f => f.id === assignedPlotId);
   const fieldResult = await saveFieldPlot({
-    ...(existingField || {}),
-    id: assignedPlotId,
     blockFarmId: assignedFarm.id,
     memberUserId: empId,
     ha: assignedHa,
-    status: existingField?.status || 'ACTIVE'
-  }, !existingField);
+    status: 'ACTIVE'
+  }, true);
   if (!fieldResult.success) {
     if (createdUser) users.splice(users.indexOf(createdUser), 1);
     if (existingUser && existingUserSnapshot) Object.assign(existingUser, existingUserSnapshot);
@@ -269,7 +278,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   await saveItem(STORAGE_KEYS.USERS, users);
 
   notifyDataUpdate();
-  return { success: true, applicant, fieldId: assignedPlotId };
+  return { success: true, applicant, fieldId: fieldResult.field.id };
 };
 
 export const rejectPendingRegistration = async (contact) => {
@@ -284,92 +293,6 @@ export const rejectPendingRegistration = async (contact) => {
 };
 
 /**
- * Unified Field ID Code Resolution and Auto-Generation (Synchronous Parity with Web)
- */
-export const extractFarmCodeFromName = (name) => {
-  if (!name) return '';
-  const clean = String(name).replace(/\b(block|farm|cooperative|coop|cluster|group|association)\b/gi, '').trim();
-  const words = clean.split(/[\s-_]+/).filter(Boolean);
-  if (words.length >= 2) {
-    return words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
-  } else if (words.length === 1) {
-    const word = words[0].toUpperCase();
-    if (word.length <= 4) return word;
-    if (word === 'NACAYAO') return 'NCY';
-    const vowelsRemoved = word.charAt(0) + word.slice(1).replace(/[AEIOU]/gi, '');
-    if (vowelsRemoved.length >= 3) return vowelsRemoved.slice(0, 3);
-    return word.slice(0, 3);
-  }
-  return String(name).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3) || 'FLD';
-};
-
-export const getFarmCode = (blockFarmInput, blockFarmsList = blockFarms) => {
-  const bfList = blockFarmsList || blockFarms || [];
-  if (!blockFarmInput) {
-    const defaultBf = Array.isArray(bfList) ? bfList[0] : null;
-    if (defaultBf) return getFarmCode(defaultBf, bfList);
-    return '';
-  }
-  let bf = (typeof blockFarmInput === 'object' && blockFarmInput !== null) ? blockFarmInput : null;
-  if (!bf && Array.isArray(bfList)) {
-    bf = bfList.find(b => b.name === blockFarmInput || b.id === blockFarmInput || b.code === blockFarmInput) || null;
-  }
-  
-  if (bf) {
-    if (bf.code) {
-      let c = String(bf.code).replace(/^BLK[-_]?/i, '').replace(/[-_]\d+$/, '').trim().toUpperCase();
-      if (c && !/^\d+$/.test(c)) return c;
-    }
-    if (bf.id) {
-      let c = String(bf.id).replace(/^BLK[-_]?/i, '').replace(/[-_]\d+$/, '').trim().toUpperCase();
-      if (c && !/^\d+$/.test(c)) return c;
-    }
-    if (bf.name) {
-      return extractFarmCodeFromName(bf.name);
-    }
-    if (bf.code) {
-      let c = String(bf.code).replace(/^BLK[-_]?/i, '').trim().toUpperCase();
-      if (c) return c;
-    }
-  }
-
-  if (typeof blockFarmInput === 'string' && blockFarmInput.trim()) {
-    return extractFarmCodeFromName(blockFarmInput);
-  }
-  return '';
-};
-
-export const generateNextFieldId = (blockFarmInput, existingFields = fields, blockFarmsList = blockFarms) => {
-  const fList = existingFields || fields || [];
-  const bfList = blockFarmsList || blockFarms || [];
-
-  const farmCode = getFarmCode(blockFarmInput, bfList);
-  const prefix = farmCode ? `FLD-${farmCode}` : 'FLD';
-
-  const matchingFields = (fList || []).filter(f => {
-    if (!f || !f.id) return false;
-    const fId = String(f.id).toUpperCase();
-    if (fId.startsWith(prefix + '-')) return true;
-    if (farmCode && (f.blockFarm === blockFarmInput || f.blockFarmId === blockFarmInput)) return true;
-    return false;
-  });
-
-  const existingNums = matchingFields
-    .map(f => {
-      const m = String(f.id || '').match(/(\d+)$/);
-      return m ? parseInt(m[1], 10) : null;
-    })
-    .filter(n => n !== null && !isNaN(n));
-
-  let nextNum = 1;
-  if (existingNums.length > 0) {
-    nextNum = Math.max(...existingNums) + 1;
-  }
-
-  return `${prefix}-${String(nextNum).padStart(3, '0')}`;
-};
-
-/**
  * Comprehensive Validation for Field Plots (Add & Edit)
  */
 export const validateFieldPlotData = (fieldData, isNew = false) => {
@@ -377,19 +300,16 @@ export const validateFieldPlotData = (fieldData, isNew = false) => {
     return { valid: false, error: 'INVALID_DATA', message: 'Field data is required.' };
   }
 
-  // 1. Field ID Validation
+  // Existing identities are required for edits. New identities come only from the API.
   const fieldId = String(fieldData.id || '').trim().toUpperCase();
-  if (!fieldId) {
+  if (!isNew && !fieldId) {
     return { valid: false, error: 'REQUIRED_FIELD_ID', message: 'Field ID is required.' };
   }
-  if (!/^[A-Za-z0-9_-]{3,25}$/.test(fieldId)) {
-    return { valid: false, error: 'INVALID_FIELD_ID_FORMAT', message: 'Field ID must be 3-25 alphanumeric characters (e.g., FLD-001).' };
+  if (!isNew && !/^[A-Za-z0-9_-]{3,80}$/.test(fieldId)) {
+    return { valid: false, error: 'INVALID_FIELD_ID_FORMAT', message: 'The existing Field ID is invalid.' };
   }
 
   const existingIdx = fields.findIndex(f => f.id.toUpperCase() === fieldId);
-  if (isNew && existingIdx >= 0) {
-    return { valid: false, error: 'FIELD_EXISTS', message: `Field ID "${fieldId}" already exists. Please use a unique Field ID.` };
-  }
   if (!isNew && existingIdx === -1) {
     return { valid: false, error: 'FIELD_NOT_FOUND', message: `Field plot "${fieldId}" does not exist in the database.` };
   }
@@ -410,11 +330,14 @@ export const validateFieldPlotData = (fieldData, isNew = false) => {
       return { 
         valid: false, 
         error: 'MEMBER_NOT_FOUND', 
-        message: `Member ID or Contact "${rawMemberId}" is not registered in the system. Please enter an existing Member ID (e.g., 04000001) or registered mobile number.` 
+        message: 'The selected Farm Member is no longer available. Refresh the authorized member list and select again.'
       };
     }
-    if (canonicalRole(matchedUser.role) !== 'MEMBER_FARMER') {
-      return { valid: false, error: 'INVALID_MEMBER_ROLE', message: 'The assigned user must have the Member Farmer role.' };
+    const ownerRole = canonicalRole(matchedUser.role);
+    const matchedUserId = matchedUser.employeeId || matchedUser.id;
+    const currentUserId = CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id;
+    if (ownerRole !== 'MEMBER_FARMER' && !(ownerRole === 'FARM_MANAGER' && matchedUserId === currentUserId)) {
+      return { valid: false, error: 'INVALID_MEMBER_ROLE', message: 'The field owner must be a Farm Member or the current Farm Manager.' };
     }
   }
 
@@ -432,7 +355,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   }
 
   const targetId = validation.sanitizedId;
-  const existingIdx = fields.findIndex(f => f.id.toUpperCase() === targetId);
+  const existingIdx = isNew ? -1 : fields.findIndex(f => f.id.toUpperCase() === targetId);
   const nowIso = new Date().toISOString();
   
   const currentF = existingIdx >= 0 ? fields[existingIdx] : {};
@@ -440,16 +363,64 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   if (!resolvedBlockFarmId || !blockFarms.some(farm => farm.id === resolvedBlockFarmId)) {
     return { success: false, error: 'BLOCK_FARM_NOT_FOUND', message: 'Select an existing block farm before saving the field.' };
   }
+
+  if (isNew && !getNetworkStatus()) {
+    return {
+      success: false,
+      error: 'ONLINE_ENROLLMENT_REQUIRED',
+      message: 'New Field enrollment requires a live connection so the server can issue its permanent ID.'
+    };
+  }
+
+  const rawMemberId = fieldData.memberUserId || fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
+  const isUnassigned = !rawMemberId || String(rawMemberId).trim().toLowerCase() === 'unassigned';
+  const matchedUser = !isUnassigned ? findUserByIdOrContact(rawMemberId) : null;
+
+  if (isNew) {
+    try {
+      const response = await authenticatedRequest('/api/fields', {
+        method: 'POST',
+        body: {
+          blockFarmId: resolvedBlockFarmId,
+          memberUserId: matchedUser ? (matchedUser.employeeId || matchedUser.id) : null,
+          areaHa: validation.parsedHa,
+          soilType: String(fieldData.soilType || '').trim(),
+          cropType: fieldData.cycleType || 'Plant Cane (New Plant)',
+          elapsedMonths: 0,
+          batchNumber: 1
+        }
+      });
+      const serverField = response?.data?.field;
+      const serverCycle = response?.data?.cycle;
+      if (!serverField?.id || !serverCycle?.id) throw new Error('The server did not return the enrolled Field identity.');
+      const authoritativeCycle = fromCycleDocument(serverCycle.id, serverCycle);
+      const authoritativeField = fromFieldDocument(serverField.id, serverField, serverCycle);
+      const farm = blockFarms.find(item => item.id === authoritativeField.blockFarmId);
+      const localField = {
+        ...authoritativeField,
+        blockFarm: farm?.name || '',
+        memberName: matchedUser?.name || 'Unassigned',
+        member: matchedUser?.name || 'Unassigned',
+        memberContact: matchedUser?.contact || matchedUser?.mobile || '',
+        synced: true,
+        lastSync: 'Just now'
+      };
+      fields.push(localField);
+      cropCycles.push(authoritativeCycle);
+      await saveItem(STORAGE_KEYS.FIELDS, fields);
+      notifyDataUpdate();
+      return { success: true, field: localField, cycle: authoritativeCycle };
+    } catch (error) {
+      return { success: false, error: 'SERVER_ENROLLMENT_REJECTED', message: error.message || 'The server rejected Field enrollment.' };
+    }
+  }
+
   const resolvedCurrentCycleId = String(fieldData.currentCycleId || currentF.currentCycleId || (isNew ? createCycleId(targetId, 1) : '')).trim().toUpperCase();
   if (!resolvedCurrentCycleId) {
     return { success: false, error: 'CURRENT_CYCLE_REQUIRED', message: 'The field must reference an existing current Crop Year Cycle.' };
   }
 
   // Resolve verified user if assigned
-  const rawMemberId = fieldData.memberUserId || fieldData.memberId || fieldData.userId || fieldData.memberContact || fieldData.member || fieldData.memberName;
-  const isUnassigned = !rawMemberId || String(rawMemberId).trim().toLowerCase() === 'unassigned';
-  const matchedUser = !isUnassigned ? findUserByIdOrContact(rawMemberId) : null;
-
   const resolvedMemberName = matchedUser ? matchedUser.name : 'Unassigned';
   const resolvedMemberId = matchedUser ? (matchedUser.employeeId || matchedUser.id) : '';
   const resolvedMemberContact = matchedUser ? (matchedUser.contact || matchedUser.mobile || '') : '';
@@ -476,7 +447,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
     batchMonth: fieldData.batchMonth || currentF.batchMonth || 1,
     synced: fieldData.synced !== undefined ? fieldData.synced : true,
     lastSync: fieldData.lastSync || currentF.lastSync || 'Just now',
-    variety: fieldData.variety || currentF.variety || '',
+    ...(currentF.variety ? { variety: currentF.variety } : {}),
     soilType: fieldData.soilType || currentF.soilType || '',
     createdAt: fieldData.createdAt || currentF.createdAt || nowIso,
     updatedAt: nowIso,
@@ -497,18 +468,11 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   const fieldMutationPayload = {
     id: formattedField.id,
     ...canonicalField,
-    isNew,
-    ...(isNew ? {
-      cropType: formattedField.cycleType,
-      cropYear: formattedField.cropYear,
-      currentStageNumber: formattedField.stageNumber,
-      elapsedMonths: formattedField.month,
-      batchNumber: formattedField.batchMonth
-    } : {})
+    isNew: false
   };
   try {
     const outcome = await commitExplicitMutation('field_upsert', fieldMutationPayload, {
-      baseVersion: isNew ? null : (currentF.updatedAt || null)
+      baseVersion: currentF.updatedAt || null
     });
     if (outcome.response?.data?.cycle) {
       const authoritativeCycle = fromCycleDocument(outcome.response.data.cycle.id, outcome.response.data.cycle);
@@ -739,13 +703,13 @@ export const restoreSessionFromToken = async () => {
     // Offline restoration trusts only a session previously issued after a
     // successful server login. Online validation refreshes both server and
     // Firebase credentials without exposing password material to the client.
-    CURRENT_SESSION = { ...session, lastActiveAt: Date.now() };
+    CURRENT_SESSION = { ...normalizeSessionUser(session), lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     notify();
     if (getNetworkStatus()) {
       try {
         const refreshed = await refreshMobileSessionFromFirebase();
-        CURRENT_SESSION = { ...refreshed.user, lastActiveAt: Date.now() };
+        CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       } catch (error) {
         if (error.status === 401) {
@@ -775,6 +739,7 @@ export const restoreSessionFromToken = async () => {
 export const logoutUser = async () => {
   stopActiveCloudSync();
   await logoutFromServer();
+  draftLogs.length = 0;
   CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
   await clearAuthSessionStorage();
   notify();
@@ -790,8 +755,11 @@ export const authenticateUser = async (contactOrId, password) => {
       await logoutFromServer();
       return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
-    CURRENT_SESSION = { ...result.user, lastActiveAt: Date.now() };
+    CURRENT_SESSION = { ...normalizeSessionUser(result.user), lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    draftLogs.length = 0;
+    const scopedDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), []);
+    if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(draft => draftLogs.push(draft));
     await restartCloudSyncIfReady();
     notify();
     if (getNetworkStatus() && getOutboxCount() > 0) {
@@ -799,7 +767,17 @@ export const authenticateUser = async (contactOrId, password) => {
     }
     return { ...result, requiresPasswordChange: result.user?.requiresPasswordChange === true };
   } catch (error) {
-    return { success: false, error: error.message || 'Authentication service is unavailable.' };
+    return {
+      success: false,
+      error: error.message || 'Authentication service is unavailable.',
+      code: error.code || null,
+      status: error.status || null,
+      isNetworkError: error.isNetworkError === true || [
+        'API_CONFIGURATION_ERROR',
+        'API_REQUEST_TIMEOUT',
+        'API_UNREACHABLE'
+      ].includes(error.code) || Number(error.status) >= 500
+    };
   }
 };
 
@@ -934,7 +912,7 @@ export const registerUser = async (userData) => {
 
 export const DEFAULT_GUEST_SESSION = {
   name: '',
-  role: 'Member Farmer',
+  role: 'Farm Member',
   roleKey: 'member',
   employeeId: '',
   fieldId: '',
@@ -965,6 +943,24 @@ const FIELD_SYNC_MUTATION_TYPES = new Set([
   'custom_operations'
 ]);
 
+export const getOperationSyncState = logId => {
+  const normalizedLogId = normalizeSyncEntityId(logId);
+  const items = getOutboxQueue().filter(item => {
+    if (!['operation_log', 'takeover_log', 'operation_amendment', 'operation_archive'].includes(item?.type)) return false;
+    if (normalizeSyncEntityId(item.payload?.id) === normalizedLogId) return true;
+    return Array.isArray(item.payload?.operationLogIds)
+      && item.payload.operationLogIds.some(id => normalizeSyncEntityId(id) === normalizedLogId);
+  });
+  const statuses = items.map(item => String(item.status || 'queued').toLowerCase());
+  const failureStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected', 'failed', 'server_failure']);
+  const status = items.length === 0
+    ? 'SYNCED'
+    : statuses.some(value => value === 'syncing')
+      ? 'SYNCING'
+      : statuses.some(value => failureStatuses.has(value)) ? 'FAILED' : 'PENDING';
+  return { status, isSynced: status === 'SYNCED', pendingCount: items.length };
+};
+
 /**
  * Derive a field's status from retained mutations and local operation markers.
  * Canonical server field documents do not carry the retired client-only
@@ -986,7 +982,8 @@ export const getFieldSyncState = fieldId => {
       .filter(log => normalizeSyncEntityId(log?.fieldId) === normalizedFieldId)
       .map(log => normalizeSyncEntityId(log?.id))
   );
-  const pendingKeys = new Set();
+  const pendingMutationIds = new Set();
+  const matchingStatuses = [];
 
   getOutboxQueue().forEach(item => {
     if (!FIELD_SYNC_MUTATION_TYPES.has(item?.type)) return;
@@ -1009,7 +1006,8 @@ export const getFieldSyncState = fieldId => {
       || archivedOperationIds.some(id => matchingOperationIds.has(id));
 
     if (targetsField) {
-      pendingKeys.add(item.entityKey || item.mutationId || item.outboxId);
+      pendingMutationIds.add(item.mutationId || item.outboxId);
+      matchingStatuses.push(String(item.status || 'queued').toLowerCase());
     }
   });
 
@@ -1017,11 +1015,23 @@ export const getFieldSyncState = fieldId => {
     if (normalizeSyncEntityId(log?.fieldId) !== normalizedFieldId) return;
     if (log.status !== 'ACTIVE' || log.isDraft === true) return;
     if (log.isOffline === true || log.synced === false || log.cloudQueueStatus === 'offline_queued') {
-      pendingKeys.add(`operation_logs/${log.id}`);
+      const representedByMutation = getOutboxQueue().some(item =>
+        ['operation_log', 'takeover_log'].includes(item.type)
+        && normalizeSyncEntityId(item.payload?.id) === normalizeSyncEntityId(log.id)
+      );
+      if (!representedByMutation) pendingMutationIds.add(`local-operation:${log.id}`);
     }
   });
 
-  return { isSynced: pendingKeys.size === 0, pendingCount: pendingKeys.size };
+  const failureStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected', 'failed', 'server_failure']);
+  const status = pendingMutationIds.size === 0
+    ? 'SYNCED'
+    : matchingStatuses.some(itemStatus => itemStatus === 'syncing')
+      ? 'SYNCING'
+      : matchingStatuses.some(itemStatus => failureStatuses.has(itemStatus))
+        ? 'FAILED'
+        : 'PENDING';
+  return { isSynced: status === 'SYNCED', status, pendingCount: pendingMutationIds.size };
 };
 
 /**
@@ -1029,11 +1039,10 @@ export const getFieldSyncState = fieldId => {
  * Counts only submitted ACTIVE records that have not reached Firestore.
  */
 export const getPendingSyncCount = (userSession = CURRENT_SESSION) => {
-  const userRole = userSession?.role || 'Member Farmer';
+  const userRole = userSession?.role || 'Farm Member';
 
-  if (userRole === 'SRA Admin') return 0;
-
-  const pendingKeys = new Set(getOutboxQueue().map(item => item.entityKey || item.mutationId || item.outboxId));
+  const queue = getOutboxQueue();
+  const pendingKeys = new Set(queue.map(item => item.mutationId || item.outboxId));
   const activeUnsyncedLogs = operationLogs.filter(l => {
     if (!l) return false;
     if (l.status !== 'ACTIVE' || l.isDraft === true) return false;
@@ -1042,8 +1051,38 @@ export const getPendingSyncCount = (userSession = CURRENT_SESSION) => {
     return l.isOffline === true || l.synced === false || l.cloudQueueStatus === 'offline_queued';
   });
 
-  activeUnsyncedLogs.forEach(log => pendingKeys.add(`operation_logs/${log.id}`));
+  activeUnsyncedLogs.forEach(log => {
+    const representedByMutation = queue.some(item =>
+      ['operation_log', 'takeover_log'].includes(item.type)
+      && normalizeSyncEntityId(item.payload?.id) === normalizeSyncEntityId(log.id)
+    );
+    if (!representedByMutation) pendingKeys.add(`local-operation:${log.id}`);
+  });
   return pendingKeys.size;
+};
+
+export const getRelevantAuditSyncState = (blockFarmId, periodKey) => {
+  const normalizedFarmId = normalizeSyncEntityId(blockFarmId);
+  const relevantFieldIds = new Set(fields
+    .filter(field => normalizeSyncEntityId(field.blockFarmId) === normalizedFarmId)
+    .map(field => normalizeSyncEntityId(field.id)));
+  const relevantOperationIds = new Set(operationLogs
+    .filter(log => relevantFieldIds.has(normalizeSyncEntityId(log.fieldId)) && String(log.performedOn || log.isoDate || '').startsWith(`${periodKey}-`))
+    .map(log => normalizeSyncEntityId(log.id)));
+  const relevantTypes = new Set(['operation_log', 'takeover_log', 'operation_amendment', 'operation_archive', 'field_upsert', 'field_archive']);
+  const pending = getOutboxQueue().filter(item => {
+    if (!relevantTypes.has(item?.type)) return false;
+    const payload = item.payload || {};
+    const payloadId = normalizeSyncEntityId(payload.id);
+    const payloadFieldId = normalizeSyncEntityId(payload.fieldId || payload.changes?.fieldId);
+    const operationIds = Array.isArray(payload.operationLogIds) ? payload.operationLogIds.map(normalizeSyncEntityId) : [];
+    const performedOn = String(payload.performedOn || payload.isoDate || payload.changes?.performedOn || '');
+    if (['field_upsert', 'field_archive'].includes(item.type)) return relevantFieldIds.has(payloadId) || normalizeSyncEntityId(payload.blockFarmId) === normalizedFarmId;
+    return relevantOperationIds.has(payloadId)
+      || operationIds.some(id => relevantOperationIds.has(id))
+      || (relevantFieldIds.has(payloadFieldId) && (!performedOn || performedOn.startsWith(`${periodKey}-`)));
+  });
+  return { isSynced: pending.length === 0, pendingCount: pending.length, pending };
 };
 
 let listeners = [];
@@ -1063,7 +1102,6 @@ const persistAllToStorage = () => {
       await multiSave([
         [STORAGE_KEYS.SESSION, CURRENT_SESSION],
         [STORAGE_KEYS.LOGS, operationLogs],
-        [STORAGE_KEYS.DRAFTS, draftLogs],
         [STORAGE_KEYS.FIELDS, fields],
         [STORAGE_KEYS.TICKETS, supportTickets],
         [STORAGE_KEYS.PREFS, SECURITY_PREFERENCES],
@@ -1105,7 +1143,7 @@ export const setSession = (role) => {
 };
 
 export const updateSessionFieldId = (fieldId) => {
-  if (CURRENT_SESSION && CURRENT_SESSION.role === 'Member Farmer') {
+  if (CURRENT_SESSION && CURRENT_SESSION.role === 'Farm Member') {
     CURRENT_SESSION.fieldId = fieldId;
     notify();
   }
@@ -1244,7 +1282,7 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   else cropCycles.push(fromCycleDocument(result.newCycleId, result.newCycle));
 
   await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  await persistCurrentUserDrafts();
   notify();
 
   // Record audit history event shared with Web & Cloud
@@ -1397,7 +1435,7 @@ export const deleteDraftLogs = async (draftIds = []) => {
   const remaining = draftLogs.filter(d => !idSet.has(d.id));
   draftLogs.length = 0;
   remaining.forEach(d => draftLogs.push(d));
-  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  await persistCurrentUserDrafts();
   notify();
 };
 
@@ -1406,13 +1444,99 @@ export const clearAllDraftsForField = async (fieldId) => {
   const remaining = draftLogs.filter(d => d.fieldId !== fieldId);
   draftLogs.length = 0;
   remaining.forEach(d => draftLogs.push(d));
-  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  await persistCurrentUserDrafts();
   notify();
 };
 
 export const saveDraftLogs = async () => {
-  await saveItem(STORAGE_KEYS.DRAFTS, draftLogs);
+  await persistCurrentUserDrafts();
   notify();
+};
+
+const currentActorId = () => String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+const currentDraftKey = () => currentActorId() ? localDraftStorageKey(currentActorId()) : null;
+
+async function persistCurrentUserDrafts() {
+  const actorId = currentActorId();
+  const key = currentDraftKey();
+  if (!key) return false;
+  return saveItem(key, draftLogs.filter(draft => draft?.createdByUserId === actorId && draft?.status === 'DRAFT'));
+}
+
+export const validateLocalDraftForSubmission = (draft, currentFields = fields) => {
+  const actorId = currentActorId();
+  if (!draft || draft.status !== 'DRAFT' || draft.createdByUserId !== actorId) {
+    return { valid: false, error: 'This draft does not belong to the signed-in account.' };
+  }
+  const field = currentFields.find(item => String(item.id || '').trim().toUpperCase() === String(draft.fieldId || '').trim().toUpperCase());
+  if (!field || String(field.memberUserId || '').trim() !== actorId) {
+    return { valid: false, error: 'Your field assignment changed. This local draft was preserved but cannot be submitted.' };
+  }
+  return { valid: true, field };
+};
+
+export const inspectLocalDraftIntegrity = (candidateDrafts = draftLogs, currentFields = fields) => {
+  const valid = [];
+  const invalid = [];
+  (candidateDrafts || []).forEach(draft => {
+    const result = validateLocalDraftForSubmission(draft, currentFields);
+    (result.valid ? valid : invalid).push(result.valid ? draft : { draft, reason: result.error });
+  });
+  return { valid, invalid };
+};
+
+export const saveLocalOperationDraft = async (input, existingId = null) => {
+  const actorId = currentActorId();
+  const fieldId = String(input?.fieldId || '').trim().toUpperCase();
+  const field = fields.find(item => String(item.id || '').trim().toUpperCase() === fieldId);
+  if (!actorId || !field || String(field.memberUserId || '').trim() !== actorId) {
+    throw new Error('Drafts can only be saved for your own currently assigned field.');
+  }
+  const prior = existingId ? draftLogs.find(draft => draft.id === existingId) : null;
+  const now = new Date().toISOString();
+  const draft = {
+    ...input,
+    id: prior?.id || `DFT-${fieldId}-${Date.now().toString(36).toUpperCase()}`,
+    fieldId,
+    status: 'DRAFT',
+    localOnly: true,
+    isDraft: true,
+    createdByUserId: actorId,
+    createdAt: prior?.createdAt || now,
+    updatedAt: now,
+    submittedOperationId: prior?.submittedOperationId || `OP-${fieldId}-${Date.now().toString(36).toUpperCase()}`
+  };
+  delete draft.synced;
+  delete draft.isOffline;
+  delete draft.cloudQueueStatus;
+  delete draft.submissionSource;
+  delete draft.submittedByUserId;
+  const index = draftLogs.findIndex(item => item.id === draft.id);
+  if (index >= 0) draftLogs[index] = draft;
+  else draftLogs.unshift(draft);
+  await persistCurrentUserDrafts();
+  notify();
+  return draft;
+};
+
+export const claimLocalDraftSubmission = async draftId => {
+  const draft = draftLogs.find(item => item.id === draftId);
+  const validation = validateLocalDraftForSubmission(draft);
+  if (!validation.valid) throw new Error(validation.error);
+  if (draft.submitting) throw new Error('This draft submission is already in progress.');
+  draft.submitting = true;
+  draft.submissionClaimedAt = new Date().toISOString();
+  await persistCurrentUserDrafts();
+  return { draft, field: validation.field };
+};
+
+export const releaseLocalDraftSubmission = async draftId => {
+  const draft = draftLogs.find(item => item.id === draftId);
+  if (draft) {
+    draft.submitting = false;
+    draft.submissionClaimedAt = null;
+    await persistCurrentUserDrafts();
+  }
 };
 
 export const isLogLocked = (log) => {
@@ -1424,7 +1548,7 @@ export const getLogAuditTrail = (logId) => {
   return target && Array.isArray(target.amendments) ? target.amendments : [];
 };
 
-export const updateOperationLogWithSecurity = async (logId, updates, editReason, passwordVerification) => {
+export const updateOperationLogWithSecurity = async (logId, updates, editReason, authorization = {}) => {
   if (!CURRENT_SESSION) {
     return { success: false, error: 'No active session. Please log in.' };
   }
@@ -1446,17 +1570,6 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     return { success: false, error: 'A valid reason for amendment or correction is required for the official audit trail.' };
   }
 
-  let passwordAuthorization;
-  try {
-    const isManager = canonicalRole(CURRENT_SESSION.role || CURRENT_SESSION.roleKey) === ROLES.FARM_MANAGER;
-    passwordAuthorization = await verifyPasswordWithServer(passwordVerification, isManager ? {
-      purpose: 'MANAGER_TAKEOVER',
-      fieldId: targetLog.fieldId
-    } : {});
-  } catch (error) {
-    return { success: false, error: 'Incorrect password. Please enter your account password to authorize modifying this log.' };
-  }
-
   // Record audit history snapshot
   const previousValues = {
     activity: targetLog.activity || targetLog.task || targetLog.operationName || '',
@@ -1466,6 +1579,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     inputQty: targetLog.inputQty || '',
     inputUnit: targetLog.inputUnit || '',
     inputName: targetLog.inputName || '',
+    variety: targetLog.variety || '',
     date: targetLog.date || targetLog.period || '',
     subItems: Array.isArray(targetLog.subItems) ? JSON.parse(JSON.stringify(targetLog.subItems)) : [],
   };
@@ -1478,6 +1592,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     inputQty: updates.inputQty != null ? updates.inputQty : previousValues.inputQty,
     inputUnit: updates.inputUnit != null ? updates.inputUnit : previousValues.inputUnit,
     inputName: updates.inputName != null ? updates.inputName : previousValues.inputName,
+    variety: updates.variety != null ? updates.variety : previousValues.variety,
     date: updates.date || updates.period || previousValues.date,
     subItems: Array.isArray(updates.subItems) ? JSON.parse(JSON.stringify(updates.subItems)) : previousValues.subItems,
   };
@@ -1501,14 +1616,16 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   }
 
   const hasActivityChanged = (previousValues.activity || '').trim() !== (newValues.activity || '').trim();
-  const hasCostChanged = Math.round(Number(previousValues.cost || 0)) !== Math.round(Number(newValues.cost || 0));
+  const hasCostChanged = Math.abs(Number(previousValues.cost || 0) - Number(newValues.cost || 0)) > 0.009;
   const hasHaChanged = Math.abs(parseFloat(previousValues.hectares || 0) - parseFloat(newValues.hectares || 0)) > 0.001;
-  const hasPeopleChanged = String(previousValues.people || '').trim() !== String(newValues.people || '').trim();
+  const hasPeopleChanged = Number(previousValues.people || 0) !== Number(newValues.people || 0);
   const hasDateChanged = formatDisplayDate(previousValues.date) !== formatDisplayDate(newValues.date);
   const hasInputQtyChanged = String(previousValues.inputQty || '').trim() !== String(newValues.inputQty || '').trim();
   const hasInputUnitChanged = String(previousValues.inputUnit || '').trim() !== String(newValues.inputUnit || '').trim();
+  const hasInputNameChanged = String(previousValues.inputName || '').trim() !== String(newValues.inputName || '').trim();
+  const hasVarietyChanged = String(previousValues.variety || '').trim() !== String(newValues.variety || '').trim();
 
-  const hasChanges = hasActivityChanged || hasCostChanged || hasHaChanged || hasPeopleChanged || hasDateChanged || hasInputQtyChanged || hasInputUnitChanged || subItemsChanged;
+  const hasChanges = hasActivityChanged || hasCostChanged || hasHaChanged || hasPeopleChanged || hasDateChanged || hasInputQtyChanged || hasInputUnitChanged || hasInputNameChanged || hasVarietyChanged || subItemsChanged;
 
   if (!hasChanges) {
     return {
@@ -1519,14 +1636,24 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   }
 
   const changes = {};
-  Object.keys(newValues).forEach(key => {
-    if (JSON.stringify(previousValues[key]) !== JSON.stringify(newValues[key])) {
-      changes[key] = { before: previousValues[key], after: newValues[key] };
-    }
-  });
+  const includeChange = (changed, key) => {
+    if (changed) changes[key] = { before: previousValues[key], after: newValues[key] };
+  };
+  includeChange(hasActivityChanged, 'activity');
+  includeChange(hasCostChanged, 'cost');
+  includeChange(hasHaChanged, 'hectares');
+  includeChange(hasPeopleChanged, 'people');
+  includeChange(hasDateChanged, 'date');
+  includeChange(hasInputQtyChanged, 'inputQty');
+  includeChange(hasInputUnitChanged, 'inputUnit');
+  includeChange(hasInputNameChanged, 'inputName');
+  includeChange(hasVarietyChanged, 'variety');
+  includeChange(subItemsChanged, 'subItems');
   const editRecord = {
     amendmentId: `AMD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
     amendedByUserId: CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '',
+    amendedByName: CURRENT_SESSION.name || '',
+    amendedByRole: canonicalRole(CURRENT_SESSION.role || CURRENT_SESSION.roleKey) || CURRENT_SESSION.role || '',
     reason: reasonTrimmed,
     amendedAt: new Date().toISOString(),
     changes
@@ -1566,7 +1693,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
       amendment: editRecord
     }, {
       baseVersion: originalLog.updatedAt || null,
-      takeoverGrant: passwordAuthorization?.takeoverGrant || null
+      takeoverGrant: authorization?.takeoverGrant || null
     });
     if (outcome.response?.data) {
       const authoritative = fromOperationLogDocument(outcome.response.data.id || logId, outcome.response.data);
@@ -1588,17 +1715,6 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     notify();
     return { success: false, error: e.message || 'The operation amendment was rejected by the server.' };
   }
-
-  // Record audit history event shared with Web & Cloud
-  const actorName = `${CURRENT_SESSION.name || 'User'} (${CURRENT_SESSION.role || 'Member Farmer'})`;
-  await logSystemEvent(
-    'operation',
-    'Operation Log Correction',
-    targetLog.id,
-    `Amended operation record ${targetLog.id} (${targetLog.activity || targetLog.task || 'Operation'}, ₱${costNum.toLocaleString()}). Reason: ${reasonTrimmed}`,
-    actorName,
-    'Amended'
-  );
 
   notify();
   return { success: true, log: targetLog, editRecord };
@@ -1719,10 +1835,11 @@ let MEMBER_SYNC_LAG_DAYS = 0;
 let MEMBER_LAST_SYNC_STR = '15 mins ago';
 
 export const getMemberSyncHealth = () => {
-  const isOffline = !IS_SYNCED || MEMBER_SYNC_LAG_DAYS >= 3;
+  const pendingCount = getPendingSyncCount(CURRENT_SESSION);
+  const isOffline = pendingCount > 0 || MEMBER_SYNC_LAG_DAYS >= 3;
   let status = 'healthy';
   if (MEMBER_SYNC_LAG_DAYS >= 7) status = 'critical';
-  else if (MEMBER_SYNC_LAG_DAYS >= 3 || !IS_SYNCED) status = 'warning';
+  else if (MEMBER_SYNC_LAG_DAYS >= 3 || pendingCount > 0) status = 'warning';
 
   const sessionUserId = CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '';
   const assignedField = fields.find(field => field.memberUserId === sessionUserId);
@@ -1733,7 +1850,8 @@ export const getMemberSyncHealth = () => {
     status,
     days: MEMBER_SYNC_LAG_DAYS,
     lastSync: MEMBER_LAST_SYNC_STR,
-    isOffline: !IS_SYNCED,
+    isOffline: pendingCount > 0,
+    pendingCount,
     manager: {
       name: mgr.name || '',
       role: mgr.role || 'Farm Manager',
@@ -1788,18 +1906,20 @@ export const getFieldCustomOperations = (fieldId, stageNumber) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
   const sNum = Number(stageNumber) || 1;
-  let baseOps = [];
-
-  if (field && field.customOperations && field.customOperations[sNum] && field.customOperations[sNum].length > 0) {
-    baseOps = field.customOperations[sNum].map(op => ({
+  const configuredOps = field?.customOperations?.[sNum] || [];
+  const normalizedConfiguredOps = configuredOps
+    .filter(op => !getOperationDefinition(op.id) || getOperationDefinition(op.id).stageNumber === sNum)
+    .map(op => ({
       ...op,
       isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group' || (op.subItems && op.subItems.length > 0)),
       inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
       subItems: (op.subItems || []).map(si => ({ ...si }))
     }));
-  } else {
-    baseOps = getDefaultStageOperations(sNum);
-  }
+  const configuredById = new Map(normalizedConfiguredOps.map(operation => [operation.id, operation]));
+  const baseOps = getDefaultStageOperations(sNum).map(operation => configuredById.get(operation.id) || operation);
+  normalizedConfiguredOps.forEach(operation => {
+    if (!baseOps.some(existing => existing.id === operation.id)) baseOps.push(operation);
+  });
 
   // Dynamically include any recorded operations for this field & stage that are not yet in baseOps
   if (Array.isArray(operationLogs)) {
@@ -1961,15 +2081,20 @@ export const listenToCloudSync = () => {
   let active = true;
   let requestInFlight = false;
   let refreshTimer = null;
+  let appState = AppState.currentState;
+  let appStateSubscription = null;
 
   const stop = () => {
     active = false;
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = null;
+    appStateSubscription?.remove?.();
+    appStateSubscription = null;
+    if (activeCloudRefresh === refresh) activeCloudRefresh = null;
   };
 
   const refresh = async () => {
-    if (!active || requestInFlight || !getNetworkStatus()) return;
+    if (!active || requestInFlight || (appState && appState !== 'active') || !getNetworkStatus()) return;
 
     const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
     const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
@@ -2005,7 +2130,7 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/prices'),
         authenticatedRequest('/api/tickets'),
         isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/users'),
-        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-reports'),
+        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')),
         isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-events')
       ]);
 
@@ -2116,12 +2241,19 @@ export const listenToCloudSync = () => {
     }
   };
 
+  activeCloudRefresh = refresh;
   refresh();
-  refreshTimer = setInterval(refresh, 15000);
+  refreshTimer = setInterval(refresh, 60000);
+  appStateSubscription = AppState.addEventListener('change', nextState => {
+    const returnedToForeground = appState !== 'active' && nextState === 'active';
+    appState = nextState;
+    if (returnedToForeground) refresh();
+  });
   return stop;
 };
 
 let activeCloudSyncStop = null;
+let activeCloudRefresh = null;
 
 const stopActiveCloudSync = () => {
   if (typeof activeCloudSyncStop === 'function') activeCloudSyncStop();
@@ -2155,6 +2287,7 @@ const canonicalStageName = stageNumber => {
 const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
   let logsChanged = false;
   let fieldsChanged = false;
+  let auditsChanged = false;
 
   queueBefore.forEach(item => {
     const response = responses[item.mutationId];
@@ -2179,6 +2312,24 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
       console.info(`[OPERATION] Server acknowledged: ${serverRecord.id}`);
     }
 
+    if (item.type === 'operation_amendment') {
+      const serverRecord = response.data;
+      if (!serverRecord?.id) return;
+      const existingIndex = operationLogs.findIndex(log => log.id === serverRecord.id || log.id === item.payload?.id);
+      const reconciled = {
+        ...(existingIndex >= 0 ? operationLogs[existingIndex] : {}),
+        ...fromOperationLogDocument(serverRecord.id, serverRecord),
+        synced: true,
+        isOffline: false,
+        cloudQueueStatus: 'synced',
+        syncedAt: new Date().toISOString()
+      };
+      if (existingIndex >= 0) operationLogs[existingIndex] = reconciled;
+      else operationLogs.unshift(reconciled);
+      logsChanged = true;
+      console.info(`[OPERATION] Amendment acknowledged: ${serverRecord.id}`);
+    }
+
     if (item.type === 'stage_update') {
       const serverCycle = response.data;
       if (!serverCycle?.id) return;
@@ -2196,6 +2347,18 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
         console.info(`[FIELD] Stage refreshed: ${targetField.id}`);
       }
     }
+
+    if (['audit_report', 'audit_submission', 'audit_return', 'audit_certification', 'audit_qr_import'].includes(item.type)) {
+      const serverRecord = response.data?.report || response.data;
+      const reportId = serverRecord?.id || serverRecord?.reportId || item.payload?.id || item.payload?.reportId;
+      if (serverRecord && reportId) {
+        const normalized = fromAuditReportDocument(reportId, serverRecord);
+        const reportIndex = auditReports.findIndex(report => (report.reportId || report.id) === reportId);
+        if (reportIndex >= 0) auditReports[reportIndex] = { ...auditReports[reportIndex], ...normalized };
+        else auditReports.unshift(normalized);
+        auditsChanged = true;
+      }
+    }
   });
 
   if (logsChanged) {
@@ -2205,6 +2368,7 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
     await saveItem(STORAGE_KEYS.LOGS, operationLogs);
   }
   if (fieldsChanged) await saveItem(STORAGE_KEYS.FIELDS, fields);
+  if (auditsChanged) await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
 };
 
 export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
@@ -2220,16 +2384,28 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       return { success: true, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: 0, responses: {} };
     }
     if (!getNetworkStatus()) {
-      return { success: false, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: remainingBefore, reason: 'OFFLINE' };
+      return {
+        success: false, attemptedCount: 0, processedCount: 0, failedCount: 0,
+        remainingCount: remainingBefore, reason: 'OFFLINE',
+        remainingItems: getOutboxQueue().map(item => ({
+          mutationId: item.mutationId, entityKey: item.entityKey, type: item.type,
+          status: item.status, retryCount: Number(item.retryCount || 0),
+          lastError: item.lastError || null, dependsOnMutationId: item.dependsOnMutationId || null
+        }))
+      };
     }
     if (!CURRENT_SESSION?.employeeId || !auth?.currentUser) {
-      return { success: false, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: remainingBefore, reason: 'AUTHENTICATION_REQUIRED' };
+      return {
+        success: false, attemptedCount: 0, processedCount: 0, failedCount: 0,
+        remainingCount: remainingBefore, reason: 'AUTHENTICATION_REQUIRED',
+        remainingItems: getOutboxQueue()
+      };
     }
 
     try {
       const refreshed = await refreshMobileSessionFromFirebase();
       if (refreshed?.user) {
-        CURRENT_SESSION = { ...refreshed.user, lastActiveAt: Date.now() };
+        CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       }
     } catch (error) {
@@ -2240,7 +2416,8 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
         processedCount: 0,
         failedCount: remainingBefore,
         remainingCount: remainingBefore,
-        reason: error?.status === 403 ? 'AUTHORIZATION_FAILURE' : 'AUTHENTICATION_RECOVERY'
+        reason: error?.status === 403 ? 'AUTHORIZATION_FAILURE' : 'AUTHENTICATION_RECOVERY',
+        remainingItems: getOutboxQueue()
       };
     }
 
@@ -2267,8 +2444,23 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
   }
 };
 
+export const fetchAuditHistoryPage = async ({ cursor = null, limit = 20 } = {}) => {
+  const query = new URLSearchParams({ view: 'history', limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  const response = await authenticatedRequest(`/api/audit-reports?${query.toString()}`);
+  return {
+    reports: (response.data || []).map(record => fromAuditReportDocument(record.id, record)),
+    hasMore: Boolean(response.hasMore),
+    nextCursor: response.nextCursor || null
+  };
+};
+
 // Register automatic sync on network reconnection
-setOnReconnectCallback(trigger => performMobileSync(trigger || 'NETWORK_RESTORED'));
+setOnReconnectCallback(async trigger => {
+  const result = await performMobileSync(trigger || 'NETWORK_RESTORED');
+  if (typeof activeCloudRefresh === 'function') await activeCloudRefresh();
+  return result;
+});
 
 export const initializeOfflineStorage = async () => {
   try {
@@ -2276,15 +2468,15 @@ export const initializeOfflineStorage = async () => {
     await initSyncEngine();
     const stored = await hydrateAllStorage();
     if (stored[STORAGE_KEYS.AUTH_TOKEN] && stored[STORAGE_KEYS.SESSION]) {
-      CURRENT_SESSION = stripCredentialFields(stored[STORAGE_KEYS.SESSION]);
+      CURRENT_SESSION = normalizeSessionUser(stored[STORAGE_KEYS.SESSION]);
     } else if (stored[STORAGE_KEYS.SESSION]) {
-      CURRENT_SESSION = stripCredentialFields(stored[STORAGE_KEYS.SESSION]);
+      CURRENT_SESSION = normalizeSessionUser(stored[STORAGE_KEYS.SESSION]);
     } else {
       CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
     }
     if (Array.isArray(stored[STORAGE_KEYS.USERS]) && stored[STORAGE_KEYS.USERS].length > 0) {
       users.length = 0;
-      stored[STORAGE_KEYS.USERS].forEach(u => users.push(stripCredentialFields(u)));
+      stored[STORAGE_KEYS.USERS].forEach(u => users.push(normalizeSessionUser(u)));
     }
     if (Array.isArray(stored[STORAGE_KEYS.LOGS]) && stored[STORAGE_KEYS.LOGS].length > 0) {
       operationLogs.length = 0;
@@ -2307,9 +2499,29 @@ export const initializeOfflineStorage = async () => {
       }));
       normalized.forEach(l => operationLogs.push(l));
     }
-    if (Array.isArray(stored[STORAGE_KEYS.DRAFTS])) {
-      draftLogs.length = 0;
-      stored[STORAGE_KEYS.DRAFTS].forEach(d => draftLogs.push(d));
+    draftLogs.length = 0;
+    const draftKey = currentDraftKey();
+    const scopedDrafts = draftKey ? await getItem(draftKey, []) : [];
+    if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(d => draftLogs.push(d));
+    // Preserve legacy drafts in their original key. Only safe, attributable
+    // drafts are copied into the current account scope; invalid drafts remain
+    // untouched for inspection and never become submittable.
+    if (Array.isArray(stored[STORAGE_KEYS.DRAFTS]) && currentActorId()) {
+      const safeLegacy = stored[STORAGE_KEYS.DRAFTS].filter(draft => {
+        const field = fields.find(item => String(item.id || '').trim().toUpperCase() === String(draft?.fieldId || '').trim().toUpperCase());
+        const creator = String(draft?.createdByUserId || draft?.submittedByUserId || draft?.loggedById || '').trim();
+        return creator === currentActorId() && String(field?.memberUserId || '').trim() === currentActorId();
+      });
+      safeLegacy.forEach(draft => {
+        if (!draftLogs.some(existing => existing.id === draft.id)) draftLogs.push({
+          ...draft,
+          createdByUserId: currentActorId(),
+          status: 'DRAFT',
+          localOnly: true,
+          submittedOperationId: draft.submittedOperationId || `OP-${String(draft.fieldId || '').trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+        });
+      });
+      if (safeLegacy.length) await persistCurrentUserDrafts();
     }
     if (Array.isArray(stored[STORAGE_KEYS.ARCHIVED_FIELDS]) && stored[STORAGE_KEYS.ARCHIVED_FIELDS].length > 0) {
       archivedFields.length = 0;
@@ -2319,6 +2531,23 @@ export const initializeOfflineStorage = async () => {
       const cleanFields = mergeActiveFields(stored[STORAGE_KEYS.FIELDS], archivedFields);
       fields.length = 0;
       cleanFields.forEach(f => fields.push(f));
+    }
+    if (Array.isArray(stored[STORAGE_KEYS.DRAFTS]) && currentActorId()) {
+      const safeLegacyAfterFieldHydration = stored[STORAGE_KEYS.DRAFTS].filter(draft => {
+        const field = fields.find(item => String(item.id || '').trim().toUpperCase() === String(draft?.fieldId || '').trim().toUpperCase());
+        const creator = String(draft?.createdByUserId || draft?.submittedByUserId || draft?.loggedById || '').trim();
+        return creator === currentActorId() && String(field?.memberUserId || '').trim() === currentActorId();
+      });
+      safeLegacyAfterFieldHydration.forEach(draft => {
+        if (!draftLogs.some(existing => existing.id === draft.id)) draftLogs.push({
+          ...draft,
+          createdByUserId: currentActorId(),
+          status: 'DRAFT',
+          localOnly: true,
+          submittedOperationId: draft.submittedOperationId || `OP-${String(draft.fieldId || '').trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+        });
+      });
+      if (safeLegacyAfterFieldHydration.length) await persistCurrentUserDrafts();
     }
     if (Array.isArray(stored[STORAGE_KEYS.TICKETS]) && stored[STORAGE_KEYS.TICKETS].length > 0) {
       supportTickets.length = 0;
@@ -2348,7 +2577,7 @@ export const initializeOfflineStorage = async () => {
     if (Array.isArray(stored[STORAGE_KEYS.AUDIT_REPORTS]) && stored[STORAGE_KEYS.AUDIT_REPORTS].length > 0) {
       auditReports.length = 0;
       auditReports.push(...sortNewestFirst(
-        stored[STORAGE_KEYS.AUDIT_REPORTS].filter(a => a && (a.status === 'PENDING' || a.status === 'CERTIFIED')),
+        stored[STORAGE_KEYS.AUDIT_REPORTS].filter(a => a && ['PENDING', 'COMPILED', 'PENDING_SUBMISSION', 'PENDING_REVIEW', 'RETURNED', 'CERTIFIED'].includes(a.status)),
         ['compiledAt', 'createdAt']
       ));
     }

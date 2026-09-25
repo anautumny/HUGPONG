@@ -49,7 +49,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
       items.push({
         id: 'no-farm',
         title: 'Block Farm Assignment Pending',
-        description: 'You are currently not linked to a specific Block Farm. Contact your SRA Administrator.',
+        description: 'You are currently not linked to a specific Block Farm. Contact your SRA Admin.',
         type: 'warning',
         to: '/profile',
         actionLabel: 'Check Profile'
@@ -59,7 +59,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     if (assignedBlockFarm && scopedFields.length === 0) {
       items.push({
         id: 'no-fields',
-        title: 'No Member Plots Registered',
+        title: 'No Farm Member Fields Registered',
         description: `No fields have been linked to ${farmName} yet. Register member plots to begin operational tracking.`,
         type: 'info',
         to: '/fields',
@@ -170,7 +170,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-hug-muted">Active Member Fields</span>
+                <span className="text-hug-muted">Active Farm Member Fields</span>
                 <span className="font-semibold text-hug-text">
                   {scopedFields.length} plots
                 </span>
@@ -180,7 +180,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
 
           <div className="pt-4 mt-4 border-t border-border/60">
             <p className="text-[11px] text-hug-muted font-medium">
-              Member field operations and activity logs sync to your local console.
+              Farm Member field operations and activity logs sync to your local console.
             </p>
           </div>
         </div>

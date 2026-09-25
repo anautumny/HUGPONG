@@ -30,8 +30,8 @@ export default function ForgotPasswordScreen({ navigation }) {
     }
 
     Alert.alert(
-      'Administrator Assistance Required',
-      'Self-service password reset is not enabled. Contact your Farm Manager or SRA Administrator for identity verification and a temporary password.'
+      'SRA Admin Assistance Required',
+      'Self-service password reset is not enabled. Contact your Farm Manager or SRA Admin for identity verification and a temporary password.'
     );
   };
 
@@ -42,7 +42,7 @@ export default function ForgotPasswordScreen({ navigation }) {
       Alert.alert('Required', 'Please enter the 6-digit SMS code.');
       return;
     }
-    Alert.alert('Reset Unavailable', 'Password-reset verification must be completed by an authorized administrator.');
+    Alert.alert('Reset Unavailable', 'Password-reset verification must be completed by an authorized SRA Admin.');
   };
 
   // ── Step 3: Save New Password ────────────────────────────────
@@ -57,7 +57,7 @@ export default function ForgotPasswordScreen({ navigation }) {
     }
 
     setLoading(true);
-    const res = { success: false, error: 'Self-service password reset is temporarily unavailable. Contact an authorized administrator.' };
+    const res = { success: false, error: 'Self-service password reset is temporarily unavailable. Contact an authorized SRA Admin.' };
     setLoading(false);
 
     if (!res.success) {
@@ -92,7 +92,7 @@ export default function ForgotPasswordScreen({ navigation }) {
               <View style={s.textBlock}>
                 <Text style={s.title}>{t('reset_pw_heading', 'Reset your password')}</Text>
                 <Text style={s.sub}>
-                  Enter your User ID or registered mobile number, then contact an authorized administrator for identity verification.
+                  Enter your User ID or registered mobile number, then contact an authorized SRA Admin for identity verification.
                 </Text>
               </View>
 
@@ -130,7 +130,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 <View style={{ flex: 1 }}>
                   <Text style={s.lostSimHelpTitle}>Lost your SIM card?</Text>
                   <Text style={s.lostSimHelpText}>
-                    If you lost your phone or cannot receive SMS verification codes, please visit your Block Farm Manager or SRA District Administrator. They can verify your identity and update your registered mobile number or reset your password directly from the cooperative portal.
+                    If you lost your phone or cannot receive SMS verification codes, please visit your Farm Manager or SRA Admin. They can verify your identity and update your registered mobile number or reset your password directly from the cooperative portal.
                   </Text>
                 </View>
               </View>
@@ -184,7 +184,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 <View style={{ flex: 1 }}>
                   <Text style={s.lostSimHelpTitle}>Didn't receive the SMS?</Text>
                   <Text style={s.lostSimHelpText}>
-                    Check your cellular signal. If you no longer have access to this SIM card, please visit your Block Farm Manager for in-person identity verification.
+                    Check your cellular signal. If you no longer have access to this SIM card, please visit your Farm Manager for in-person identity verification.
                   </Text>
                 </View>
               </View>

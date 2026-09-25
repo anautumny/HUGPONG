@@ -10,7 +10,10 @@ export default function AuditHistoryModal({
   onClose,
   reports = [],
   blockFarms = [],
-  onSelectReport
+  onSelectReport,
+  onLoadMore,
+  hasMore = false,
+  isLoading = false
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
@@ -23,7 +26,8 @@ export default function AuditHistoryModal({
 
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
-      const p = r.period || r.month || '';
+      if (r.status !== 'CERTIFIED') return false;
+      const p = r.periodKey || r.period || r.month || '';
       if (selectedPeriod !== 'ALL' && p !== selectedPeriod) return false;
 
       if (!searchTerm.trim()) return true;
@@ -48,7 +52,7 @@ export default function AuditHistoryModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="SRA Audit History & Historical Dossiers"
+      title="Audit History"
       size="xl"
       footer={
         <Button variant="secondary" size="md" onClick={onClose}>
@@ -59,7 +63,7 @@ export default function AuditHistoryModal({
       <div className="flex flex-col gap-4 text-xs">
         {/* Subtitle */}
         <p className="text-xs text-hug-muted -mt-2">
-          Historical log of monthly compliance packages, digital seals, and regulatory verification audits.
+          Certified monthly audits. The newest 20 load first; load more only when needed.
         </p>
 
         {/* Filters */}
@@ -135,7 +139,7 @@ export default function AuditHistoryModal({
                   return (
                     <tr key={report.id || report.reportId} className="hover:bg-bg/40">
                       <td className="px-3.5 py-2.5 font-bold font-mono">
-                        {report.period || report.month}
+                        {report.periodKey || report.period || report.month}
                       </td>
                       <td className="px-3.5 py-2.5 font-semibold">
                         {getFarmName(report.blockFarmId)}
@@ -171,6 +175,7 @@ export default function AuditHistoryModal({
             </table>
           )}
         </div>
+        {hasMore && <Button variant="secondary" size="md" onClick={onLoadMore} isLoading={isLoading} loadingText="Loading...">Load More</Button>}
       </div>
     </Modal>
   );

@@ -4,15 +4,6 @@ import { Edit3 } from 'lucide-react';
 import { updateField } from '../../services/fieldsService';
 import { formatCropYearDisplay } from '../../utils/formatters';
 
-const SUGARCANE_VARIETIES = [
-  'VMC 84-524',
-  'Phil 2006-228',
-  'Phil 99-1793',
-  'Phil 58-260',
-  'Phil 80-13',
-  'Other / Local High Yield'
-];
-
 const SOIL_TYPES = [
   'Clay Loam',
   'Sandy Loam',
@@ -33,7 +24,6 @@ export default function FieldEditModal({
   const [blockFarmId, setBlockFarmId] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
-  const [variety, setVariety] = useState('');
   const [soilType, setSoilType] = useState('');
 
   const [errors, setErrors] = useState({});
@@ -45,7 +35,6 @@ export default function FieldEditModal({
       setBlockFarmId(field.blockFarmId || '');
       setMemberUserId(field.memberUserId || '');
       setAreaHa(String(field.areaHa || field.ha || ''));
-      setVariety(field.variety || SUGARCANE_VARIETIES[0]);
       setSoilType(field.soilType || SOIL_TYPES[0]);
       setErrors({});
       setServerError(null);
@@ -79,7 +68,6 @@ export default function FieldEditModal({
         blockFarmId,
         memberUserId: memberUserId || null,
         areaHa: numHa,
-        variety,
         soilType
       };
 
@@ -100,7 +88,7 @@ export default function FieldEditModal({
       onClose={onClose}
       size="md"
       title={`Edit Field ${field.id}`}
-      subtitle="Modify registered acreage, soil type, variety, or farmer assignment."
+      subtitle="Modify registered acreage, soil type, or field owner assignment."
       badge="Plot Configuration"
       icon={Edit3}
       preventBackdropClose={isSubmitting}
@@ -165,7 +153,7 @@ export default function FieldEditModal({
 
           <FormField
             id="edit-member-user"
-            label="Assigned Farmer Member"
+            label="Assigned Field Owner"
           >
             <Select
               id="edit-member-user"
@@ -181,8 +169,8 @@ export default function FieldEditModal({
           </FormField>
         </div>
 
-        {/* Plot Area, Variety, Soil Type */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        {/* Persistent parcel attributes */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <FormField
             id="edit-area-ha"
             label="Plot Area"
@@ -203,19 +191,6 @@ export default function FieldEditModal({
               }}
               error={Boolean(errors.areaHa)}
               disabled={isSubmitting}
-            />
-          </FormField>
-
-          <FormField
-            id="edit-variety"
-            label="Cane Variety"
-          >
-            <Select
-              id="edit-variety"
-              value={variety}
-              onChange={(e) => setVariety(e.target.value)}
-              disabled={isSubmitting}
-              options={SUGARCANE_VARIETIES.map(v => ({ value: v, label: v }))}
             />
           </FormField>
 

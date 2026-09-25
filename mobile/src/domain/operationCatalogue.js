@@ -124,7 +124,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     stageNumber: 4,
     stageName: 'Stage 4: Cultivation & Weed Management',
     section: 'I. Direct Operations',
-    name: 'Weeding Operations',
+    name: 'Weeding Operations (Hilamon & Herbicides)',
     category: 'weed',
     inputType: 'group',
     isGroup: true,
@@ -142,7 +142,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
     section: 'I. Direct Operations',
     name: 'Top-Dress / 2nd Dose Fertilization',
-    category: 'maint',
+    category: 'fert',
     inputType: 'group',
     isGroup: true,
     unit: 'ha',
@@ -158,7 +158,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     stageName: 'Stage 5: Crop Maintenance & Final Hilling-Up',
     section: 'I. Direct Operations',
     name: 'Final Hilling-up (Pasungkal)',
-    category: 'maint',
+    category: 'weed',
     inputType: 'direct',
     isGroup: false,
     perHa: 1,
@@ -260,4 +260,12 @@ export const getDefaultStageOperations = stageNumber => (
       costPerHa: operation.costPerHa || 0,
       subItems: (operation.subItems || []).map(subItem => ({ ...subItem }))
     }))
+);
+
+export const getOperationsForStage = stageNumber => (
+  SRA_OPERATIONS_CATALOGUE.filter(operation => operation.stageNumber === Number(stageNumber))
+);
+
+export const getOperationDefinition = operationDefinitionId => (
+  SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === String(operationDefinitionId || '').trim().toUpperCase()) || null
 );

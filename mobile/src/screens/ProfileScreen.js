@@ -9,8 +9,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
-import { getNetworkStatus, subscribeToNetwork, checkConnectivity } from '../services/networkService';
+import {
+  getNetworkStatus,
+  getConnectivityDetails,
+  subscribeToNetwork,
+  checkConnectivity,
+  CONNECTIVITY_STATUS
+} from '../services/networkService';
 import { useTranslation, LANGUAGES } from '../services/i18n';
+import { syncResultMessage } from '../domain/syncPresentation';
 
 const { height } = Dimensions.get('window');
 
@@ -73,18 +80,27 @@ export default function ProfileScreen({ navigation }) {
             onPress: async () => {
               setSyncing(true);
               try {
-                const online = await checkConnectivity(3500);
+                const online = await checkConnectivity({ force: true });
                 if (online) {
                   const result = await performMobileSync('MANUAL_SYNC');
                   setSyncedState(result.remainingCount === 0);
                   Alert.alert(
                     result.remainingCount === 0 ? t('sync_complete_title', 'Online & Synced') : 'Sync Incomplete',
-                    result.remainingCount === 0
-                      ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
-                      : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+                    syncResultMessage(result),
+                    result.remainingCount > 0 ? [
+                      { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
+                      { text: 'Try Again', onPress: () => doSync() },
+                      { text: 'Close', style: 'cancel' }
+                    ] : undefined
                   );
                 } else {
-                  Alert.alert('Still Offline', 'Could not establish internet connection. Local storage remains active.');
+                  const serverUnavailable = getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
+                  Alert.alert(
+                    serverUnavailable ? 'HUGPONG Server Unavailable' : 'Still Offline',
+                    serverUnavailable
+                      ? 'Your internet connection is active, but HUGPONG is temporarily unavailable. Local storage remains active.'
+                      : 'Could not establish internet connection. Local storage remains active.'
+                  );
                 }
               } catch (e) {
                 Alert.alert('Connection Check', 'Unable to complete connection check.');
@@ -104,9 +120,12 @@ export default function ProfileScreen({ navigation }) {
       setSyncedState(result.remainingCount === 0);
       Alert.alert(
         result.remainingCount === 0 ? t('sync_complete_title', 'Sync Complete') : 'Sync Incomplete',
-        result.remainingCount === 0
-          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
-          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+        syncResultMessage(result),
+        result.remainingCount > 0 ? [
+          { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
+          { text: 'Try Again', onPress: () => doSync() },
+          { text: 'Close', style: 'cancel' }
+        ] : undefined
       );
     } catch (e) {
       Alert.alert(t('sync_error_title', 'Sync Failed'), e.message || 'Unable to complete sync.');
@@ -207,7 +226,7 @@ export default function ProfileScreen({ navigation }) {
             <Text style={s.identityName}>{session?.name || 'User'}</Text>
             <View style={s.roleBadge}>
               <Text style={s.roleText}>
-                {session?.role === 'Member Farmer' ? t('role_member', 'Sugarcane Block Farm Member') : (session?.role === 'Farm Manager' ? t('role_manager', 'Block Farm Manager') : t('role_sra', 'SRA Administrator'))}
+                {session?.role === 'Farm Member' ? t('role_member', 'Farm Member') : (session?.role === 'Farm Manager' ? t('role_manager', 'Farm Manager') : t('role_sra', 'SRA Admin'))}
               </Text>
             </View>
             <Text style={s.identityId}>ID: {session?.employeeId || session?.contact || '—'}</Text>
@@ -350,7 +369,7 @@ export default function ProfileScreen({ navigation }) {
           <Text style={s.sectionHeaderTitle}>Sync & Offline Data</Text>
         </View>
         <View style={s.card}>
-          {(session?.role === 'Member Farmer' || session?.role === 'Farm Manager') && (
+          {(session?.role === 'Farm Member' || session?.role === 'Farm Manager') && (
             <View style={s.settingRow}>
               <View style={[s.settingIcon, { backgroundColor: COLORS.primaryBg }]}>
                 <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
@@ -368,7 +387,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           )}
 
-          {(session?.role === 'Farm Manager' || session?.role === 'Member Farmer') && (
+          {(session?.role === 'Farm Manager' || session?.role === 'Farm Member') && (
             <TouchableOpacity 
               style={s.settingRow} 
               onPress={() => navigation.navigate('SyncMonitor')}
@@ -378,7 +397,7 @@ export default function ProfileScreen({ navigation }) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.settingLabel}>
-                  {session?.role === 'Farm Manager' ? t('profile_sync_monitor', 'Member Sync Telemetry Monitor') : t('action_sync_hub', 'Sync Status & Diagnostics')}
+                  {session?.role === 'Farm Manager' ? t('profile_sync_monitor', 'Farm Member Sync Telemetry Monitor') : t('action_sync_hub', 'Sync Status & Diagnostics')}
                 </Text>
                 <Text style={s.settingSubLabel}>View queue, conflict logs, and connectivity</Text>
               </View>
@@ -451,7 +470,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_support', 'Help & Support Desk')}</Text>
-              <Text style={s.settingSubLabel}>Submit issue tickets or request administrator assistance</Text>
+              <Text style={s.settingSubLabel}>Submit issue tickets or request SRA Admin assistance</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -757,7 +776,7 @@ export default function ProfileScreen({ navigation }) {
               <View style={{ gap: 6 }}>
                 <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>1. Personal &amp; Agronomic Data Collected</Text>
                 <Text style={{ fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 }}>
-                  • Farmer Name, Mobile Contact, and System User ID{'\n'}
+                  • Farm Member Name, Mobile Contact, and System User ID{'\n'}
                   • Farm Block Name, Association, Coordinates &amp; Hectarage{'\n'}
                   • 6-Stage Agronomic Logs (Plowing to Harvesting){'\n'}
                   • Delivery &amp; Support Verification Records

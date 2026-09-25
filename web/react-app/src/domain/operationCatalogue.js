@@ -203,3 +203,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     ]
   }
 ];
+
+export const getOperationsForStage = stageNumber => (
+  SRA_OPERATIONS_CATALOGUE.filter(operation => operation.stageNumber === Number(stageNumber))
+);
+
+export const getOperationDefinition = operationDefinitionId => (
+  SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === String(operationDefinitionId || '').trim().toUpperCase()) || null
+);

@@ -23,6 +23,8 @@ export const ROLE_ALIASES = Object.freeze({
   MANAGER: ROLE_KEYS.FARM_MANAGER,
   MEMBERFARMER: ROLE_KEYS.MEMBER_FARMER,
   MEMBER_FARMER: ROLE_KEYS.MEMBER_FARMER,
+  FARMMEMBER: ROLE_KEYS.MEMBER_FARMER,
+  FARM_MEMBER: ROLE_KEYS.MEMBER_FARMER,
   MEMBER: ROLE_KEYS.MEMBER_FARMER
 });
 
@@ -37,7 +39,7 @@ export const DASHBOARD_PATHS = Object.freeze({
   [ROLE_KEYS.SUPER_ADMIN]: '/dashboard',
   [ROLE_KEYS.SRA_ADMIN]: '/dashboard',
   [ROLE_KEYS.FARM_MANAGER]: '/dashboard',
-  // Member Farmer is mobile-only in the approved Stage 7 baseline.
+  // Farm Member is mobile-only in the approved Stage 7 baseline.
   [ROLE_KEYS.MEMBER_FARMER]: null
 });
 

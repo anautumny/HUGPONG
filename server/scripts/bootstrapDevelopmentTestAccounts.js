@@ -19,7 +19,7 @@ const TEST_ACCOUNTS = Object.freeze({
   farmManager: { userId: '03000001', displayName: 'Development Farm Manager', phone: '09170000003', role: ROLES.FARM_MANAGER },
   memberFarmer: {
     userId: '04000001',
-    displayName: 'Development Member Farmer',
+    displayName: 'Development Farm Member',
     phone: '09170000004',
     role: ROLES.MEMBER_FARMER,
     // This is request-only scope evidence for the Farm Manager API. The
@@ -37,7 +37,6 @@ const TEST_BLOCK_FARM = Object.freeze({
 const TEST_FIELD = Object.freeze({
   id: 'DEV-FLD-001',
   areaHa: 1,
-  variety: 'VMC 84-524',
   soilType: 'Loam',
   cropType: 'Sugarcane',
   cropYear: '2026-2027',
@@ -49,7 +48,11 @@ const TEST_FIELD = Object.freeze({
 async function request(path, { method = 'GET', token, body, expectedStatus } = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-hugpong-development-seed': 'true',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const payload = await response.json().catch(() => ({}));
@@ -138,7 +141,13 @@ async function ensureField(managerToken) {
     method: 'POST',
     token: managerToken,
     body: {
-      ...TEST_FIELD,
+      id: TEST_FIELD.id,
+      areaHa: TEST_FIELD.areaHa,
+      soilType: TEST_FIELD.soilType,
+      cropType: TEST_FIELD.cropType,
+      currentStageNumber: TEST_FIELD.currentStageNumber,
+      elapsedMonths: TEST_FIELD.elapsedMonths,
+      batchNumber: TEST_FIELD.batchNumber,
       blockFarmId: TEST_BLOCK_FARM.id,
       memberUserId: TEST_ACCOUNTS.memberFarmer.userId
     }
@@ -159,6 +168,14 @@ async function verifyAuthenticationAndRbac(tokens) {
   if (!Object.values(TEST_ACCOUNTS).every(account => superUsers.some(user => user.id === account.userId))) {
     throw new Error('Super Admin verification failed: the system-wide user directory is incomplete.');
   }
+  const resolvedManager = superUsers.find(user => user.id === TEST_ACCOUNTS.farmManager.userId);
+  const resolvedMember = superUsers.find(user => user.id === TEST_ACCOUNTS.memberFarmer.userId);
+  if (resolvedManager?.assignment?.displayLabel !== `${TEST_BLOCK_FARM.name} (Manager)`) {
+    throw new Error('Super Admin verification failed: the Farm Manager assignment was not resolved canonically.');
+  }
+  if (resolvedMember?.assignment?.displayLabel !== `${TEST_BLOCK_FARM.name} · ${TEST_FIELD.id}`) {
+    throw new Error('Super Admin verification failed: the Farm Member Field relationship was not resolved canonically.');
+  }
   const sraFarms = (await request('/api/block-farms', { token: tokens[TEST_ACCOUNTS.sraAdmin.userId] })).data || [];
   if (!sraFarms.some(farm => farm.id === TEST_BLOCK_FARM.id)) throw new Error('SRA Admin verification failed: test block farm is unavailable.');
   await request('/api/tickets/NO-SUCH-TICKET', { method: 'PATCH', token: tokens[TEST_ACCOUNTS.sraAdmin.userId], body: { status: 'CLOSED' }, expectedStatus: 403 });
@@ -174,7 +191,7 @@ async function verifyAuthenticationAndRbac(tokens) {
 
   const memberFields = (await request('/api/fields', { token: tokens[TEST_ACCOUNTS.memberFarmer.userId] })).data || [];
   if (memberFields.length !== 1 || memberFields[0].id !== TEST_FIELD.id) {
-    throw new Error('Member Farmer verification failed: field scope is not limited to the assigned test field.');
+    throw new Error('Farm Member verification failed: field scope is not limited to the assigned test field.');
   }
   await request('/api/users', { token: tokens[TEST_ACCOUNTS.memberFarmer.userId], expectedStatus: 403 });
 }

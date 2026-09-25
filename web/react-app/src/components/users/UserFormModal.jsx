@@ -42,7 +42,7 @@ export default function UserFormModal({
 
   // Available roles for creation with platform scope indicators
   const roleOptions = [
-    { value: 'MEMBER_FARMER', label: 'Member Farmer (Mobile Only)' },
+    { value: 'MEMBER_FARMER', label: 'Farm Member (Mobile Only)' },
     ...(!isFarmManager ? [{ value: 'FARM_MANAGER', label: 'Farm Manager (Web & Mobile)' }] : []),
     ...(isSuperAdmin ? [
       { value: 'SRA_ADMIN', label: 'SRA Admin (Web & Mobile)' },
@@ -61,7 +61,7 @@ export default function UserFormModal({
         setDisplayName(initialUser.displayName || initialUser.name || '');
         setPhone(initialUser.phone || initialUser.contact || '');
         setSelectedRole(initialUser.canonicalRole || 'MEMBER_FARMER');
-        setBlockFarmId(initialUser.blockFarmId || '');
+        setBlockFarmId(initialUser.assignment?.blockFarmId || '');
         setPassword('');
         setIsPhoneVerified(Boolean(initialUser.phoneVerified));
       } else {
@@ -198,7 +198,7 @@ export default function UserFormModal({
       isOpen={isOpen}
       onClose={onClose}
       title={isEditing ? 'Edit Personnel Profile' : 'Provision Personnel Account'}
-      subtitle={isEditing ? 'Update authorized credentials and assignment.' : 'Create authorized personnel or member farmer credentials.'}
+      subtitle={isEditing ? 'Update authorized credentials and assignment.' : 'Create authorized personnel or Farm Member credentials.'}
       icon={User}
       badge={isEditing ? 'Update Profile' : 'New Personnel'}
       size="md"
@@ -239,7 +239,7 @@ export default function UserFormModal({
           id="user-form-name"
           label="Full Display Name"
           required
-          helperText="Official full legal name of the personnel or cooperative farmer"
+          helperText="Official full legal name of the personnel or cooperative Farm Member"
         >
           <Input
             type="text"

@@ -12,7 +12,7 @@ Local UI cache updates are not authoritative. Mobile offline actions are retaine
 
 | Client workflow previously writing Firestore | Authoritative API |
 | --- | --- |
-| Field creation and initial crop cycle | `POST /api/fields` |
+| Field creation, server-issued ID, and initial crop cycle | `POST /api/fields` |
 | Field assignment/profile changes | `PATCH /api/fields/:id` |
 | Field archival, including its ACTIVE cycle and logs | `POST /api/fields/:id/archive` |
 | Custom field stages | `PUT /api/fields/:id/custom-stages` |
@@ -35,14 +35,14 @@ The removed write sites covered the web database-wide background uploader and in
 
 ## Server enforcement
 
-- Member Farmers can record, amend, or archive only their own submitted operations on their assigned ACTIVE field and current ACTIVE crop cycle.
-- Farm Managers can mutate fields, crop cycles, operations, reports, and Member Farmer accounts only inside their assigned block farm.
+- Farm Members can record, amend, or archive only their own submitted operations on their assigned ACTIVE field and current ACTIVE crop cycle.
+- Farm Managers can mutate fields, crop cycles, operations, reports, and Farm Member accounts only inside their assigned block farm.
 - SRA Admin owns price publication and audit-report certification. Audit certification remains separate from operation lifecycle.
 - Super Admin owns support-ticket triage and may perform the explicitly permitted registry administration workflows.
-- Field assignment rejects an ACTIVE Member Farmer assignment crossing block-farm scope.
+- Field assignment rejects an ACTIVE Farm Member assignment crossing block-farm scope.
 - Support tickets with a `fieldId` are validated against the actor's field scope.
 - Submitted operations have only `ACTIVE` and `ARCHIVED`; the API exposes archival, not deletion or purge.
-- Client retries use stable IDs. Operation creation/amendment, fields, prices, tickets, audit events, reports, and crop-cycle rollover have replay handling to avoid duplicate server mutations.
+- Offline-capable client retries reuse stable operation/mutation identifiers. New Field enrollment is online-only and waits for the server-issued identity; existing Field edits retain their permanent identity and version checks.
 
 ## Firestore writes that remain
 

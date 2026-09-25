@@ -4,11 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import CirclingRetryButton from './CirclingRetryButton';
+import { CONNECTIVITY_STATUS, getConnectivityDetails } from '../services/networkService';
 
 const { width } = Dimensions.get('window');
 
-export default function AdminOfflineBarrier({ onRetry, session = {} }) {
+export default function AdminOfflineBarrier({ onRetry, session = {}, connectivityStatus }) {
   const [lastCheckFailed, setLastCheckFailed] = useState(false);
+  const serverUnavailable = connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
 
   const handleResult = (online) => {
     if (!online) {
@@ -39,9 +41,11 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
         </View>
 
         {/* Title & Subtitle */}
-        <Text style={s.title}>No Internet Connection</Text>
+        <Text style={s.title}>{serverUnavailable ? 'HUGPONG Server Unavailable' : 'No Internet Connection'}</Text>
         <Text style={s.subtitle}>
-          Internet access is required for SRA Admin operations. Official sugar price circular broadcasts, regulatory compliance certificates, and district audit approvals must be certified with central servers in real time.
+          {serverUnavailable
+            ? 'Your internet connection is active, but the HUGPONG server cannot be reached. SRA Admin operations will resume when the service is available.'
+            : 'Internet access is required for SRA Admin operations. Official sugar price circular broadcasts, regulatory compliance certificates, and district audit approvals must be certified with central servers in real time.'}
         </Text>
 
         {/* Compliance Guarantees Card */}
@@ -67,7 +71,7 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
           <View style={s.featureRow}>
             <Ionicons name="people" size={16} color={COLORS.primary} style={s.featIcon} />
             <View style={{ flex: 1 }}>
-              <Text style={s.featTitle}>Member Registration Approval</Text>
+              <Text style={s.featTitle}>Farm Member Registration Approval</Text>
               <Text style={s.featDesc}>Validates 8-digit identification codes against central database.</Text>
             </View>
           </View>
@@ -76,7 +80,11 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
         {lastCheckFailed && (
           <View style={s.errorPill}>
             <Ionicons name="alert-circle" size={14} color="#B91C1C" />
-            <Text style={s.errorText}>No internet connection detected. Please check Wi-Fi or mobile data.</Text>
+            <Text style={s.errorText}>
+              {getConnectivityDetails().status === CONNECTIVITY_STATUS.NO_INTERNET
+                ? 'No internet connection detected. Please check Wi-Fi or mobile data.'
+                : 'The HUGPONG server is temporarily unavailable. Please try again.'}
+            </Text>
           </View>
         )}
 
@@ -92,7 +100,7 @@ export default function AdminOfflineBarrier({ onRetry, session = {} }) {
 
         {/* Footer Note for Field Roles */}
         <Text style={s.footerText}>
-          Logged in as <Text style={{ fontWeight: '700' }}>{session?.name || 'SRA Administrator'}</Text> ({session?.role || 'SRA Admin'}). Field operations (offline log and draft capture) remain active for Member Farmers and Farm Managers in the field.
+          Logged in as <Text style={{ fontWeight: '700' }}>{session?.name || 'SRA Admin'}</Text> ({session?.role || 'SRA Admin'}). Field operations (offline log and draft capture) remain active for Farm Members and Farm Managers in the field.
         </Text>
       </View>
     </SafeAreaView>

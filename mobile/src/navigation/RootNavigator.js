@@ -13,18 +13,16 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
-import HomeScreen from '../screens/HomeScreen';
-import AnalyticsScreen from '../screens/AnalyticsScreen';
-import PlannerScreen from '../screens/PlannerScreen';
-import FieldOpsScreen from '../screens/FieldOpsScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import SecurityScreen from '../screens/SecurityScreen';
-import SyncMonitorScreen from '../screens/SyncMonitorScreen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../services/i18n';
 
 import AdminOfflineBarrier from '../components/AdminOfflineBarrier';
-import { subscribeToNetwork, getNetworkStatus } from '../services/networkService';
+import {
+  subscribeToNetwork,
+  getNetworkStatus,
+  getConnectivityDetails,
+  CONNECTIVITY_STATUS
+} from '../services/networkService';
 
 const Root = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -32,6 +30,14 @@ const HomeStack = createNativeStackNavigator();
 const CalcStack = createNativeStackNavigator();
 const SchedStack = createNativeStackNavigator();
 const ProfileStack = createNativeStackNavigator();
+
+const getHomeScreen = () => require('../screens/HomeScreen').default;
+const getAnalyticsScreen = () => require('../screens/AnalyticsScreen').default;
+const getPlannerScreen = () => require('../screens/PlannerScreen').default;
+const getFieldOpsScreen = () => require('../screens/FieldOpsScreen').default;
+const getProfileScreen = () => require('../screens/ProfileScreen').default;
+const getSecurityScreen = () => require('../screens/SecurityScreen').default;
+const getSyncMonitorScreen = () => require('../screens/SyncMonitorScreen').default;
 
 const TAB_ICONS = {
   Home: { active: 'home', inactive: 'home-outline' },
@@ -43,10 +49,10 @@ const TAB_ICONS = {
 function HomeNavigator() {
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }}>
-      <HomeStack.Screen name="HomeMain" component={HomeScreen} />
-      <HomeStack.Screen name="FieldOps" component={FieldOpsScreen} options={{ animation: 'slide_from_right' }} />
-      <HomeStack.Screen name="Analytics" component={AnalyticsScreen} options={{ animation: 'slide_from_right' }} />
-      <HomeStack.Screen name="SyncMonitor" component={SyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
+      <HomeStack.Screen name="HomeMain" getComponent={getHomeScreen} />
+      <HomeStack.Screen name="FieldOps" getComponent={getFieldOpsScreen} options={{ animation: 'slide_from_right' }} />
+      <HomeStack.Screen name="Analytics" getComponent={getAnalyticsScreen} options={{ animation: 'slide_from_right' }} />
+      <HomeStack.Screen name="SyncMonitor" getComponent={getSyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
     </HomeStack.Navigator>
   );
 }
@@ -54,7 +60,7 @@ function HomeNavigator() {
 function CalcNavigator() {
   return (
     <CalcStack.Navigator screenOptions={{ headerShown: false }}>
-      <CalcStack.Screen name="CalcMain" component={PlannerScreen} />
+      <CalcStack.Screen name="CalcMain" getComponent={getPlannerScreen} />
     </CalcStack.Navigator>
   );
 }
@@ -62,9 +68,9 @@ function CalcNavigator() {
 function SchedNavigator() {
   return (
     <SchedStack.Navigator screenOptions={{ headerShown: false }}>
-      <SchedStack.Screen name="SchedMain" component={FieldOpsScreen} />
-      <SchedStack.Screen name="Analytics" component={AnalyticsScreen} options={{ animation: 'slide_from_right' }} />
-      <SchedStack.Screen name="SyncMonitor" component={SyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
+      <SchedStack.Screen name="SchedMain" getComponent={getFieldOpsScreen} />
+      <SchedStack.Screen name="Analytics" getComponent={getAnalyticsScreen} options={{ animation: 'slide_from_right' }} />
+      <SchedStack.Screen name="SyncMonitor" getComponent={getSyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
     </SchedStack.Navigator>
   );
 }
@@ -72,9 +78,9 @@ function SchedNavigator() {
 function ProfileNavigator() {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
-      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
-      <ProfileStack.Screen name="Security" component={SecurityScreen} options={{ animation: 'slide_from_right' }} />
-      <ProfileStack.Screen name="SyncMonitor" component={SyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
+      <ProfileStack.Screen name="ProfileMain" getComponent={getProfileScreen} />
+      <ProfileStack.Screen name="Security" getComponent={getSecurityScreen} options={{ animation: 'slide_from_right' }} />
+      <ProfileStack.Screen name="SyncMonitor" getComponent={getSyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
     </ProfileStack.Navigator>
   );
 }
@@ -140,21 +146,26 @@ const modalStyles = StyleSheet.create({
 });
 
 function MainTabs({ navigation }) {
-  const [role, setRole] = React.useState(getCurrentSession()?.role || 'Member Farmer');
+  const [role, setRole] = React.useState(getCurrentSession()?.role || 'Farm Member');
   const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
-  const [showOfflineNotice, setShowOfflineNotice] = React.useState(!getNetworkStatus());
-  const hasShownOfflineNoticeRef = React.useRef(!getNetworkStatus());
+  const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
+  const [showOfflineNotice, setShowOfflineNotice] = React.useState(false);
+  const hasShownOfflineNoticeRef = React.useRef(false);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom > 0 ? Math.min(insets.bottom, 16) : 0;
 
   React.useEffect(() => {
     const unsubSession = subscribe(() => {
-      setRole(getCurrentSession()?.role || 'Member Farmer');
+      setRole(getCurrentSession()?.role || 'Farm Member');
     });
-    const unsubNet = subscribeToNetwork((online) => {
+    const unsubNet = subscribeToNetwork((online, details) => {
       setIsOnline(online);
-      if (!online) {
+      setConnectivityStatus(details.status);
+      if (online) {
+        hasShownOfflineNoticeRef.current = false;
+        setShowOfflineNotice(false);
+      } else if (details.status !== CONNECTIVITY_STATUS.CHECKING) {
         if (!hasShownOfflineNoticeRef.current) {
           setShowOfflineNotice(true);
           hasShownOfflineNoticeRef.current = true;
@@ -232,6 +243,7 @@ function MainTabs({ navigation }) {
     return (
       <AdminOfflineBarrier
         session={getCurrentSession()}
+        connectivityStatus={connectivityStatus}
         onRetry={(online) => setIsOnline(online)}
       />
     );
@@ -254,7 +266,7 @@ function MainTabs({ navigation }) {
             }
           }}
         />
-        {role === 'Member Farmer' ? (
+        {role === 'Farm Member' ? (
           <Tab.Screen name="Planner" component={CalcNavigator} />
         ) : (
           isOnline && role !== 'SRA Admin' && (
@@ -289,13 +301,17 @@ function MainTabs({ navigation }) {
             </View>
 
             <Text style={modalStyles.title}>
-              You are currently in offline mode
+              {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
+                ? 'No internet connection'
+                : 'HUGPONG server unavailable'}
             </Text>
 
             <Text style={modalStyles.desc}>
-              {role === 'Farm Manager'
-                ? 'Navigating directly to Field Operations. In offline mode, only your own personal field plot can be accessed. Managed block farm plots and supervisory takeover are disabled until an internet connection is restored.'
-                : role === 'Member Farmer'
+              {connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE
+                ? 'Your internet connection is active, but the HUGPONG server cannot be reached. Cached work remains available and queued changes will sync automatically when service returns.'
+                : role === 'Farm Manager'
+                ? 'Navigating directly to Field Operations. In offline mode, only your own personal field plot can be accessed. Managed block farm plots and Manager Takeover are disabled until an internet connection is restored.'
+                : role === 'Farm Member'
                 ? 'You have offline access to your Planner and assigned field plot. Any recorded operations will be saved locally and synced once connection is restored.'
                 : 'You are currently in offline mode. Cached records and operations are accessible.'}
             </Text>

@@ -82,14 +82,14 @@ export default function AppShell() {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // If user is Member Farmer, redirect with explanation (Member Farmer is mobile-only in Stage 7)
+  // If user is Farm Member, redirect with explanation (Farm Member is mobile-only in Stage 7)
   if (isAuthenticated && roleKey === ROLE_KEYS.MEMBER_FARMER) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg p-6 text-hug-text">
         <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-6 text-center shadow-lg">
           <h2 className="text-lg font-bold text-primary mb-2">Mobile Access Only</h2>
           <p className="text-sm text-hug-text2 mb-4">
-            Member Farmer accounts use the HUGPONG mobile application for field management and harvest monitoring.
+            Farm Member accounts use the HUGPONG mobile application for field management and harvest monitoring.
           </p>
           <button
             type="button"

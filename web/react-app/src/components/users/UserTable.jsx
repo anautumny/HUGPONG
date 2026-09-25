@@ -2,12 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { Search, User, CheckCircle2, AlertCircle, Edit2, ShieldAlert, ShieldCheck, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import Button from '../ui/Button';
 
 export default function UserTable({
   users = [],
-  blockFarms = [],
-  fields = [],
   isLoading = false,
   currentUser = null,
   onEditUser,
@@ -24,23 +21,6 @@ export default function UserTable({
   const isSuperAdmin = actorRole === 'SUPER_ADMIN';
   const isSraAdmin = actorRole === 'SRA_ADMIN';
   const isFarmManager = actorRole === 'FARM_MANAGER';
-
-  // Map of block farms by id and manager
-  const farmMap = useMemo(() => new Map(blockFarms.map(f => [f.id, f])), [blockFarms]);
-  const farmByManagerMap = useMemo(() => new Map(blockFarms.map(f => [f.managerUserId, f])), [blockFarms]);
-
-  // Map of fields by member
-  const fieldsByMemberMap = useMemo(() => {
-    const map = new Map();
-    fields.forEach(f => {
-      if (f.memberUserId) {
-        const existing = map.get(f.memberUserId) || [];
-        existing.push(f);
-        map.set(f.memberUserId, existing);
-      }
-    });
-    return map;
-  }, [fields]);
 
   // Filtered users
   const filteredUsers = useMemo(() => {
@@ -78,7 +58,7 @@ export default function UserTable({
   // Role options for filter
   const roleOptions = [
     { value: 'ALL', label: 'All Roles' },
-    { value: 'MEMBER_FARMER', label: 'Member Farmer' },
+    { value: 'MEMBER_FARMER', label: 'Farm Member' },
     { value: 'FARM_MANAGER', label: 'Farm Manager' },
     ...(isSuperAdmin ? [
       { value: 'SRA_ADMIN', label: 'SRA Admin' },
@@ -131,13 +111,13 @@ export default function UserTable({
       <div className="p-4 sm:p-5 border-b border-border/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-hug-text flex items-center gap-2">
-            <span>Personnel & Member Directory</span>
+            <span>Personnel & Farm Member Directory</span>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-bg dark:bg-gray-800 text-hug-muted border border-border">
               {filteredUsers.length} accounts
             </span>
           </h3>
           <p className="text-xs text-hug-muted mt-0.5">
-            Authorized HUGPONG personnel, managers, and registered member farmers.
+            Authorized HUGPONG personnel, Farm Managers, and registered Farm Members.
           </p>
         </div>
 
@@ -186,7 +166,7 @@ export default function UserTable({
           <thead>
             <tr className="bg-bg/60 dark:bg-[#0C1015]/60 border-b border-border/80 text-hug-muted font-bold text-xs uppercase tracking-wider">
               <th scope="col" className="px-5 py-3.5">User ID</th>
-              <th scope="col" className="px-5 py-3.5">Personnel / Member</th>
+              <th scope="col" className="px-5 py-3.5">Personnel / Farm Member</th>
               <th scope="col" className="px-5 py-3.5">Role</th>
               <th scope="col" className="px-5 py-3.5">Assigned Block Farm / Plot</th>
               <th scope="col" className="px-5 py-3.5">Status</th>
@@ -222,28 +202,10 @@ export default function UserTable({
                 const canEdit = canEditUser(u);
                 const canToggle = canToggleUser(u);
 
-                // Compute farm and plot details
-                let farmPlotDisplay = 'Unassigned';
-                if (u.canonicalRole === 'SUPER_ADMIN') {
-                  farmPlotDisplay = 'Central District Oversight';
-                } else if (u.canonicalRole === 'SRA_ADMIN') {
-                  farmPlotDisplay = 'SRA Regulatory Oversight';
-                } else if (u.canonicalRole === 'FARM_MANAGER') {
-                  const farm = farmByManagerMap.get(u.id) || farmMap.get(u.blockFarmId);
-                  farmPlotDisplay = farm ? `${farm.name} (Manager)` : 'Unassigned Farm';
-                } else {
-                  // Member Farmer: lookup fields
-                  const userFields = fieldsByMemberMap.get(u.id) || [];
-                  if (userFields.length > 0) {
-                    const farmId = userFields[0].blockFarmId;
-                    const farm = farmMap.get(farmId);
-                    const farmName = farm?.name || farmId || 'Block Farm';
-                    const plotsStr = userFields.map(f => f.id).join(', ');
-                    farmPlotDisplay = `${farmName} · ${plotsStr}`;
-                  } else {
-                    farmPlotDisplay = u.blockFarmName || 'Unassigned';
-                  }
-                }
+                // Relationship data arrives already resolved by the authoritative API.
+                const assignment = u.assignment || null;
+                const farmPlotDisplay = assignment?.displayLabel || 'Assignment unavailable';
+                const assignmentNeedsReview = ['ORPHANED', 'CONFLICT'].includes(assignment?.status);
 
                 return (
                   <tr key={u.id} className="hover:bg-bg/40 dark:hover:bg-surface-subtle/40 transition-colors">
@@ -284,7 +246,10 @@ export default function UserTable({
                     </td>
 
                     {/* Block Farm / Plot */}
-                    <td className="px-5 py-4 text-xs text-hug-text2 max-w-[220px] truncate" title={farmPlotDisplay}>
+                    <td
+                      className={`px-5 py-4 text-xs max-w-[220px] truncate ${assignmentNeedsReview ? 'text-danger font-semibold' : 'text-hug-text2'}`}
+                      title={farmPlotDisplay}
+                    >
                       {farmPlotDisplay}
                     </td>
 

@@ -3,7 +3,9 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-import { subscribe, getCurrentSession, fields, users, blockFarms, getMemberSyncHealth, performMobileSync, updateSessionFieldId } from '../data/dataStore';
+import { subscribe, getCurrentSession, fields, users, blockFarms, getMemberSyncHealth, getFieldSyncState, performMobileSync, updateSessionFieldId } from '../data/dataStore';
+import { getOutboxDiagnostics } from '../services/syncEngine';
+import { syncItemLabel, syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
 
 export default function SyncMonitorScreen({ navigation }) {
@@ -22,9 +24,7 @@ export default function SyncMonitorScreen({ navigation }) {
       const result = await performMobileSync('MANUAL_SYNC');
       Alert.alert(
         result.remainingCount === 0 ? t('sync_status_synced', 'Sync Successful') : 'Sync Incomplete',
-        result.remainingCount === 0
-          ? `${result.processedCount || 0} queued record(s) synchronized. No records remain.`
-          : `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`
+        syncResultMessage(result)
       );
     } finally {
       setIsSyncing(false);
@@ -52,11 +52,16 @@ export default function SyncMonitorScreen({ navigation }) {
     const managedFields = managedFarm ? fields.filter(field => field.blockFarmId === managedFarm.id) : [];
     return managedFields.map((f) => {
       const member = users.find(user => (user.id || user.employeeId) === f.memberUserId);
-      const isLagging = f.lastSync?.includes('days') || !f.synced;
+      const fieldSync = getFieldSyncState(f.id);
+      const isLagging = f.lastSync?.includes('days') || !fieldSync.isSynced;
       const lagDays = Number(f.syncLagDays || 0);
       const isCritical = lagDays >= 7;
       const status = isCritical ? 'critical' : (isLagging ? 'warning' : 'active');
-      const statusLabel = isCritical ? `Critical (${f.lastSync})` : (isLagging ? `Lagging (${f.lastSync})` : 'Active & Synced');
+      const statusLabel = isCritical
+        ? `Critical (${f.lastSync})`
+        : fieldSync.status === 'FAILED'
+          ? `Sync Failed (${fieldSync.pendingCount})`
+          : isLagging ? `Pending Sync (${fieldSync.pendingCount})` : 'Active & Synced';
       return {
         id: f.id,
         name: member?.name || member?.displayName || 'Unassigned',
@@ -65,7 +70,7 @@ export default function SyncMonitorScreen({ navigation }) {
         stage: f.stage ? f.stage.split(':')[0] : 'In Progress',
         lastSync: f.lastSync || 'No sync recorded',
         lagDays,
-        offlineLogsCount: Number(f.offlineLogsCount || 0),
+        offlineLogsCount: fieldSync.pendingCount,
         battery: f.batteryLevel ?? null,
         status,
         statusLabel,
@@ -114,7 +119,7 @@ export default function SyncMonitorScreen({ navigation }) {
     const cleanPhone = (member.contact || '').replace(/[^0-9+]/g, '');
 
     Alert.alert(
-      `${t('btn_call_member', 'Call Member')}: ${member.name}`,
+      `${t('btn_call_member', 'Call Farm Member')}: ${member.name}`,
       `${t('profile_mobile_contact', 'Mobile')}: ${member.contact}\n${t('field_plot', 'Field Plot')}: ${member.id} (${member.ha || 1.5} Ha)\n${t('status', 'Sync Status')}: ${formatSyncTime(member.lastSync)}\n\nDirect carrier call via your device dialer (no SMS fees).`,
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
@@ -140,12 +145,12 @@ export default function SyncMonitorScreen({ navigation }) {
 
   const handleTakeOver = (member) => {
     Alert.alert(
-      t('btn_take_over', 'Take Over Field Plot'),
-      `Take operational supervision of ${member.id} (${member.name})? You will be navigated to Field Ops to enter your manager account password and authorize supervisor take over.`,
+      t('btn_take_over', 'Manager Takeover'),
+      `Use Manager Takeover for ${member.id} (${member.name})? You will be navigated to Field Ops to enter your manager account password and authorize the action.`,
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
         {
-          text: t('btn_take_over', 'Proceed to Take Over'),
+          text: t('btn_take_over', 'Proceed to Manager Takeover'),
           onPress: () => {
             navigation.navigate('Field Ops', {
               screen: 'SchedMain',
@@ -165,13 +170,27 @@ export default function SyncMonitorScreen({ navigation }) {
           <Ionicons name="arrow-back" size={20} color={COLORS.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={s.headerTitle}>{isFarmManager ? t('telemetry_title', 'Member Sync Monitor') : (isSRA ? 'SRA Terminal' : t('action_sync_hub', 'Sync Status'))}</Text>
+          <Text style={s.headerTitle}>{isFarmManager ? t('telemetry_title', 'Farm Member Sync Monitor') : (isSRA ? 'SRA Terminal' : t('action_sync_hub', 'Sync Status'))}</Text>
           <Text style={s.headerSub}>{isFarmManager ? `${managedFarm?.name || 'Unassigned'} Supervision` : (isSRA ? 'Administrative Authority' : 'Mobile Terminal Connection')}</Text>
         </View>
         <View style={{ width: 36 }} />
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+
+        {getOutboxDiagnostics().length > 0 && (
+          <View style={s.memberCard}>
+            <Text style={s.sectionTitle}>Changes waiting to sync</Text>
+            {getOutboxDiagnostics().map(item => (
+              <View key={item.mutationId} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EEF2E9' }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{syncItemLabel(item)}</Text>
+                <Text style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>
+                  {item.entityKey} · {item.status === 'queued' || item.status === 'retryable' ? 'Waiting to retry' : item.status}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* ── FARM MANAGER VIEW ── */}
         {isFarmManager ? (
@@ -211,7 +230,7 @@ export default function SyncMonitorScreen({ navigation }) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.alertTitle}>
-                    {t('sync_critical_title', 'Sync Action Required')}: {attentionCount} Member(s) Offline
+                    {t('sync_critical_title', 'Sync Action Required')}: {attentionCount} Farm Member(s) Offline
                   </Text>
                   <Text style={s.alertSub}>
                     Follow up with lagging members before monthly district report compile.
@@ -344,7 +363,7 @@ export default function SyncMonitorScreen({ navigation }) {
                             activeOpacity={0.8}
                           >
                             <Ionicons name="call-outline" size={16} color={COLORS.text} />
-                            <Text style={s.contactBtnText} numberOfLines={1}>{t('btn_call_member', 'Call Member')}</Text>
+                            <Text style={s.contactBtnText} numberOfLines={1}>{t('btn_call_member', 'Call Farm Member')}</Text>
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -353,7 +372,7 @@ export default function SyncMonitorScreen({ navigation }) {
                             activeOpacity={0.8}
                           >
                             <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.primary} />
-                            <Text style={s.takeOverBtnText} numberOfLines={1}>{t('btn_take_over', 'Take Over Plot')}</Text>
+                            <Text style={s.takeOverBtnText} numberOfLines={1}>{t('btn_take_over', 'Manager Takeover')}</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -397,10 +416,10 @@ export default function SyncMonitorScreen({ navigation }) {
               <Ionicons name="business" size={26} color={COLORS.primary} />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text, textAlign: 'center' }}>
-              {t('role_sra', 'SRA Administrator')}
+              {t('role_sra', 'SRA Admin')}
             </Text>
             <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4, lineHeight: 18 }}>
-              {t('profile_sra_status', 'Individual member sync health & telemetry is supervised directly by local Farm Managers. SRA Administrators supervise sugar price circulars, monthly compiled audit reports, and macro analytics.')}
+              {t('profile_sra_status', 'Individual member sync health & telemetry is supervised directly by local Farm Managers. SRA Admins supervise sugar price circulars, monthly compiled audit reports, and macro analytics.')}
             </Text>
 
             <View style={{ width: '100%', backgroundColor: '#F8FAF6', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#E2E8DC', marginVertical: 16, gap: 8 }}>
@@ -435,8 +454,12 @@ export default function SyncMonitorScreen({ navigation }) {
               <Ionicons name="shield-checkmark" size={32} color={COLORS.primary} />
             </View>
 
-            <Text style={s.statusTitle}>Fully Synced</Text>
-            <Text style={s.statusSub}>All records match the cloud database.</Text>
+            <Text style={s.statusTitle}>{syncHealth.pendingCount > 0 ? 'Pending Sync' : 'Fully Synced'}</Text>
+            <Text style={s.statusSub}>
+              {syncHealth.pendingCount > 0
+                ? `${syncHealth.pendingCount} saved change${syncHealth.pendingCount === 1 ? ' is' : 's are'} waiting to sync.`
+                : 'All records match the cloud database.'}
+            </Text>
 
             <View style={s.infoBox}>
               <View style={s.infoItem}>

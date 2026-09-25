@@ -36,7 +36,10 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const memberUsers = (usersResult.data || [])
       .map(member => fromUser(member.id || member.employeeId, member))
-      .filter(member => member.canonicalRole === 'MEMBER_FARMER')
+      .filter(member => member.canonicalRole === 'MEMBER_FARMER' || (
+        member.canonicalRole === 'FARM_MANAGER' &&
+        String(member.employeeId || member.id || '') === String(user?.employeeId || user?.id || '')
+      ))
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')));
     const cycleMap = new Map(cropCycles.map(cycle => [cycle.id, cycle]));
     const memberMap = new Map();
@@ -53,6 +56,8 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
         ...field,
         stageNumber: cycle?.currentStageNumber ?? null,
         cropCycle: cycle,
+        variety: String(cycle?.variety || field.variety || '').trim(),
+        varietySource: cycle?.variety ? 'CROP_YEAR_CYCLE' : (field.variety ? 'LEGACY_FIELD' : ''),
         memberName: member?.displayName || member?.name || field.memberUserId || 'Unassigned',
         memberPhone: member?.phone || member?.contact || '',
         blockFarmName: farm?.name || field.blockFarmId || 'Unknown Farm'
@@ -63,7 +68,10 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
     onData: data => onUpdate({ ...data, isLoading: false, error: null }),
     onError: error => {
       if (onError) onError(error);
-    }
+    },
+    resources: canListUsers
+      ? ['fields', 'crop-cycles', 'block-farms', 'users']
+      : ['fields', 'crop-cycles', 'block-farms']
   });
 }
 

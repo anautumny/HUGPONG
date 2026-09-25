@@ -25,10 +25,14 @@ const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '—');
 export default function AuditHistoryModal({
   visible = false,
   onClose,
-  onOpenQR
+  onOpenQR,
+  reports = null,
+  onLoadMore,
+  hasMore = false,
+  isLoading = false
 }) {
   const { t, formatPhaseMonth } = useTranslation();
-  const orderedAudits = sortNewestFirst(auditLogs, ['compiledAt', 'createdAt', 'period', 'month']);
+  const orderedAudits = sortNewestFirst(Array.isArray(reports) ? reports : auditLogs, ['certifiedAt', 'compiledAt', 'createdAt', 'period', 'month']);
   const [selectedAuditId, setSelectedAuditId] = useState(orderedAudits[0]?.id || 'AUD-2026-05');
   const activeAudit = orderedAudits.find(a => a.id === selectedAuditId) || orderedAudits[0] || {};
 
@@ -155,6 +159,11 @@ export default function AuditHistoryModal({
               </TouchableOpacity>
             </View>
           </View>
+          {hasMore && (
+            <TouchableOpacity style={s.qrBtn} disabled={isLoading} onPress={onLoadMore}>
+              <Text style={s.qrBtnText}>{isLoading ? 'Loading...' : 'Load More Certified Audits'}</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>

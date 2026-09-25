@@ -102,7 +102,7 @@ export function AuthProvider({ children }) {
       } finally {
         clearSession();
       }
-      throw new Error('Member Farmer accounts are restricted to the HUGPONG mobile application.');
+      throw new Error('Farm Member accounts are restricted to the HUGPONG mobile application.');
     }
     if (data.firebaseCustomToken) {
       await signInWithCustomTokenSilently(data.firebaseCustomToken).catch(() => {});

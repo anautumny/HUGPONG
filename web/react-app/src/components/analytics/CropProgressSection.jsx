@@ -169,7 +169,7 @@ export default function CropProgressSection({
                     <thead>
                       <tr className="border-b border-border/80 text-hug-muted font-bold uppercase tracking-wider">
                         <th className="py-2 px-3">Parcel ID</th>
-                        <th className="py-2 px-3">Member Farmer</th>
+                        <th className="py-2 px-3">Farm Member</th>
                         <th className="py-2 px-3">Block Farm</th>
                         <th className="py-2 px-3">Cane Variety</th>
                         <th className="py-2 px-3 text-right">Area (Ha)</th>

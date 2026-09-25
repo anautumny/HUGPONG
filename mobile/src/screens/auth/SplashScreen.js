@@ -22,15 +22,18 @@ export default function SplashScreen({ navigation }) {
       Animated.timing(tagOpacity, { toValue: 1, duration: 400, delay: 200, useNativeDriver: true }),
     ]).start();
 
-    const timer = setTimeout(async () => {
+    let active = true;
+    const restore = async () => {
       try {
         const langChosen = await getItem('@hugpong_lang_chosen');
+        if (!active) return;
         if (!langChosen) {
           navigation.replace('LanguageSelect');
           return;
         }
 
         const onboarded = await getItem('@hugpong_onboarded');
+        if (!active) return;
         if (!onboarded) {
           navigation.replace('Onboarding');
           return;
@@ -38,16 +41,18 @@ export default function SplashScreen({ navigation }) {
 
         // Check persistent auth session token (Stay Logged In)
         const authRes = await restoreSessionFromToken();
+        if (!active) return;
         if (authRes.success) {
           navigation.replace('MainTabs');
         } else {
           navigation.replace('Login');
         }
       } catch (e) {
-        navigation.replace('Login');
+        if (active) navigation.replace('Login');
       }
-    }, 1800);
-    return () => clearTimeout(timer);
+    };
+    restore();
+    return () => { active = false; };
   }, []);
 
   return (

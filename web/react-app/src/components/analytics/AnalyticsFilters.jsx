@@ -12,6 +12,9 @@ export default function AnalyticsFilters({
   blockFarms = [],
   selectedFarmId = 'ALL',
   onFarmChange,
+  fields = [],
+  selectedFieldId = 'ALL',
+  onFieldChange,
   periods = [],
   selectedPeriod = 'ALL',
   onPeriodChange,
@@ -44,7 +47,12 @@ export default function AnalyticsFilters({
     })
   ];
 
-  const hasActiveFilters = selectedSeason !== 'ALL' || selectedFarmId !== 'ALL' || selectedPeriod !== 'ALL';
+  const fieldOptions = [
+    { value: 'ALL', label: 'All Fields' },
+    ...fields.map(field => ({ value: field.id, label: field.id }))
+  ];
+
+  const hasActiveFilters = selectedSeason !== 'ALL' || selectedFarmId !== 'ALL' || selectedFieldId !== 'ALL' || selectedPeriod !== 'ALL';
 
   return (
     <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-4 sm:p-5 shadow-xs ${className}`}>
@@ -64,13 +72,13 @@ export default function AnalyticsFilters({
               )}
             </h3>
             <p className="text-xs text-hug-muted">
-              Scope data across Crop Year Cycles, Block Farms, and reporting periods.
+              Scope data across Crop Year Cycles, Block Farms, Fields, and reporting periods.
             </p>
           </div>
         </div>
 
         {/* Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full lg:w-auto min-w-0">
           {/* Season Filter */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
@@ -92,6 +100,15 @@ export default function AnalyticsFilters({
               value={selectedFarmId}
               onChange={(e) => onFarmChange(e.target.value)}
               options={farmOptions}
+            />
+          </div>
+
+          <div className="min-w-0">
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Field</label>
+            <Select
+              value={selectedFieldId}
+              onChange={(e) => onFieldChange(e.target.value)}
+              options={fieldOptions}
             />
           </div>
 

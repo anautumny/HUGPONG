@@ -13,6 +13,9 @@ import {
   saveCustomStages,
   saveCustomOperations,
   compileAuditReport,
+  submitAuditReport,
+  returnAuditReport,
+  importAuditQr,
   certifyAuditReport,
   approveUser
 } from './mutationService';
@@ -264,6 +267,21 @@ export function getOutboxQueue() {
   return [...outboxQueue];
 }
 
+export function getOutboxDiagnostics() {
+  return outboxQueue.map(item => ({
+    mutationId: item.mutationId,
+    entityKey: item.entityKey,
+    type: item.type,
+    status: item.status,
+    enqueuedAt: item.enqueuedAt,
+    retryCount: Number(item.retryCount || 0),
+    nextAttemptAt: item.nextAttemptAt || null,
+    lastAttempt: item.lastAttempt || null,
+    lastError: item.lastError || null,
+    dependsOnMutationId: item.dependsOnMutationId || null
+  }));
+}
+
 /**
  * Get number of unsynced items in outbox
  */
@@ -357,7 +375,8 @@ export async function processOutbox(remoteUploadHandler) {
         if (!persisted) throw new Error('The synchronization queue state could not be persisted.');
         outboxQueue = nextQueue;
         notifySyncEngine();
-      }
+      },
+      { batchSize: 10, applyBackoff: true }
     );
     outboxQueue = drained.queue;
 
@@ -422,6 +441,12 @@ export async function flushOutboxToApi() {
         return saveCustomOperations(payload.fieldId, payload.customOperations, mutation);
       } else if (type === 'audit_report') {
         return compileAuditReport(payload, mutation);
+      } else if (type === 'audit_submission') {
+        return submitAuditReport(payload.id, payload.submissionMethod || 'CLOUD', mutation);
+      } else if (type === 'audit_return') {
+        return returnAuditReport(payload.id, payload.returnReason, mutation);
+      } else if (type === 'audit_qr_import') {
+        return importAuditQr(payload.payload, mutation);
       } else if (type === 'audit_certification') {
         return certifyAuditReport(payload.id, payload.certificationNotes, mutation);
       } else if (type === 'user_approve') {
@@ -433,7 +458,17 @@ export async function flushOutboxToApi() {
     });
   } catch (err) {
     console.warn('[syncEngine] Error flushing through API:', err);
-    return { success: false, error: err.message };
+    return {
+      success: false,
+      error: err.message,
+      reason: 'QUEUE_PERSISTENCE_FAILURE',
+      attemptedCount: 0,
+      processedCount: 0,
+      failedCount: 0,
+      remainingCount: outboxQueue.length,
+      remainingItems: getOutboxDiagnostics(),
+      responses: {}
+    };
   }
 }
 
