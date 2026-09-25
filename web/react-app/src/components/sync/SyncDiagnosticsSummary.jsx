@@ -1,136 +1,47 @@
 import React from 'react';
-import { Wifi, WifiOff, Smartphone, Clock, AlertTriangle, Layers, Database } from 'lucide-react';
-import { evaluateNodeStatus } from '../../services/telemetryService';
+import { Clock, Layers3, MonitorSmartphone, RefreshCw } from 'lucide-react';
+import { formatActivity, formatPhilippineTime, syncStatusPresentation } from '../../services/telemetryService';
 
-export default function SyncDiagnosticsSummary({
-  isOnline = true,
-  syncStatus = 'idle',
-  lastSyncedAt = null,
-  activeOperationsCount = 0,
-  diagnostics = [],
-  className = ''
-}) {
-  const totalNodes = diagnostics.length;
+export default function SyncDiagnosticsSummary({ subject, localPending = 0, isLoading = false }) {
+  if (isLoading) return <div className="h-44 rounded-2xl border border-border bg-white dark:bg-surface animate-pulse" />;
+  if (!subject) return <div className="rounded-2xl border border-border bg-white dark:bg-surface p-5 text-sm text-hug-muted">Your activity has not been reported yet.</div>;
 
-  let activeCount = 0;
-  let delayedCount = 0;
-  let offlineCount = 0;
-
-  diagnostics.forEach(d => {
-    const evaluated = evaluateNodeStatus(d.updatedAt);
-    if (evaluated.state === 'ACTIVE') activeCount++;
-    else if (evaluated.state === 'DELAYED') delayedCount++;
-    else offlineCount++;
-  });
-
-  const formatLastSync = (date) => {
-    if (!date) return 'No sync completed yet in this session';
-    try {
-      const d = new Date(date);
-      return isNaN(d.getTime()) ? String(date) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch {
-      return String(date);
-    }
-  };
+  const status = syncStatusPresentation(subject.sync?.state, subject.sync?.pendingMutationCount, subject.sync?.failedMutationCount);
+  const tone = {
+    success: 'bg-success-bg text-success border-success/30',
+    warning: 'bg-amber-50 text-amber-700 border-amber-200',
+    danger: 'bg-danger-bg text-danger border-danger/30',
+    info: 'bg-blue-50 text-blue-700 border-blue-200',
+    muted: 'bg-bg text-hug-muted border-border'
+  }[status.tone];
+  const platform = subject.activity?.lastPlatform;
+  const details = [
+    { label: 'Last Active', value: formatActivity(subject.activity?.lastActiveAt), icon: Clock },
+    { label: 'Platform', value: platform ? platform[0] + platform.slice(1).toLowerCase() : 'Not reported', icon: MonitorSmartphone },
+    { label: 'Last Successful Sync', value: formatPhilippineTime(subject.sync?.lastSuccessfulSyncAt), icon: RefreshCw },
+    { label: 'Last Reported Pending', value: String(subject.sync?.pendingMutationCount ?? 0), icon: Layers3 },
+    { label: 'Pending in This Browser', value: String(localPending), icon: Layers3 }
+  ];
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      {/* Network & Local Outbox Status Bar */}
-      <div className={`rounded-2xl p-4 sm:p-5 border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-        !isOnline
-          ? 'bg-danger-bg/30 dark:bg-danger/10 border-danger/40'
-          : syncStatus === 'syncing'
-          ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800/50'
-          : 'bg-white dark:bg-surface border-border'
-      }`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-            !isOnline
-              ? 'bg-danger/20 text-danger'
-              : 'bg-success-bg text-success border border-success/30'
-          }`}>
-            {isOnline ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
-          </div>
-
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-hug-text">
-                {isOnline ? 'Web Client Connected' : 'Offline Mode (Local Storage Active)'}
-              </h3>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                !isOnline
-                  ? 'bg-danger text-white'
-                  : syncStatus === 'syncing'
-                  ? 'bg-blue-500 text-white animate-pulse'
-                  : 'bg-success-bg text-success border border-success/30'
-              }`}>
-                {!isOnline ? 'OFFLINE' : syncStatus === 'syncing' ? 'SYNCHRONIZING' : 'ONLINE'}
-              </span>
-            </div>
-            <p className="text-xs text-hug-muted mt-0.5 flex items-center gap-2 flex-wrap">
-              <span>Last confirmed session sync: <strong className="text-hug-text">{formatLastSync(lastSyncedAt)}</strong></span>
-            </p>
-          </div>
+    <section className="rounded-2xl border border-border bg-white dark:bg-surface shadow-xs p-5">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-wider font-bold text-hug-muted">Your Status</p>
+          <h2 className="text-lg font-black text-hug-text">{subject.displayName}</h2>
         </div>
-
-        {/* Local mutation outbox counter */}
-        <div className="flex items-center gap-2 self-start sm:self-auto bg-surface-subtle px-3.5 py-2 rounded-xl border border-border text-xs">
-          <Database className="w-4 h-4 text-primary shrink-0" />
-          <div>
-            <span className="text-[10px] text-hug-muted uppercase font-bold block">Local Outbox Queue</span>
-            <span className="font-extrabold text-hug-text">
-              {activeOperationsCount} pending mutation{activeOperationsCount === 1 ? '' : 's'}
-            </span>
-          </div>
-        </div>
+        <span className={`rounded-full border px-3 py-1 text-xs font-bold ${tone}`}>{status.label}</span>
       </div>
-
-      {/* Node Metrics KPI Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs">
-          <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
-            <span className="font-bold uppercase tracking-wider text-[10px]">Registered Terminals</span>
-            <Smartphone className="w-4 h-4 text-hug-muted" />
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {details.map(({ label, value, icon: Icon }) => (
+          <div key={label} className="rounded-xl bg-bg/60 dark:bg-black/10 border border-border/70 p-3">
+            <Icon className="w-4 h-4 text-primary mb-2" />
+            <p className="text-[10px] uppercase tracking-wider font-bold text-hug-muted">{label}</p>
+            <p className="text-sm font-extrabold text-hug-text mt-0.5">{value}</p>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-hug-text">{totalNodes}</span>
-            <span className="text-xs text-hug-muted font-medium">mobile nodes</span>
-          </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
-            Terminals reporting hardware telemetry
-          </span>
-        </div>
-
-        <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs">
-          <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
-            <span className="font-bold uppercase tracking-wider text-[10px]">Active & Synced</span>
-            <span className="w-2 h-2 rounded-full bg-success" />
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-success">{activeCount}</span>
-            <span className="text-xs text-hug-muted font-medium">nodes (&lt; 24h)</span>
-          </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
-            Communicating within 24-hour cycle
-          </span>
-        </div>
-
-        <div className="bg-white dark:bg-surface rounded-2xl p-4 border border-border shadow-xs">
-          <div className="flex items-center justify-between text-xs text-hug-muted mb-1">
-            <span className="font-bold uppercase tracking-wider text-[10px]">Delayed / Inactive</span>
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-hug-text">
-              {delayedCount + offlineCount}
-            </span>
-            <span className="text-xs text-hug-muted font-medium">lagging</span>
-          </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
-            {delayedCount} delayed (&gt;24h), {offlineCount} inactive (&gt;72h)
-          </span>
-        </div>
+        ))}
       </div>
-    </div>
+      <p className="text-xs text-hug-muted mt-4">Activity and synchronization are reported independently. A Web login does not change Mobile Outbox status.</p>
+    </section>
   );
 }

@@ -9,16 +9,17 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, getMemberSyncHealth, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
+import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
 import { saveItem, STORAGE_KEYS } from '../services/storageService';
 import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
+import { importAuditQr, verifyAuditQr } from '../services/mutationService';
 import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
-import { AUDIT_STATUS, canonicalAuditStatus, createAuditQrPayload, decodeAuditQrPayload, businessPeriodKey, displayPeriod } from '../domain/auditWorkflow';
+import { AUDIT_STATUS, canonicalAuditStatus, createAuditQrPayload, businessPeriodKey, displayPeriod, auditReportsForFarmPeriod, reportedOperationIds, certifiedOperationIds } from '../domain/auditWorkflow';
 import { safeAlert } from '../utils/dialogs';
 import { canonicalStoredCropYear, cleanDataForFirestore, cleanupDuplicateLogs, formatDisplayDate, toISODateString, sortOperationsNewestFirst, sortNewestFirst, cropYearCycleForDate, formatCropYearDisplay, uniqueCropYears } from '../utils/dataHelpers';
 import {
@@ -852,9 +853,10 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [auditHistoryHasMore, setAuditHistoryHasMore] = useState(false);
   const [isLoadingAuditHistory, setIsLoadingAuditHistory] = useState(false);
   const [selectedManagerAuditId, setSelectedManagerAuditId] = useState('AUD-2026-05');
-  const currentRealMonth = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentRealMonth = displayPeriod(businessPeriodKey());
   const [compileMonth, setCompileMonth] = useState(currentRealMonth);
   const [managerLedgerScope, setManagerLedgerScope] = useState('selected');
+  const [logs, setLogs] = useState(() => Array.isArray(operationLogs) ? [...operationLogs] : []);
 
   React.useEffect(() => {
     if (canonicalRole(session?.role) !== 'FARM_MANAGER') return;
@@ -978,7 +980,6 @@ export default function FieldOpsScreen({ navigation, route }) {
     });
     return unsubscribe;
   }, [selectedField?.id]);
-  const [logs, setLogs] = useState(operationLogs);
   const [showLog, setShowLog] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
@@ -1252,7 +1253,6 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showFieldsModal, setShowFieldsModal] = useState(false);
   const [fieldSearch, setFieldSearch] = useState('');
   const [fieldsModalPage, setFieldsModalPage] = useState(1);
-  const [manualQR, setManualQR] = useState('');
   const [showOpPicker, setShowOpPicker] = useState(false);
   const [showCycleModal, setShowCycleModal] = useState(false);
   const [cycleTypeForm, setCycleTypeForm] = useState({
@@ -1320,36 +1320,22 @@ export default function FieldOpsScreen({ navigation, route }) {
   // Helper: check if an operation log falls within the target month (e.g. 'May 2026')
   const isLogFromMonth = (log, targetMonthStr) => {
     if (!targetMonthStr) return true;
-    const dateStr = String(log?.date || log?.createdAt || log?.recordedAt || log?.timestamp || log?.period || '').trim();
+    const dateStr = String(log?.performedOn || log?.isoDate || log?.date || log?.createdAt || log?.recordedAt || log?.timestamp || log?.period || '').trim();
     if (!dateStr) return true;
+    const targetPeriod = toReportPeriod(targetMonthStr);
+    if (!targetPeriod) return false;
+    const storedPeriod = toReportPeriod(dateStr);
+    if (storedPeriod) return storedPeriod === targetPeriod;
 
-    const cleanTarget = targetMonthStr.toLowerCase().replace(/\s*\([^)]*\)/, '').trim();
-    const parts = cleanTarget.split(' ');
-    const targetMonthName = parts[0]?.toLowerCase() || '';
-    const targetYear = parts[1] ? parseInt(parts[1], 10) : null;
-
-    // Direct match (e.g. 'sep' in 'Sep 13, 2026')
-    if (dateStr.toLowerCase().includes(cleanTarget) || dateStr.toLowerCase().includes(targetMonthName)) {
-      return true;
-    }
-
-    // Date object parse fallback
+    // Compatibility for legacy human-readable operation dates. Canonical
+    // operation records use ISO dates and are handled above without runtime-
+    // dependent natural-language date parsing.
     const d = new Date(dateStr);
     if (!isNaN(d.getTime())) {
-      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-      const fullMonthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-      const logMonthIdx = d.getMonth();
-      const logYear = d.getFullYear();
-
-      const monthMatches = monthNames[logMonthIdx] === targetMonthName ||
-                           fullMonthNames[logMonthIdx] === targetMonthName ||
-                           targetMonthName.startsWith(monthNames[logMonthIdx]) ||
-                           fullMonthNames[logMonthIdx].startsWith(targetMonthName);
-      const yearMatches = !targetYear || logYear === targetYear;
-      return monthMatches && yearMatches;
+      const logPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return logPeriod === targetPeriod;
     }
-
-    return dateStr.toLowerCase().includes(targetMonthName);
+    return false;
   };
 
   // Detect fields with durable mutations that have not received a server acknowledgement.
@@ -1447,7 +1433,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     const targetFarm = farm?.name || 'Unassigned Block Farm';
     const farmFields = fields.filter(field => field.blockFarmId === farm?.id);
     const farmTotalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
-    const existing = auditReports.find(report => report.blockFarmId === farm?.id && toReportPeriod(report.period || report.month) === toReportPeriod(compileMonth));
+    const existing = auditReportsForFarmPeriod(auditReports, farm?.id, toReportPeriod(compileMonth))[0];
     if (existing) {
       const haVal = existing.totalHectares || farmTotalHa;
       setActiveQRData({
@@ -1498,17 +1484,18 @@ export default function FieldOpsScreen({ navigation, route }) {
     const farmLogs = activeCycleLogs.filter(l => isLogFromMonth(l, compileMonth));
 
     // Existing reports for this month
-    const existingReportsForMonth = auditReports.filter(a => 
-      a.blockFarmId === targetFarmId && toReportPeriod(a.period || a.month) === periodKey
-    );
-    const orderedReports = [...existingReportsForMonth].sort((left, right) => Number(right.reportVersion || 1) - Number(left.reportVersion || 1));
+    const orderedReports = auditReportsForFarmPeriod(auditReports, targetFarmId, periodKey);
     const latestReport = orderedReports[0] || null;
-    let logsToCompile = farmLogs;
+    const certifiedIds = certifiedOperationIds(orderedReports);
+    let logsToCompile = farmLogs.filter(log => !certifiedIds.has(String(log.id)));
+    const latestStatus = latestReport ? canonicalAuditStatus(latestReport.status) : null;
 
-    if (latestReport && canonicalAuditStatus(latestReport.status) !== AUDIT_STATUS.RETURNED) {
+    if (latestReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION, AUDIT_STATUS.PENDING_REVIEW].includes(latestStatus)) {
         safeAlert(
           'Audit Already Compiled',
-          `${compileMonth} already has report ${latestReport.reportId || latestReport.id}. Open the existing report instead of creating a duplicate.`
+          latestStatus === AUDIT_STATUS.PENDING_REVIEW
+            ? `${compileMonth} report ${latestReport.reportId || latestReport.id} is already awaiting SRA review.`
+            : `${compileMonth} already has report ${latestReport.reportId || latestReport.id}. Submit that compiled report before creating another version.`
         );
         setActiveQRData({
           reportId: latestReport.reportId || latestReport.id, month: latestReport.month || compileMonth,
@@ -1523,6 +1510,17 @@ export default function FieldOpsScreen({ navigation, route }) {
         });
         setShowQR(true);
         return;
+    }
+
+    if (latestReport && latestStatus === AUDIT_STATUS.CERTIFIED && logsToCompile.length === 0) {
+      safeAlert('Audit Up to Date', `All eligible ${compileMonth} operation logs are already covered by certified audit reports.`);
+      handleViewHistoricalAuditQR(latestReport);
+      return;
+    }
+
+    if (logsToCompile.length === 0) {
+      safeAlert('Cannot Compile Audit', `No new eligible operation logs were found for ${compileMonth}.`);
+      return;
     }
 
     let totalCost = logsToCompile.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
@@ -1560,8 +1558,10 @@ export default function FieldOpsScreen({ navigation, route }) {
     // Save / update compiled report in auditReports
     let cloudQueueStatus = 'offline_queued';
     let cloudQueuedAt = null;
+    let wasReplayed = false;
 
     const targetReportId = reportId;
+    let effectiveReportId = targetReportId;
     const compiledAt = new Date().toISOString();
     const newReport = {
       id: targetReportId,
@@ -1605,7 +1605,12 @@ export default function FieldOpsScreen({ navigation, route }) {
         periodKey,
         operationLogIds: logsToCompile.map(log => log.id)
       });
-      Object.assign(newReport, outcome.response?.data || {});
+      const authoritativeReport = outcome.response?.data || null;
+      Object.assign(newReport, authoritativeReport || {});
+      wasReplayed = Boolean(outcome.response?.replayed);
+      effectiveReportId = authoritativeReport?.id || authoritativeReport?.reportId || targetReportId;
+      newReport.id = effectiveReportId;
+      newReport.reportId = effectiveReportId;
       if (outcome.response?.data?.qrHash) hash = outcome.response.data.qrHash;
       if (Array.isArray(outcome.response?.data?.operationSnapshots)) {
         const authoritativeSnapshots = outcome.response.data.operationSnapshots;
@@ -1631,7 +1636,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
-    const existingIdx = auditReports.findIndex(a => a.id === targetReportId || a.reportId === targetReportId);
+    const existingIdx = auditReports.findIndex(a => a.id === effectiveReportId || a.reportId === effectiveReportId);
     if (existingIdx >= 0) {
       auditReports[existingIdx] = { ...auditReports[existingIdx], ...newReport };
     } else {
@@ -1641,7 +1646,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     notifyDataUpdate();
 
     setActiveQRData({
-      reportId: targetReportId,
+      reportId: effectiveReportId,
       month: compileMonth,
       blockFarm: targetFarm,
       totalCost,
@@ -1656,12 +1661,33 @@ export default function FieldOpsScreen({ navigation, route }) {
 
     const deltaCount = logsCount;
     const countLabel = `${deltaCount} operation log${deltaCount !== 1 ? 's' : ''}`;
+    const finalStatus = canonicalAuditStatus(newReport.status);
 
     if (cloudQueueStatus === 'compiled') {
+      if (wasReplayed && finalStatus === AUDIT_STATUS.CERTIFIED) {
+        safeAlert(
+          'Audit Already Up to Date',
+          `The server confirmed that all eligible ${compileMonth} logs are already covered by certificate ${effectiveReportId}.`,
+          [{ text: 'View Certificate QR', onPress: () => setShowQR(true) }]
+        );
+        return;
+      }
+      if (wasReplayed && finalStatus === AUDIT_STATUS.PENDING_REVIEW) {
+        safeAlert(
+          'Already Submitted',
+          `Report ${effectiveReportId} is already in the SRA Audit Inbox and awaiting review.`,
+          [{ text: 'View Submitted Audit QR', onPress: () => setShowQR(true) }]
+        );
+        return;
+      }
       safeAlert(
         'Monthly Audit Compiled',
         `Successfully compiled ${countLabel} for ${compileMonth}.\n\nThe snapshot is saved. Review it, then use Submit to SRA.`,
-        [{ text: 'View Compiled Audit QR', onPress: () => setShowQR(true) }]
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Review QR', onPress: () => setShowQR(true) },
+          { text: 'Submit to SRA', onPress: () => handleSubmitAuditReport(newReport) }
+        ]
       );
     } else {
       safeAlert(
@@ -1735,82 +1761,39 @@ export default function FieldOpsScreen({ navigation, route }) {
   const handleScanOrSubmitCode = async (code) => {
     if (!code) return;
     const rawStr = String(code).trim();
-    const manualCode = rawStr.toUpperCase();
-    if (/^(AUD|RPT|HUG)-[A-Z0-9-]+$/.test(manualCode)) {
-      if (!getNetworkStatus()) {
-        Alert.alert('Connection Required', 'Manual report ID or hash lookup requires a connection. Scan the full HUGPONG QR package for offline structural verification.');
-        setShowScanner(false);
-        setIsBarcodeProcessing(false);
-        return;
-      }
-      try {
-        const outcome = await commitExplicitMutation('audit_qr_import', { reportId: manualCode, payload: manualCode });
-        const report = outcome.response?.data?.report;
-        if (!report) throw new Error('The report was not found.');
-        setScannedAuditReport({ ...report, integrityStatus: 'VERIFIED' });
-        if (outcome.response?.data?.alreadyImported) Alert.alert('Audit Already Imported', 'This audit already exists in HUGPONG.');
-        setShowScanner(false);
-        setIsBarcodeProcessing(false);
-        setShowSRAInspectModal(true);
-      } catch (error) {
-        Alert.alert('Audit Not Found', error.message || 'The report ID or hash could not be verified.');
-      }
-      return;
-    }
-    let qrPackage;
-    try {
-      qrPackage = decodeAuditQrPayload(rawStr);
-    } catch (error) {
-      Alert.alert('Unsupported Audit QR', error.message || 'This QR code is malformed or uses an unsupported version.');
+    if (!rawStr) return;
+    if (!getNetworkStatus()) {
+      Alert.alert('Connection Required', 'SRA report verification requires a live HUGPONG connection. Reconnect and sign in again.');
       setShowScanner(false);
-      setIsBarcodeProcessing(false);
       return;
-    }
-
-    let report = (auditReports || []).find(candidate => (candidate.reportId || candidate.id) === qrPackage.reportId);
-    if (report) {
-      const identityMatches = report.blockFarmId === qrPackage.blockFarmId
-        && toReportPeriod(report.periodKey || report.period) === qrPackage.periodKey
-        && Number(report.reportVersion || 1) === Number(qrPackage.reportVersion)
-        && (report.integrityHash || report.qrHash || report.qrSignature) === qrPackage.integrityHash;
-      if (!identityMatches) {
-        Alert.alert('Integrity Check Failed', 'The QR identity does not match the cached audit snapshot.');
-        setShowScanner(false);
-        setIsBarcodeProcessing(false);
-        return;
-      }
     }
 
     try {
-      const outcome = await commitExplicitMutation('audit_qr_import', { reportId: qrPackage.reportId, payload: rawStr });
-      if (outcome.response?.data?.report) {
-        report = { ...outcome.response.data.report, integrityStatus: 'VERIFIED' };
-        const index = auditReports.findIndex(candidate => (candidate.reportId || candidate.id) === qrPackage.reportId);
-        if (index >= 0) auditReports[index] = { ...auditReports[index], ...report };
-        else auditReports.unshift(report);
-        await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
-      } else if (!report) {
-        report = {
-          id: qrPackage.reportId, reportId: qrPackage.reportId, ...qrPackage,
-          period: qrPackage.periodKey, status: AUDIT_STATUS.PENDING_SUBMISSION,
-          qrHash: qrPackage.integrityHash, integrityStatus: 'STRUCTURE_VALID_CLOUD_PENDING',
-          operationSnapshots: [], qrImportPending: true
-        };
-      } else {
-        report = { ...report, integrityStatus: 'CACHED_AUTHORITY_MATCH', qrImportPending: true };
-      }
-      if (outcome.response?.data?.alreadyImported) Alert.alert('Audit Already Imported', 'This audit already exists in HUGPONG. The existing record will be opened.');
-    } catch (error) {
-      Alert.alert('QR Import Failed', error.message || 'The audit package could not be verified.');
-      setShowScanner(false);
-      setIsBarcodeProcessing(false);
-      return;
-    }
+      const verified = await verifyAuditQr(rawStr);
+      if (!verified.data?.integrityVerified) throw new Error('The server could not verify this audit report.');
+      const result = verified.data.alreadyImported ? verified : await importAuditQr(rawStr);
+      const serverReport = result.data?.report;
+      if (!serverReport) throw new Error('The authoritative audit report was not returned.');
 
-    setScannedAuditReport(report);
-    setShowScanner(false);
-    setIsBarcodeProcessing(false);
-    setShowSRAInspectModal(true);
+      const report = { ...serverReport, integrityStatus: 'VERIFIED' };
+      const reportId = report.reportId || report.id;
+      const updatedReports = [...(auditReports || [])];
+      const index = updatedReports.findIndex(candidate => (candidate.reportId || candidate.id) === reportId);
+      if (index >= 0) updatedReports[index] = { ...updatedReports[index], ...report };
+      else updatedReports.unshift(report);
+      auditReports.splice(0, auditReports.length, ...updatedReports);
+      await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+
+      if (result.data.alreadyImported) {
+        Alert.alert('Audit Already Imported', 'This audit already exists in HUGPONG. The authoritative record will be opened.');
+      }
+      setScannedAuditReport(report);
+      setShowScanner(false);
+      setShowSRAInspectModal(true);
+    } catch (error) {
+      Alert.alert('Verification Failed', error.message || 'The report code could not be verified by HUGPONG.');
+      setShowScanner(false);
+    }
   };
 
   const handleCertifyReport = async (report) => {
@@ -1824,7 +1807,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
     if (!getNetworkStatus()) {
-      Alert.alert('Connection Required', 'You may review this QR package offline, but final SRA certification requires a live server connection.');
+      Alert.alert('Connection Required', 'SRA Admin actions require a live HUGPONG connection. Reconnect and sign in again.');
       return;
     }
 
@@ -4733,27 +4716,40 @@ export default function FieldOpsScreen({ navigation, route }) {
           <>
             {(() => {
               const session = getCurrentSession();
-              const targetFarm = session?.farm || (session?.farm || session?.blockFarm || 'District Central');
-              const farmFields = accessibleFields;
+              const actorId = session?.employeeId || session?.id || '';
+              const assignedFarm = blockFarms.find(farm => farm.managerUserId === actorId);
+              const targetFarmId = assignedFarm?.id || '';
+              const targetFarm = assignedFarm?.name || assignedFarm?.code || session?.farm || session?.blockFarm || 'Unassigned Block Farm';
+              const farmFields = accessibleFields.filter(field => !targetFarmId || field.blockFarmId === targetFarmId);
+              const farmFieldIds = new Set(farmFields.map(field => field.id));
               const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
-              const activeCycleLogs = logs.filter(l => !l.declined && l.status === 'ACTIVE');
+              const activeCycleLogs = logs.filter(l => farmFieldIds.has(l.fieldId) && !l.declined && l.status === 'ACTIVE' && Boolean(l.cycleId));
               const selectedPeriod = toReportPeriod(compileMonth);
               const farmLogs = activeCycleLogs.filter(l => isLogFromMonth(l, compileMonth));
-              const monthReports = auditReports.filter(report => toReportPeriod(report.periodKey || report.period || report.month) === selectedPeriod)
-                .sort((left, right) => Number(right.reportVersion || 1) - Number(left.reportVersion || 1));
-              const reportedIds = new Set(monthReports.flatMap(report =>
-                (report.operationSnapshots || report.operations || []).map(operation => operation.operationLogId || operation.id)
-              ));
-              const uncompiledLogs = farmLogs.filter(l => !reportedIds.has(l.id));
-              const compiledLogs = farmLogs.filter(l => reportedIds.has(l.id));
-              const isOnline = Boolean(getNetworkStatus());
+              const monthReports = auditReportsForFarmPeriod(auditReports, targetFarmId, selectedPeriod);
+              const reportedIds = reportedOperationIds(monthReports);
+              const uncompiledLogs = farmLogs.filter(l => !reportedIds.has(String(l.id)));
               const monthReport = monthReports[0] || null;
               const auditStatus = monthReport ? canonicalAuditStatus(monthReport.status) : null;
-              const isAllCompiled = Boolean(monthReport && auditStatus !== AUDIT_STATUS.RETURNED);
-              const isCloudSent = Boolean(monthReport && [AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(auditStatus));
+              const needsSubmission = Boolean(monthReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION].includes(auditStatus));
+              const isAwaitingReview = auditStatus === AUDIT_STATUS.PENDING_REVIEW;
+              const needsCompilation = auditStatus === AUDIT_STATUS.RETURNED || !monthReport || uncompiledLogs.length > 0;
+              const isAllCompiled = Boolean(monthReport && !needsCompilation && !needsSubmission);
               const isOfflineQueued = Boolean(monthReport && auditStatus === AUDIT_STATUS.PENDING_SUBMISSION);
               const totalCost = farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0);
-              const logsCount = farmLogs.length;
+              const compiledCount = reportedIds.size || monthReports
+                .filter(report => canonicalAuditStatus(report.status) !== AUDIT_STATUS.RETURNED)
+                .reduce((sum, report) => sum + Number(report.operationCount || report.logsCount || report.operationSnapshots?.length || 0), 0);
+              const statusText = needsSubmission
+                ? (isOfflineQueued ? 'Submission Queued' : 'Ready to Submit')
+                : isAwaitingReview
+                  ? 'Awaiting SRA Review'
+                  : auditStatus === AUDIT_STATUS.RETURNED
+                    ? 'Correction Required'
+                    : auditStatus === AUDIT_STATUS.CERTIFIED && uncompiledLogs.length === 0
+                      ? 'Audit Up to Date'
+                      : `${uncompiledLogs.length} Ready to Compile`;
+              const statusNeedsAttention = needsSubmission || needsCompilation || isAwaitingReview;
 
               return (
                 /* Elevated Monthly Regulatory Audit Card */
@@ -4783,33 +4779,27 @@ export default function FieldOpsScreen({ navigation, route }) {
                       </Text>
                     </View>
                     <View style={{
-                      backgroundColor: farmLogs.length === 0 ? '#F4F7F2' : (isAllCompiled ? '#EBF7EE' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FEF3C7' : '#EBF7EE')),
+                      backgroundColor: farmLogs.length === 0 && !monthReport ? '#F4F7F2' : (statusNeedsAttention ? '#FEF3C7' : '#EBF7EE'),
                       paddingHorizontal: 10,
                       paddingVertical: 5,
                       borderRadius: RADIUS.full,
                       borderWidth: 1,
-                      borderColor: farmLogs.length === 0 ? '#E2EBDC' : (isAllCompiled ? '#B7E4C7' : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#FEF0D0' : '#B7E4C7')),
+                      borderColor: farmLogs.length === 0 && !monthReport ? '#E2EBDC' : (statusNeedsAttention ? '#F6D98B' : '#B7E4C7'),
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 4
                     }}>
                       <Ionicons 
-                        name={farmLogs.length === 0 ? "document-text-outline" : (isAllCompiled ? "checkmark-circle" : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? "time-outline" : "shield-checkmark"))} 
+                        name={farmLogs.length === 0 && !monthReport ? "document-text-outline" : (statusNeedsAttention ? "time-outline" : "checkmark-circle")}
                         size={12} 
-                        color={farmLogs.length === 0 ? COLORS.textMuted : (isAllCompiled ? COLORS.success : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#B45309' : COLORS.success))} 
+                        color={farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success)}
                       />
                       <Text style={{ 
                         fontSize: 11, 
                         fontWeight: '800', 
-                        color: farmLogs.length === 0 ? COLORS.textMuted : (isAllCompiled ? COLORS.success : (uncompiledLogs.length > 0 && compiledLogs.length > 0 ? '#B45309' : COLORS.success)) 
+                        color: farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success)
                       }}>
-                        {farmLogs.length === 0
-                          ? '0 Logs'
-                          : (isAllCompiled 
-                            ? 'Audit Up to Date' 
-                            : (uncompiledLogs.length > 0 && compiledLogs.length > 0 
-                              ? `${uncompiledLogs.length} Pending` 
-                              : `${uncompiledLogs.length} Ready to Compile`))}
+                        {farmLogs.length === 0 && !monthReport ? '0 Logs' : statusText}
                       </Text>
                     </View>
                   </View>
@@ -4819,11 +4809,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <View style={{ flex: 1, backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 }}>{t('stat_recorded_logs', 'Compiled Logs')}</Text>
                       <Text style={{ fontSize: 13.5, fontWeight: '800', color: COLORS.primary, marginTop: 3 }}>
-                        {farmLogs.length === 0
-                          ? '0'
-                          : (isAllCompiled 
-                            ? `${compiledLogs.length} logs` 
-                            : `${uncompiledLogs.length} ready`)}
+                        {compiledCount > 0
+                          ? (uncompiledLogs.length > 0 ? `${compiledCount} done / ${uncompiledLogs.length} ready` : `${compiledCount} logs`)
+                          : (farmLogs.length > 0 ? `${uncompiledLogs.length} ready` : '0')}
                       </Text>
                     </View>
                     <View style={{ flex: 1, backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
@@ -4850,9 +4838,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                       ...SHADOW.card,
                     }}
                     onPress={() => {
-                      if (monthReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION].includes(auditStatus)) {
+                      if (needsSubmission) {
                         handleSubmitAuditReport(monthReport);
-                      } else if (monthReport && [AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(auditStatus)) {
+                      } else if (monthReport && (isAwaitingReview || (auditStatus === AUDIT_STATUS.CERTIFIED && !needsCompilation))) {
                         handleViewHistoricalAuditQR(monthReport);
                       } else {
                         const countToCompile = uncompiledLogs.length > 0 ? uncompiledLogs.length : farmLogs.length;
@@ -4873,18 +4861,20 @@ export default function FieldOpsScreen({ navigation, route }) {
                     activeOpacity={0.85}
                   >
                     <Ionicons 
-                      name={isAllCompiled ? "qr-code" : "flash"} 
+                      name={needsSubmission ? "cloud-upload-outline" : (isAllCompiled ? "qr-code" : "flash")}
                       size={17} 
                       color="#fff" 
                     />
                     <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.3 }}>
-                      {monthReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION].includes(auditStatus)
+                      {needsSubmission
                         ? 'Submit to SRA'
-                        : isAllCompiled
-                        ? t('btn_view_compiled_qr', auditStatus === AUDIT_STATUS.CERTIFIED ? 'View Certificate QR' : 'View Submitted Audit QR')
+                        : isAwaitingReview
+                        ? 'View Submitted Audit QR'
+                        : auditStatus === AUDIT_STATUS.CERTIFIED && !needsCompilation
+                        ? 'View Certificate QR'
                         : auditStatus === AUDIT_STATUS.RETURNED
                         ? 'Compile Corrected Version'
-                        : (uncompiledLogs.length > 0 && compiledLogs.length > 0
+                        : (uncompiledLogs.length > 0 && compiledCount > 0
                           ? `Compile ${uncompiledLogs.length} New Logs · Update QR`
                           : t('btn_compile_sra_audit', 'Compile Monthly SRA Audit Package'))}
                     </Text>
@@ -5177,9 +5167,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             {/* Farm Selector */}
             {(() => {
-              const availableFarms = blockFarms.length > 0
-                ? ['All Block Farms', ...blockFarms.map(bf => bf.name)]
-                : ['All Block Farms', ...new Set(fields.map(f => f.blockFarm || resolveFieldBlockFarm(f)))];
+              const availableFarms = ['All Block Farms', ...blockFarms.map(bf => bf.name)];
 
               return (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: 10, marginBottom: SPACING.md }}>
@@ -5235,16 +5223,27 @@ export default function FieldOpsScreen({ navigation, route }) {
 
               {(() => {
                 const isAll = selectedFarm === 'All' || selectedFarm === 'All Block Farms';
-                const farmFields = isAll 
-                  ? fields 
-                  : fields.filter(f => (f.blockFarm || resolveFieldBlockFarm(f)) === selectedFarm || f.blockFarmId === selectedFarm);
+                const selectedFarmRecords = isAll
+                  ? blockFarms
+                  : blockFarms.filter(farm => farm.id === selectedFarm || farm.name === selectedFarm);
+                const selectedFarmIds = new Set(selectedFarmRecords.map(farm => farm.id));
+                const farmFields = fields.filter(field => selectedFarmIds.has(field.blockFarmId));
                 const farmFieldIds = farmFields.map(f => f.id);
-                const farmLogs = operationLogs.filter(l => farmFieldIds.includes(l.fieldId));
+                const farmFieldById = new Map(farmFields.map(field => [field.id, field]));
+                const farmLogs = operationLogs.filter(log => {
+                  const field = farmFieldById.get(log.fieldId);
+                  return Boolean(
+                    field
+                    && log.status === 'ACTIVE'
+                    && log.isDraft !== true
+                    && (!field.currentCycleId || log.cycleId === field.currentCycleId)
+                  );
+                });
 
                 const totalHa = farmFields.reduce((sum, f) => sum + (parseFloat(f.ha) || 0), 0);
-                const uniqueFarms = isAll ? blockFarms.length : (farmFields.length > 0 ? 1 : 0);
-                const uniqueMembers = new Set(farmFields.map(f => f.member || f.memberName || resolveFieldMember(f)).filter(Boolean)).size;
-                const fManagers = users.filter(u => u.role === 'Farm Manager').length;
+                const uniqueFarms = selectedFarmRecords.length;
+                const uniqueMembers = new Set(farmFields.map(f => f.memberUserId).filter(Boolean)).size;
+                const fManagers = new Set(selectedFarmRecords.map(farm => farm.managerUserId).filter(Boolean)).size;
                 const totalCost = Number(farmLogs.reduce((sum, l) => sum + (Number(l.totalCost || l.cost) || 0), 0) || 0);
                 const costPerHa = Number(totalHa > 0 ? Math.round(totalCost / totalHa) : 0 || 0);
                 const compiledLogsCount = Number(farmLogs.length || 0);
@@ -5275,7 +5274,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                       <View style={{ flex: 1, alignItems: 'center' }}>
                         <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 }}>
-                          Compiled Logs
+                          Current Cycle Logs
                         </Text>
                         <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.primary }}>
                           {compiledLogsCount} <Text style={{ fontSize: 12.5, fontWeight: '700', color: COLORS.primary }}>Logs</Text>
@@ -5347,7 +5346,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               <TouchableOpacity
                 key={report.reportId || report.id}
                 style={[s.auditCard, { marginBottom: 8 }]}
-                onPress={() => { setScannedAuditReport({ ...report, integrityStatus: 'CACHED_AUTHORITY_MATCH' }); setShowSRAInspectModal(true); }}
+                onPress={() => { setScannedAuditReport({ ...report, integrityStatus: 'SERVER_VERIFIED' }); setShowSRAInspectModal(true); }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                   <View style={{ flex: 1 }}>
@@ -6312,7 +6311,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </>
               )}
-              {canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && scannedAuditReport?.integrityStatus !== 'STRUCTURE_VALID_CLOUD_PENDING' ? (
+              {canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
                 <TouchableOpacity
                   style={{ backgroundColor: COLORS.success, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
                   onPress={() => handleCertifyReport(scannedAuditReport)}

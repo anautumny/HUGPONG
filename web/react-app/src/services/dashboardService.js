@@ -39,12 +39,43 @@ function terminalDiagnostic(data) {
   };
 }
 
+async function dashboardRead(label, path, force) {
+  try {
+    return await authenticatedRead(path, { force });
+  } catch (error) {
+    const missingIndex = /failed[_ -]?precondition|requires an index/i.test(String(error?.message || ''));
+    const detail = error?.isNetworkError
+      ? 'The HUGPONG server could not be reached.'
+      : error?.status === 401
+        ? 'Your session has expired. Please sign in again.'
+        : missingIndex
+          ? 'A required database index is not available yet.'
+          : 'The server rejected the request.';
+    const wrapped = new Error(`${label} could not be loaded. ${detail}`);
+    wrapped.cause = error;
+    wrapped.status = error.status;
+    wrapped.code = error.code;
+    wrapped.isMissingIndex = missingIndex;
+    throw wrapped;
+  }
+}
+
+async function readRecentOperations(force) {
+  try {
+    return await dashboardRead('Recent operations', '/api/logs?limit=5', force);
+  } catch (error) {
+    if (!error.isMissingIndex) throw error;
+    console.warn('[Dashboard] Recent-operation index unavailable; retrying the authorization-scoped compatibility read.');
+    return dashboardRead('Recent operations', '/api/logs', true);
+  }
+}
+
 export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
   return subscribeToAuthenticatedLoader(async ({ force }) => {
     if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
       const [ticketsResult, diagnosticsResult] = await Promise.all([
-        authenticatedRead('/api/tickets', { force }),
-        authenticatedRead('/api/terminal-diagnostics', { force })
+        dashboardRead('Support tickets', '/api/tickets', force),
+        dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
       ]);
       return {
         ...emptyDashboard(),
@@ -61,13 +92,13 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
 
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
     const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult] = await Promise.all([
-      authenticatedRead('/api/prices', { force }),
-      authenticatedRead('/api/fields', { force }),
-      authenticatedRead('/api/block-farms', { force }),
-      authenticatedRead('/api/crop-cycles', { force }),
-      authenticatedRead('/api/logs?limit=5', { force }),
+      dashboardRead('Official prices', '/api/prices', force),
+      dashboardRead('Fields', '/api/fields', force),
+      dashboardRead('Block farms', '/api/block-farms', force),
+      dashboardRead('Crop Year Cycles', '/api/crop-cycles', force),
+      readRecentOperations(force),
       includeAudits
-        ? authenticatedRead('/api/audit-reports', { force })
+        ? dashboardRead('Audit reports', '/api/audit-reports', force)
         : Promise.resolve({ data: [] })
     ]);
 

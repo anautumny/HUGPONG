@@ -11,10 +11,15 @@ function snapshot(entries) {
   };
 }
 
-function fakeDatabase(collections) {
+function fakeDatabase(collections, { failOrderedQuery = false } = {}) {
   function query(entries, constraints = [], ordering = null, maximum = null) {
     return {
       async get() {
+        if (ordering && failOrderedQuery) {
+          const error = new Error('9 FAILED_PRECONDITION: The query requires an index.');
+          error.code = 9;
+          throw error;
+        }
         let matching = entries.filter(([, data]) => constraints.every(({ field, operator, value }) => operator === 'in'
           ? value.includes(data[field])
           : data[field] === value));
@@ -91,6 +96,24 @@ test('operation query service applies a bounded newest-first server query', asyn
   const records = await listOperationRecords(
     boundedDatabase,
     { employeeId: 'SRA-1', role: 'SRA_ADMIN' },
+    { limit: '2' }
+  );
+  assert.deepEqual(records.map(record => record.id), ['LOG-NEW', 'LOG-MID']);
+});
+
+test('bounded manager operation reads fall back safely while the composite index is unavailable', async () => {
+  const fallbackDatabase = fakeDatabase({
+    block_farms: { 'BF-1': { managerUserId: 'MGR-1' } },
+    fields: { 'FLD-1': { blockFarmId: 'BF-1', memberUserId: 'MEM-1' } },
+    operation_logs: {
+      'LOG-OLD': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-01' },
+      'LOG-NEW': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-20' },
+      'LOG-MID': { fieldId: 'FLD-1', status: 'ACTIVE', performedOn: '2026-09-10' }
+    }
+  }, { failOrderedQuery: true });
+  const records = await listOperationRecords(
+    fallbackDatabase,
+    { employeeId: 'MGR-1', role: 'FARM_MANAGER' },
     { limit: '2' }
   );
   assert.deepEqual(records.map(record => record.id), ['LOG-NEW', 'LOG-MID']);

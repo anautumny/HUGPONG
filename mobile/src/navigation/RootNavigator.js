@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '../theme';
-import { getCurrentSession, subscribe } from '../data/dataStore';
+import { getCurrentSession, subscribe, logoutUser } from '../data/dataStore';
 
 import SplashScreen from '../screens/auth/SplashScreen';
 import LanguageSelectScreen from '../screens/auth/LanguageSelectScreen';
@@ -151,6 +151,7 @@ function MainTabs({ navigation }) {
   const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
   const [showOfflineNotice, setShowOfflineNotice] = React.useState(false);
   const hasShownOfflineNoticeRef = React.useRef(false);
+  const adminOfflineLogoutRef = React.useRef(false);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom > 0 ? Math.min(insets.bottom, 16) : 0;
@@ -163,9 +164,26 @@ function MainTabs({ navigation }) {
       setIsOnline(online);
       setConnectivityStatus(details.status);
       if (online) {
+        adminOfflineLogoutRef.current = false;
         hasShownOfflineNoticeRef.current = false;
         setShowOfflineNotice(false);
       } else if (details.status !== CONNECTIVITY_STATUS.CHECKING) {
+        const activeSession = getCurrentSession();
+        if (activeSession?.role === 'SRA Admin') {
+          if (!adminOfflineLogoutRef.current) {
+            adminOfflineLogoutRef.current = true;
+            setShowOfflineNotice(false);
+            const sessionNotice = details.status === CONNECTIVITY_STATUS.NO_INTERNET
+              ? 'SRA Admin was signed out because there is no internet connection. Reconnect before signing in again.'
+              : 'SRA Admin was signed out because the HUGPONG server is unavailable. Try again when the service is reachable.';
+            logoutUser({ skipRemote: true })
+              .finally(() => navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login', params: { sessionNotice } }]
+              }));
+          }
+          return;
+        }
         if (!hasShownOfflineNoticeRef.current) {
           setShowOfflineNotice(true);
           hasShownOfflineNoticeRef.current = true;

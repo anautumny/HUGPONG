@@ -80,7 +80,7 @@ These indexes must be deployed with the server release before the new production
 
 ## 6. Automatic period logic
 
-The server computes the current business period in `Asia/Manila`. `/api/audit-reports/next-period` resolves the authenticated manager's assigned Block Farm, finds months with eligible active operations, and selects the oldest month with no audit or whose latest version was returned. If no unresolved month exists, it selects the current business period. The backend rejects future periods. Web uses this endpoint. Mobile mirrors the selection for its local-first preview, while the server remains authoritative when online compilation occurs.
+The server computes the current business period in `Asia/Manila`. `/api/audit-reports/next-period` resolves the authenticated manager's assigned Block Farm, finds months with eligible active operations, and selects the oldest month with no audit, a returned version, or new operations that are not covered by a certified snapshot. If no unresolved month exists, it selects the current business period. The backend rejects future periods. Web uses this endpoint. Mobile mirrors the selection for its local-first preview, while the server remains authoritative when online compilation occurs.
 
 ## 7. Compilation logic
 
@@ -90,7 +90,7 @@ The mobile client blocks compilation only for unsynchronized field/operation mut
 
 ## 8. Snapshot/versioning logic
 
-Snapshots include stable operation log identity, field/cycle data, operation values, line items, and amendment history. A deterministic root identity represents Block Farm plus period; the stored report identity also includes the version. Repeating a compile for a non-returned period returns the existing report. Recompiling after `RETURNED` creates the next version and links `previousVersionId`. Certified versions are never rewritten by the workflow.
+Snapshots include stable operation log identity, field/cycle data, operation values, line items, and amendment history. A deterministic root identity represents Block Farm plus period; the stored report identity also includes the version. Repeating compilation while a report is compiled, queued, or awaiting review returns that in-progress report. New eligible operations recorded after certification create the next version as a distinct batch, excluding operation IDs already protected by certified snapshots. Recompiling after `RETURNED` also creates the next version and links `previousVersionId`. Certified versions are never rewritten by the workflow.
 
 ## 9. QR payload changes
 
@@ -100,7 +100,7 @@ Web, mobile, and server now use one compact JSON envelope with a HUGPONG audit t
 
 The server recomputes SHA-256 over the canonical report identity, Block Farm, period, and immutable operation snapshots, then compares it with both the QR envelope and stored report. The verifier reports decoding, report discovery, integrity verification, review state, and certification separately. A decodable QR is never labeled certified.
 
-Offline mobile scanning validates the envelope structure and can match it to a cached canonical report. An unseen offline envelope is explicitly labeled as structurally valid with cloud confirmation pending; it is not claimed to be cryptographically authenticated or certified.
+SRA QR verification is online-only. Both camera scans and manually entered report IDs, hashes, or envelopes are sent to the server, which resolves the authoritative report and recomputes its integrity hash before the mobile client may open it. The camera is unmounted while the separate manual-entry screen is active.
 
 ## 11. Cloud submission changes
 
@@ -108,7 +108,7 @@ Compilation and submission are separate endpoints and UI actions. `POST /api/aud
 
 ## 12. QR/Cloud deduplication logic
 
-Cloud and QR use the same deterministic report document ID and report version. QR import reads and updates that document; it does not create a second business record. Repeated QR import reports `alreadyImported`. A cloud submission after QR import, or QR import after cloud submission, resolves to the same `PENDING_REVIEW` or later report. The mobile outbox also deduplicates audit submission/import mutations by logical report key.
+Cloud and QR use the same deterministic report document ID and report version. QR import reads and updates that document; it does not create a second business record. Repeated QR import reports `alreadyImported`. A cloud submission after QR import, or QR import after cloud submission, resolves to the same `PENDING_REVIEW` or later report. Farm Manager submission remains retryable; SRA QR verification/import is a direct online server operation and is never accepted as an offline authority.
 
 ## 13. SRA Inbox changes
 
@@ -132,11 +132,11 @@ The compile modal now loads the automatic period preview and no longer asks for 
 
 ## 18. Mobile changes
 
-Mobile now shares the canonical lifecycle and QR contract, computes the oldest unresolved local preview, performs scoped sync blocking, separates compile from submit, queues offline submission/import work, shows returned reasons, uses an actionable SRA Inbox, loads history separately, and requires server confirmation for final certification. `expo-crypto` supplies compatible SHA-256 hashing for locally retained compiled packages.
+Mobile now shares the canonical lifecycle and QR contract, computes the oldest unresolved local preview, performs scoped sync blocking, separates compile from submit, and offers Submit to SRA immediately after successful compilation. Its audit card is restricted to the signed-in manager's assigned Block Farm, counts the authoritative report snapshots, exposes newly eligible logs after an earlier certificate, queues offline Farm Manager submission work, shows returned reasons, uses an actionable SRA Inbox, loads history separately, and requires server confirmation for SRA verification, import, return, and certification. `expo-crypto` supplies compatible SHA-256 hashing for locally retained compiled packages.
 
 ## 19. Offline behavior changes
 
-An offline Farm Manager can retain the compiled package, display its compact QR, and queue submission for retry. Offline SRA scanning distinguishes structural validation, cached-authority matching, and cloud confirmation. A legitimate import can be queued and reconciled by canonical identity after reconnect. Final certification remains online-only, consistent with the existing centralized-authority rule.
+An offline Farm Manager can retain the compiled package, display its compact QR, and queue submission for retry. SRA Admin has no offline operating mode: loss of internet or API reachability ends the SRA mobile session, and QR scan/manual verification, import, return, price publication, user approval, and certification require a live authoritative server response. SRA-only actions bypass the mobile outbox, and obsolete SRA queue entries from earlier builds are discarded when the SRA session starts.
 
 ## 20. Performance improvements
 
@@ -154,10 +154,10 @@ Readers normalize legacy `PENDING`, `SUBMITTED`, and `VERIFIED` values to `PENDI
 
 ## 22. Tests performed and results
 
-- Server test suite: 213 tests passed, including 7 canonical audit workflow tests.
-- Web test suite: 21 tests passed.
+- Server test suite: 242 tests passed, including the certified-batch and returned-batch audit workflow regressions.
+- Web test suite: 23 tests passed.
 - Web production build: passed.
-- Android Expo export: passed; 1,150 modules bundled. The temporary export directory was removed afterward.
+- Android Expo export: passed; 1,151 modules bundled. The temporary export directory was removed afterward.
 - Server syntax checks for the new domain and route modules: passed.
 - `git diff --check`: no audit-source whitespace errors after final cleanup; line-ending conversion warnings remain because the Windows working tree uses CRLF.
 
@@ -168,7 +168,7 @@ The automated audit tests cover lifecycle constants, deterministic version IDs, 
 - A live Farm Manager-to-SRA staging run was not executed because no isolated Firestore emulator/staging credential set was configured, and exercising the endpoints against an unknown live database would create regulatory records. The release gate should run the requested cloud, QR, duplicate, return/version, rollover, 48-report pagination, latency, and reconnect scenarios against an emulator or dedicated staging project.
 - Firestore composite indexes must be deployed before rollout.
 - The current data model has no canonical district ID relationship between SRA users and Block Farms. Role authorization is enforced, but true per-district SRA isolation cannot be safely inferred from display strings. Add canonical `districtId` fields and scoped rules/API queries before operating multiple districts.
-- The compact QR uses a deterministic SHA-256 integrity identifier, not an asymmetric digital signature. Server verification is authoritative; an unseen QR cannot be authenticated fully offline without a trusted public-key signature design. The UI deliberately does not claim otherwise.
+- The compact QR uses a deterministic SHA-256 integrity identifier, not an asymmetric digital signature. Server verification is authoritative, so SRA verification is deliberately unavailable offline.
 - Existing legacy reports receive read compatibility but are not retroactively versioned or rehashed. A controlled migration is required if every old record must expose the full new metadata.
 - The project dependency install reported npm audit findings (1 low, 14 moderate, 1 high, 1 critical). They were not auto-fixed because dependency upgrades were outside this audit workflow change and could be breaking.
 - Audit-specific notifications were not added because the repository does not expose an existing notification delivery pipeline for these events; creating a parallel notification system would violate the requirement.

@@ -13,6 +13,7 @@ const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp
 const { sendSms } = require('../services/smsGateway');
 const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
+const { recordActivity } = require('../services/telemetryService');
 
 function normalizeContact(value) {
   const digits = String(value || '').replace(/\D/g, '');
@@ -178,6 +179,12 @@ router.post('/login', async (req, res) => {
     }
     req.session.user = sessionUser;
     const credentials = await issueCredentials(sessionUser);
+    recordActivity(db, {
+      userId: sessionUser.employeeId,
+      platform: clientPlatform,
+      clientInstanceId: req.headers['x-client-instance-id'] || req.body?.clientInstanceId || `${clientPlatform}-login`,
+      event: 'LOGIN'
+    }).catch(error => console.warn('[HUGPONG Auth] Activity telemetry notice:', error.message));
     return res.json({
       success: true,
       user: sessionUser,

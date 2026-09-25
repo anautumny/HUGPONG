@@ -5,75 +5,88 @@ const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
-const { COLLECTIONS, ROLES, requiredString, optionalString, finiteNumber, nowIso } = require('../schema/firestoreSchema');
+const { ROLES } = require('../schema/firestoreSchema');
 const { actor } = require('../services/resourceScope');
-const { sortNewestFirst } = require('../services/recordOrdering');
+const { recordActivity, recordSyncTelemetry, buildAgriculturalMonitor } = require('../services/telemetryService');
 
-router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+const AGRICULTURAL_ROLES = [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER];
+
+function clientIdentity(req) {
+  return {
+    platform: req.headers['x-client-platform'] || req.body?.platform,
+    clientInstanceId: req.headers['x-client-instance-id'] || req.body?.clientInstanceId
+  };
+}
+
+function metadata(body = {}) {
+  return { model: body.model, os: body.os, appVersion: body.appVersion };
+}
+
+router.get('/', requireAuth, requireRole(AGRICULTURAL_ROLES), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const identity = actor(req.session.user);
-    let permittedUserIds = null;
-
-    if (identity.role === ROLES.FARM_MANAGER) {
-      const farms = await db.collection(COLLECTIONS.BLOCK_FARMS)
-        .where('managerUserId', '==', identity.userId)
-        .get();
-      const farmIds = new Set(farms.docs.map(document => document.id));
-      const fields = await db.collection(COLLECTIONS.FIELDS).get();
-      permittedUserIds = [
-        identity.userId,
-        ...fields.docs
-          .filter(document => farmIds.has(document.data().blockFarmId))
-          .map(document => document.data().memberUserId)
-          .filter(Boolean)
-      ];
-    }
-
-    const records = [];
-    if (permittedUserIds === null) {
-      const snapshot = await db.collection(COLLECTIONS.TERMINAL_DIAGNOSTICS).get();
-      records.push(...snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
-    } else {
-      const uniqueUserIds = Array.from(new Set(permittedUserIds));
-      for (let index = 0; index < uniqueUserIds.length; index += 10) {
-        const snapshot = await db.collection(COLLECTIONS.TERMINAL_DIAGNOSTICS)
-          .where('userId', 'in', uniqueUserIds.slice(index, index + 10))
-          .get();
-        records.push(...snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
-      }
-    }
-    const data = sortNewestFirst(records, ['updatedAt']);
-
-    return res.json({ success: true, count: data.length, data });
+    const data = await buildAgriculturalMonitor(db, actor(req.session.user));
+    return res.json({ success: true, count: data.subjects.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-router.put('/:deviceId', requireAuth, async (req, res) => {
+router.post('/activity', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const identity = actor(req.session.user);
-    const deviceId = requiredString(req.params.deviceId, 'deviceId', { max: 120 });
-    const ref = db.collection(COLLECTIONS.TERMINAL_DIAGNOSTICS).doc(deviceId);
-    const current = await ref.get();
-    if (current.exists && current.data().userId !== identity.userId) {
-      return res.status(403).json({ success: false, error: 'This terminal belongs to another user.' });
-    }
-    const payload = {
+    const data = await recordActivity(db, {
       userId: identity.userId,
-      deviceId,
-      model: optionalString(req.body.model, { max: 200 }),
-      os: optionalString(req.body.os, { max: 200 }),
-      appVersion: optionalString(req.body.appVersion, { max: 120 }),
-      battery: optionalString(req.body.battery, { max: 40 }),
-      cachedLogs: finiteNumber(req.body.cachedLogs == null ? 0 : req.body.cachedLogs, 'cachedLogs', { min: 0, max: 100000 }),
-      status: optionalString(req.body.status, { max: 80 }),
-      updatedAt: nowIso()
-    };
-    await ref.set(payload, { merge: true });
-    return res.json({ success: true, data: payload });
+      ...clientIdentity(req),
+      event: req.body?.event || 'HEARTBEAT',
+      metadata: metadata(req.body)
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/sync', requireAuth, requireRole(AGRICULTURAL_ROLES), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const identity = actor(req.session.user);
+    const data = await recordSyncTelemetry(db, {
+      userId: identity.userId,
+      ...clientIdentity(req),
+      pendingMutationCount: req.body?.pendingMutationCount,
+      failedMutationCount: req.body?.failedMutationCount,
+      syncState: req.body?.syncState,
+      connectionState: req.body?.connectionState,
+      syncSucceeded: req.body?.syncSucceeded === true,
+      metadata: metadata(req.body)
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Compatibility endpoint for deployed clients. It reports a buffer snapshot
+// but deliberately cannot claim a successful synchronization.
+router.put('/:legacyDeviceId', requireAuth, requireRole(AGRICULTURAL_ROLES), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const identity = actor(req.session.user);
+    const pending = Number(req.body?.cachedLogs || 0);
+    const data = await recordSyncTelemetry(db, {
+      userId: identity.userId,
+      ...clientIdentity(req),
+      clientInstanceId: req.headers['x-client-instance-id'] || req.body?.clientInstanceId || req.params.legacyDeviceId,
+      pendingMutationCount: pending,
+      failedMutationCount: 0,
+      syncState: pending > 0 ? 'PENDING_SYNC' : 'UNKNOWN',
+      connectionState: 'ONLINE',
+      syncSucceeded: false,
+      metadata: metadata(req.body)
+    });
+    return res.json({ success: true, data });
   } catch (error) {
     return res.status(400).json({ success: false, error: error.message });
   }

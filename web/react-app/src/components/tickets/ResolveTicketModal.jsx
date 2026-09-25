@@ -5,7 +5,8 @@ import FormField from '../ui/FormField';
 import Select from '../ui/Select';
 import Textarea from '../ui/Textarea';
 import Button from '../ui/Button';
-import { updateTicket, TICKET_STATUSES, TICKET_PRIORITIES } from '../../services/ticketsService';
+import { updateTicket } from '../../services/ticketsService';
+import { nextTicketStatus, statusLabel } from '../../domain/supportTickets';
 
 export default function ResolveTicketModal({
   isOpen = false,
@@ -14,7 +15,6 @@ export default function ResolveTicketModal({
   onUpdated
 }) {
   const [status, setStatus] = useState('IN_PROGRESS');
-  const [priority, setPriority] = useState('NORMAL');
   const [resolutionNotes, setResolutionNotes] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -23,34 +23,29 @@ export default function ResolveTicketModal({
   useEffect(() => {
     if (isOpen && ticket) {
       setStatus(ticket.status || 'IN_PROGRESS');
-      setPriority(ticket.priority || 'NORMAL');
-      setResolutionNotes(ticket.resolutionNotes || '');
+      setResolutionNotes('');
       setFormError(null);
       setIsSubmitting(false);
     }
   }, [isOpen, ticket]);
 
-  const statusOptions = TICKET_STATUSES.map(s => ({
-    value: s,
-    label: s.replace(/_/g, ' ')
-  }));
-
-  const priorityOptions = TICKET_PRIORITIES.map(p => ({
-    value: p,
-    label: `${p.charAt(0) + p.slice(1).toLowerCase()} Priority`
-  }));
+  const nextStatus = nextTicketStatus(ticket?.status);
+  const statusOptions = [ticket?.status, nextStatus].filter(Boolean).map(value => ({ value, label: statusLabel(value) }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!ticket) return;
     setFormError(null);
+    if (status === 'RESOLVED' && !resolutionNotes.trim()) {
+      setFormError('A public resolution response is required before resolving the ticket.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
       const payload = {
         status,
-        priority,
-        resolutionNotes: resolutionNotes.trim()
+        response: resolutionNotes.trim()
       };
 
       const res = await updateTicket(ticket.id, payload);
@@ -73,8 +68,8 @@ export default function ResolveTicketModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Manage & Resolve Ticket"
-      subtitle={`Resolution controls for ${ticket.id} (${ticket.title})`}
+      title="Manage Support Ticket"
+      subtitle={`${ticket.id} · ${ticket.requesterName || ticket.createdByUserId}`}
       icon={Wrench}
       badge="Super Admin"
       size="md"
@@ -111,7 +106,7 @@ export default function ResolveTicketModal({
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <FormField
             id="tck-update-status"
             label="Ticket Status"
@@ -126,30 +121,17 @@ export default function ResolveTicketModal({
             />
           </FormField>
 
-          <FormField
-            id="tck-update-priority"
-            label="Priority Level"
-            required
-          >
-            <Select
-              id="tck-update-priority"
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              options={priorityOptions}
-              disabled={isSubmitting}
-            />
-          </FormField>
         </div>
 
         <FormField
           id="tck-resolution-notes"
-          label="Resolution Notes & Actions Taken"
-          helperText="Explain the corrective action or resolution for the member/manager"
+          label="Public Response"
+          helperText="This append-only response will be visible to the requester"
         >
           <Textarea
             id="tck-resolution-notes"
             rows={4}
-            placeholder="Document administrative resolution or technical findings..."
+            placeholder="Write a response to the requester..."
             value={resolutionNotes}
             onChange={(e) => setResolutionNotes(e.target.value)}
             disabled={isSubmitting}

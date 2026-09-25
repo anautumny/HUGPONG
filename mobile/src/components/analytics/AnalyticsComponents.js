@@ -445,19 +445,19 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
 
       <View style={styles.priceGrid}>
         <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B, â‚±/Lkg)</Text>
+          <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B, ₱/Lkg)</Text>
           <Text style={styles.priceBoxValue}>₱{sugarPrice.toLocaleString()}</Text>
-          <Text style={styles.priceBoxUnit}>â‚±/Lkg</Text>
+          <Text style={styles.priceBoxUnit}>₱/Lkg</Text>
         </View>
 
         <View style={styles.priceDivider} />
 
         <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>MOLASSES BENCHMARK (â‚±/MT)</Text>
+          <Text style={styles.priceBoxLabel}>MOLASSES BENCHMARK (₱/MT)</Text>
           <Text style={[styles.priceBoxValue, { color: COLORS.text }]}>
             ₱{molassesPrice.toLocaleString()}
           </Text>
-          <Text style={styles.priceBoxUnit}>â‚±/MT</Text>
+          <Text style={styles.priceBoxUnit}>₱/MT</Text>
         </View>
       </View>
     </Card>

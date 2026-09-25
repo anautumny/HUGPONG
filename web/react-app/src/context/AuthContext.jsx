@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { roleKeyFromUser } from '../utils/authRouting';
 import { signInWithCustomTokenSilently, signOutFirebase } from '../services/firebaseClient';
+import { getWebClientInstanceId, reportWebActivity } from '../services/telemetryService';
 
 const AuthContext = createContext(null);
 
@@ -78,13 +79,33 @@ export function AuthProvider({ children }) {
     refreshSession();
   }, []);
 
+  useEffect(() => {
+    if (!user) return undefined;
+    const report = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+        reportWebActivity().catch(() => {});
+      }
+    };
+    report();
+    const interval = window.setInterval(report, 5 * 60 * 1000);
+    const onVisibility = () => report();
+    window.addEventListener('focus', report);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', report);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user?.employeeId]);
+
   const login = async (contactNumber, password) => {
     setSessionExpiredNotice('');
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-client-platform': 'web'
+        'x-client-platform': 'web',
+        'x-client-instance-id': getWebClientInstanceId()
       },
       body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
       credentials: 'include'

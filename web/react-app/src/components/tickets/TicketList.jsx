@@ -1,20 +1,28 @@
 import React, { useState, useMemo } from 'react';
-import { Search, LifeBuoy, AlertCircle, CheckCircle2, Clock, ChevronDown, ChevronUp, User, MapPin, Tag, Wrench, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, LifeBuoy, Clock, ChevronDown, ChevronUp, User, MapPin, Wrench, Send } from 'lucide-react';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
+import { TICKET_CATEGORIES } from '../../domain/supportTickets';
 
 export default function TicketList({
   tickets = [],
   isLoading = false,
   isSuperAdmin = false,
   onResolveClick,
+  onSendMessage,
+  categoryFilter = 'ALL',
+  onCategoryFilterChange,
+  title = 'Support Inbox',
+  emptyMessage = 'No support tickets require attention.',
   className = ''
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [expandedTicketId, setExpandedTicketId] = useState(null);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
@@ -29,6 +37,8 @@ export default function TicketList({
       result = result.filter(t => t.priority === priorityFilter);
     }
 
+    if (categoryFilter !== 'ALL') result = result.filter(t => t.category === categoryFilter);
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       result = result.filter(t =>
@@ -39,9 +49,8 @@ export default function TicketList({
         (t.details && t.details.toLowerCase().includes(q))
       );
     }
-
     return result;
-  }, [tickets, statusFilter, priorityFilter, searchTerm]);
+  }, [tickets, statusFilter, priorityFilter, categoryFilter, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTickets.length / pageSize));
   const validPage = Math.min(currentPage, totalPages);
@@ -52,6 +61,7 @@ export default function TicketList({
 
   const statusOptions = [
     { value: 'ALL', label: 'All Statuses' },
+    { value: 'PENDING_SUBMISSION', label: 'Pending Submission' },
     { value: 'OPEN', label: 'Open' },
     { value: 'IN_PROGRESS', label: 'In Progress' },
     { value: 'RESOLVED', label: 'Resolved' },
@@ -65,17 +75,20 @@ export default function TicketList({
     { value: 'HIGH', label: 'High Priority' },
     { value: 'URGENT', label: 'Urgent Priority' }
   ];
+  const categoryOptions = [{ value: 'ALL', label: 'All Categories' }, ...TICKET_CATEGORIES.map(value => ({ value, label: value }))];
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case 'OPEN':
-        return 'bg-danger-bg text-danger border-danger/20';
+        return 'bg-bg text-hug-muted border-border';
       case 'IN_PROGRESS':
         return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200 dark:border-amber-800/60';
       case 'RESOLVED':
         return 'bg-success-bg text-success border border-success/30';
       case 'CLOSED':
         return 'bg-bg text-hug-muted dark:bg-gray-800 border-border';
+      case 'PENDING_SUBMISSION':
+        return 'bg-amber-50 text-amber-700 border-amber-200';
       default:
         return 'bg-bg text-hug-muted border-border';
     }
@@ -114,13 +127,13 @@ export default function TicketList({
       <div className="p-4 sm:p-5 border-b border-border/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-hug-text flex items-center gap-2">
-            <span>Support Incident Queue</span>
+            <span>{title}</span>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-bg dark:bg-gray-800 text-hug-muted border border-border">
               {filteredTickets.length} tickets
             </span>
           </h3>
           <p className="text-xs text-hug-muted mt-0.5">
-            Operational inquiries, data corrections, and technical incident reports.
+            {isSuperAdmin ? 'Requests assigned to Super Admin support.' : 'Your private support requests and responses.'}
           </p>
         </div>
 
@@ -159,6 +172,17 @@ export default function TicketList({
               options={priorityOptions}
             />
           </div>
+
+          <div className="w-full sm:w-48">
+            <Select
+              value={categoryFilter}
+              onChange={(e) => {
+                onCategoryFilterChange?.(e.target.value);
+                setCurrentPage(1);
+              }}
+              options={categoryOptions}
+            />
+          </div>
         </div>
       </div>
 
@@ -176,7 +200,7 @@ export default function TicketList({
             <LifeBuoy className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
             <p className="font-semibold text-hug-text text-sm">No support tickets found</p>
             <p className="text-xs text-hug-muted mt-0.5">
-              {searchTerm ? 'No tickets matched your filter criteria.' : 'Create a new ticket if you encounter operational issues.'}
+              {searchTerm ? 'No tickets matched your filter criteria.' : emptyMessage}
             </p>
           </div>
         ) : (
@@ -198,7 +222,7 @@ export default function TicketList({
                         </h4>
 
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getStatusBadgeClass(t.status)}`}>
-                          {t.status}
+                          {String(t.status || 'OPEN').replace(/_/g, ' ')}
                         </span>
 
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getPriorityBadgeClass(t.priority)}`}>
@@ -213,7 +237,8 @@ export default function TicketList({
                       <div className="flex items-center gap-3 text-xs text-hug-muted flex-wrap">
                         <span className="flex items-center gap-1">
                           <User className="w-3 h-3" />
-                          {t.createdByUserId}
+                          {t.requesterName || t.memberName || t.createdByUserId}
+                          {t.requesterRole ? ` · ${String(t.requesterRole).replace(/_/g, ' ')}` : ''}
                         </span>
                         {t.fieldId && (
                           <>
@@ -274,6 +299,53 @@ export default function TicketList({
                           Official Resolution Notes {t.resolvedAt && `(${formatDate(t.resolvedAt)})`}
                         </span>
                         <p className="text-hug-text whitespace-pre-wrap">{t.resolutionNotes}</p>
+                      </div>
+                    )}
+
+                    {Array.isArray(t.messages) && t.messages.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-hug-muted">Conversation</span>
+                        {t.messages.map((message, index) => (
+                          <div key={message.messageId || index} className="p-3 rounded-xl border border-border bg-white dark:bg-gray-900">
+                            <div className="flex justify-between gap-3 text-[10px] text-hug-muted mb-1">
+                              <strong className="text-hug-text">{message.authorName || message.authorUserId || 'HUGPONG User'}</strong>
+                              <span>{formatDate(message.createdAt)}</span>
+                            </div>
+                            <p className="text-hug-text whitespace-pre-wrap">{message.content || message.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {!isSuperAdmin && ['OPEN', 'IN_PROGRESS'].includes(t.status) && onSendMessage && (
+                      <div className="flex gap-2 items-end">
+                        <div className="flex-1">
+                          <Input
+                            type="text"
+                            placeholder="Add a follow-up message..."
+                            value={expandedTicketId === t.id ? replyText : ''}
+                            onChange={(event) => setReplyText(event.target.value)}
+                            disabled={sendingReply}
+                          />
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={Send}
+                          disabled={!replyText.trim() || sendingReply}
+                          isLoading={sendingReply}
+                          onClick={async () => {
+                            setSendingReply(true);
+                            try {
+                              await onSendMessage(t, replyText.trim());
+                              setReplyText('');
+                            } finally {
+                              setSendingReply(false);
+                            }
+                          }}
+                        >
+                          Send
+                        </Button>
                       </div>
                     )}
                   </div>

@@ -33,7 +33,7 @@ function inferEntityKey(type, payload = {}) {
   if (type === 'stage_update') return `crop_cycles/${payload.cycleId || ''}`;
   if (type === 'cycle_rollover') return `fields/${payload.fieldId || ''}`;
   if (type === 'price') return `sra_prices/${id}`;
-  if (type === 'ticket') return `support_tickets/${id}`;
+  if (type === 'ticket' || type === 'ticket_message') return `support_tickets/${id}`;
   if (type === 'audit_log' || type === 'system_event') return `audit_logs/${id}`;
   if (['audit_report', 'audit_submission', 'audit_return', 'audit_certification'].includes(type)) return `audit_reports/${id}`;
   if (type === 'audit_qr_import') return `audit_reports/${payload.reportId || payload.id || ''}`;
@@ -52,6 +52,7 @@ function inferLogicalMutationKey(type, payload = {}) {
     return `${type}:${payload.id || `${payload.blockFarmId || ''}:${payload.periodKey || payload.period || ''}`}:${ids.join(',')}`;
   }
   if (type === 'audit_submission') return payload.id ? `${type}:${payload.id}` : null;
+  if (type === 'ticket_message') return payload.id && payload.messageId ? `${type}:${payload.id}:${payload.messageId}` : null;
   if (type === 'audit_qr_import') return payload.reportId ? `${type}:${payload.reportId}` : null;
   if (type === 'operation_archive') {
     const ids = Array.isArray(payload.operationLogIds) ? [...new Set(payload.operationLogIds.map(String))].sort() : [];
@@ -87,6 +88,7 @@ function createMutationEnvelope(type, payload, options = {}, existingQueue = [])
     type,
     entityKey,
     logicalMutationKey,
+    ownerUserId: String(options.ownerUserId || '').trim() || null,
     baseVersion: options.baseVersion === undefined ? null : options.baseVersion,
     // Takeover grants are deliberately never serialized into the durable queue.
     takeoverGrant: null,
@@ -118,6 +120,7 @@ function migrateOutbox(savedQueue = []) {
       type,
       entityKey,
       logicalMutationKey: item?.logicalMutationKey || inferLogicalMutationKey(type, payload),
+      ownerUserId: String(item?.ownerUserId || '').trim() || null,
       baseVersion: item?.baseVersion === undefined ? null : item.baseVersion,
       takeoverGrant: null,
       dependsOnMutationId: item?.dependsOnMutationId || null,

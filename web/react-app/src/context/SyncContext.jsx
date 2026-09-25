@@ -1,70 +1,82 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useTransition } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const SyncContext = createContext({
   isOnline: true,
-  syncStatus: 'idle', // 'idle' | 'syncing' | 'failed' | 'offline'
-  lastSyncedAt: null,
-  activeOperationsCount: 0,
-  beginSync: () => {},
-  endSync: () => {}
+  networkOnline: true,
+  apiReachable: null,
+  syncStatus: 'idle' // Browser plus HUGPONG API reachability.
 });
 
 export function SyncProvider({ children }) {
-  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
-  const [activeOperationsCount, setActiveOperationsCount] = useState(0);
-  const [lastSyncedAt, setLastSyncedAt] = useState(null);
-  const [hasSyncError, setHasSyncError] = useState(false);
+  const [networkOnline, setNetworkOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [apiReachable, setApiReachable] = useState(null);
 
   useEffect(() => {
+    let active = true;
+    let inFlight = false;
+
+    async function probeApi() {
+      if (!navigator.onLine) {
+        if (active) setApiReachable(false);
+        return;
+      }
+      if (inFlight) return;
+      inFlight = true;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch('/health', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
+        const result = await response.json().catch(() => ({}));
+        if (active) setApiReachable(response.ok && result.success === true);
+      } catch {
+        if (active) setApiReachable(false);
+      } finally {
+        window.clearTimeout(timeout);
+        inFlight = false;
+      }
+    }
+
     function handleOnline() {
-      setIsOnline(true);
+      setNetworkOnline(true);
+      setApiReachable(null);
+      probeApi();
     }
     function handleOffline() {
-      setIsOnline(false);
+      setNetworkOnline(false);
+      setApiReachable(false);
     }
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('focus', probeApi);
+    probeApi();
+    const interval = window.setInterval(probeApi, 30000);
 
     return () => {
+      active = false;
+      window.clearInterval(interval);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('focus', probeApi);
     };
   }, []);
 
-  const beginSync = useCallback(() => {
-    setActiveOperationsCount(prev => prev + 1);
-    setHasSyncError(false);
-  }, []);
-
-  const endSync = useCallback((success = true) => {
-    setActiveOperationsCount(prev => Math.max(0, prev - 1));
-    if (success) {
-      setLastSyncedAt(new Date());
-      setHasSyncError(false);
-    } else {
-      setHasSyncError(true);
-    }
-  }, []);
-
-  let syncStatus = 'idle';
-  if (!isOnline) {
-    syncStatus = 'offline';
-  } else if (activeOperationsCount > 0) {
-    syncStatus = 'syncing';
-  } else if (hasSyncError) {
-    syncStatus = 'failed';
-  }
+  const isOnline = networkOnline && apiReachable !== false;
+  const syncStatus = !networkOnline
+    ? 'offline'
+    : apiReachable === null
+      ? 'syncing'
+      : apiReachable
+        ? 'idle'
+        : 'failed';
 
   return (
     <SyncContext.Provider
       value={{
         isOnline,
-        syncStatus,
-        lastSyncedAt,
-        activeOperationsCount,
-        beginSync,
-        endSync
+        networkOnline,
+        apiReachable,
+        syncStatus
       }}
     >
       {children}

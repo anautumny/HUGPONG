@@ -85,7 +85,7 @@ export default function App() {
                 <Route path="/prices" element={<RoleRoute allowed={[ROLE_KEYS.SRA_ADMIN]}><PricesView /></RoleRoute>} />
                 <Route path="/audit" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AuditCenterView /></RoleRoute>} />
                 <Route path="/users" element={<RoleRoute allowed={MANAGEMENT_ROLES}><UsersView /></RoleRoute>} />
-                <Route path="/sync" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SUPER_ADMIN]}><SyncView /></RoleRoute>} />
+                <Route path="/sync" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><SyncView /></RoleRoute>} />
                 <Route path="/support" element={<RoleRoute allowed={MANAGEMENT_ROLES}><TicketsView /></RoleRoute>} />
                 <Route path="/maintenance" element={<RoleRoute allowed={GOVERNANCE_ROLES}><MaintenanceView /></RoleRoute>} />
                 <Route path="/settings" element={<SettingsView />} />

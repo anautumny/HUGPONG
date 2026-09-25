@@ -30,6 +30,15 @@ async function fetchFromApi(path, options = {}) {
 
 export { API_BASE_URL };
 
+export async function getMobileClientInstanceId() {
+  let value = await getItem(STORAGE_KEYS.CLIENT_INSTANCE_ID);
+  if (!value) {
+    value = `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    await saveItem(STORAGE_KEYS.CLIENT_INSTANCE_ID, value);
+  }
+  return value;
+}
+
 export async function probeServerConnectivity() {
   try {
     const response = await fetchFromApi('/health', {
@@ -61,11 +70,13 @@ export async function signInToFirebase(customToken) {
 }
 
 export async function publicAuthRequest(path, body) {
+  const clientInstanceId = await getMobileClientInstanceId();
   const response = await fetchFromApi(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-client-platform': 'mobile'
+      'x-client-platform': 'mobile',
+      'x-client-instance-id': clientInstanceId
     },
     body: JSON.stringify(body || {})
   });
@@ -74,12 +85,14 @@ export async function publicAuthRequest(path, body) {
 
 export async function authenticatedRequest(path, options = {}) {
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const clientInstanceId = await getMobileClientInstanceId();
   if (!token) throw new Error('No authenticated server session is available.');
   const response = await fetchFromApi(path, {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
       'x-client-platform': 'mobile',
+      'x-client-instance-id': clientInstanceId,
       Authorization: `Bearer ${token}`,
       ...(options.headers || {})
     },
@@ -112,11 +125,13 @@ export async function verifyPasswordWithServer(password, authorization = {}) {
 export async function refreshMobileSessionFromFirebase() {
   if (!auth?.currentUser) throw new Error('Firebase authentication must be restored before synchronization.');
   const firebaseIdToken = await auth.currentUser.getIdToken(true);
+  const clientInstanceId = await getMobileClientInstanceId();
   const response = await fetchFromApi('/auth/mobile-session', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-client-platform': 'mobile',
+      'x-client-instance-id': clientInstanceId,
       Authorization: `Bearer ${firebaseIdToken}`
     },
     body: JSON.stringify({})
@@ -169,11 +184,13 @@ export async function verifyRegistrationOtp(phone, code) {
   return publicAuthRequest('/auth/registration-otp/verify', { phone, code });
 }
 
-export async function logoutFromServer() {
-  try {
-    await authenticatedRequest('/auth/logout', { method: 'POST', body: {} });
-  } catch (error) {
-    // Local sign-out must still complete when the server is offline.
+export async function logoutFromServer(options = {}) {
+  if (options.skipRemote !== true) {
+    try {
+      await authenticatedRequest('/auth/logout', { method: 'POST', body: {} });
+    } catch (error) {
+      // Local sign-out must still complete when the server is offline.
+    }
   }
   if (auth) await signOut(auth).catch(() => {});
   await saveItem(STORAGE_KEYS.AUTH_TOKEN, null);

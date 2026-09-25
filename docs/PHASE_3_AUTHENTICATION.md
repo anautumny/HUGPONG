@@ -12,7 +12,7 @@ Date: 2026-09-16
 - Web and mobile send credentials only to Express and receive an opaque HUGPONG bearer plus a Firebase custom token.
 - Firebase custom claims contain canonical role and assignment IDs. `accountReady` remains false until registered-phone verification and any required first-login password change are complete.
 - Clients sign in to Firebase Auth with the custom token before attaching Firestore realtime listeners.
-- A previously authenticated client may restore its cached local session while offline. It does not recheck a password locally. On reconnection, `/auth/session` reloads the active user and refreshes both tokens.
+- A previously authenticated Farm Member or Farm Manager may restore its cached local session while offline. SRA Admin is online-only and is signed out when internet or the HUGPONG API is unavailable. On reconnection, `/auth/session` reloads eligible field-role users and refreshes both tokens.
 
 ## Account flows
 

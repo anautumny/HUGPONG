@@ -3,9 +3,9 @@ import { RefreshCw, WifiOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useSync } from '../../context/SyncContext';
 
 export default function SyncIndicator({ compact = false }) {
-  const { syncStatus, isOnline } = useSync();
+  const { syncStatus, networkOnline } = useSync();
 
-  if (!isOnline || syncStatus === 'offline') {
+  if (!networkOnline || syncStatus === 'offline') {
     return (
       <div
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-danger-bg text-danger border border-danger/20"
@@ -37,12 +37,12 @@ export default function SyncIndicator({ compact = false }) {
     return (
       <div
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-warning-bg text-warning border border-warning/20"
-        title="Last synchronization attempt encountered an error."
+        title="The browser is online, but the HUGPONG API is unavailable."
         role="status"
         aria-live="polite"
       >
         <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-        {!compact && <span>Sync Issue</span>}
+        {!compact && <span>Server Unavailable</span>}
       </div>
     );
   }

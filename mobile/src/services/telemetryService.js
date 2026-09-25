@@ -1,63 +1,77 @@
-// ══════════════════════════════════════════════════════════════
-// HUGPONG — Mobile Terminal Hardware & Health Telemetry Service
-// Collects battery, local SQLite/AsyncStorage buffer, Android OS, and app release verification
-// ══════════════════════════════════════════════════════════════
-
 import { Platform } from 'react-native';
-import { publishTelemetry } from './mutationService';
+import { authenticatedRequest, getMobileClientInstanceId } from './authService';
 
-export async function publishTerminalTelemetry(session, pendingLogsCount = 0) {
-  if (!session || !session.name) return null;
+const ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
+let lastActivityReportAt = 0;
 
+function deviceMetadata() {
+  const constants = Platform.constants || {};
+  return {
+    platform: 'MOBILE',
+    model: String(constants.Model || constants.model || Platform.OS || 'Mobile device'),
+    os: `${Platform.OS} ${String(Platform.Version || '')}`.trim(),
+    appVersion: String(constants.reactNativeVersion?.major ? `React Native ${constants.reactNativeVersion.major}.${constants.reactNativeVersion.minor}` : 'HUGPONG Mobile')
+  };
+}
+
+async function telemetryRequest(path, body) {
+  const clientInstanceId = await getMobileClientInstanceId();
+  return authenticatedRequest(path, {
+    method: 'POST',
+    headers: { 'x-client-instance-id': clientInstanceId },
+    body: { ...deviceMetadata(), ...body }
+  });
+}
+
+export async function reportMobileActivity(event = 'HEARTBEAT') {
+  const now = Date.now();
+  if (String(event).toUpperCase() !== 'LOGIN' && now - lastActivityReportAt < ACTIVITY_HEARTBEAT_MS) {
+    return { throttled: true };
+  }
+  lastActivityReportAt = now;
   try {
-    const cleanContact = (session.contact || '').replace(/\D/g, '');
-    const userRole = session.role || 'Farm Member';
-    
-    // Generate deterministic device ID based on user contact or role
-    const deviceSuffix = cleanContact ? cleanContact.slice(-4) : (session.employeeId ? session.employeeId.slice(-4) : '01');
-    const deviceId = session.deviceId || (
-      userRole === 'Farm Manager' ? `SM-S23U-${deviceSuffix}` :
-      (userRole === 'SRA Admin' ? `SM-TAB9-${deviceSuffix}` : `SM-A146P-${deviceSuffix}`)
-    );
-
-    // Hardware and OS Model detection
-    const isAndroid = Platform.OS === 'android';
-    const osVersion = Platform.Version ? String(Platform.Version) : '14';
-    const apiLevel = (Platform.constants && Platform.constants.Version) ? String(Platform.constants.Version) : '34';
-    const osStr = isAndroid ? `Android ${osVersion} (API ${apiLevel})` : `${Platform.OS} ${osVersion}`;
-    
-    const hardwareModel = (Platform.constants && Platform.constants.Model) 
-      ? Platform.constants.Model 
-      : (userRole === 'Farm Manager' ? 'Samsung Galaxy S23' : (userRole === 'SRA Admin' ? 'Samsung Galaxy Tab S9' : 'Samsung Galaxy A14'));
-
-    // Estimated battery level
-    const batteryLevel = session.battery || '88%';
-    const appRelease = 'v1.0.0 (Build 2026.09)';
-    const status = (pendingLogsCount > 3) ? 'Lag Alert' : 'Optimal';
-
-    const telemetryPayload = {
-      id: deviceId,
-      deviceId: deviceId,
-      staff: session.name || 'Field Officer',
-      memberId: session.employeeId || cleanContact || '',
-      blockFarm: session.blockFarm || session.farm || '',
-      blockFarmId: session.blockFarmId || '',
-      model: hardwareModel,
-      os: osStr,
-      appVersion: appRelease,
-      battery: batteryLevel,
-      cachedLogs: Number(pendingLogsCount) || 0,
-      lastSync: 'Just now',
-      status: status,
-      updatedAt: new Date().toISOString(),
-      timestamp: Date.now()
-    };
-
-    await publishTelemetry(deviceId, telemetryPayload);
-
-    return telemetryPayload;
-  } catch (err) {
-    console.warn('[Telemetry] Error publishing terminal telemetry:', err);
+    return await telemetryRequest('/api/terminal-diagnostics/activity', { event });
+  } catch (error) {
+    lastActivityReportAt = 0;
+    console.warn('[Telemetry] Activity report deferred:', error.message);
     return null;
   }
+}
+
+export async function reportMobileSync({
+  pendingMutationCount = 0,
+  failedMutationCount = 0,
+  syncState = 'UNKNOWN',
+  connectionState = 'ONLINE',
+  syncSucceeded = false
+} = {}) {
+  try {
+    return await telemetryRequest('/api/terminal-diagnostics/sync', {
+      pendingMutationCount,
+      failedMutationCount,
+      syncState,
+      connectionState,
+      syncSucceeded
+    });
+  } catch (error) {
+    console.warn('[Telemetry] Sync report deferred:', error.message);
+    return null;
+  }
+}
+
+export async function fetchAgriculturalSyncMonitor() {
+  const response = await authenticatedRequest('/api/terminal-diagnostics');
+  return response.data || { scope: {}, subjects: [] };
+}
+
+// Compatibility export used by startup code. Reporting a queue snapshot never
+// claims that a synchronization completed.
+export async function publishTerminalTelemetry(_session, pendingLogsCount = 0) {
+  return reportMobileSync({
+    pendingMutationCount: Number(pendingLogsCount || 0),
+    failedMutationCount: 0,
+    syncState: Number(pendingLogsCount || 0) > 0 ? 'PENDING_SYNC' : 'UNKNOWN',
+    connectionState: 'ONLINE',
+    syncSucceeded: false
+  });
 }

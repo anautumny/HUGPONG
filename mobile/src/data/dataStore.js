@@ -1,6 +1,6 @@
 import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey } from '../services/storageService';
-import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, generateTicketId } from '../services/syncEngine';
-import { publishTerminalTelemetry } from '../services/telemetryService';
+import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
+import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AppState } from 'react-native';
@@ -38,6 +38,7 @@ import {
 } from './firestoreSchema';
 import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations, getOperationDefinition } from '../domain/operationCatalogue';
 import { SUGARCANE_STAGES } from '../constants/cropStages';
+import { canCreateSupportTicket, canonicalSupportRole, SUPPORT_TICKET_STATUS } from '../domain/supportTickets';
 import {
   cleanDataForFirestore,
   cleanupDuplicateLogs,
@@ -56,8 +57,20 @@ export {
 } from '../utils/dataHelpers';
 
 export const commitExplicitMutation = async (type, payload, options = {}) => {
-  if (type === 'audit_certification' && !getNetworkStatus()) {
-    throw new Error('Final SRA certification requires a live connection. You may review the QR package offline and certify after reconnecting.');
+  const sraOnlineOnlyMutations = new Set(['audit_qr_import', 'audit_certification', 'audit_return', 'price', 'user_approve']);
+  const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const bypassOfflineOutbox = activeRole === ROLES.SRA_ADMIN || sraOnlineOnlyMutations.has(type);
+  if (bypassOfflineOutbox) {
+    if (!getNetworkStatus()) {
+      throw new Error('SRA Admin actions require a live HUGPONG connection. Reconnect and sign in again.');
+    }
+    const response = await executeMutationViaApi({ type, payload, baseVersion: options.baseVersion, takeoverGrant: options.takeoverGrant }, { includeMutation: false });
+    return {
+      item: null,
+      result: { success: true, attemptedCount: 1, processedCount: 1, failedCount: 0, remainingCount: getOutboxCount(), responses: {} },
+      queued: false,
+      response
+    };
   }
   if (options.takeoverGrant && !getNetworkStatus()) {
     throw new Error('Farm Manager Takeover changes require a live server connection and cannot be stored for later replay.');
@@ -199,6 +212,25 @@ export const resolveAssignmentRequest = (requestId, approved = true) => {
 
 // ── Pending Member Registrations ──
 export const pendingUsers = [];
+
+const clearCanonicalRuntimeData = () => {
+  [
+    priceHistory,
+    blockFarms,
+    cropCycles,
+    users,
+    archivedFields,
+    fields,
+    operationLogs,
+    auditReports,
+    assignmentRequests,
+    supportTickets,
+    systemHistory,
+    pendingUsers
+  ].forEach(collection => {
+    collection.length = 0;
+  });
+};
 
 export const approvePendingRegistration = async (contact, options = {}) => {
   const cleanContact = String(contact || '').replace(/\D/g, '');
@@ -690,21 +722,38 @@ export const restoreSessionFromToken = async () => {
     if (auth?.authStateReady) await auth.authStateReady();
     if (!token || !session) {
       stopActiveCloudSync();
+      await initSyncEngine('');
       if (auth?.currentUser) await logoutFromServer();
       await clearAuthSessionStorage();
       return { success: false, reason: 'no_stored_session' };
     }
     if (!auth?.currentUser || auth.currentUser.uid !== session.employeeId) {
       stopActiveCloudSync();
+      await initSyncEngine('');
       if (auth?.currentUser) await logoutFromServer();
       await clearAuthSessionStorage();
       return { success: false, reason: 'firebase_session_missing' };
     }
+    const restoredSession = normalizeSessionUser(session);
+    const restoredRole = canonicalRole(restoredSession.canonicalRole || restoredSession.role || restoredSession.roleKey);
+    if (restoredRole === ROLES.SRA_ADMIN && !(await checkConnectivity({ force: true }))) {
+      stopActiveCloudSync();
+      clearCanonicalRuntimeData();
+      CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+      await initSyncEngine('');
+      await logoutFromServer({ skipRemote: true });
+      await clearAuthSessionStorage();
+      notify();
+      return { success: false, reason: 'sra_online_required', adminOnlineRequired: true };
+    }
     // Offline restoration trusts only a session previously issued after a
     // successful server login. Online validation refreshes both server and
     // Firebase credentials without exposing password material to the client.
-    CURRENT_SESSION = { ...normalizeSessionUser(session), lastActiveAt: Date.now() };
+    CURRENT_SESSION = { ...restoredSession, lastActiveAt: Date.now() };
+    if (restoredRole === ROLES.SRA_ADMIN) clearCanonicalRuntimeData();
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
+    if (restoredRole === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
     notify();
     if (getNetworkStatus()) {
       try {
@@ -715,6 +764,7 @@ export const restoreSessionFromToken = async () => {
         if (error.status === 401) {
           stopActiveCloudSync();
           CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+          await initSyncEngine('');
           await clearAuthSessionStorage();
           if (auth?.currentUser) await logoutFromServer();
           return { success: false, reason: 'server_session_rejected' };
@@ -727,7 +777,18 @@ export const restoreSessionFromToken = async () => {
       stopActiveCloudSync();
       return { success: false, reason: 'account_setup_required' };
     }
-    await restartCloudSyncIfReady();
+    const liveDataReady = await restartCloudSyncIfReady();
+    if (restoredRole === ROLES.SRA_ADMIN && !liveDataReady) {
+      stopActiveCloudSync();
+      clearCanonicalRuntimeData();
+      CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+      await initSyncEngine('');
+      await logoutFromServer({ skipRemote: !getNetworkStatus() });
+      await clearAuthSessionStorage();
+      notify();
+      return { success: false, reason: 'sra_live_data_unavailable', adminOnlineRequired: true };
+    }
+    reportMobileActivity('HEARTBEAT').catch(() => {});
     notify();
     return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
   } catch (err) {
@@ -736,11 +797,13 @@ export const restoreSessionFromToken = async () => {
   }
 };
 
-export const logoutUser = async () => {
+export const logoutUser = async (options = {}) => {
   stopActiveCloudSync();
-  await logoutFromServer();
+  await logoutFromServer(options);
   draftLogs.length = 0;
+  clearCanonicalRuntimeData();
   CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+  await initSyncEngine('');
   await clearAuthSessionStorage();
   notify();
   return { success: true };
@@ -755,12 +818,28 @@ export const authenticateUser = async (contactOrId, password) => {
       await logoutFromServer();
       return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
+    clearCanonicalRuntimeData();
     CURRENT_SESSION = { ...normalizeSessionUser(result.user), lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
+    if (roleUpper === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
     draftLogs.length = 0;
     const scopedDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), []);
     if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(draft => draftLogs.push(draft));
-    await restartCloudSyncIfReady();
+    const liveDataReady = await restartCloudSyncIfReady();
+    const accountSetupPending = CURRENT_SESSION.pendingFirstLoginVerification === true
+      || CURRENT_SESSION.phoneVerified === false
+      || CURRENT_SESSION.requiresPasswordChange === true;
+    if (roleUpper === ROLES.SRA_ADMIN && !accountSetupPending && !liveDataReady) {
+      await logoutUser({ skipRemote: !getNetworkStatus() });
+      return {
+        success: false,
+        error: 'SRA Admin requires a live HUGPONG connection and current district data. Please reconnect and sign in again.',
+        code: 'SRA_ONLINE_REQUIRED',
+        isNetworkError: true
+      };
+    }
+    reportMobileActivity('LOGIN').catch(() => {});
     notify();
     if (getNetworkStatus() && getOutboxCount() > 0) {
       performMobileSync('AUTH_RESTORED').catch(() => {});
@@ -928,6 +1007,11 @@ let IS_SYNCED = true;
 
 export const getCurrentSession = () => CURRENT_SESSION || DEFAULT_GUEST_SESSION;
 export const getIsSynced = () => IS_SYNCED;
+
+const canReportAgriculturalSyncTelemetry = (session = CURRENT_SESSION) => {
+  const role = canonicalRole(session?.canonicalRole || session?.role || session?.roleKey);
+  return role === ROLES.MEMBER_FARMER || role === ROLES.FARM_MANAGER;
+};
 
 const normalizeSyncEntityId = value => String(value || '').trim().toUpperCase();
 const FIELD_SYNC_MUTATION_TYPES = new Set([
@@ -1101,6 +1185,8 @@ const persistAllToStorage = () => {
     try {
       await multiSave([
         [STORAGE_KEYS.SESSION, CURRENT_SESSION],
+        [STORAGE_KEYS.BLOCK_FARMS, blockFarms],
+        [STORAGE_KEYS.CROP_CYCLES, cropCycles],
         [STORAGE_KEYS.LOGS, operationLogs],
         [STORAGE_KEYS.FIELDS, fields],
         [STORAGE_KEYS.TICKETS, supportTickets],
@@ -1831,37 +1917,6 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
   return localRecord;
 };
 
-let MEMBER_SYNC_LAG_DAYS = 0;
-let MEMBER_LAST_SYNC_STR = '15 mins ago';
-
-export const getMemberSyncHealth = () => {
-  const pendingCount = getPendingSyncCount(CURRENT_SESSION);
-  const isOffline = pendingCount > 0 || MEMBER_SYNC_LAG_DAYS >= 3;
-  let status = 'healthy';
-  if (MEMBER_SYNC_LAG_DAYS >= 7) status = 'critical';
-  else if (MEMBER_SYNC_LAG_DAYS >= 3 || pendingCount > 0) status = 'warning';
-
-  const sessionUserId = CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '';
-  const assignedField = fields.find(field => field.memberUserId === sessionUserId);
-  const assignedFarm = blockFarms.find(farm => farm.id === assignedField?.blockFarmId);
-  const mgr = users.find(user => (user.id || user.employeeId) === assignedFarm?.managerUserId) || {};
-
-  return {
-    status,
-    days: MEMBER_SYNC_LAG_DAYS,
-    lastSync: MEMBER_LAST_SYNC_STR,
-    isOffline: pendingCount > 0,
-    pendingCount,
-    manager: {
-      name: mgr.name || '',
-      role: mgr.role || 'Farm Manager',
-      blockFarm: assignedFarm?.name || 'Unassigned',
-      phone: mgr.mobile || mgr.contact || ''
-    }
-  };
-};
-
-
 export const setSynced = (synced) => {
   IS_SYNCED = synced;
   if (!synced) {
@@ -2007,38 +2062,114 @@ export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
 };
 
 export const submitSupportTicket = async (ticket) => {
-  const newId = generateTicketId(800 + supportTickets.length + 1);
+  const requesterRole = canonicalSupportRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  if (!canCreateSupportTicket(requesterRole)) {
+    throw new Error('Super Admin handles support requests and cannot create a normal support ticket.');
+  }
+  const newId = generateTicketId();
   const sessionUserId = CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '';
-  const assignedField = fields.find(field => field.memberUserId === sessionUserId);
-  const assignedFarm = blockFarms.find(farm => farm.id === assignedField?.blockFarmId);
-  const farmName = assignedFarm?.name || 'Unassigned';
+  const selectedField = ticket.fieldId ? fields.find(field => field.id === ticket.fieldId) : null;
+  const createdAt = new Date().toISOString();
+  const details = String(ticket.details || ticket.message || '').trim();
+  if (!String(ticket.title || ticket.subject || '').trim()) throw new Error('Subject is required.');
+  if (!details) throw new Error('Description is required.');
   const newTicket = {
     id: newId,
     subject: ticket.title || ticket.subject || 'Support Request',
+    title: ticket.title || ticket.subject || 'Support Request',
+    requesterName: CURRENT_SESSION.name,
+    requesterRole,
     memberName: CURRENT_SESSION.name,
     memberId: CURRENT_SESSION.employeeId || '',
+    createdByUserId: sessionUserId,
     contact: CURRENT_SESSION.contact || '',
-    fieldId: ticket.fieldId || assignedField?.id || null,
-    blockFarm: farmName,
-    category: ticket.category || 'General Support',
-    priority: ticket.priority || 'Normal',
-    status: 'Open',
+    fieldId: selectedField?.id || null,
+    blockFarmId: selectedField?.blockFarmId || ticket.blockFarmId || null,
+    operationId: ticket.operationId || null,
+    auditReportId: ticket.auditReportId || null,
+    category: ticket.category || 'Other',
+    priority: 'NORMAL',
+    status: SUPPORT_TICKET_STATUS.PENDING_SUBMISSION,
+    details,
     messages: [
       {
-        sender: CURRENT_SESSION.name,
-        text: ticket.details || ticket.message || '',
-        timestamp: new Date().toISOString()
+        messageId: `${newId}-LOCAL`,
+        authorUserId: sessionUserId,
+        authorName: CURRENT_SESSION.name,
+        authorRole: requesterRole,
+        visibility: 'PUBLIC',
+        content: details,
+        createdAt
       }
     ],
-    createdAt: new Date().toISOString()
+    createdAt,
+    updatedAt: createdAt
   };
   supportTickets.unshift(newTicket);
+  await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
 
-  const ticketPayload = { id: newId, ...toSupportTicketDocument({ ...newTicket, title: newTicket.subject, details: ticket.details || ticket.message || '' }, CURRENT_SESSION?.employeeId || '') };
-  await commitExplicitMutation('ticket', ticketPayload);
+  const ticketPayload = { id: newId, ...toSupportTicketDocument(newTicket, sessionUserId) };
+  // PENDING_SUBMISSION is a local state. Canonical tickets always begin OPEN.
+  ticketPayload.status = 'OPEN';
+  try {
+    const outcome = await commitExplicitMutation('ticket', ticketPayload);
+    if (!outcome.queued && outcome.response?.data) {
+      const canonical = fromSupportTicketDocument(outcome.response.data.id || newId, outcome.response.data);
+      const index = supportTickets.findIndex(item => item.id === newId);
+      if (index >= 0) supportTickets[index] = canonical;
+      await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
+      notify();
+      return { ...canonical, queued: false };
+    }
+    notify();
+    return { ...newTicket, queued: true };
+  } catch (error) {
+    const index = supportTickets.findIndex(item => item.id === newId);
+    if (index >= 0) supportTickets.splice(index, 1);
+    await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
+    notify();
+    throw error;
+  }
+};
 
+export const addSupportTicketMessage = async (ticketId, content) => {
+  const ticket = supportTickets.find(item => item.id === ticketId);
+  if (!ticket) throw new Error('Support ticket not found.');
+  const status = String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase();
+  if (!['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(status)) {
+    throw new Error('Follow-up messages are allowed only while a ticket is active.');
+  }
+  const cleanContent = String(content || '').trim();
+  if (!cleanContent) throw new Error('Message is required.');
+  const actorId = CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '';
+  const actorRole = canonicalSupportRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const message = {
+    messageId: `${ticketId}-MSG-${Date.now().toString(36).toUpperCase()}`,
+    authorUserId: actorId,
+    authorName: CURRENT_SESSION.name,
+    authorRole: actorRole,
+    visibility: 'PUBLIC',
+    content: cleanContent,
+    createdAt: new Date().toISOString()
+  };
+  ticket.messages = [...(ticket.messages || []), message];
+  ticket.updatedAt = message.createdAt;
+  await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
   notify();
-  return newTicket;
+  try {
+    const outcome = await commitExplicitMutation('ticket_message', { id: ticketId, messageId: message.messageId, content: cleanContent });
+    if (!outcome.queued && outcome.response?.data) {
+      Object.assign(ticket, fromSupportTicketDocument(ticketId, outcome.response.data));
+      await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
+      notify();
+    }
+    return { ticket, queued: outcome.queued };
+  } catch (error) {
+    ticket.messages = (ticket.messages || []).filter(item => item.messageId !== message.messageId);
+    await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
+    notify();
+    throw error;
+  }
 };
 
 // ── Security Preferences State ──────────────────────────────
@@ -2077,6 +2208,8 @@ export const resetLocalCache = async () => {
 // Mobile reads use the same server-enforced authorization boundary as writes.
 // The durable outbox remains responsible for offline mutations; this refresh
 // only replaces canonical read replicas after a successful API response.
+const responseRecords = response => Array.isArray(response?.data) ? response.data : [];
+
 export const listenToCloudSync = () => {
   let active = true;
   let requestInFlight = false;
@@ -2119,6 +2252,7 @@ export const listenToCloudSync = () => {
         logsResponse,
         pricesResponse,
         ticketsResponse,
+        ticketHistoryResponse,
         usersResponse,
         reportsResponse,
         auditEventsResponse
@@ -2129,6 +2263,7 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/logs'),
         authenticatedRequest('/api/prices'),
         authenticatedRequest('/api/tickets'),
+        authenticatedRequest('/api/tickets?view=history&limit=20'),
         isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/users'),
         isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')),
         isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-events')
@@ -2136,17 +2271,17 @@ export const listenToCloudSync = () => {
 
       if (!active) return;
 
-      const remoteBlockFarms = (blockFarmResponse.data || [])
+      const remoteBlockFarms = responseRecords(blockFarmResponse)
         .map(record => fromBlockFarmDocument(record.id, record));
-      const remoteCycles = (cyclesResponse.data || [])
+      const remoteCycles = responseRecords(cyclesResponse)
         .map(record => fromCycleDocument(record.id, record));
       const cycleById = new Map(remoteCycles.map(cycle => [cycle.id, cycle]));
-      const mappedFields = (fieldsResponse.data || [])
+      const mappedFields = responseRecords(fieldsResponse)
         .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
       const remoteFields = mappedFields.filter(field => field.status !== 'ARCHIVED');
       const remoteArchivedFields = mappedFields.filter(field => field.status === 'ARCHIVED');
 
-      const canonicalRemoteLogs = (logsResponse.data || [])
+      const canonicalRemoteLogs = responseRecords(logsResponse)
         .filter(record => record.cycleId && (record.status === 'ACTIVE' || record.status === 'ARCHIVED'))
         .map(record => fromOperationLogDocument(record.id, record));
       const remoteLogIds = new Set(canonicalRemoteLogs.map(record => record.id));
@@ -2166,7 +2301,7 @@ export const listenToCloudSync = () => {
       const reconciledLogs = sortOperationsNewestFirst(cleanupDuplicateLogs([...canonicalRemoteLogs, ...pendingCreateOverlays]));
 
       const remotePrices = [];
-      (pricesResponse.data || []).forEach(record => {
+      responseRecords(pricesResponse).forEach(record => {
         try {
           remotePrices.push(fromPriceDocument(record.id, record));
         } catch (error) {
@@ -2175,15 +2310,21 @@ export const listenToCloudSync = () => {
       });
       const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate', 'publishedAt']);
 
-      const remoteTickets = sortNewestFirst((ticketsResponse.data || [])
-        .map(record => fromSupportTicketDocument(record.id, record)), ['createdAt']);
+      const pendingTicketOverlays = supportTickets.filter(ticket => ticket.status === SUPPORT_TICKET_STATUS.PENDING_SUBMISSION);
+      const canonicalTickets = [...responseRecords(ticketsResponse), ...responseRecords(ticketHistoryResponse)]
+        .map(record => fromSupportTicketDocument(record.id, record));
+      const canonicalTicketIds = new Set(canonicalTickets.map(ticket => ticket.id));
+      const remoteTickets = sortNewestFirst([
+        ...pendingTicketOverlays.filter(ticket => !canonicalTicketIds.has(ticket.id)),
+        ...canonicalTickets
+      ], ['updatedAt', 'createdAt']);
       const remoteUsers = isMember
         ? []
-        : (usersResponse.data || []).map(record => fromUserDocument(record.id || record.employeeId, record));
+        : responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record));
       const remoteReports = isMember
         ? []
-        : sortNewestFirst((reportsResponse.data || []).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt']);
-      const remoteHistory = isMember ? [] : sortNewestFirst(auditEventsResponse.data || [], ['createdAt']);
+        : sortNewestFirst(responseRecords(reportsResponse).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt']);
+      const remoteHistory = isMember ? [] : sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt']);
 
       blockFarms.length = 0;
       blockFarms.push(...remoteBlockFarms);
@@ -2213,7 +2354,8 @@ export const listenToCloudSync = () => {
       CURRENT_SESSION.pendingLogs = pendingCount;
 
       const cacheEntries = [
-        ['@hugpong_block_farms', blockFarms],
+        [STORAGE_KEYS.BLOCK_FARMS, blockFarms],
+        [STORAGE_KEYS.CROP_CYCLES, cropCycles],
         [STORAGE_KEYS.FIELDS, fields],
         [STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields],
         [STORAGE_KEYS.LOGS, operationLogs],
@@ -2230,19 +2372,21 @@ export const listenToCloudSync = () => {
       }
       await multiSave(cacheEntries);
       if (active) notify();
+      return true;
     } catch (error) {
       if (error.status === 401) {
         stop();
-        return;
+        return false;
       }
       console.warn('[Mobile] Server data refresh notice:', error.message);
+      return false;
     } finally {
       requestInFlight = false;
     }
   };
 
   activeCloudRefresh = refresh;
-  refresh();
+  stop.initialRefresh = refresh();
   refreshTimer = setInterval(refresh, 60000);
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
@@ -2274,6 +2418,13 @@ export const restartCloudSyncIfReady = async () => {
   if (!auth?.currentUser || auth.currentUser.uid !== sessionUserId) return false;
 
   activeCloudSyncStop = listenToCloudSync();
+  if (activeRole === ROLES.SRA_ADMIN) {
+    const initialRefreshSucceeded = await activeCloudSyncStop.initialRefresh;
+    if (!initialRefreshSucceeded) {
+      stopActiveCloudSync();
+      return false;
+    }
+  }
   return true;
 };
 
@@ -2288,6 +2439,7 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
   let logsChanged = false;
   let fieldsChanged = false;
   let auditsChanged = false;
+  let ticketsChanged = false;
 
   queueBefore.forEach(item => {
     const response = responses[item.mutationId];
@@ -2348,6 +2500,18 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
       }
     }
 
+    if (item.type === 'ticket' || item.type === 'ticket_message') {
+      const serverRecord = response.data;
+      const ticketId = serverRecord?.id || item.payload?.id;
+      if (serverRecord && ticketId) {
+        const canonical = fromSupportTicketDocument(ticketId, serverRecord);
+        const ticketIndex = supportTickets.findIndex(ticket => ticket.id === ticketId);
+        if (ticketIndex >= 0) supportTickets[ticketIndex] = canonical;
+        else supportTickets.unshift(canonical);
+        ticketsChanged = true;
+      }
+    }
+
     if (['audit_report', 'audit_submission', 'audit_return', 'audit_certification', 'audit_qr_import'].includes(item.type)) {
       const serverRecord = response.data?.report || response.data;
       const reportId = serverRecord?.id || serverRecord?.reportId || item.payload?.id || item.payload?.reportId;
@@ -2369,6 +2533,7 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
   }
   if (fieldsChanged) await saveItem(STORAGE_KEYS.FIELDS, fields);
   if (auditsChanged) await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+  if (ticketsChanged) await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
 };
 
 export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
@@ -2381,6 +2546,15 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       IS_SYNCED = true;
       if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
       notify();
+      if (canReportAgriculturalSyncTelemetry()) {
+        reportMobileSync({
+          pendingMutationCount: 0,
+          failedMutationCount: 0,
+          syncState: 'UNKNOWN',
+          connectionState: getNetworkStatus() ? 'ONLINE' : 'OFFLINE',
+          syncSucceeded: false
+        }).catch(() => {});
+      }
       return { success: true, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: 0, responses: {} };
     }
     if (!getNetworkStatus()) {
@@ -2427,7 +2601,7 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
     IS_SYNCED = getOutboxCount() === 0;
     if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = getPendingSyncCount(CURRENT_SESSION);
     notify();
-    return {
+    const normalizedResult = {
       attemptedCount: Number(result.attemptedCount || 0),
       processedCount: Number(result.processedCount || 0),
       failedCount: Number(result.failedCount || 0),
@@ -2435,6 +2609,22 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       ...result,
       success: result.success === true && getOutboxCount() === 0
     };
+    const failedRemainingCount = getOutboxQueue()
+      .filter(item => item.status && !['queued', 'syncing'].includes(item.status))
+      .length;
+    const reportedFailedCount = Math.max(normalizedResult.failedCount, failedRemainingCount);
+    if (canReportAgriculturalSyncTelemetry()) {
+      reportMobileSync({
+        pendingMutationCount: normalizedResult.remainingCount,
+        failedMutationCount: reportedFailedCount,
+        syncState: reportedFailedCount > 0
+          ? 'SYNC_FAILED'
+          : normalizedResult.remainingCount > 0 ? 'PENDING_SYNC' : 'UP_TO_DATE',
+        connectionState: 'ONLINE',
+        syncSucceeded: normalizedResult.success && normalizedResult.processedCount > 0
+      }).catch(() => {});
+    }
+    return normalizedResult;
   })();
 
   try {
@@ -2449,7 +2639,7 @@ export const fetchAuditHistoryPage = async ({ cursor = null, limit = 20 } = {}) 
   if (cursor) query.set('cursor', cursor);
   const response = await authenticatedRequest(`/api/audit-reports?${query.toString()}`);
   return {
-    reports: (response.data || []).map(record => fromAuditReportDocument(record.id, record)),
+    reports: responseRecords(response).map(record => fromAuditReportDocument(record.id, record)),
     hasMore: Boolean(response.hasMore),
     nextCursor: response.nextCursor || null
   };
@@ -2465,7 +2655,6 @@ setOnReconnectCallback(async trigger => {
 export const initializeOfflineStorage = async () => {
   try {
     await ensureCurrentCacheSchema();
-    await initSyncEngine();
     const stored = await hydrateAllStorage();
     if (stored[STORAGE_KEYS.AUTH_TOKEN] && stored[STORAGE_KEYS.SESSION]) {
       CURRENT_SESSION = normalizeSessionUser(stored[STORAGE_KEYS.SESSION]);
@@ -2473,6 +2662,15 @@ export const initializeOfflineStorage = async () => {
       CURRENT_SESSION = normalizeSessionUser(stored[STORAGE_KEYS.SESSION]);
     } else {
       CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+    }
+    await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
+    if (Array.isArray(stored[STORAGE_KEYS.BLOCK_FARMS]) && stored[STORAGE_KEYS.BLOCK_FARMS].length > 0) {
+      blockFarms.length = 0;
+      stored[STORAGE_KEYS.BLOCK_FARMS].forEach(farm => blockFarms.push(farm));
+    }
+    if (Array.isArray(stored[STORAGE_KEYS.CROP_CYCLES]) && stored[STORAGE_KEYS.CROP_CYCLES].length > 0) {
+      cropCycles.length = 0;
+      stored[STORAGE_KEYS.CROP_CYCLES].forEach(cycle => cropCycles.push(cycle));
     }
     if (Array.isArray(stored[STORAGE_KEYS.USERS]) && stored[STORAGE_KEYS.USERS].length > 0) {
       users.length = 0;
@@ -2587,6 +2785,12 @@ export const initializeOfflineStorage = async () => {
       systemHistory.length = 0;
       systemHistory.push(...sortNewestFirst(stored[STORAGE_KEYS.SYSTEM_HISTORY], ['createdAt', 'rawTimestamp', 'timestamp']));
     }
+
+    // SRA is online-only. Never render device-cached district records while a
+    // live, authorization-scoped server snapshot is still pending.
+    if (canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey) === ROLES.SRA_ADMIN) {
+      clearCanonicalRuntimeData();
+    }
     
     const pendingCount = getPendingSyncCount(CURRENT_SESSION);
     if (pendingCount > 0) {
@@ -2609,7 +2813,7 @@ export const initializeOfflineStorage = async () => {
         });
       }
       // Publish background device telemetry
-      if (CURRENT_SESSION && CURRENT_SESSION.name) {
+      if (CURRENT_SESSION && CURRENT_SESSION.name && canReportAgriculturalSyncTelemetry()) {
         publishTerminalTelemetry(CURRENT_SESSION, pendingCount).catch(() => {});
       }
       // If internet is connected, auto-sync immediately on launch

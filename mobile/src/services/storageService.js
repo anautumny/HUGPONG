@@ -5,8 +5,11 @@ export const MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1';
 export const STORAGE_KEYS = {
   CACHE_SCHEMA_VERSION: '@hugpong_cache_schema_version',
   AUTH_TOKEN: '@hugpong_auth_token',
+  CLIENT_INSTANCE_ID: '@hugpong_client_instance_id',
   SESSION: '@hugpong_session',
   USERS: '@hugpong_users',
+  BLOCK_FARMS: '@hugpong_block_farms',
+  CROP_CYCLES: '@hugpong_crop_cycles',
   LOGS: '@hugpong_logs',
   DRAFTS: '@hugpong_drafts',
   FIELDS: '@hugpong_fields',
@@ -29,7 +32,8 @@ export const STORAGE_KEYS = {
 const PRESERVED_INSTALLATION_KEYS = new Set([
   '@hugpong_language',
   '@hugpong_lang_chosen',
-  '@hugpong_onboarded'
+  '@hugpong_onboarded',
+  '@hugpong_client_instance_id'
 ]);
 
 // In-memory shadow cache for synchronous reads after initial hydration
@@ -56,6 +60,12 @@ export function localDraftStorageKey(userId) {
   const normalized = String(userId || '').trim();
   if (!normalized) throw new Error('A signed-in user is required for local draft storage.');
   return `${STORAGE_KEYS.DRAFTS}:${normalized}`;
+}
+
+export function localOutboxStorageKey(userId) {
+  const normalized = String(userId || '').trim();
+  if (!normalized) throw new Error('A signed-in user is required for local outbox storage.');
+  return `${STORAGE_KEYS.OUTBOX}:${normalized}`;
 }
 
 /**
@@ -148,8 +158,13 @@ export async function multiSave(keyValuePairs) {
 export async function clearHugpongStorage() {
   try {
     memoryCache.clear();
-    const allKeys = Object.values(STORAGE_KEYS).filter(key => key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION);
-    await AsyncStorage.multiRemove(allKeys);
+    const allStoredKeys = await AsyncStorage.getAllKeys();
+    const hugpongKeys = allStoredKeys.filter(key =>
+      key.startsWith('@hugpong_')
+      && key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION
+      && !PRESERVED_INSTALLATION_KEYS.has(key)
+    );
+    if (hugpongKeys.length) await AsyncStorage.multiRemove(hugpongKeys);
     return true;
   } catch (error) {
     console.warn('[storageService] Error clearing storage:', error);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { LifeBuoy, AlertCircle, Send } from 'lucide-react';
 import Modal from '../ui/Modal';
 import FormField from '../ui/FormField';
@@ -6,29 +6,25 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Textarea from '../ui/Textarea';
 import Button from '../ui/Button';
-import { createTicket, TICKET_CATEGORIES, TICKET_PRIORITIES } from '../../services/ticketsService';
+import { createTicket, TICKET_CATEGORIES } from '../../services/ticketsService';
 
 export default function CreateTicketModal({
   isOpen = false,
   onClose,
   fields = [],
+  user = {},
   onCreated
 }) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(TICKET_CATEGORIES[0]);
-  const [priority, setPriority] = useState('NORMAL');
   const [fieldId, setFieldId] = useState('');
   const [details, setDetails] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const submitLock = useRef(false);
 
   const categoryOptions = TICKET_CATEGORIES.map(c => ({ value: c, label: c }));
-  const priorityOptions = TICKET_PRIORITIES.map(p => ({
-    value: p,
-    label: `${p.charAt(0) + p.slice(1).toLowerCase()} Priority`
-  }));
-
   const fieldOptions = [
     { value: '', label: 'None / General Issue' },
     ...fields.map(f => ({ value: f.id, label: `${f.id} (${f.blockFarmName || 'Plot'})` }))
@@ -36,27 +32,33 @@ export default function CreateTicketModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitLock.current) return;
     setFormError(null);
 
     if (!title.trim()) {
-      setFormError('Ticket title / summary is required.');
+      setFormError('Subject is required.');
+      return;
+    }
+    if (!details.trim()) {
+      setFormError('Description is required.');
       return;
     }
 
+    submitLock.current = true;
     setIsSubmitting(true);
 
     try {
       const payload = {
         title: title.trim(),
         category,
-        priority,
+        priority: 'NORMAL',
         fieldId: fieldId || null,
-        details: details.trim() || undefined
+        details: details.trim()
       };
 
-      const res = await createTicket(payload);
+      const res = await createTicket(payload, user);
       if (res.success) {
-        if (onCreated) onCreated(res.data);
+        if (onCreated) onCreated(res.data, res.queued === true);
         setTitle('');
         setDetails('');
         setFieldId('');
@@ -67,6 +69,7 @@ export default function CreateTicketModal({
     } catch (err) {
       setFormError(err.message || 'An error occurred during submission.');
     } finally {
+      submitLock.current = false;
       setIsSubmitting(false);
     }
   };
@@ -76,7 +79,7 @@ export default function CreateTicketModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Create Support Ticket"
-      subtitle="Report an operational, agronomic, or technical incident."
+      subtitle="Ask the HUGPONG Super Admin for help."
       icon={LifeBuoy}
       badge="Support Desk"
       size="md"
@@ -115,14 +118,14 @@ export default function CreateTicketModal({
 
         <FormField
           id="tck-title"
-          label="Incident Title / Summary"
+          label="Subject"
           required
           helperText="Brief summary of the issue or assistance required"
         >
           <Input
             type="text"
             id="tck-title"
-            placeholder="e.g. Discrepancy in recorded fertilizer application volume"
+            placeholder="e.g. Submitted operation is still pending"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={isSubmitting}
@@ -130,7 +133,7 @@ export default function CreateTicketModal({
           />
         </FormField>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <FormField
             id="tck-category"
             label="Category"
@@ -145,19 +148,6 @@ export default function CreateTicketModal({
             />
           </FormField>
 
-          <FormField
-            id="tck-priority"
-            label="Priority"
-            required
-          >
-            <Select
-              id="tck-priority"
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              options={priorityOptions}
-              disabled={isSubmitting}
-            />
-          </FormField>
         </div>
 
         {fields.length > 0 && (
@@ -178,8 +168,9 @@ export default function CreateTicketModal({
 
         <FormField
           id="tck-details"
-          label="Detailed Description"
-          helperText="Include relevant details, timestamps, or operational context"
+          label="Description"
+          helperText="Describe what happened and what help you need"
+          required
         >
           <Textarea
             id="tck-details"
@@ -188,6 +179,7 @@ export default function CreateTicketModal({
             value={details}
             onChange={(e) => setDetails(e.target.value)}
             disabled={isSubmitting}
+            required
           />
         </FormField>
       </form>

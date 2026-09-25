@@ -8,7 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
 import {
   getNetworkStatus,
   getConnectivityDetails,
@@ -18,6 +18,7 @@ import {
 } from '../services/networkService';
 import { useTranslation, LANGUAGES } from '../services/i18n';
 import { syncResultMessage } from '../domain/syncPresentation';
+import { canCreateSupportTicket, SUPPORT_TICKET_CATEGORIES, supportStatusLabel } from '../domain/supportTickets';
 
 const { height } = Dimensions.get('window');
 
@@ -34,15 +35,22 @@ export default function ProfileScreen({ navigation }) {
   const [autoSync, setAutoSync] = useState(true);
   const [showTicketsModal, setShowTicketsModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
-  const [ticketTab, setTicketTab] = useState('submit');
-  const [ticketForm, setTicketForm] = useState({ title: '', category: 'Offline Sync', priority: 'Normal', details: '' });
+  const [ticketTab, setTicketTab] = useState('active');
+  const [ticketForm, setTicketForm] = useState({ title: '', category: 'Synchronization', details: '' });
   const [ticketsList, setTicketsList] = useState(supportTickets);
+  const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const ticketSubmitLock = useRef(false);
+  const [ticketReplies, setTicketReplies] = useState({});
+  const [sendingTicketReplyId, setSendingTicketReplyId] = useState(null);
 
   const sessionUserId = session?.id || session?.employeeId || '';
   const memberFields = fields.filter(field => field.memberUserId === sessionUserId);
   const managedFarm = blockFarms.find(farm => farm.managerUserId === sessionUserId);
   const memberFarm = blockFarms.find(farm => farm.id === memberFields[0]?.blockFarmId);
   const assignedFarm = session?.role === 'Farm Manager' ? managedFarm : memberFarm;
+  const ticketCreationAllowed = canCreateSupportTicket(session?.canonicalRole || session?.role || session?.roleKey);
+  const activeTickets = ticketsList.filter(ticket => ['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));
+  const ticketHistory = ticketsList.filter(ticket => ['RESOLVED', 'CLOSED'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));
 
   useEffect(() => {
     const unsubscribeSession = subscribe(() => {
@@ -87,7 +95,7 @@ export default function ProfileScreen({ navigation }) {
                   Alert.alert(
                     result.remainingCount === 0 ? t('sync_complete_title', 'Online & Synced') : 'Sync Incomplete',
                     syncResultMessage(result),
-                    result.remainingCount > 0 ? [
+                    result.remainingCount > 0 && (session?.role === 'Farm Member' || session?.role === 'Farm Manager') ? [
                       { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
                       { text: 'Try Again', onPress: () => doSync() },
                       { text: 'Close', style: 'cancel' }
@@ -121,7 +129,7 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert(
         result.remainingCount === 0 ? t('sync_complete_title', 'Sync Complete') : 'Sync Incomplete',
         syncResultMessage(result),
-        result.remainingCount > 0 ? [
+        result.remainingCount > 0 && (session?.role === 'Farm Member' || session?.role === 'Farm Manager') ? [
           { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
           { text: 'Try Again', onPress: () => doSync() },
           { text: 'Close', style: 'cancel' }
@@ -470,7 +478,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_support', 'Help & Support Desk')}</Text>
-              <Text style={s.settingSubLabel}>Submit issue tickets or request SRA Admin assistance</Text>
+              <Text style={s.settingSubLabel}>Create a ticket or check Super Admin responses</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -523,7 +531,7 @@ export default function ProfileScreen({ navigation }) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.ticketTitle}>{t('support_desk_title', 'Help & Support Desk')}</Text>
-                  <Text style={s.ticketSub}>{t('support_desk_sub', 'Submit issues, sync collisions, or requests to SRA / Coop Admin')}</Text>
+                  <Text style={s.ticketSub}>{t('support_desk_sub', 'Create a support ticket and check Super Admin responses')}</Text>
                 </View>
               </View>
               <TouchableOpacity onPress={() => setShowTicketsModal(false)} style={s.ticketCloseBtn}>
@@ -534,24 +542,33 @@ export default function ProfileScreen({ navigation }) {
             {/* Segment Switcher */}
             <View style={s.ticketTabWrap}>
               <View style={s.ticketSegmentTrack}>
-                <TouchableOpacity
-                  style={[s.ticketTabBtn, ticketTab === 'submit' && s.ticketTabBtnActive]}
-                  onPress={() => setTicketTab('submit')}
-                >
-                  <Ionicons name="create-outline" size={15} color={ticketTab === 'submit' ? COLORS.primary : COLORS.textMuted} />
-                  <Text style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]}>
-                    {t('ticket_tab_send', 'Submit Issue')}
-                  </Text>
-                </TouchableOpacity>
+                {ticketCreationAllowed && (
+                  <TouchableOpacity
+                    style={[s.ticketTabBtn, ticketTab === 'submit' && s.ticketTabBtnActive]}
+                    onPress={() => setTicketTab('submit')}
+                  >
+                    <Ionicons name="create-outline" size={15} color={ticketTab === 'submit' ? COLORS.primary : COLORS.textMuted} />
+                    <Text style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]}>
+                      {t('ticket_tab_send', 'Create')}
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
-                  style={[s.ticketTabBtn, ticketTab === 'my' && s.ticketTabBtnActive]}
-                  onPress={() => setTicketTab('my')}
+                  style={[s.ticketTabBtn, ticketTab === 'active' && s.ticketTabBtnActive]}
+                  onPress={() => setTicketTab('active')}
                 >
-                  <Ionicons name="file-tray-full-outline" size={15} color={ticketTab === 'my' ? COLORS.primary : COLORS.textMuted} />
-                  <Text style={[s.ticketTabText, ticketTab === 'my' && s.ticketTabTextActive]}>
-                    {t('ticket_tab_my', 'My Tickets')} ({ticketsList.length})
+                  <Ionicons name="file-tray-full-outline" size={15} color={ticketTab === 'active' ? COLORS.primary : COLORS.textMuted} />
+                  <Text style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]}>
+                    {t('ticket_tab_my', 'Active')} ({activeTickets.length})
                   </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.ticketTabBtn, ticketTab === 'history' && s.ticketTabBtnActive]}
+                  onPress={() => setTicketTab('history')}
+                >
+                  <Ionicons name="time-outline" size={15} color={ticketTab === 'history' ? COLORS.primary : COLORS.textMuted} />
+                  <Text style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]}>History</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -571,54 +588,19 @@ export default function ProfileScreen({ navigation }) {
                   <View style={{ gap: 6 }}>
                     <Text style={s.formLabel}>{t('ticket_issue_category', 'Issue Category')}</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                      {[
-                        { id: 'Offline Sync', label: 'Offline Sync', icon: 'cloud-offline-outline' },
-                        { id: 'Field Boundary', label: 'Field Boundary', icon: 'map-outline' },
-                        { id: 'Price & Milling', label: 'Price & Milling', icon: 'receipt-outline' },
-                        { id: 'App Glitch', label: 'App Glitch', icon: 'bug-outline' },
-                        { id: 'Agronomy & SRA', label: 'Agronomy & SRA', icon: 'book-outline' },
-                        { id: 'Other', label: 'Other', icon: 'help-circle-outline' }
-                      ].map(cat => {
-                        const active = ticketForm.category === cat.id;
+                      {SUPPORT_TICKET_CATEGORIES.map(category => {
+                        const active = ticketForm.category === category;
                         return (
                           <TouchableOpacity
-                            key={cat.id}
+                            key={category}
                             style={[s.categoryChip, active && s.categoryChipActive]}
-                            onPress={() => setTicketForm(p => ({ ...p, category: cat.id }))}
+                            onPress={() => setTicketForm(p => ({ ...p, category }))}
                           >
-                            <Ionicons name={cat.icon} size={15} color={active ? '#fff' : COLORS.textSecondary} />
-                            <Text style={[s.categoryChipText, active && s.categoryChipTextActive]}>{cat.label}</Text>
+                            <Text style={[s.categoryChipText, active && s.categoryChipTextActive]}>{category}</Text>
                           </TouchableOpacity>
                         );
                       })}
                     </ScrollView>
-                  </View>
-
-                  {/* Priority Picker */}
-                  <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_urgency', 'Urgency / Priority')}</Text>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {[
-                        { id: 'Normal', label: 'Normal', icon: 'checkmark-circle-outline', activeBg: '#F0F8EC', activeBorder: '#A3D9A5', activeColor: COLORS.primary },
-                        { id: 'High', label: 'High Priority', icon: 'time-outline', activeBg: '#FFFBEB', activeBorder: '#FCD34D', activeColor: '#D97706' },
-                        { id: 'Critical', label: 'Critical', icon: 'alert-circle-outline', activeBg: '#FEF2F2', activeBorder: '#FCA5A5', activeColor: '#DC2626' }
-                      ].map(prio => {
-                        const active = ticketForm.priority === prio.id;
-                        return (
-                          <TouchableOpacity
-                            key={prio.id}
-                            style={[
-                              s.priorityChip,
-                              active && { backgroundColor: prio.activeBg, borderColor: prio.activeBorder }
-                            ]}
-                            onPress={() => setTicketForm(p => ({ ...p, priority: prio.id }))}
-                          >
-                            <Ionicons name={prio.icon} size={14} color={active ? prio.activeColor : COLORS.textMuted} />
-                            <Text style={[s.priorityChipText, active && { color: prio.activeColor, fontWeight: '900' }]}>{prio.label}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
                   </View>
 
                   {/* Subject */}
@@ -648,51 +630,59 @@ export default function ProfileScreen({ navigation }) {
 
                   {/* Submit Button */}
                   <TouchableOpacity
-                    style={[s.ticketSubmitBtn, !ticketForm.title.trim() && { opacity: 0.5 }]}
-                    disabled={!ticketForm.title.trim()}
+                    style={[s.ticketSubmitBtn, (!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket) && { opacity: 0.5 }]}
+                    disabled={!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket}
                     onPress={async () => {
-                      const created = await submitSupportTicket({
-                        title: ticketForm.title.trim(),
-                        category: ticketForm.category,
-                        priority: ticketForm.priority,
-                        details: ticketForm.details.trim() || 'No additional details provided.'
-                      });
-                      setTicketsList([...supportTickets]);
-                      setTicketForm({ title: '', category: 'Offline Sync', priority: 'Normal', details: '' });
-                      setTicketTab('my');
-                      Alert.alert(
-                        'Ticket Submitted',
-                        `Your support ticket (#${created?.id || 'TICK-NEW'}) has been recorded and queued for cooperative admin review.`
-                      );
+                      if (ticketSubmitLock.current) return;
+                      ticketSubmitLock.current = true;
+                      setIsSubmittingTicket(true);
+                      try {
+                        const created = await submitSupportTicket({
+                          title: ticketForm.title.trim(),
+                          category: ticketForm.category,
+                          details: ticketForm.details.trim()
+                        });
+                        setTicketsList([...supportTickets]);
+                        setTicketForm({ title: '', category: 'Synchronization', details: '' });
+                        setTicketTab('active');
+                        Alert.alert(
+                          created?.queued ? 'Ticket Queued' : 'Ticket Submitted',
+                          created?.queued
+                            ? 'Ticket queued for submission. It will be sent automatically when the connection returns.'
+                            : `Support received ticket #${created?.id || 'TICK-NEW'}. Status: Open.`
+                        );
+                      } catch (error) {
+                        Alert.alert('Unable to Save Ticket', error.message || 'Please try again.');
+                      } finally {
+                        ticketSubmitLock.current = false;
+                        setIsSubmittingTicket(false);
+                      }
                     }}
                   >
-                    <Ionicons name="paper-plane-outline" size={17} color="#fff" />
-                    <Text style={s.ticketSubmitBtnText}>{t('ticket_btn_send', 'Send Support Ticket')}</Text>
+                    {isSubmittingTicket ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="paper-plane-outline" size={17} color="#fff" />}
+                    <Text style={s.ticketSubmitBtnText}>{isSubmittingTicket ? 'Submitting...' : t('ticket_btn_send', 'Submit Ticket')}</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  {ticketsList.length === 0 ? (
+                  {(ticketTab === 'history' ? ticketHistory : activeTickets).length === 0 ? (
                     <View style={s.emptyTicketBox}>
                       <Ionicons name="chatbubbles-outline" size={42} color={COLORS.textMuted} />
-                      <Text style={s.emptyTicketTitle}>No Support Tickets Filed Yet</Text>
-                      <Text style={s.emptyTicketSub}>Tap "Submit Issue" above to report offline sync lag, plot boundary questions, or mobile app issues.</Text>
-                      <TouchableOpacity
-                        style={s.createFirstTicketBtn}
-                        onPress={() => setTicketTab('submit')}
-                      >
-                        <Text style={s.createFirstTicketText}>Create Your First Ticket</Text>
-                      </TouchableOpacity>
+                      <Text style={s.emptyTicketTitle}>{ticketTab === 'history' ? 'No Ticket History Yet' : 'No Active Support Tickets'}</Text>
+                      <Text style={s.emptyTicketSub}>{ticketTab === 'history' ? 'Resolved tickets will appear here.' : 'Create a ticket whenever you need help from Super Admin.'}</Text>
+                      {ticketCreationAllowed && ticketTab !== 'history' && <TouchableOpacity style={s.createFirstTicketBtn} onPress={() => setTicketTab('submit')}><Text style={s.createFirstTicketText}>Create Ticket</Text></TouchableOpacity>}
                     </View>
                   ) : (
-                    ticketsList.map(t => {
-                      const isResolved = t.status === 'Resolved' || t.status === 'RESOLVED';
-                      const isInProgress = t.status === 'In Progress' || t.status === 'IN_PROGRESS';
-                      const statusBg = isResolved ? '#E8F5E9' : (isInProgress ? '#E0F2FE' : '#FFF8E1');
-                      const statusBorder = isResolved ? '#C8E6C9' : (isInProgress ? '#BAE6FD' : '#FDE68A');
-                      const statusColor = isResolved ? COLORS.success : (isInProgress ? '#0284C7' : '#D97706');
-                      const statusIcon = isResolved ? 'checkmark-circle' : (isInProgress ? 'time-outline' : 'alert-circle-outline');
-                      const statusText = isResolved ? 'Resolved' : (isInProgress ? 'In Progress' : 'Open');
+                    (ticketTab === 'history' ? ticketHistory : activeTickets).map(t => {
+                      const canonicalStatus = String(t.status || 'OPEN').replace(/[\s-]+/g, '_').toUpperCase();
+                      const isResolved = canonicalStatus === 'RESOLVED' || canonicalStatus === 'CLOSED';
+                      const isInProgress = canonicalStatus === 'IN_PROGRESS';
+                      const isPending = canonicalStatus === 'PENDING_SUBMISSION';
+                      const statusBg = isResolved ? '#E8F5E9' : (isInProgress ? '#E8F5E4' : '#FFF8E1');
+                      const statusBorder = isResolved ? '#C8E6C9' : (isInProgress ? '#A3D9A5' : '#FDE68A');
+                      const statusColor = isResolved ? COLORS.success : (isInProgress ? COLORS.primary : '#A16207');
+                      const statusIcon = isResolved ? 'checkmark-circle' : (isInProgress ? 'time-outline' : (isPending ? 'cloud-upload-outline' : 'ellipse-outline'));
+                      const statusText = supportStatusLabel(canonicalStatus);
 
                       const ticketTitle = t.title || t.subject || 'Support Ticket';
                       const ticketDetails = t.details || t.messages?.[0]?.text || 'No description provided';
@@ -716,7 +706,7 @@ export default function ProfileScreen({ navigation }) {
 
                           <View style={s.ticketMetaRow}>
                             <View style={s.ticketPill}>
-                              <Text style={s.ticketPillText}>{t.category || 'General Support'}</Text>
+                              <Text style={s.ticketPillText}>{t.category || 'Other'}</Text>
                             </View>
                             <View style={[s.priorityPill, t.priority === 'Critical' ? { backgroundColor: '#FEE2E2' } : (t.priority === 'High' ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#F0F8EC' })]}>
                               <Text style={[s.priorityPillText, t.priority === 'Critical' ? { color: '#DC2626' } : (t.priority === 'High' ? { color: '#D97706' } : { color: COLORS.primary })]}>
@@ -726,7 +716,17 @@ export default function ProfileScreen({ navigation }) {
                             <Text style={s.ticketDateText}>{ticketDate}</Text>
                           </View>
 
-                          {t.resolutionNotes ? (
+                          {(t.messages || []).slice(1).map((message, index) => (
+                            <View key={message.messageId || index} style={s.adminResponseBox}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="chatbubble-ellipses-outline" size={13} color={COLORS.primary} />
+                                <Text style={[s.adminResponseLabel, { color: COLORS.primary }]}>{message.authorName || 'Super Admin'}:</Text>
+                              </View>
+                              <Text style={s.adminResponseBody}>{message.content || message.text}</Text>
+                            </View>
+                          ))}
+
+                          {t.resolutionNotes && !(t.messages || []).some(message => message.content === t.resolutionNotes) ? (
                             <View style={s.adminResponseBox}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                 <Ionicons name="checkmark-done" size={13} color={COLORS.success} />
@@ -735,6 +735,39 @@ export default function ProfileScreen({ navigation }) {
                               <Text style={s.adminResponseBody}>{t.resolutionNotes}</Text>
                             </View>
                           ) : null}
+
+                          {['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(canonicalStatus) && (
+                            <View style={{ gap: 8, marginTop: 4 }}>
+                              <TextInput
+                                style={s.ticketInput}
+                                placeholder="Add a follow-up message..."
+                                placeholderTextColor={COLORS.textMuted}
+                                value={ticketReplies[t.id] || ''}
+                                onChangeText={value => setTicketReplies(current => ({ ...current, [t.id]: value }))}
+                                editable={sendingTicketReplyId !== t.id}
+                              />
+                              <TouchableOpacity
+                                style={[s.ticketSubmitBtn, { marginTop: 0, minHeight: 42, paddingVertical: 10 }, (!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id) && { opacity: 0.5 }]}
+                                disabled={!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id}
+                                onPress={async () => {
+                                  setSendingTicketReplyId(t.id);
+                                  try {
+                                    const result = await addSupportTicketMessage(t.id, ticketReplies[t.id]);
+                                    setTicketsList([...supportTickets]);
+                                    setTicketReplies(current => ({ ...current, [t.id]: '' }));
+                                    Alert.alert(result.queued ? 'Follow-up Queued' : 'Follow-up Sent', result.queued ? 'Your message is saved and will be retried when connected.' : 'Your follow-up is now visible to support.');
+                                  } catch (error) {
+                                    Alert.alert('Unable to Send', error.message || 'Please try again.');
+                                  } finally {
+                                    setSendingTicketReplyId(null);
+                                  }
+                                }}
+                              >
+                                {sendingTicketReplyId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send-outline" size={15} color="#fff" />}
+                                <Text style={s.ticketSubmitBtnText}>{sendingTicketReplyId === t.id ? 'Sending...' : 'Send Follow-up'}</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
                         </View>
                       );
                     })

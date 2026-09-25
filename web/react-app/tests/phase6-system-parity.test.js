@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as webSchema from '../src/services/firestoreSchema.js';
 import * as webAnalytics from '../src/services/analyticsSelectors.js';
+import * as webAuditWorkflow from '../src/domain/auditWorkflow.js';
 
 const require = createRequire(import.meta.url);
 const serverSchema = require('../../../server/schema/firestoreSchema.js');
@@ -45,6 +46,10 @@ async function loadMobileAnalytics() {
     ));
 }
 
+async function loadMobileAuditWorkflow() {
+  return importSource('../../../mobile/src/domain/auditWorkflow.js');
+}
+
 const plain = value => JSON.parse(JSON.stringify(value));
 
 test('server, web, and Android share collection, role, and platform contracts', async () => {
@@ -73,6 +78,40 @@ test('server, web, and Android share collection, role, and platform contracts', 
       assert.equal(mobileSchema.isRoleAllowedOnPlatform(role, platform), expected);
     });
   });
+});
+
+test('web and Android normalize display audit months without runtime date-string parsing', async () => {
+  const mobileSchema = await loadMobileSchema();
+  const cases = [
+    ['2026-09', '2026-09'],
+    ['2026-09-25', '2026-09'],
+    ['2026-09-25T08:00:00.000Z', '2026-09'],
+    ['September 2026', '2026-09'],
+    ['Sep 2026', '2026-09'],
+    ['September, 2026', '2026-09'],
+    ['not-a-period', '']
+  ];
+  cases.forEach(([input, expected]) => {
+    assert.equal(webSchema.reportPeriod(input), expected);
+    assert.equal(mobileSchema.toReportPeriod(input), expected);
+  });
+});
+
+test('web and Android select the newest audit only inside the assigned farm and period', async () => {
+  const mobileAuditWorkflow = await loadMobileAuditWorkflow();
+  const reports = [
+    { id: 'OTHER-V9', blockFarmId: 'BF-002', periodKey: '2026-09', reportVersion: 9, status: 'CERTIFIED', operationSnapshots: [{ operationLogId: 'OTHER' }] },
+    { id: 'BF1-V1', blockFarmId: 'BF-001', month: 'September 2026', reportVersion: 1, status: 'CERTIFIED', operationSnapshots: [{ operationLogId: 'LOG-1' }] },
+    { id: 'BF1-V2', blockFarmId: 'BF-001', periodKey: '2026-09', reportVersion: 2, status: 'COMPILED', operationSnapshots: [{ operationLogId: 'LOG-2' }] },
+    { id: 'BF1-AUG', blockFarmId: 'BF-001', periodKey: '2026-08', reportVersion: 5, status: 'CERTIFIED', operationSnapshots: [{ operationLogId: 'OLD' }] }
+  ];
+
+  for (const workflow of [webAuditWorkflow, mobileAuditWorkflow]) {
+    const scoped = workflow.auditReportsForFarmPeriod(reports, 'BF-001', '2026-09');
+    assert.deepEqual(scoped.map(report => report.id), ['BF1-V2', 'BF1-V1']);
+    assert.deepEqual([...workflow.reportedOperationIds(scoped)].sort(), ['LOG-1', 'LOG-2']);
+    assert.deepEqual([...workflow.certifiedOperationIds(scoped)], ['LOG-1']);
+  }
 });
 
 test('server, web, and Android serialize the same canonical operation record', async () => {

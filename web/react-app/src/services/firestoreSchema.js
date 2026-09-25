@@ -68,10 +68,19 @@ export const cycleId = (fieldId, sequenceNumber) =>
   `CYC-${String(fieldId || '').trim().toUpperCase()}-${String(Number(sequenceNumber) || 1).padStart(3, '0')}`;
 
 export const reportPeriod = value => {
-  const input = String(value || '').trim();
-  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(input)) return input;
-  const parsed = new Date(`1 ${input}`);
-  return Number.isNaN(parsed.getTime()) ? '' : `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+  const input = String(value || '').trim().replace(/\s*\([^)]*\)\s*$/, '');
+  const isoPeriod = input.match(/^(\d{4})-(0[1-9]|1[0-2])(?:-|T|$)/);
+  if (isoPeriod) return `${isoPeriod[1]}-${isoPeriod[2]}`;
+
+  const namedPeriod = input.replace(/,/g, ' ').replace(/\s+/g, ' ').match(/^([A-Za-z]+) (\d{4})$/);
+  if (!namedPeriod) return '';
+  const monthToken = namedPeriod[1].toLowerCase();
+  const monthNames = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+  const monthIndex = monthNames.findIndex(month => month === monthToken || (monthToken.length >= 3 && month.startsWith(monthToken)));
+  return monthIndex < 0 ? '' : `${namedPeriod[2]}-${String(monthIndex + 1).padStart(2, '0')}`;
 };
 
 export const lineItems = value =>
@@ -448,12 +457,19 @@ export const fromPrice = (id, value) => ({ id: priceString(id, 'id'), ...canonic
 
 export const toTicket = (value, userId) => ({
   createdByUserId: value.createdByUserId || value.memberId || userId || '',
+  requesterName: value.requesterName || value.memberName || '',
+  requesterRole: value.requesterRole || '',
+  blockFarmId: value.blockFarmId || null,
   fieldId: value.fieldId || null,
+  operationId: value.operationId || null,
+  auditReportId: value.auditReportId || null,
   title: value.title || value.subject || '',
-  category: value.category || 'General Support',
+  category: value.category || 'Other',
   priority: String(value.priority || 'NORMAL').toUpperCase(),
   status: String(value.status || 'OPEN').replace(/\s+/g, '_').toUpperCase(),
   details: value.details || '',
+  messages: Array.isArray(value.messages) ? value.messages : [],
+  statusHistory: Array.isArray(value.statusHistory) ? value.statusHistory : [],
   resolutionNotes: value.resolutionNotes || '',
   createdAt: value.createdAt || now(),
   updatedAt: value.updatedAt || now(),

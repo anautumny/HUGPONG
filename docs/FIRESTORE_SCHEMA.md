@@ -296,46 +296,98 @@ The operation snapshot is the intentional denormalization that preserves exactly
 ```js
 {
   createdByUserId: string,
+  requesterName: string,
+  requesterRole: "MEMBER_FARMER" | "FARM_MANAGER" | "SRA_ADMIN",
+  blockFarmId: string | null,
   fieldId: string | null,
+  operationId: string | null,
+  auditReportId: string | null,
   title: string,
   category: string,
   priority: "LOW" | "NORMAL" | "HIGH" | "URGENT",
   status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED",
   details: string,
+  messages: Array<{
+    messageId: string,
+    authorUserId: string,
+    authorName: string,
+    authorRole: string,
+    visibility: "PUBLIC",
+    content: string,
+    createdAt: string
+  }>,
+  statusHistory: Array<{
+    from: string | null,
+    to: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED",
+    changedByUserId: string,
+    changedByRole: string,
+    changedAt: string
+  }>,
   resolutionNotes: string,
   createdAt: string,
   updatedAt: string,
   resolvedAt: string | null,
-  resolvedByUserId: string | null
+  resolvedByUserId: string | null,
+  closedAt: string | null,
+  closedByUserId: string | null
 }
 ```
+
+`PENDING_SUBMISSION` is deliberately not a Firestore ticket status. It exists only in a client cache while the stable-ID create mutation remains in that client's Outbox. Canonical persistence changes the client copy to `OPEN`.
 
 ### `terminal_diagnostics/{deviceId}`
 
 ```js
 {
+  schemaVersion: 2,
   userId: string,
+  deviceId: string,                 // server-derived owner/platform/install hash
+  platform: "WEB" | "MOBILE",
   model: string,
-  operatingSystem: string,
+  os: string,
   appVersion: string,
-  batteryPercent: number | null,
-  pendingOperationCount: number,
-  status: "OPTIMAL" | "DEGRADED" | "OFFLINE",
-  lastSyncedAt: string | null,
+  lastLoginAt: string | null,       // server ISO timestamp; activity only
+  lastActiveAt: string | null,      // server ISO timestamp; activity only
+  lastPlatform: "WEB" | "MOBILE",
+  activityReportedAt: string | null,
+  lastSuccessfulSyncAt: string | null,
+  pendingMutationCount: number,
+  failedMutationCount: number,
+  syncState: "UP_TO_DATE" | "PENDING_SYNC" | "SYNCING" | "SYNC_FAILED" | "OFFLINE" | "UNKNOWN",
+  connectionState: "ONLINE" | "OFFLINE" | "UNKNOWN",
+  syncReportedAt: string | null,
+  telemetryReportedAt: string | null,
+  createdAt: string,
   updatedAt: string
 }
 ```
 
+`lastActiveAt` and `lastSuccessfulSyncAt` are intentionally independent. A
+login/heartbeat never changes sync fields. Pending counts are the last device
+reports received by the server; an offline device's unreported AsyncStorage
+Outbox cannot be observed remotely. Legacy v1 fields (`cachedLogs`, `status`,
+`lastSyncedAt`, `operatingSystem`, and `pendingOperationCount`) are read only as
+device-history metadata and never promoted to a successful canonical sync.
+
 ## 4. Required indexes
 
 Create composite indexes only when the corresponding query is deployed:
+
+- `terminal_diagnostics` currently requires no composite index; role-scoped
+  aggregation uses the automatic single-field `userId` index and bounded `in`
+  queries.
 
 - `operation_logs`: `fieldId ASC, cycleId ASC, status ASC, performedOn DESC`
 - `audit_reports`: `blockFarmId ASC, compiledAt DESC`
 - `audit_reports`: `status ASC, submittedAt DESC`
 - `audit_reports`: `status ASC, certifiedAt DESC`
 - `crop_cycles`: `fieldId ASC, sequenceNumber DESC`
-- `support_tickets`: `createdByUserId ASC, createdAt DESC`
+- `support_tickets`: `status ASC, updatedAt DESC`
+- `support_tickets`: `createdByUserId ASC, status ASC, updatedAt DESC`
+- `support_tickets`: `category ASC, status ASC, updatedAt DESC`
+- `support_tickets`: `createdByUserId ASC, category ASC, status ASC, updatedAt DESC`
+- `support_tickets`: `requesterRole ASC, status ASC, updatedAt DESC`
+- `support_tickets`: `blockFarmId ASC, status ASC, updatedAt DESC`
 
 ## 5. Atomic workflow requirements
 
@@ -343,10 +395,11 @@ Create composite indexes only when the corresponding query is deployed:
 - Cycle rollover requires the caller's `previousCycleId` and runs in one transaction: verify it is still `fields.currentCycleId`, archive that cycle, archive only logs whose explicit `cycleId` matches it and whose status is ACTIVE, create the next cycle at stage 1 with zero elapsed months, and update `fields.currentCycleId`.
 - Operation creation, amendment, and stage updates validate the field pointer, cycle status, and canonical stage-operation relation inside their write transaction. Planting variety is written to both the operation snapshot and owning active cycle. A stale device cannot create against, amend, reactivate, or advance an ARCHIVED cycle or operation.
 - Field archival is also transactional with archival of its ACTIVE cycle and ACTIVE submitted operations; submitted records remain present with their original `fieldId` and `cycleId`.
-- Audit compilation resolves the authenticated manager's canonical Block Farm, re-queries eligible ACTIVE logs, and creates one deterministic `COMPILED` version. It does not submit or modify source logs.
+- Audit compilation resolves the authenticated manager's canonical Block Farm, re-queries eligible ACTIVE logs, and creates one deterministic `COMPILED` version. It does not submit or modify source logs. If a prior version is certified, only newly eligible operation IDs are included in the next version; the certified snapshot is never overwritten or duplicated.
 - Submission is a separate idempotent transition from `COMPILED` to `PENDING_REVIEW`; Cloud and QR update the same report identity.
 - Return changes `PENDING_REVIEW` to `RETURNED` with a required reason. Recompilation creates the next version and preserves the returned snapshot.
 - Certification revalidates the snapshot integrity hash, changes only `PENDING_REVIEW` to `CERTIFIED`, and appends an `audit_logs` event. Only an SRA Admin may perform it, and final certification requires server acknowledgement.
+- Support ticket creation accepts only Farm Member, Farm Manager, and SRA Admin identities. The server snapshots requester identity, canonical tickets start `OPEN`, messages and status changes append history, and only Super Admin may advance `OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED`.
 
 ## 6. Forbidden persisted aliases
 

@@ -12,6 +12,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
 import { compileAuditReport, fetchNextAuditPeriod, createAuditQrPayload } from '../../services/auditService';
+import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, certifiedOperationIds } from '../../domain/auditWorkflow';
 
 export default function AuditCompilationModal({
   isOpen = false,
@@ -66,7 +67,22 @@ export default function AuditCompilationModal({
     });
   }, [operations, farmFieldIds, selectedPeriod]);
 
-  const eligibleLogs = matchingMonthLogs;
+  const periodReports = useMemo(
+    () => auditReportsForFarmPeriod(existingReports, blockFarm?.id, selectedPeriod),
+    [existingReports, blockFarm?.id, selectedPeriod]
+  );
+  const latestReport = periodReports[0] || null;
+  const latestStatus = latestReport ? canonicalAuditStatus(latestReport.status) : null;
+  const certifiedIds = useMemo(() => certifiedOperationIds(periodReports), [periodReports]);
+  const eligibleLogs = useMemo(
+    () => matchingMonthLogs.filter(log => !certifiedIds.has(String(log.id))),
+    [matchingMonthLogs, certifiedIds]
+  );
+  const compilationBlockedByActiveReport = [
+    AUDIT_STATUS.COMPILED,
+    AUDIT_STATUS.PENDING_SUBMISSION,
+    AUDIT_STATUS.PENDING_REVIEW
+  ].includes(latestStatus);
 
   // Compute pre-flight metrics
   const totalExpenditure = useMemo(() => {
@@ -101,6 +117,12 @@ export default function AuditCompilationModal({
   const handleCompile = async () => {
     if (!blockFarm?.id) {
       setCompileError('No assigned Block Farm identified for your account.');
+      return;
+    }
+    if (compilationBlockedByActiveReport) {
+      setCompileError(latestStatus === AUDIT_STATUS.PENDING_REVIEW
+        ? 'This monthly report is already awaiting SRA review.'
+        : 'Submit the existing compiled report before creating another version.');
       return;
     }
     if (eligibleLogs.length === 0) {
@@ -149,7 +171,7 @@ export default function AuditCompilationModal({
         variant="primary"
         size="md"
         onClick={handleCompile}
-        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0}
+        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0 || compilationBlockedByActiveReport}
         isLoading={isCompiling}
         loadingText="Compiling report..."
         icon={FileCheck2}
@@ -212,7 +234,11 @@ export default function AuditCompilationModal({
           {/* Status Message */}
           <div className="px-3 py-2 rounded-xl bg-primary-bg/30 dark:bg-primary/10 border border-primary/20 text-hug-text flex items-center justify-between">
             <span className="font-semibold text-[11px]">
-              {eligibleLogs.length > 0
+              {compilationBlockedByActiveReport
+                ? (latestStatus === AUDIT_STATUS.PENDING_REVIEW
+                  ? `The ${selectedPeriod} report is awaiting SRA review.`
+                  : `The ${selectedPeriod} report is compiled and ready to submit.`)
+                : eligibleLogs.length > 0
                 ? `${eligibleLogs.length} synchronized operation record(s) ready for the ${selectedPeriod} audit report.`
                 : matchingMonthLogs.length > 0
                 ? `All operations for ${selectedPeriod} are already included in an audit report.`

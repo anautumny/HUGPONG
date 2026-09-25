@@ -24,14 +24,14 @@ import CirclingRetryButton from '../../components/CirclingRetryButton';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ navigation, route }) {
   const { t } = useTranslation();
   const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [authError, setAuthError] = useState('');
+  const [authError, setAuthError] = useState(() => String(route?.params?.sessionNotice || ''));
   const [deviceOnline, setDeviceOnline] = useState(isOnline());
   const [connectivityStatus, setConnectivityStatus] = useState(getConnectivityDetails().status);
   const [showOfflineGateModal, setShowOfflineGateModal] = useState(false);

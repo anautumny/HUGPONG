@@ -118,7 +118,9 @@ service cloud.firestore {
     }
 
     match /terminal_diagnostics/{terminalId} {
-      allow read: if superAdmin() || sraAdmin();
+      // Fast-changing activity/sync telemetry is exposed only through the
+      // server's canonical role-scoped aggregation endpoint.
+      allow read: if false;
       allow write: if false;
     }
 

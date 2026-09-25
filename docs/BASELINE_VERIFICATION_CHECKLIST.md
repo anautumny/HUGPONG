@@ -66,7 +66,7 @@
 - [ ] C-03 SRA Admin sees district oversight, report audit/certification, price publication, block farms, fields, and users.
 - [ ] C-04 Super Admin sees platform governance, district monitoring, history, telemetry, tickets, maintenance, and settings on web.
 - [ ] C-05 SRA Admin mobile Planner tab is absent.
-- [ ] C-06 SRA Admin mobile is blocked offline and can retry connectivity.
+- [ ] C-06 SRA Admin mobile signs out when internet or the HUGPONG API is unavailable and requires a fresh online login.
 - [ ] C-07 Super Admin mobile remains unavailable by explicit design.
 - [ ] C-08 Direct navigation to another web role's URL is denied or rerouted.
 - [ ] C-09 Changing browser local role state cannot grant authority. **Required; current UI design needs characterization.**
@@ -161,10 +161,10 @@
 
 - [ ] J-01 Manager selects reporting month and sees eligible/uncompiled counts and missing-field warnings.
 - [ ] J-02 Compilation produces stable report ID, farm, period, area, log count, total cost, stage breakdown, operation snapshot, compiler, and timestamp.
-- [ ] J-03 Compiling after an already certified report creates a distinct revision/batch for new eligible logs without overwriting the certificate.
+- [x] J-03 Compiling after an already certified report creates a distinct revision/batch for new eligible logs without overwriting the certificate.
 - [ ] J-04 Generated QR/envelope resolves to the exact persisted report and exact content digest.
 - [ ] J-05 Unknown, malformed, or modified QR/envelope is rejected. **Required; expected current FAIL/needs characterization.**
-- [ ] J-06 SRA Admin can scan via camera/file and enter a code manually.
+- [ ] J-06 SRA Admin can scan via camera/file or use the separate manual-code screen while online; both paths require authoritative server verification.
 - [ ] J-07 SRA Admin inspection shows farm, period, plots/hectares, operations, cost, compiler, hash, and current status.
 - [ ] J-08 Only SRA Admin can certify a report. **Required; Super Admin bypass needs explicit resolution.**
 - [ ] J-09 Certification persists `Certified`, SRA actor, role, timestamp, and immutable audit event on the report.

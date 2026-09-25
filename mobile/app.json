@@ -20,7 +20,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "HUGPONG needs camera access to scan and verify SRA compliance QR codes."
+          "cameraPermission": "HUGPONG needs camera access to scan and verify SRA compliance QR codes.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
         }
       ],
       "expo-status-bar",

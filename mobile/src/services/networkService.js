@@ -110,7 +110,7 @@ export const setNetworkStatus = (newStatus, forceTrigger = false) => applyConnec
   apiReachable: Boolean(newStatus)
 }, forceTrigger);
 
-async function evaluateNetworkState(state, generation, forceReconnect = false) {
+async function evaluateNetworkState(state, generation) {
   if (state && !networkStateHasInternet(state)) {
     if (generation === connectivityCheckGeneration) {
       applyConnectivity({
@@ -137,7 +137,7 @@ async function evaluateNetworkState(state, generation, forceReconnect = false) {
     status: serverReachable ? CONNECTIVITY_STATUS.ONLINE : CONNECTIVITY_STATUS.SERVER_UNAVAILABLE,
     internetReachable: true,
     apiReachable: serverReachable
-  }, forceReconnect && serverReachable);
+  });
 }
 
 export const checkConnectivity = async (options = {}) => {
@@ -155,7 +155,7 @@ export const checkConnectivity = async (options = {}) => {
           logApiDiagnostic('NetInfo could not report reachability; falling back to the server health probe.', error);
         }
       }
-      return await evaluateNetworkState(state, generation, force);
+      return await evaluateNetworkState(state, generation);
     } catch (_) {
       if (generation === connectivityCheckGeneration) {
         applyConnectivity({
@@ -180,7 +180,7 @@ export const startNetworkMonitor = () => {
   netInfoUnsubscribe = NetInfo?.addEventListener
     ? NetInfo.addEventListener(state => {
       const generation = ++connectivityCheckGeneration;
-      const check = evaluateNetworkState(state, generation, true).catch(() => false);
+      const check = evaluateNetworkState(state, generation).catch(() => false);
       connectivityCheckPromise = check;
       check.finally(() => {
         if (connectivityCheckPromise === check) connectivityCheckPromise = null;

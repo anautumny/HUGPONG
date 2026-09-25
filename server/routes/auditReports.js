@@ -13,11 +13,12 @@ const { readMutationContext, assertBaseVersion } = require('../services/mutation
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots,
-  encodeQrPayload, decodeQrPayload
+  encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
 } = require('../domain/auditWorkflow');
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
+let missingIndexFallbackLogged = false;
 
 function identity(req) {
   return {
@@ -115,46 +116,106 @@ function pageSize(value) {
   return Number.isInteger(parsed) ? Math.min(MAX_PAGE_SIZE, Math.max(1, parsed)) : DEFAULT_PAGE_SIZE;
 }
 
+function isMissingIndexError(error) {
+  const code = String(error?.code ?? '').toLowerCase();
+  return code === '9'
+    || code === 'failed-precondition'
+    || code === 'failed_precondition'
+    || /requires an index/i.test(String(error?.message || ''));
+}
+
+function reportTimestampMillis(report, field) {
+  const value = report?.[field];
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (typeof value?._seconds === 'number') return value._seconds * 1000;
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortAndPageReports(reports, field, cursor, limit) {
+  let rows = [...reports].sort((left, right) => reportTimestampMillis(right, field) - reportTimestampMillis(left, field)
+    || String(right.id).localeCompare(String(left.id)));
+  if (cursor) {
+    const cursorIndex = rows.findIndex(report => report.id === String(cursor));
+    if (cursorIndex >= 0) rows = rows.slice(cursorIndex + 1);
+  }
+  const hasMore = rows.length > limit;
+  const data = rows.slice(0, limit);
+  return { data, hasMore, nextCursor: hasMore ? data[data.length - 1]?.id || null : null };
+}
+
+function logMissingIndexFallback() {
+  if (missingIndexFallbackLogged) return;
+  missingIndexFallbackLogged = true;
+  console.warn('[Audit Reports] Composite index unavailable; using the authorization-scoped fallback query.');
+}
+
 async function listReports(req) {
   const { actorId, actorRole } = identity(req);
   const view = String(req.query.view || (actorRole === ROLES.SRA_ADMIN ? 'inbox' : 'manager')).toLowerCase();
   const limit = pageSize(req.query.limit);
   let query = db.collection(COLLECTIONS.AUDIT_REPORTS);
+  let fallbackQuery = query;
+  let sortField = 'compiledAt';
 
   if (actorRole === ROLES.FARM_MANAGER) {
     const farmIds = (await assignedFarmsForManager(actorId)).map(farm => farm.id);
     if (!farmIds.length) return { data: [], hasMore: false, nextCursor: null };
     if (farmIds.length > 10) throw Object.assign(new Error('Manager Block Farm scope exceeds the supported query limit.'), { status: 409 });
-    query = query.where('blockFarmId', 'in', farmIds).orderBy('compiledAt', 'desc').limit(limit + 1);
+    fallbackQuery = query.where('blockFarmId', 'in', farmIds);
+    query = fallbackQuery.orderBy('compiledAt', 'desc').limit(limit + 1);
   } else if (view === 'history') {
-    query = query.where('status', '==', AUDIT_STATUS.CERTIFIED).orderBy('certifiedAt', 'desc').limit(limit + 1);
+    sortField = 'certifiedAt';
+    fallbackQuery = query.where('status', '==', AUDIT_STATUS.CERTIFIED);
+    query = fallbackQuery.orderBy('certifiedAt', 'desc').limit(limit + 1);
   } else {
     let primaryQuery = query.where('status', '==', AUDIT_STATUS.PENDING_REVIEW).orderBy('submittedAt', 'desc').limit(limit + 1);
     if (req.query.cursor) {
       const cursor = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.query.cursor)).get();
       if (cursor.exists) primaryQuery = primaryQuery.startAfter(cursor);
     }
-    const [primarySnapshot, legacySnapshot] = await Promise.all([
-      primaryQuery.get(),
-      req.query.cursor
-        ? Promise.resolve({ docs: [] })
-        : db.collection(COLLECTIONS.AUDIT_REPORTS).where('status', '==', 'PENDING').limit(limit + 1).get()
-    ]);
+    let primarySnapshot;
+    let legacySnapshot;
+    try {
+      [primarySnapshot, legacySnapshot] = await Promise.all([
+        primaryQuery.get(),
+        req.query.cursor
+          ? Promise.resolve({ docs: [] })
+          : db.collection(COLLECTIONS.AUDIT_REPORTS).where('status', '==', 'PENDING').limit(limit + 1).get()
+      ]);
+    } catch (error) {
+      if (!isMissingIndexError(error)) throw error;
+      logMissingIndexFallback();
+      [primarySnapshot, legacySnapshot] = await Promise.all([
+        db.collection(COLLECTIONS.AUDIT_REPORTS).where('status', '==', AUDIT_STATUS.PENDING_REVIEW).get(),
+        req.query.cursor
+          ? Promise.resolve({ docs: [] })
+          : db.collection(COLLECTIONS.AUDIT_REPORTS).where('status', '==', 'PENDING').get()
+      ]);
+    }
     const unique = new Map([...primarySnapshot.docs, ...legacySnapshot.docs].map(document => [document.id, normalizedReport(document)]));
-    const rows = Array.from(unique.values()).sort((left, right) => String(right.submittedAt || right.compiledAt || '').localeCompare(String(left.submittedAt || left.compiledAt || '')));
-    const data = rows.slice(0, limit);
-    return { data, hasMore: rows.length > limit, nextCursor: rows.length > limit ? data[data.length - 1]?.id || null : null };
+    return sortAndPageReports(Array.from(unique.values()).map(report => ({
+      ...report,
+      submittedAt: report.submittedAt || report.compiledAt
+    })), 'submittedAt', req.query.cursor, limit);
   }
 
   if (req.query.cursor) {
     const cursor = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.query.cursor)).get();
     if (cursor.exists) query = query.startAfter(cursor);
   }
-  const snapshot = await query.get();
-  const rows = snapshot.docs.map(normalizedReport);
-  const hasMore = rows.length > limit;
-  const data = rows.slice(0, limit);
-  return { data, hasMore, nextCursor: hasMore ? data[data.length - 1]?.id || null : null };
+  try {
+    const snapshot = await query.get();
+    const rows = snapshot.docs.map(normalizedReport);
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit);
+    return { data, hasMore, nextCursor: hasMore ? data[data.length - 1]?.id || null : null };
+  } catch (error) {
+    if (!isMissingIndexError(error)) throw error;
+    logMissingIndexFallback();
+    const snapshot = await fallbackQuery.get();
+    return sortAndPageReports(snapshot.docs.map(normalizedReport), sortField, req.query.cursor, limit);
+  }
 }
 
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]), async (req, res) => {
@@ -191,8 +252,12 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
     const reportsSnapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).where('blockFarmId', '==', farm.id).get();
     const reports = reportsSnapshot.docs.map(normalizedReport);
     const unresolvedPeriod = periods.find(period => {
-      const matching = reports.filter(report => report.periodKey === period).sort((a, b) => b.reportVersion - a.reportVersion);
-      return !matching.length || matching[0].status === AUDIT_STATUS.RETURNED;
+      const eligibleForPeriod = logDocuments.filter(document => String(document.data().status || '').toUpperCase() === 'ACTIVE'
+        && Boolean(document.data().cycleId)
+        && String(document.data().performedOn || '').startsWith(`${period}-`));
+      const matching = reports.filter(report => report.periodKey === period);
+      const batch = selectAuditCompilationBatch(eligibleForPeriod, matching);
+      return !matching.length || (!batch.replay && batch.operations.length > 0);
     });
     const periodKey = unresolvedPeriod || currentPeriod;
     const eligible = logDocuments.filter(document => String(document.data().status || '').toUpperCase() === 'ACTIVE'
@@ -238,15 +303,17 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const { actorId, actorName } = identity(req);
     const { activeFields, eligibleLogDocuments } = await loadFarmAuditData(farm.id, period);
     if (!eligibleLogDocuments.length) throw new Error(`No synchronized eligible operation logs were found for ${period} in the assigned Block Farm.`);
-    if (eligibleLogDocuments.length > 500) throw new Error('A report cannot contain more than 500 operation logs.');
     const existing = await reportsForFarmPeriod(farm.id, period);
-    const latest = existing[0] || null;
-    if (latest && latest.status !== AUDIT_STATUS.RETURNED) return res.json({ success: true, replayed: true, data: latest });
+    const batch = selectAuditCompilationBatch(eligibleLogDocuments, existing);
+    const latest = batch.latest;
+    if (batch.replay) return res.json({ success: true, replayed: true, data: batch.replay });
+    if (!batch.operations.length) throw new Error(`No new eligible operation logs were found for ${period}.`);
+    if (batch.operations.length > 500) throw new Error('A report cannot contain more than 500 operation logs.');
 
     const version = latest ? latest.reportVersion + 1 : 1;
     const reportId = versionedAuditReportId(farm.id, period, version);
     if (req.body.id && String(req.body.id) !== reportId) return res.status(409).json({ success: false, error: `The canonical report identity for this audit is ${reportId}.` });
-    const operationSnapshots = eligibleLogDocuments.sort((left, right) => left.id.localeCompare(right.id))
+    const operationSnapshots = batch.operations.sort((left, right) => left.id.localeCompare(right.id))
       .map(document => buildOperationSnapshot(document.id, document.data()));
     const now = nowIso();
     const integrityHash = createAuditHash(reportId, farm.id, period, operationSnapshots);

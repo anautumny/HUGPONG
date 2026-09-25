@@ -32,11 +32,12 @@ export const archiveOperations = (operationLogIds, mutation, takeoverGrant) => a
 
 export const publishPrice = (payload, mutation) => api('/api/prices', 'POST', payload, mutation);
 export const createTicket = (payload, mutation) => api('/api/tickets', 'POST', payload, mutation);
+export const addTicketMessage = (payload, mutation) => api(`/api/tickets/${encodeURIComponent(payload.id)}/messages`, 'POST', payload, mutation);
 export const createAuditEvent = (payload, mutation) => api('/api/audit-events', 'POST', payload, mutation);
 export const compileAuditReport = (payload, mutation) => api('/api/audit-reports', 'POST', payload, mutation);
 export const submitAuditReport = (id, submissionMethod = 'CLOUD', mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/submit`, 'POST', { submissionMethod }, mutation);
 export const returnAuditReport = (id, returnReason, mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/return`, 'POST', { returnReason }, mutation);
+export const verifyAuditQr = (payload) => api('/api/audit-reports/qr/verify', 'POST', { payload });
 export const importAuditQr = (payload, mutation) => api('/api/audit-reports/qr/import', 'POST', { payload }, mutation);
 export const certifyAuditReport = (id, certificationNotes = '', mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/certify`, 'POST', { certificationNotes }, mutation);
 export const approveUser = (payload, mutation) => api('/api/users/approve', 'POST', payload, mutation);
-export const publishTelemetry = (deviceId, payload) => api(`/api/terminal-diagnostics/${encodeURIComponent(deviceId)}`, 'PUT', payload);

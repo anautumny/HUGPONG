@@ -60,6 +60,50 @@ function summarizeSnapshots(operationSnapshots = [], activeFields = []) {
   };
 }
 
+function operationId(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return String(value.operationLogId || value.id || '').trim();
+}
+
+function newestAuditReport(reports = []) {
+  return [...reports].sort((left, right) => {
+    const versionDifference = Number(right?.reportVersion || 1) - Number(left?.reportVersion || 1);
+    if (versionDifference) return versionDifference;
+    const rightTime = Date.parse(right?.updatedAt || right?.compiledAt || right?.createdAt || '') || 0;
+    const leftTime = Date.parse(left?.updatedAt || left?.compiledAt || left?.createdAt || '') || 0;
+    return rightTime - leftTime;
+  })[0] || null;
+}
+
+/**
+ * Determines the next authoritative monthly compilation batch.
+ *
+ * Certified snapshots are immutable and are never included in a later batch.
+ * An in-progress report is replayed idempotently. Once the latest report is
+ * certified, newly recorded operations become a new version. A returned batch
+ * can be rebuilt from its still-uncertified operations plus any newer records.
+ */
+function selectAuditCompilationBatch(eligibleOperations = [], reports = []) {
+  const latest = newestAuditReport(reports);
+  const latestStatus = canonicalAuditStatus(latest?.status);
+  if (latest && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION, AUDIT_STATUS.PENDING_REVIEW].includes(latestStatus)) {
+    return { latest, operations: [], replay: latest };
+  }
+
+  const certifiedOperationIds = new Set(reports
+    .filter(report => canonicalAuditStatus(report?.status) === AUDIT_STATUS.CERTIFIED)
+    .flatMap(report => report.operationSnapshots || report.operations || [])
+    .map(operationId)
+    .filter(Boolean));
+  const operations = eligibleOperations.filter(operation => !certifiedOperationIds.has(operationId(operation)));
+
+  if (latest && latestStatus === AUDIT_STATUS.CERTIFIED && operations.length === 0) {
+    return { latest, operations: [], replay: latest };
+  }
+  return { latest, operations, replay: null };
+}
+
 function qrTransportObject(report) {
   return {
     type: QR_TYPE,
@@ -115,6 +159,8 @@ module.exports = {
   rootAuditReportId,
   versionedAuditReportId,
   summarizeSnapshots,
+  newestAuditReport,
+  selectAuditCompilationBatch,
   qrTransportObject,
   encodeQrPayload,
   decodeQrPayload

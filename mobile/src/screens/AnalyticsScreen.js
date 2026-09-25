@@ -623,7 +623,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               </View>
 
               <View>
-                <Text style={s.inputLabel}>Raw Sugar (Class B) Price (â‚±/Lkg) *</Text>
+                <Text style={s.inputLabel}>Raw Sugar (Class B) Price (₱/Lkg) *</Text>
                 <TextInput
                   style={s.input}
                   placeholder="e.g. 2650.00"
@@ -634,7 +634,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               </View>
 
               <View>
-                <Text style={s.inputLabel}>Molasses Price (â‚±/MT) *</Text>
+                <Text style={s.inputLabel}>Molasses Price (₱/MT) *</Text>
                 <TextInput
                   style={s.input}
                   placeholder="e.g. 9500.00"

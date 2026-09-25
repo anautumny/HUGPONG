@@ -89,7 +89,7 @@ function AppHeader({ right }) {
         safeAlert(
           remaining === 0 ? t('sync_status_synced', 'Online & Synced') : 'Sync Incomplete',
           syncResultMessage(result),
-          remaining > 0 ? [
+          remaining > 0 && (session?.role === 'Farm Member' || session?.role === 'Farm Manager') ? [
             { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
             { text: 'Try Again', onPress: () => handleSync() },
             { text: 'Close', style: 'cancel' }
@@ -158,7 +158,7 @@ function AppHeader({ right }) {
       safeAlert(
         remaining === 0 ? t('sync_status_synced', 'Sync Successful') : 'Sync Incomplete',
         syncResultMessage(result),
-        remaining > 0 ? [
+        remaining > 0 && (session?.role === 'Farm Member' || session?.role === 'Farm Manager') ? [
           { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
           { text: 'Try Again', onPress: () => handleSync() },
           { text: 'Close', style: 'cancel' }

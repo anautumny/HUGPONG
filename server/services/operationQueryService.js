@@ -20,6 +20,24 @@ function applyOperationLimit(query, limit) {
   return query.orderBy('performedOn', 'desc').limit(limit);
 }
 
+function isMissingIndexError(error) {
+  const code = String(error?.code ?? '').toLowerCase();
+  return code === '9'
+    || code === 'failed-precondition'
+    || code === 'failed_precondition'
+    || /requires an index/i.test(String(error?.message || ''));
+}
+
+async function getBoundedOperationSnapshot(baseQuery, limit) {
+  try {
+    return await applyOperationLimit(baseQuery, limit).get();
+  } catch (error) {
+    if (!limit || !isMissingIndexError(error)) throw error;
+    console.warn('[Operations] Composite index unavailable; using the authorization-scoped fallback query.');
+    return baseQuery.get();
+  }
+}
+
 async function getOperationActorScope(database, user) {
   const userId = String(user?.employeeId || user?.userId || '').trim();
   const role = canonicalRole(user?.role || user?.roleKey);
@@ -84,8 +102,7 @@ async function listOperationRecords(database, user, options = {}) {
   if (scope.all) {
     let query = database.collection(COLLECTIONS.OPERATION_LOGS);
     if (status) query = query.where('status', '==', status);
-    query = applyOperationLimit(query, limit);
-    const snapshot = await query.get();
+    const snapshot = await getBoundedOperationSnapshot(query, limit);
     const records = await enrichAmendmentEditors(database, snapshot.docs.map(document => ({ id: document.id, ...document.data() })));
     return sortOperationsNewestFirst(records.map(presentOperationRecord));
   }
@@ -94,8 +111,7 @@ async function listOperationRecords(database, user, options = {}) {
     const fieldIds = scope.fieldIds.slice(index, index + 10);
     let query = database.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', fieldIds);
     if (status) query = query.where('status', '==', status);
-    query = applyOperationLimit(query, limit);
-    const snapshot = await query.get();
+    const snapshot = await getBoundedOperationSnapshot(query, limit);
     records.push(...snapshot.docs.map(document => presentOperationRecord({ id: document.id, ...document.data() })));
   }
   const enriched = await enrichAmendmentEditors(database, records);
@@ -105,6 +121,8 @@ async function listOperationRecords(database, user, options = {}) {
 
 module.exports = {
   getOperationActorScope,
+  getBoundedOperationSnapshot,
+  isMissingIndexError,
   listOperationRecords,
   normalizeOperationLimit
 };

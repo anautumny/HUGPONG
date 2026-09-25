@@ -9,26 +9,13 @@ import {
   Animated,
   Dimensions,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
-
-// Safely resolve expo-camera if available in the current native runtime
-let CameraView = null;
-let useCameraPermissions = null;
-let isCameraSupported = false;
-
-try {
-  const ExpoCamera = require('expo-camera');
-  if (ExpoCamera) {
-    CameraView = ExpoCamera.CameraView || null;
-    useCameraPermissions = ExpoCamera.useCameraPermissions || null;
-    isCameraSupported = Boolean(CameraView);
-  }
-} catch (e) {
-  isCameraSupported = false;
-}
 
 const { width, height } = Dimensions.get('window');
 const SCAN_BOX_SIZE = Math.min(width * 0.72, 280);
@@ -38,58 +25,82 @@ export default function LiveQRScanner({
   onClose,
   onCodeDetected,
 }) {
-  let permission = { granted: false, canAskAgain: true };
-  let requestPermission = () => {};
-
-  if (isCameraSupported && typeof useCameraPermissions === 'function') {
-    try {
-      const [perm, reqPerm] = useCameraPermissions();
-      if (perm) permission = perm;
-      if (reqPerm) requestPermission = reqPerm;
-    } catch (e) {
-      permission = { granted: false, canAskAgain: false };
-    }
-  }
+  const [permission, requestPermission] = useCameraPermissions();
   const [torch, setTorch] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualCode, setManualCode] = useState('');
+  const [cameraKey, setCameraKey] = useState(0);
+  const [cameraState, setCameraState] = useState('idle');
+  const [cameraError, setCameraError] = useState('');
 
   // Scanning laser animation
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (visible) {
-      setScanned(false);
-      setTorch(false);
-      setShowManualInput(false);
-
-      // Start looping scan line animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scanLineAnim, {
-            toValue: SCAN_BOX_SIZE - 6,
-            duration: 1800,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanLineAnim, {
-            toValue: 0,
-            duration: 1800,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else {
+    if (!visible) {
       scanLineAnim.setValue(0);
+      return undefined;
     }
+    setScanned(false);
+    setTorch(false);
+    setShowManualInput(false);
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanLineAnim, {
+          toValue: SCAN_BOX_SIZE - 6,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanLineAnim, {
+          toValue: 0,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => {
+      animation.stop();
+      scanLineAnim.setValue(0);
+    };
   }, [visible]);
 
+  useEffect(() => {
+    if (!visible || !permission?.granted || showManualInput) {
+      setCameraState('idle');
+      setCameraError('');
+      return undefined;
+    }
+    setCameraState('initializing');
+    setCameraError('');
+    const timeout = setTimeout(() => {
+      setCameraState(current => current === 'ready' ? current : 'timeout');
+    }, 8000);
+    return () => clearTimeout(timeout);
+  }, [visible, permission?.granted, cameraKey, showManualInput]);
+
+  const retryCamera = () => {
+    setTorch(false);
+    setCameraError('');
+    setCameraState('initializing');
+    setCameraKey(current => current + 1);
+  };
+
+  const handleCameraMountError = event => {
+    const message = event?.message || event?.nativeEvent?.message || 'The camera preview could not be started.';
+    console.warn('[QR Scanner] Camera preview unavailable:', message);
+    setCameraError(message);
+    setCameraState('error');
+  };
+
   const handleBarcodeScanned = ({ data }) => {
-    if (scanned || !data) return;
+    if (scanned || showManualInput || !data) return;
     setScanned(true);
 
     if (onCodeDetected) {
-      onCodeDetected(data);
+      onCodeDetected(data, { source: 'camera' });
     }
   };
 
@@ -98,7 +109,7 @@ export default function LiveQRScanner({
     if (!cleanCode) return;
     setScanned(true);
     if (onCodeDetected) {
-      onCodeDetected(cleanCode);
+      onCodeDetected(cleanCode, { source: 'manual' });
     }
     setManualCode('');
   };
@@ -106,7 +117,14 @@ export default function LiveQRScanner({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent={false} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent={false}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      hardwareAccelerated
+      onRequestClose={onClose}
+    >
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         {/* Header Bar */}
         <View style={styles.header}>
@@ -115,34 +133,75 @@ export default function LiveQRScanner({
           </TouchableOpacity>
 
           <View style={styles.headerTextCol}>
-            <Text style={styles.headerTitle}>SRA Live QR Scanner</Text>
-            <Text style={styles.headerSub}>Point at Farm Manager's QR Code</Text>
+            <Text style={styles.headerTitle}>{showManualInput ? 'Manual Report Verification' : 'SRA Live QR Scanner'}</Text>
+            <Text style={styles.headerSub}>
+              {showManualInput ? 'Verify through the HUGPONG server' : "Point at Farm Manager's QR Code"}
+            </Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.iconBtn, torch && styles.iconBtnActive]}
-            onPress={() => setTorch(!torch)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={22} color={torch ? '#267326' : '#FFF'} />
-          </TouchableOpacity>
+          {showManualInput ? (
+            <View style={styles.headerIconSpacer} />
+          ) : (
+            <TouchableOpacity
+              style={[styles.iconBtn, torch && styles.iconBtnActive, cameraState !== 'ready' && styles.iconBtnDisabled]}
+              onPress={() => setTorch(!torch)}
+              disabled={cameraState !== 'ready'}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={22} color={torch ? '#267326' : '#FFF'} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Camera Feed or Permission Prompt */}
-        {!isCameraSupported || !CameraView ? (
-          <View style={styles.centerContainer}>
-            <View style={styles.permissionIconCircle}>
-              <Ionicons name="qr-code-outline" size={48} color={COLORS.primary} />
+        {showManualInput ? (
+          <KeyboardAvoidingView
+            style={styles.manualScreen}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.manualCard}>
+              <View style={styles.manualIconCircle}>
+                <Ionicons name="keypad-outline" size={38} color="#7BC043" />
+              </View>
+              <Text style={styles.manualTitle}>Enter report code</Text>
+              <Text style={styles.manualBody}>
+                Use the report ID, audit hash, or complete QR package supplied by the Farm Manager.
+              </Text>
+              <Text style={styles.manualFieldLabel}>REPORT ID OR QR PACKAGE</Text>
+              <TextInput
+                style={styles.manualInput}
+                placeholder="Example: AUD-... or HUG-..."
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={manualCode}
+                onChangeText={setManualCode}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                multiline
+                autoFocus
+              />
+              <View style={styles.onlineNotice}>
+                <Ionicons name="cloud-done-outline" size={18} color="#7BC043" />
+                <Text style={styles.onlineNoticeText}>A live HUGPONG connection is required for verification.</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.manualSubmitBtn, !manualCode.trim() && styles.manualSubmitBtnDisabled]}
+                onPress={handleManualSubmit}
+                disabled={!manualCode.trim() || scanned}
+                activeOpacity={0.8}
+              >
+                {scanned ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="shield-checkmark-outline" size={19} color="#FFF" />}
+                <Text style={styles.manualSubmitBtnText}>{scanned ? 'Verifying...' : 'Verify with HUGPONG'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.backToCameraBtn}
+                onPress={() => { setShowManualInput(false); setManualCode(''); setScanned(false); }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="camera-outline" size={18} color="#FFF" />
+                <Text style={styles.backToCameraText}>Back to Scanner</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.permissionTitle}>Manual QR Verification Mode</Text>
-            <Text style={styles.permissionBody}>
-              Live Camera hardware module is not active in this environment. You can enter or paste the SRA Audit Hash / QR Envelope string directly below.
-            </Text>
-            <TouchableOpacity style={styles.grantBtn} onPress={() => setShowManualInput(true)} activeOpacity={0.8}>
-              <Ionicons name="keypad" size={20} color="#FFF" />
-              <Text style={styles.grantBtnText}>Enter SRA Hash / Code</Text>
-            </TouchableOpacity>
-          </View>
+          </KeyboardAvoidingView>
         ) : !permission ? (
           <View style={styles.centerContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
@@ -164,23 +223,56 @@ export default function LiveQRScanner({
 
             <TouchableOpacity
               style={styles.manualEntryLink}
-              onPress={() => setShowManualInput(true)}
+              onPress={() => { setTorch(false); setShowManualInput(true); }}
             >
-              <Text style={styles.manualEntryLinkText}>Or enter QR hash code manually</Text>
+              <Text style={styles.manualEntryLinkText}>Enter report code manually</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.cameraContainer}>
             {/* Live Camera Feed */}
             <CameraView
+              key={`sra-camera-${cameraKey}`}
               style={StyleSheet.absoluteFillObject}
               facing="back"
               enableTorch={torch}
+              onCameraReady={() => setCameraState('ready')}
+              onMountError={handleCameraMountError}
               barcodeScannerSettings={{
                 barcodeTypes: ['qr'],
               }}
               onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
             />
+
+            {cameraState !== 'ready' && (
+              <View style={styles.cameraStatusOverlay}>
+                {cameraState === 'initializing' ? (
+                  <>
+                    <ActivityIndicator size="large" color="#7BC043" />
+                    <Text style={styles.cameraStatusTitle}>Starting camera…</Text>
+                    <Text style={styles.cameraStatusBody}>Keep HUGPONG open while the camera preview initializes.</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="camera-outline" size={48} color="#7BC043" />
+                    <Text style={styles.cameraStatusTitle}>Camera preview unavailable</Text>
+                    <Text style={styles.cameraStatusBody}>
+                      {cameraError || 'The camera did not start. Close other camera apps, then retry.'}
+                    </Text>
+                    <View style={styles.cameraRecoveryRow}>
+                      <TouchableOpacity style={styles.retryBtn} onPress={retryCamera} activeOpacity={0.8}>
+                        <Ionicons name="refresh" size={18} color="#FFF" />
+                        <Text style={styles.retryBtnText}>Retry Camera</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.manualRecoveryBtn} onPress={() => { setTorch(false); setShowManualInput(true); }} activeOpacity={0.8}>
+                        <Ionicons name="keypad-outline" size={18} color="#FFF" />
+                        <Text style={styles.retryBtnText}>Enter Code</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
 
             {/* Viewfinder Dark Overlay with Center Cutout */}
             <View style={styles.overlay}>
@@ -230,44 +322,17 @@ export default function LiveQRScanner({
                 {/* Manual Fallback Toggle */}
                 <TouchableOpacity
                   style={styles.manualEntryBtn}
-                  onPress={() => setShowManualInput(!showManualInput)}
+                  onPress={() => { setTorch(false); setShowManualInput(true); }}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name={showManualInput ? "camera-outline" : "keypad-outline"} size={16} color="#FFF" />
-                  <Text style={styles.manualEntryBtnText}>
-                    {showManualInput ? "Hide Code Entry" : "Enter Hash Manually"}
-                  </Text>
+                  <Ionicons name="keypad-outline" size={16} color="#FFF" />
+                  <Text style={styles.manualEntryBtnText}>Enter Report Code Manually</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
         )}
 
-        {/* Manual Code Input Bar / Drawer (Optional Fallback) */}
-        {showManualInput && (
-          <View style={styles.manualDrawer}>
-            <Text style={styles.manualDrawerTitle}>Manual SRA Hash or Envelope Entry</Text>
-            <View style={styles.manualInputRow}>
-              <TextInput
-                style={styles.manualInput}
-                placeholder="Enter report QR hash"
-                placeholderTextColor="#888"
-                value={manualCode}
-                onChangeText={setManualCode}
-                autoCapitalize="characters"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                style={[styles.manualSubmitBtn, !manualCode.trim() && styles.manualSubmitBtnDisabled]}
-                onPress={handleManualSubmit}
-                disabled={!manualCode.trim()}
-              >
-                <Ionicons name="arrow-forward" size={18} color="#FFF" />
-                <Text style={styles.manualSubmitBtnText}>Verify</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
       </SafeAreaView>
     </Modal>
   );
@@ -301,6 +366,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(74, 222, 128, 0.25)',
     borderWidth: 1,
     borderColor: '#267326',
+  },
+  iconBtnDisabled: {
+    opacity: 0.45,
+  },
+  headerIconSpacer: {
+    width: 40,
+    height: 40,
   },
   headerTextCol: {
     flex: 1,
@@ -387,6 +459,59 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     backgroundColor: '#000',
+  },
+  cameraStatusOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5,
+    backgroundColor: 'rgba(3, 12, 5, 0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  cameraStatusTitle: {
+    color: '#FFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 14,
+    textAlign: 'center',
+  },
+  cameraStatusBody: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 7,
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  cameraRecoveryRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 22,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primary,
+  },
+  manualRecoveryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: RADIUS.md,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  retryBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -510,36 +635,81 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  manualDrawer: {
-    padding: SPACING.md,
-    backgroundColor: '#112211',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.15)',
-    zIndex: 20,
+  manualScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: SPACING.lg,
+    backgroundColor: '#071007',
   },
-  manualDrawerTitle: {
+  manualCard: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    padding: SPACING.lg,
+    borderRadius: RADIUS.xl,
+    backgroundColor: '#112211',
+    borderWidth: 1,
+    borderColor: 'rgba(123,192,67,0.35)',
+  },
+  manualIconCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    backgroundColor: 'rgba(123,192,67,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(123,192,67,0.35)',
+  },
+  manualTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  manualBody: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 22,
+  },
+  manualFieldLabel: {
     fontSize: 11,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.7)',
-    textTransform: 'uppercase',
     marginBottom: 8,
   },
-  manualInputRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
   manualInput: {
-    flex: 1,
-    height: 44,
+    minHeight: 92,
+    maxHeight: 160,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.2)',
     borderRadius: RADIUS.md,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     color: '#FFF',
     fontSize: 13,
     fontWeight: '700',
     fontFamily: 'monospace',
+    textAlignVertical: 'top',
+  },
+  onlineNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 18,
+  },
+  onlineNoticeText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 12,
+    lineHeight: 17,
   },
   manualSubmitBtn: {
     flexDirection: 'row',
@@ -547,7 +717,7 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: COLORS.primary,
     paddingHorizontal: 16,
-    height: 44,
+    height: 48,
     borderRadius: RADIUS.md,
     justifyContent: 'center',
   },
@@ -558,5 +728,20 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '800',
+  },
+  backToCameraBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 10,
+    height: 44,
+    borderRadius: RADIUS.md,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  backToCameraText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

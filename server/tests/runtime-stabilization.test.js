@@ -13,11 +13,14 @@ const syncEngine = read('mobile/src/services/syncEngine.js');
 const outboxCore = read('mobile/src/services/mutationOutboxCore.js');
 const networkService = read('mobile/src/services/networkService.js');
 const app = read('mobile/App.js');
+const rootNavigator = read('mobile/src/navigation/RootNavigator.js');
 const fieldOps = read('mobile/src/screens/FieldOpsScreen.js');
+const liveQrScanner = read('mobile/src/components/LiveQRScanner.js');
 const memberHome = read('mobile/src/screens/member/MemberHomeView.js');
 const mobileSchema = read('mobile/src/data/firestoreSchema.js');
 const homeScreen = read('mobile/src/screens/HomeScreen.js');
 const authService = read('mobile/src/services/authService.js');
+const mutationService = read('mobile/src/services/mutationService.js');
 const authRoute = read('server/routes/auth.js');
 const fieldsRoute = read('server/routes/fields.js');
 const cropCycleRoute = read('server/routes/cropCycles.js');
@@ -25,6 +28,10 @@ const webOperations = read('web/react-app/src/services/operationReadService.js')
 const webSchema = read('web/react-app/src/services/firestoreSchema.js');
 const webFields = read('web/react-app/src/services/fieldsService.js');
 const webAddOperation = read('web/react-app/src/components/operations/AddOperationModal.jsx');
+const webSyncContext = read('web/react-app/src/context/SyncContext.jsx');
+const webSyncIndicator = read('web/react-app/src/components/layout/SyncIndicator.jsx');
+const webDashboardService = read('web/react-app/src/services/dashboardService.js');
+const webDashboardView = read('web/react-app/src/views/dashboard/DashboardView.jsx');
 const cropCycleOperations = read('server/services/cropCycleOperations.js');
 const mobilePackage = read('mobile/package.json');
 const mobileAppConfig = read('mobile/app.json');
@@ -33,15 +40,32 @@ const { buildOperationLog } = require('../schema/firestoreSchema');
 
 test('manual, automatic, and status UI share the canonical durable outbox', () => {
   assert.match(read('mobile/src/services/storageService.js'), /OUTBOX:\s*'@hugpong_outbox'/);
+  assert.match(read('mobile/src/services/storageService.js'), /localOutboxStorageKey/);
   assert.match(dataStore, /getOutboxQueue\(\)/);
-  assert.match(syncEngine, /STORAGE_KEYS\.OUTBOX/);
+  assert.match(syncEngine, /localOutboxStorageKey/);
   assert.doesNotMatch(dataStore, /syncQueue|pendingWrites|offlineQueue|pendingOperations/);
 });
 
 test('queue removal requires an explicit successful server acknowledgement', () => {
   assert.match(outboxCore, /response\.success !== true/);
   assert.match(outboxCore, /workingQueue = workingQueue\.filter/);
-  assert.match(syncEngine, /saveItem\(STORAGE_KEYS\.OUTBOX, nextQueue\)/);
+  assert.match(syncEngine, /persistOutboxQueue\(nextQueue, processingOwnerId\)/);
+});
+
+test('durable outboxes are isolated by signed-in account and legacy shared entries stay quarantined', () => {
+  const storageService = read('mobile/src/services/storageService.js');
+  assert.match(syncEngine, /activeOutboxOwnerId/);
+  assert.match(syncEngine, /ownerUserId:\s*activeOutboxOwnerId/);
+  assert.match(syncEngine, /former unscoped/);
+  assert.match(dataStore, /initSyncEngine\(CURRENT_SESSION\.employeeId \|\| CURRENT_SESSION\.id\)/);
+  assert.match(dataStore, /CURRENT_SESSION = \{ \.\.\.DEFAULT_GUEST_SESSION \};\s*await initSyncEngine\(''\)/);
+  assert.match(storageService, /key\.startsWith\('@hugpong_'\)/);
+});
+
+test('sync logging cannot claim completion while queued items remain', () => {
+  assert.match(syncEngine, /if \(result\.remainingCount === 0\)/);
+  assert.match(syncEngine, /\[SYNC\] Deferred:/);
+  assert.match(syncEngine, /\[SYNC\] Incomplete:/);
 });
 
 test('successful operation reconciliation clears every local unsynchronized marker', () => {
@@ -100,6 +124,13 @@ test('concurrent triggers reuse single-flight promises and release locks in fina
   assert.match(dataStore, /finally \{\s*mobileSyncPromise = null/);
 });
 
+test('mobile publishes agricultural sync telemetry only for member and manager sessions', () => {
+  assert.match(dataStore, /const canReportAgriculturalSyncTelemetry/);
+  assert.match(dataStore, /role === ROLES\.MEMBER_FARMER \|\| role === ROLES\.FARM_MANAGER/);
+  assert.match(dataStore, /if \(canReportAgriculturalSyncTelemetry\(\)\) \{\s*reportMobileSync/);
+  assert.match(dataStore, /CURRENT_SESSION\.name && canReportAgriculturalSyncTelemetry\(\)/);
+});
+
 test('startup migration recovers stale syncing entries as retryable', () => {
   assert.match(outboxCore, /status === 'syncing'.*return 'retryable'/);
   assert.match(syncEngine, /migrateOutbox\(savedOutbox\)/);
@@ -117,7 +148,35 @@ test('mobile cloud refresh starts only after the Firebase and server sessions ag
   assert.match(dataStore, /const token = await getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
   assert.match(dataStore, /if \(!token \|\| !activeRole \|\| !sessionUserId \|\| !accountReady\) return false/);
   assert.match(dataStore, /await restartCloudSyncIfReady\(\)/);
+  assert.match(dataStore, /stop\.initialRefresh = refresh\(\)/);
+  assert.match(dataStore, /activeRole === ROLES\.SRA_ADMIN/);
+  assert.match(dataStore, /await activeCloudSyncStop\.initialRefresh/);
   assert.doesNotMatch(dataStore, /__unassigned__|\*\*unassigned\*\*/);
+});
+
+test('SRA mobile sessions require live connectivity and sign out when connectivity is lost', () => {
+  assert.match(dataStore, /restoredRole === ROLES\.SRA_ADMIN && !\(await checkConnectivity\(\{ force: true \}\)\)/);
+  assert.match(dataStore, /reason: 'sra_online_required'/);
+  assert.match(rootNavigator, /activeSession\?\.role === 'SRA Admin'/);
+  assert.match(rootNavigator, /logoutUser\(\{ skipRemote: true \}\)/);
+  assert.match(rootNavigator, /routes: \[\{ name: 'Login', params: \{ sessionNotice \} \}\]/);
+});
+
+test('SRA district summaries use only canonical farms and current-cycle active logs', () => {
+  assert.match(fieldOps, /const selectedFarmIds = new Set\(selectedFarmRecords\.map\(farm => farm\.id\)\)/);
+  assert.match(fieldOps, /const farmFields = fields\.filter\(field => selectedFarmIds\.has\(field\.blockFarmId\)\)/);
+  assert.match(fieldOps, /log\.status === 'ACTIVE'/);
+  assert.match(fieldOps, /!field\.currentCycleId \|\| log\.cycleId === field\.currentCycleId/);
+  assert.match(fieldOps, /Current Cycle Logs/);
+});
+
+test('mobile persists complete farm topology while SRA refuses cached district snapshots', () => {
+  const storageService = read('mobile/src/services/storageService.js');
+  assert.match(storageService, /BLOCK_FARMS:\s*'@hugpong_block_farms'/);
+  assert.match(storageService, /CROP_CYCLES:\s*'@hugpong_crop_cycles'/);
+  assert.match(dataStore, /\[STORAGE_KEYS\.BLOCK_FARMS, blockFarms\]/);
+  assert.match(dataStore, /\[STORAGE_KEYS\.CROP_CYCLES, cropCycles\]/);
+  assert.match(dataStore, /SRA is online-only[\s\S]*clearCanonicalRuntimeData\(\)/);
 });
 
 test('mobile canonical reads use role-scoped server APIs without direct Firestore listeners', () => {
@@ -135,6 +194,67 @@ test('mobile canonical reads use role-scoped server APIs without direct Firestor
     assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}'`));
   }
   assert.doesNotMatch(dataStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
+});
+
+test('mobile canonical refresh treats missing or malformed response collections as empty arrays', () => {
+  assert.match(dataStore, /const responseRecords = response => Array\.isArray\(response\?\.data\) \? response\.data : \[\]/);
+  assert.match(dataStore, /responseRecords\(reportsResponse\)\.map/);
+  assert.match(dataStore, /reports: responseRecords\(response\)\.map/);
+});
+
+test('Field Ops initializes local logs before evaluating hook dependencies that read logs.length', () => {
+  const declaration = fieldOps.indexOf('const [logs, setLogs] = useState');
+  const dependencyRead = fieldOps.indexOf('logs.length, auditReports.length');
+  assert.ok(declaration >= 0, 'logs state declaration must exist');
+  assert.ok(dependencyRead >= 0, 'logs.length dependency must exist');
+  assert.ok(declaration < dependencyRead, 'logs state must be initialized before logs.length is evaluated');
+  assert.match(fieldOps, /useState\(\(\) => Array\.isArray\(operationLogs\) \? \[\.\.\.operationLogs\] : \[\]\)/);
+});
+
+test('Android QR scanner accelerates its modal and exposes camera readiness and recovery states', () => {
+  assert.match(liveQrScanner, /import \{ CameraView, useCameraPermissions \} from 'expo-camera'/);
+  assert.match(liveQrScanner, /hardwareAccelerated/);
+  assert.match(liveQrScanner, /onCameraReady=/);
+  assert.match(liveQrScanner, /onMountError=/);
+  assert.match(liveQrScanner, /Retry Camera/);
+  assert.match(liveQrScanner, /cameraState !== 'ready'/);
+});
+
+test('SRA manual report entry replaces the camera session and remains server-authoritative', () => {
+  const manualScreen = liveQrScanner.indexOf('{showManualInput ? (');
+  const cameraView = liveQrScanner.indexOf('<CameraView');
+  assert.ok(manualScreen >= 0 && cameraView > manualScreen, 'manual entry must be the first mutually exclusive scanner branch');
+  assert.match(liveQrScanner, /!permission\?\.granted \|\| showManualInput/);
+  assert.match(liveQrScanner, /Enter Report Code Manually/);
+  assert.match(liveQrScanner, /Back to Scanner/);
+  assert.match(liveQrScanner, /A live HUGPONG connection is required for verification/);
+  assert.doesNotMatch(liveQrScanner, /manualDrawer|Enter Hash Manually/);
+
+  assert.match(mutationService, /\/api\/audit-reports\/qr\/verify/);
+  assert.match(fieldOps, /await verifyAuditQr\(rawStr\)/);
+  assert.match(fieldOps, /await importAuditQr\(rawStr\)/);
+  assert.doesNotMatch(fieldOps, /commitExplicitMutation\('audit_qr_import'/);
+  assert.doesNotMatch(fieldOps, /STRUCTURE_VALID_CLOUD_PENDING|CACHED_AUTHORITY_MATCH|offline structural verification/);
+});
+
+test('SRA-only mutations bypass and clear the mobile offline outbox', () => {
+  assert.match(dataStore, /sraOnlineOnlyMutations = new Set\(\['audit_qr_import', 'audit_certification', 'audit_return', 'price', 'user_approve'\]\)/);
+  assert.match(dataStore, /activeRole === ROLES\.SRA_ADMIN \|\| sraOnlineOnlyMutations\.has\(type\)/);
+  assert.match(dataStore, /executeMutationViaApi\([^;]+includeMutation: false/);
+  assert.match(dataStore, /restoredRole === ROLES\.SRA_ADMIN && getOutboxCount\(\) > 0\) await clearOutbox\(\)/);
+  assert.match(dataStore, /roleUpper === ROLES\.SRA_ADMIN && getOutboxCount\(\) > 0\) await clearOutbox\(\)/);
+});
+
+test('dashboard connectivity reflects API health and reports the failing resource', () => {
+  assert.match(webSyncContext, /fetch\('\/health'/);
+  assert.match(webSyncContext, /setApiReachable\(response\.ok && result\.success === true\)/);
+  assert.match(webSyncIndicator, /Server Unavailable/);
+  assert.match(webDashboardService, /async function dashboardRead/);
+  assert.match(webDashboardService, /async function readRecentOperations/);
+  assert.match(webDashboardService, /Recent operations.*\/api\/logs\?limit=5/);
+  assert.match(webDashboardService, /error\.isMissingIndex[\s\S]*\/api\/logs'/);
+  assert.doesNotMatch(webDashboardService, /new Error\(`\$\{label\} could not be loaded: \$\{error\.message/);
+  assert.match(webDashboardView, /error: err\?\.message/);
 });
 
 test('clearing the mobile data cache preserves the authenticated session pair', () => {

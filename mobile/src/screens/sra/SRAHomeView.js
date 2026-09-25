@@ -14,11 +14,14 @@ import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
+  const safeFields = Array.isArray(fields) ? fields : [];
+  const safeBlockFarms = Array.isArray(blockFarms) ? blockFarms : [];
+  const safeAuditReports = Array.isArray(auditReports) ? auditReports : [];
 
   const blockFarmsList = React.useMemo(() => {
-    const list = blockFarms;
+    const list = safeBlockFarms;
     return list.map(bf => {
-      const bfFields = fields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
+      const bfFields = safeFields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
       const activeFieldsList = bfFields;
       const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
       const resolvedMgr = resolveBlockFarmManager(bf);
@@ -33,7 +36,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
         status: resolvedMgr === 'Pending Appointment' ? 'Pending Manager' : 'SRA Verified ✓'
       };
     });
-  }, [fields]);
+  }, [safeFields, safeBlockFarms]);
 
   const totalDistrictHa = React.useMemo(() => {
     return blockFarmsList.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
@@ -44,10 +47,10 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
   }, [blockFarmsList]);
 
   const complianceRate = React.useMemo(() => {
-    if (!auditReports || auditReports.length === 0) return 100;
-    const actionable = auditReports.filter(a => canonicalAuditStatus(a.status) === AUDIT_STATUS.PENDING_REVIEW).length;
-    return actionable === 0 ? 100 : Math.max(0, Math.round(((auditReports.length - actionable) / auditReports.length) * 100));
-  }, [auditReports]);
+    if (safeAuditReports.length === 0) return 100;
+    const actionable = safeAuditReports.filter(a => canonicalAuditStatus(a.status) === AUDIT_STATUS.PENDING_REVIEW).length;
+    return actionable === 0 ? 100 : Math.max(0, Math.round(((safeAuditReports.length - actionable) / safeAuditReports.length) * 100));
+  }, [safeAuditReports]);
 
   return (
     <View style={s.container}>

@@ -46,6 +46,9 @@ test('connectivity classification gates reconnect sync on API health', () => {
   assert.match(network, /SERVER_UNAVAILABLE: 'SERVER_UNAVAILABLE'/);
   assert.match(network, /const serverReachable = await probeServerConnectivity\(\)/);
   assert.match(network, /if \(online && \(!wasOnline \|\| forceReconnect\)/);
+  assert.match(network, /async function evaluateNetworkState\(state, generation\)/);
+  assert.doesNotMatch(network, /evaluateNetworkState\(state, generation, true\)/);
+  assert.doesNotMatch(network, /evaluateNetworkState\(state, generation, force\)/);
   assert.match(network, /checkConnectivity\(\{ force: true \}\)/);
 });
 

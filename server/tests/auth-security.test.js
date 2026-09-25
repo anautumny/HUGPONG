@@ -323,8 +323,9 @@ test('governance API routes enforce role-scoped read boundaries', () => {
   assert.match(auditEvents, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.FARM_MANAGER, ROLES\.SRA_ADMIN, ROLES\.SUPER_ADMIN\]\)/);
   assert.match(auditEvents, /\.where\('actorUserId', '==', identity\.userId\)/);
   assert.match(auditEvents, /\.where\('blockFarmId', 'in', farmIds\.slice\(index, index \+ 10\)\)/);
-  assert.match(telemetry, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.FARM_MANAGER, ROLES\.SRA_ADMIN, ROLES\.SUPER_ADMIN\]\)/);
-  assert.match(telemetry, /\.where\('userId', 'in', uniqueUserIds\.slice\(index, index \+ 10\)\)/);
+  assert.match(telemetry, /const AGRICULTURAL_ROLES = \[ROLES\.MEMBER_FARMER, ROLES\.FARM_MANAGER\]/);
+  assert.match(telemetry, /router\.get\('\/', requireAuth, requireRole\(AGRICULTURAL_ROLES\)/);
+  assert.doesNotMatch(telemetry, /ROLES\.SRA_ADMIN|ROLES\.SUPER_ADMIN/);
   assert.match(diagnostics, /router\.get\('\/', requireAuth, requireRole\(\[ROLES\.SUPER_ADMIN\]\)/);
   assert.match(server, /app\.use\('\/api\/system-diagnostics', systemDiagnosticsRoutes\)/);
 });

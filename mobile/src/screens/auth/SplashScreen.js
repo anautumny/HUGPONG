@@ -45,7 +45,9 @@ export default function SplashScreen({ navigation }) {
         if (authRes.success) {
           navigation.replace('MainTabs');
         } else {
-          navigation.replace('Login');
+          navigation.replace('Login', authRes.adminOnlineRequired ? {
+            sessionNotice: 'SRA Admin requires a live HUGPONG connection. Reconnect to the internet and sign in again.'
+          } : undefined);
         }
       } catch (e) {
         if (active) navigation.replace('Login');

@@ -50,7 +50,7 @@ export default function DashboardView() {
         setDashboardData(prev => ({
           ...prev,
           isLoading: false,
-          error: 'Unable to synchronize real-time dashboard data. Please check connection.'
+          error: err?.message || 'Unable to synchronize dashboard data from HUGPONG.'
         }));
       }
     });

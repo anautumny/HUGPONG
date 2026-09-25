@@ -164,10 +164,10 @@ Observed implementation:
 
 - Web exposes Dashboard, SRA Audit Center, SRA Price Monitor, Block Farm Registry, User Management, and Settings.
 - Mobile exposes Dashboard, Field Ops/Audit Desk, Analytics, and Profile; Planner is hidden.
-- Mobile blocks SRA Admin while offline.
-- Web and mobile can scan/manual-enter report data, inspect a report, and issue an SRA seal.
-- Certification is performed directly in Firestore from clients; the server has no audit-report endpoint.
-- Certification code also marks operation logs `Certified`, contrary to the canonical log lifecycle.
+- Mobile signs out SRA Admin when internet or the HUGPONG API becomes unavailable; district data is loaded from a fresh authorization-scoped server snapshot before the SRA workspace opens.
+- Web and mobile can scan/manual-enter report data, inspect a report, and issue an SRA seal. QR and manual-code verification are online-only and server-authoritative; mobile does not retain an offline SRA verification fallback.
+- Verification, QR import, return, and certification use role-protected audit-report API endpoints and authoritative Firestore transactions.
+- SRA certification updates the audit report and its audit trail; it does not rewrite operation-log lifecycle status.
 
 ### Super Admin
 

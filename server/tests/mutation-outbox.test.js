@@ -27,12 +27,14 @@ test('offline creation produces one explicit durable mutation envelope', () => {
   const item = createMutationEnvelope('operation_log', payload, {
     now: 1_700_000_000_000,
     random: 'ABC12345',
+    ownerUserId: '04000001',
     baseVersion: null
   });
 
   assert.equal(item.mutationId, 'MUT-LOYW3V28-ABC12345');
   assert.equal(item.idempotencyKey, item.mutationId);
   assert.equal(item.entityKey, 'operation_logs/LOG-OFFLINE-1');
+  assert.equal(item.ownerUserId, '04000001');
   assert.deepEqual(item.payload, payload);
   assert.equal(item.payload.cropYearCycle, '2026-2027');
   assert.equal(item.payload.stageNumberAtRecord, 4);
