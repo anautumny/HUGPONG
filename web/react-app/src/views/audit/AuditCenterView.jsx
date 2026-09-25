@@ -26,6 +26,7 @@ import {
 } from '../../services/auditService';
 import { subscribeToOperationsData } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
+import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
 export default function AuditCenterView() {
   const { user, roleKey } = useAuth();
@@ -54,6 +55,25 @@ export default function AuditCenterView() {
 
   const isFarmManager = roleKey === ROLE_KEYS.FARM_MANAGER;
   const isSraAdmin = roleKey === ROLE_KEYS.SRA_ADMIN;
+
+  const upsertReport = useCallback((nextReport) => {
+    if (!nextReport) return;
+    const nextId = nextReport.id || nextReport.reportId;
+    setReports(current => {
+      const withoutCurrent = current.filter(report => (report.id || report.reportId) !== nextId);
+      return [nextReport, ...withoutCurrent];
+    });
+    setSelectedReport(nextReport);
+  }, []);
+
+  const activeReports = useMemo(
+    () => reports.filter(report => canonicalAuditStatus(report.status) !== AUDIT_STATUS.CERTIFIED),
+    [reports]
+  );
+  const pendingDeliveryReport = useMemo(
+    () => activeReports.find(report => [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION].includes(canonicalAuditStatus(report.status))) || null,
+    [activeReports]
+  );
 
   useEffect(() => {
     if (isFarmManager && searchParams.get('compile') === '1') {
@@ -167,8 +187,7 @@ export default function AuditCenterView() {
       const response = await certifyAuditReport(reportId, { certificationNotes: notes });
       if (response.success && response.data) {
         showToast('SRA Digital Seal issued for the audit report.', 'success');
-        // Update selected report in place
-        setSelectedReport(prev => prev && (prev.id === reportId || prev.reportId === reportId) ? { ...prev, ...response.data } : prev);
+        upsertReport(response.data);
       } else {
         throw new Error(response.error || 'Server rejected audit certification.');
       }
@@ -183,14 +202,14 @@ export default function AuditCenterView() {
   // Handle compilation success (Farm Manager)
   const handleCompileSuccess = (compiledData) => {
     showToast(`Audit report ${compiledData.id || compiledData.period} compiled successfully!`, 'success');
-    setSelectedReport(compiledData);
+    upsertReport(compiledData);
   };
 
   const handleSubmitReport = async reportId => {
     setIsSubmitting(true);
     try {
       const response = await submitAuditReport(reportId);
-      setSelectedReport(response.data);
+      upsertReport(response.data);
       showToast('Submitted to SRA. The audit is awaiting review.', 'success');
     } catch (error) {
       showToast(error.message || 'Submission failed. The compiled audit remains saved.', 'error');
@@ -203,7 +222,7 @@ export default function AuditCenterView() {
     setIsReturning(true);
     try {
       const response = await returnAuditReport(reportId, reason, baseVersion);
-      setSelectedReport(response.data);
+      upsertReport(response.data);
       showToast('Audit returned to the Farm Manager with the correction reason.', 'success');
     } catch (error) {
       showToast(error.message || 'Unable to return this audit.', 'error');
@@ -262,10 +281,13 @@ export default function AuditCenterView() {
               <Button
                 variant="primary"
                 size="md"
-                onClick={() => setShowCompileModal(true)}
+                onClick={() => {
+                  if (pendingDeliveryReport) setSelectedReport(pendingDeliveryReport);
+                  setShowCompileModal(true);
+                }}
                 icon={FileCheck2}
               >
-                Compile Monthly Audit
+                {pendingDeliveryReport ? 'Compiled Report Available' : 'Compile Monthly Audit'}
               </Button>
             )}
 
@@ -291,7 +313,7 @@ export default function AuditCenterView() {
             />}
 
             <AuditQueue
-              reports={reports}
+              reports={activeReports}
               selectedReportId={selectedReport?.id || selectedReport?.reportId}
               onSelectReport={(report) => setSelectedReport(report)}
               isLoading={isLoadingReports}
@@ -301,7 +323,7 @@ export default function AuditCenterView() {
                 setReportsError(null);
               }}
               blockFarms={blockFarms}
-              title={isSraAdmin ? 'Audit Inbox' : 'My Monthly Audits'}
+              title={isSraAdmin ? 'Audit Inbox' : 'Active Audit Reports'}
             />
           </div>
 
@@ -333,6 +355,7 @@ export default function AuditCenterView() {
             fields={fields}
             operations={operations}
             existingReports={reports}
+            initialReport={pendingDeliveryReport}
             onSuccess={handleCompileSuccess}
           />
         </div>

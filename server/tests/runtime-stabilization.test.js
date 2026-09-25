@@ -16,6 +16,7 @@ const app = read('mobile/App.js');
 const rootNavigator = read('mobile/src/navigation/RootNavigator.js');
 const fieldOps = read('mobile/src/screens/FieldOpsScreen.js');
 const liveQrScanner = read('mobile/src/components/LiveQRScanner.js');
+const webQrVerifier = read('web/react-app/src/components/audit/QRVerifierPanel.jsx');
 const memberHome = read('mobile/src/screens/member/MemberHomeView.js');
 const mobileSchema = read('mobile/src/data/firestoreSchema.js');
 const homeScreen = read('mobile/src/screens/HomeScreen.js');
@@ -28,6 +29,7 @@ const webOperations = read('web/react-app/src/services/operationReadService.js')
 const webSchema = read('web/react-app/src/services/firestoreSchema.js');
 const webFields = read('web/react-app/src/services/fieldsService.js');
 const webAddOperation = read('web/react-app/src/components/operations/AddOperationModal.jsx');
+const webOperationsView = read('web/react-app/src/views/operations/OperationsView.jsx');
 const webSyncContext = read('web/react-app/src/context/SyncContext.jsx');
 const webSyncIndicator = read('web/react-app/src/components/layout/SyncIndicator.jsx');
 const webDashboardService = read('web/react-app/src/services/dashboardService.js');
@@ -211,31 +213,50 @@ test('Field Ops initializes local logs before evaluating hook dependencies that 
   assert.match(fieldOps, /useState\(\(\) => Array\.isArray\(operationLogs\) \? \[\.\.\.operationLogs\] : \[\]\)/);
 });
 
-test('Android QR scanner accelerates its modal and exposes camera readiness and recovery states', () => {
-  assert.match(liveQrScanner, /import \{ CameraView, useCameraPermissions \} from 'expo-camera'/);
+test('Android QR scanner uses the native device scanner and tightly cropped image decoding', () => {
+  assert.match(liveQrScanner, /CameraView, scanFromURLAsync, useCameraPermissions/);
+  assert.match(liveQrScanner, /import \* as ImagePicker from 'expo-image-picker'/);
   assert.match(liveQrScanner, /hardwareAccelerated/);
-  assert.match(liveQrScanner, /onCameraReady=/);
-  assert.match(liveQrScanner, /onMountError=/);
-  assert.match(liveQrScanner, /Retry Camera/);
-  assert.match(liveQrScanner, /cameraState !== 'ready'/);
+  assert.match(liveQrScanner, /CameraView\.launchScanner/);
+  assert.match(liveQrScanner, /CameraView\.onModernBarcodeScanned/);
+  assert.match(liveQrScanner, /CameraView\.isModernBarcodeScannerAvailable/);
+  assert.match(liveQrScanner, /Allow Camera/);
+  assert.match(liveQrScanner, /Upload QR Image/);
+  assert.match(liveQrScanner, /launchImageLibraryAsync/);
+  assert.match(liveQrScanner, /allowsEditing: true/);
+  assert.match(liveQrScanner, /aspect: \[1, 1\]/);
+  assert.match(liveQrScanner, /scanFromURLAsync/);
+  assert.match(liveQrScanner, /scanLocked/);
+  assert.doesNotMatch(liveQrScanner, /onCameraReady=|onMountError=|onBarcodeScanned=|StyleSheet\.absoluteFillObject|TextInput|showManualInput|Animated|scanLaser|cameraFrame/);
 });
 
-test('SRA manual report entry reads full packages offline while import remains server-authoritative', () => {
-  const manualScreen = liveQrScanner.indexOf('{showManualInput ? (');
-  const cameraView = liveQrScanner.indexOf('<CameraView');
-  assert.ok(manualScreen >= 0 && cameraView > manualScreen, 'manual entry must be the first mutually exclusive scanner branch');
-  assert.match(liveQrScanner, /!permission\?\.granted \|\| showManualInput/);
-  assert.match(liveQrScanner, /Enter Report Code Manually/);
-  assert.match(liveQrScanner, /Back to Scanner/);
-  assert.match(liveQrScanner, /Complete QR packages can be read offline/);
-  assert.doesNotMatch(liveQrScanner, /manualDrawer|Enter Hash Manually/);
-
+test('SRA receive workflow separates real scanning from online transfer-code lookup', () => {
+  assert.match(fieldOps, /Receive Audit Report/);
+  assert.match(fieldOps, />Scan QR</);
+  assert.match(fieldOps, />Input Code</);
+  assert.match(fieldOps, /source === 'manual'/);
+  assert.match(fieldOps, /\^\(AUD\|RPT\|HUG\)-\[A-Z0-9-\]\+\$/);
   assert.match(mutationService, /\/api\/audit-reports\/qr\/verify/);
   assert.match(fieldOps, /assembleAuditQrParts/);
   assert.match(fieldOps, /await verifyAuditQr\(pendingScannedPayload\)/);
   assert.match(fieldOps, /await importAuditQr\(pendingScannedPayload\)/);
+  assert.match(webQrVerifier, /BrowserQRCodeReader/);
+  assert.match(webQrVerifier, /decodeFromImageUrl/);
+  assert.match(webQrVerifier, />\s*Upload QR\s*</);
+  assert.match(webQrVerifier, />\s*Input Code\s*</);
+  assert.doesNotMatch(webQrVerifier, /decodeFromConstraints|getUserMedia|WebQrCameraScanner|>\s*Scan QR\s*</);
+  assert.doesNotMatch(webQrVerifier, /textarea/);
   assert.doesNotMatch(fieldOps, /commitExplicitMutation\('audit_qr_import'/);
   assert.doesNotMatch(fieldOps, /STRUCTURE_VALID_CLOUD_PENDING|CACHED_AUTHORITY_MATCH|offline structural verification/);
+});
+
+test('compiled operations expose audit-state indicators on Web and Mobile', () => {
+  assert.match(webOperationsView, /operationAuditCoverage\(auditReports\)/);
+  assert.match(webOperationsView, /<AuditCoverageBadge coverage=\{auditCoverage\}/);
+  assert.match(webOperationsView, /header: 'Audit'/);
+  assert.match(fieldOps, /operationAuditCoverage\(auditReports\)/);
+  assert.match(fieldOps, /auditCoverage\.label/);
+  assert.match(fieldOps, /Audit Report:/);
 });
 
 test('SRA-only mutations bypass and clear the mobile offline outbox', () => {
@@ -303,8 +324,9 @@ test('new operation forms cannot attach photos while legacy evidence remains sch
   assert.match(webSchema, /photoEvidence: photoEvidence\(value\.photoEvidence\)/);
   assert.doesNotMatch(fieldOps, /photoEvidence|ImagePicker|preparePhotoEvidence|form_attach_photo/);
   assert.doesNotMatch(webAddOperation, /photoEvidence|resizePhotoEvidence|Choose Photo|Field Photo/);
-  assert.doesNotMatch(mobilePackage, /expo-image-picker|expo-image-manipulator/);
-  assert.doesNotMatch(mobileAppConfig, /expo-image-picker/);
+  assert.match(mobilePackage, /expo-image-picker/);
+  assert.match(mobileAppConfig, /expo-image-picker/);
+  assert.doesNotMatch(mobilePackage, /expo-image-manipulator/);
   assert.match(cropCycleOperations, /submissionSource:[^\n]+\n\s*photoEvidence: null/);
   assert.match(cropCycleOperations, /photoEvidence: existing\.photoEvidence \|\| null/);
 

@@ -185,18 +185,30 @@ export function subscribeToAuthenticatedResource(path, {
 } = {}) {
   let active = true;
   let inFlight = false;
+  let forcedRefreshQueued = false;
   const resources = affectedResources(path);
 
   const refresh = async ({ force = false } = {}) => {
-    if (!active || inFlight) return;
+    if (!active) return;
+    if (inFlight) {
+      // A mutation can complete while an older GET is still in flight. Never
+      // let that stale response become the final subscription value; queue one
+      // authoritative read after it settles instead of dropping invalidation.
+      if (force) forcedRefreshQueued = true;
+      return;
+    }
     inFlight = true;
     try {
       const result = await authenticatedRead(path, { force });
-      if (active && typeof onData === 'function') onData(result);
+      if (active && !forcedRefreshQueued && typeof onData === 'function') onData(result);
     } catch (error) {
       if (active && typeof onError === 'function') onError(error);
     } finally {
       inFlight = false;
+      if (active && forcedRefreshQueued) {
+        forcedRefreshQueued = false;
+        void refresh({ force: true });
+      }
     }
   };
 

@@ -110,61 +110,21 @@ export async function importAuditQr(payload) {
   return authenticatedRequest('/api/audit-reports/qr/import', { method: 'POST', body: { payload } });
 }
 
+export async function verifyAuditReportIntegrity(report) {
+  if (!globalThis.crypto?.subtle) throw new Error('Secure audit verification is not available in this browser.');
+  const canonical = JSON.stringify({
+    reportId: report?.reportId || report?.id,
+    blockFarmId: report?.blockFarmId,
+    period: report?.periodKey || report?.period,
+    operationSnapshots: report?.operationSnapshots || []
+  });
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+  const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  const expected = `HUG-${hex.slice(0, 24).toUpperCase()}`;
+  return expected === (report?.integrityHash || report?.qrHash);
+}
+
 export {
   createAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
   decodeAuditQrPart, assembleAuditQrParts, validateCanonicalAuditReport
 };
-
-/**
- * Extract canonical HUGPONG audit hash or report ID from raw QR text or URL
- */
-export function extractAuditHash(rawText) {
-  if (!rawText) return null;
-  const str = String(rawText).trim();
-
-  if (str.startsWith('{')) {
-    try {
-      const payload = decodeAuditQrPayload(str);
-      return payload.reportId;
-    } catch {
-      return null;
-    }
-  }
-
-  // Match HUG-... hash (e.g. HUG-202609-XXXX or HUG-XXXX)
-  const hugMatch = str.match(/(HUG-[A-Z0-9-]+)/i);
-  if (hugMatch) return hugMatch[1].toUpperCase();
-
-  // Match RPT-... report ID (e.g. RPT-2026-09-BF01-01)
-  const rptMatch = str.match(/(RPT-[A-Z0-9-]+)/i);
-  if (rptMatch) return rptMatch[1].toUpperCase();
-
-  // If text itself looks like an alphanumeric code without prefix
-  if (/^[A-Z0-9-]{6,40}$/i.test(str)) {
-    return str.toUpperCase();
-  }
-
-  return null;
-}
-
-/**
- * Attempt to decode a QR code from an image File using native BarcodeDetector
- */
-export async function decodeQRCodeFromImage(file) {
-  if (!file) throw new Error('No image file provided.');
-
-  if ('BarcodeDetector' in window) {
-    try {
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      const imgBitmap = await createImageBitmap(file);
-      const barcodes = await detector.detect(imgBitmap);
-      if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
-        return barcodes[0].rawValue;
-      }
-    } catch (e) {
-      console.warn('[AuditService] BarcodeDetector error:', e);
-    }
-  }
-
-  throw new Error('Could not decode QR code from this photo. Please ensure good lighting or enter the audit hash code manually.');
-}

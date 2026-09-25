@@ -21,7 +21,7 @@ export default function QRCodeView({
 
     QRCode.toString(payload, {
       type: 'svg',
-      margin: 1,
+      margin: 4,
       width: size,
       color: {
         dark: color,

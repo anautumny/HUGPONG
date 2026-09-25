@@ -19,9 +19,12 @@ const LEGACY_STATUS = Object.freeze({
 const QR_SCHEMA_VERSION = 3;
 const QR_TYPE = 'HUGPONG_AUDIT_TRANSFER';
 const QR_PART_TYPE = 'HUGPONG_AUDIT_PART';
-const QR_SINGLE_MAX_LENGTH = 2200;
-const AUDIT_DELIVERY_METHOD = Object.freeze({ CLOUD: 'CLOUD', QR: 'QR' });
-const AUDIT_DELIVERY_STATUS = Object.freeze({ READY: 'READY', SUBMITTED: 'SUBMITTED', RECEIVED: 'RECEIVED' });
+// Keep each symbol sparse enough to scan reliably from another phone screen.
+// The multipart envelope adds roughly 200 characters around each data chunk.
+const QR_SINGLE_MAX_LENGTH = 600;
+const QR_PART_DATA_LENGTH = 350;
+const AUDIT_DELIVERY_METHOD = Object.freeze({ CLOUD: 'cloud', QR: 'qr' });
+const AUDIT_DELIVERY_STATUS = Object.freeze({ READY: 'ready', SUBMITTED: 'submitted', RECEIVED: 'received' });
 const BUSINESS_TIME_ZONE = 'Asia/Manila';
 
 function canonicalAuditStatus(value) {
@@ -123,8 +126,18 @@ function canonicalAuditReport(report = {}) {
     hectaresAudited: Number(report.hectaresAudited || 0),
     totalCost: Number(report.totalCost || 0),
     status: canonicalAuditStatus(report.status) || AUDIT_STATUS.COMPILED,
-    deliveryMethod: report.deliveryMethod || null,
-    deliveryStatus: report.deliveryStatus || AUDIT_DELIVERY_STATUS.READY,
+    reviewStatus: report.reviewStatus || ({
+      [AUDIT_STATUS.COMPILED]: 'not_submitted',
+      [AUDIT_STATUS.PENDING_SUBMISSION]: 'not_submitted',
+      [AUDIT_STATUS.PENDING_REVIEW]: 'pending_review',
+      [AUDIT_STATUS.RETURNED]: 'returned',
+      [AUDIT_STATUS.CERTIFIED]: 'complete'
+    }[canonicalAuditStatus(report.status)] || 'not_submitted'),
+    certificationStatus: report.certificationStatus || (
+      canonicalAuditStatus(report.status) === AUDIT_STATUS.CERTIFIED ? 'certified' : 'not_certified'
+    ),
+    deliveryMethod: report.deliveryMethod ? String(report.deliveryMethod).toLowerCase() : null,
+    deliveryStatus: report.deliveryStatus ? String(report.deliveryStatus).toLowerCase() : AUDIT_DELIVERY_STATUS.READY,
     submittedAt: report.submittedAt || null,
     submittedByUserId: report.submittedByUserId || null,
     submissionMethod: report.submissionMethod || null,
@@ -209,7 +222,9 @@ function selectAuditCompilationBatch(eligibleOperations = [], reports = []) {
 
   const coveredOperationIds = new Set(reports
     .filter(report => canonicalAuditStatus(report?.status) !== AUDIT_STATUS.RETURNED)
-    .flatMap(report => report.operationSnapshots || report.operations || [])
+    .flatMap(report => Array.isArray(report?.sourceLogIds) && report.sourceLogIds.length
+      ? report.sourceLogIds
+      : (report.operationSnapshots || report.operations || []))
     .map(operationId)
     .filter(Boolean));
   const operations = eligibleOperations.filter(operation => !coveredOperationIds.has(operationId(operation)));
@@ -271,8 +286,22 @@ function decodeQrPayload(rawPayload) {
 
 function encodeQrParts(report) {
   const payload = encodeQrPayload(report);
-  if (Buffer.byteLength(payload, 'utf8') > QR_SINGLE_MAX_LENGTH) throw new Error('This report is too large for one offline QR. Send it through Cloud instead.');
-  return [payload];
+  if (Buffer.byteLength(payload, 'utf8') <= QR_SINGLE_MAX_LENGTH) return [payload];
+  const canonical = validateCanonicalAuditReport(report);
+  const chunks = [];
+  for (let index = 0; index < payload.length; index += QR_PART_DATA_LENGTH) {
+    chunks.push(payload.slice(index, index + QR_PART_DATA_LENGTH));
+  }
+  const transferId = `${canonical.reportId}:${canonical.integrityHash}`;
+  return chunks.map((data, index) => JSON.stringify({
+    type: QR_PART_TYPE,
+    schemaVersion: 2,
+    transferId,
+    partNumber: index + 1,
+    partCount: chunks.length,
+    encoding: 'RAW',
+    data
+  }));
 }
 
 function decodeQrPart(rawPart) {

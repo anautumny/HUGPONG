@@ -1,112 +1,201 @@
-import React, { useState, useRef } from 'react';
-import { QrCode, Upload, ShieldCheck, AlertCircle, Search, Inbox } from 'lucide-react';
+import React, { useCallback, useRef, useState } from 'react';
+import { AlertCircle, ImageUp, Inbox, Keyboard, QrCode, ShieldCheck } from 'lucide-react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import Button from '../ui/Button';
 import {
-  decodeQRCodeFromImage, verifyAuditQr, importAuditQr, createAuditQrPayload,
-  decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts
+  verifyAuditQr,
+  importAuditQr,
+  verifyAuditReportIntegrity,
+  createAuditQrPayload,
+  decodeAuditQrPayload,
+  decodeAuditQrPart,
+  assembleAuditQrParts
 } from '../../services/auditService';
 
-export default function QRVerifierPanel({
-  reports = [],
-  onSelectReport,
-  className = ''
-}) {
+const TRANSFER_CODE_PATTERN = /^(AUD|RPT|HUG)-[A-Z0-9-]+$/i;
+
+function reportIdentity(report) {
+  return report?.reportId || report?.id || '';
+}
+
+export default function QRVerifierPanel({ reports = [], onSelectReport, className = '' }) {
+  const [mode, setMode] = useState('choice');
   const [inputCode, setInputCode] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [feedback, setFeedback] = useState(null); // { type: 'success'|'error'|'info', message: string }
+  const [feedback, setFeedback] = useState(null);
   const [decodedReport, setDecodedReport] = useState(null);
   const [pendingPayload, setPendingPayload] = useState('');
+  const [alreadyImported, setAlreadyImported] = useState(false);
   const fileInputRef = useRef(null);
   const transferPartsRef = useRef(new Map());
 
-  const readAuditPackage = async (rawInput) => {
+  const resetReceiver = useCallback(() => {
+    setMode('choice');
+    setInputCode('');
+    setDecodedReport(null);
+    setPendingPayload('');
+    setAlreadyImported(false);
+    setFeedback(null);
+    transferPartsRef.current.clear();
+  }, []);
+
+  const showPreview = useCallback((report, payload, duplicate = false) => {
+    setDecodedReport(report);
+    setPendingPayload(payload);
+    setAlreadyImported(duplicate);
+    setMode('preview');
+    setFeedback({
+      type: duplicate ? 'info' : 'success',
+      message: duplicate
+        ? 'This audit report has already been imported.'
+        : 'Audit report decoded. Review the details before importing it.'
+    });
+  }, []);
+
+  const readQrPayload = useCallback(async rawInput => {
+    const raw = String(rawInput || '').trim();
+    if (!raw) return { continueScanning: true, message: 'This QR code is not a valid HUGPONG audit report.' };
     setIsProcessing(true);
-    setFeedback({ type: 'info', message: 'Reading the complete audit package...' });
+    setFeedback({ type: 'info', message: 'Validating audit report...' });
+
     try {
-      const values = String(rawInput || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
       let report;
-      let payload;
+      let payload = raw;
+      let duplicate = false;
+
       try {
-        const parts = values.map(decodeAuditQrPart);
-        const transferId = parts[0].transferId;
-        if (!transferPartsRef.current.has(transferId)) transferPartsRef.current.set(transferId, new Map());
-        const collected = transferPartsRef.current.get(transferId);
-        parts.forEach((part, index) => collected.set(part.partNumber, values[index]));
-        if (collected.size < parts[0].partCount) {
-          setFeedback({ type: 'info', message: `QR part ${parts[0].partNumber} captured. ${collected.size} of ${parts[0].partCount} parts are ready.` });
-          return;
+        const part = decodeAuditQrPart(raw);
+        if (!transferPartsRef.current.has(part.transferId)) {
+          transferPartsRef.current.set(part.transferId, new Map());
+        }
+        const collected = transferPartsRef.current.get(part.transferId);
+        collected.set(part.partNumber, raw);
+        if (collected.size < part.partCount) {
+          const message = `${collected.size} of ${part.partCount} QR parts captured. Keep scanning.`;
+          setFeedback({ type: 'info', message });
+          return { continueScanning: true, message };
         }
         report = assembleAuditQrParts(Array.from(collected.values()));
         payload = createAuditQrPayload(report);
-        transferPartsRef.current.delete(transferId);
+        transferPartsRef.current.delete(part.transferId);
       } catch (partError) {
         try {
-          report = decodeAuditQrPayload(values[0] || rawInput);
+          report = decodeAuditQrPayload(raw);
           if (report.legacyLookupOnly) throw partError;
-          payload = createAuditQrPayload(report);
         } catch {
-          const verified = await verifyAuditQr(rawInput);
+          const verified = await verifyAuditQr(raw);
+          if (!verified.data?.integrityVerified || !verified.data?.report) {
+            throw new Error('The server could not verify this audit report.');
+          }
           report = verified.data.report;
-          payload = rawInput;
+          duplicate = Boolean(verified.data.alreadyImported);
         }
       }
-      setDecodedReport(report);
-      setPendingPayload(payload);
-      setFeedback({ type: 'success', message: 'Complete report decoded. Review its contents, then confirm import to the SRA Audit Inbox.' });
-    } catch (error) {
-      setFeedback({ type: 'error', message: error.message || 'The QR audit could not be verified.' });
+
+      if (!await verifyAuditReportIntegrity(report)) {
+        throw new Error('The audit QR integrity check failed.');
+      }
+      showPreview(report, payload, duplicate);
+      return { continueScanning: false };
+    } catch {
+      const message = 'This QR code is not a valid HUGPONG audit report.';
+      setFeedback({ type: 'error', message });
+      return { continueScanning: true, message };
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [showPreview]);
 
-  const confirmImport = async () => {
-    if (!pendingPayload || !decodedReport) return;
-    setIsProcessing(true);
-    setFeedback({ type: 'info', message: 'Verifying against the authoritative report and importing...' });
-    try {
-      const verified = await verifyAuditQr(pendingPayload);
-      const imported = verified.data.alreadyImported ? verified : await importAuditQr(pendingPayload);
-      setDecodedReport(imported.data.report);
-      setFeedback({ type: 'success', message: imported.data.alreadyImported ? 'This audit was already imported; its existing record is open.' : 'Audit imported into the SRA Audit Inbox.' });
-      onSelectReport?.(imported.data.report);
-    } catch (error) {
-      setFeedback({ type: 'error', message: error.message || 'The complete report could not be imported.' });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleManualSubmit = (e) => {
-    if (e) e.preventDefault();
-    if (!inputCode.trim()) {
-      setFeedback({ type: 'error', message: 'Please enter an audit hash code.' });
+  const handleImageUpload = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || isProcessing) return;
+    if (!file.type.startsWith('image/')) {
+      setFeedback({ type: 'error', message: 'Choose an image file containing a QR code.' });
       return;
     }
-    readAuditPackage(inputCode.trim());
+
+    setIsProcessing(true);
+    setFeedback({ type: 'info', message: 'Reading uploaded QR image...' });
+    const imageUrl = URL.createObjectURL(file);
+    try {
+      const result = await new BrowserQRCodeReader().decodeFromImageUrl(imageUrl);
+      await readQrPayload(result.getText());
+    } catch {
+      setFeedback({ type: 'error', message: 'No readable QR code was found. Try a clear, uncropped image.' });
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+      setIsProcessing(false);
+    }
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleManualSubmit = async event => {
+    event.preventDefault();
+    const code = inputCode.trim().toUpperCase();
+    if (!TRANSFER_CODE_PATTERN.test(code)) {
+      setFeedback({ type: 'error', message: 'Enter a valid AUD-, RPT-, or HUG- code.' });
+      return;
+    }
 
-    setFeedback({ type: 'info', message: 'Processing uploaded QR photo...' });
     setIsProcessing(true);
-
+    setFeedback({ type: 'info', message: 'Looking up the authoritative audit report...' });
     try {
-      const rawText = await decodeQRCodeFromImage(file);
-      setInputCode(rawText);
-      setFeedback({ type: 'info', message: 'QR decoded. Reading transfer contents...' });
-      await readAuditPackage(rawText);
-    } catch (err) {
+      const verified = await verifyAuditQr(code);
+      if (!verified.data?.integrityVerified || !verified.data?.report) {
+        throw new Error('The server could not verify this audit report.');
+      }
+      showPreview(verified.data.report, code, Boolean(verified.data.alreadyImported));
+    } catch (error) {
       setFeedback({
         type: 'error',
-        message: err.message || 'Could not decode QR code from this photo. Please enter the hash code manually.'
+        message: error.status === 404
+          ? 'No audit report was found for this code.'
+          : (error.message || 'No audit report was found for this code.')
       });
     } finally {
       setIsProcessing(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const viewExistingReport = () => {
+    const id = reportIdentity(decodedReport);
+    const existing = reports.find(report => reportIdentity(report) === id) || decodedReport;
+    onSelectReport?.(existing);
+    setFeedback({ type: 'success', message: 'The existing audit report is open in the review panel.' });
+  };
+
+  const confirmImport = async () => {
+    if (!pendingPayload || !decodedReport || alreadyImported) return;
+    setIsProcessing(true);
+    setFeedback({ type: 'info', message: 'Verifying and importing the report...' });
+    try {
+      const verified = await verifyAuditQr(pendingPayload);
+      if (!verified.data?.integrityVerified) throw new Error('The server could not verify this audit report.');
+      const result = verified.data.alreadyImported ? verified : await importAuditQr(pendingPayload);
+      const report = result.data?.report;
+      if (!report) throw new Error('The authoritative audit report was not returned.');
+      setDecodedReport(report);
+      setAlreadyImported(true);
+      setFeedback({
+        type: 'success',
+        message: result.data.alreadyImported
+          ? 'This audit report has already been imported.'
+          : 'Audit imported to the SRA Audit Inbox. It is awaiting review and has not been certified.'
+      });
+      onSelectReport?.(report);
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message || 'The audit report could not be imported.' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const cancelPreview = () => {
+    setDecodedReport(null);
+    setPendingPayload('');
+    setAlreadyImported(false);
+    setFeedback(null);
+    setMode('choice');
   };
 
   return (
@@ -116,118 +205,82 @@ export default function QRVerifierPanel({
           <div className="w-8 h-8 rounded-lg bg-primary-bg dark:bg-primary/20 text-primary flex items-center justify-center shrink-0">
             <QrCode className="w-4 h-4" />
           </div>
-          <h3 className="text-base font-bold text-hug-text tracking-tight">
-            SRA QR Audit Verifier
-          </h3>
+          <h3 className="text-base font-bold text-hug-text tracking-tight">Receive Audit Report</h3>
         </div>
         <p className="text-xs text-hug-muted leading-relaxed">
-          Scan or upload a compiled HUGPONG audit package. Decoding, integrity verification, SRA review, and certification remain separate states.
+          Receive a Farm Manager report by uploading its QR image or entering its code.
         </p>
       </div>
 
-      {/* Upload button */}
-      <div>
-        <label
-          htmlFor="qr-file-input"
-          className="w-full border border-farm-blue/30 bg-farm-blue-bg/40 hover:bg-farm-blue/10 dark:bg-farm-blue/10 text-farm-blue dark:text-blue-400 text-xs font-bold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-center shadow-2xs group"
-        >
-          <Upload className="w-4 h-4 transition-transform group-hover:-translate-y-0.5" />
-          <span>Upload QR Photo / Screenshot</span>
-          <input
-            id="qr-file-input"
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileUpload}
-            disabled={isProcessing}
-          />
-        </label>
-      </div>
-
-      {/* Divider */}
-      <div className="relative flex items-center py-0.5">
-        <div className="flex-grow border-t border-border"></div>
-        <span className="shrink-0 mx-3 text-[10px] uppercase font-bold text-hug-muted tracking-wider">
-          or enter manually
-        </span>
-        <div className="flex-grow border-t border-border"></div>
-      </div>
-
-      {/* Manual Input Form */}
-      <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
-        <div>
-          <label htmlFor="manual-qr-input" className="block text-xs font-semibold text-hug-text mb-1.5">
-            Audit QR Package
-          </label>
-          <textarea
-            id="manual-qr-input"
-            value={inputCode}
-            onChange={(e) => setInputCode(e.target.value)}
-            placeholder="Paste one QR part, all parts on separate lines, or an audit report code"
-            className="w-full min-h-24 rounded-xl border border-border bg-bg px-3 py-2 font-mono text-xs text-hug-text"
-            disabled={isProcessing}
-          />
-        </div>
-
-        <Button
-          type="submit"
-          variant="primary"
-          size="md"
-          className="w-full justify-center"
-          isLoading={isProcessing}
-          loadingText="Reading report..."
-          icon={Search}
-        >
-          Read Audit Report
-        </Button>
-      </form>
-
-      {decodedReport && (
-        <div className="rounded-xl border border-border bg-bg p-3 text-xs">
-          <div className="flex justify-between gap-3"><strong>{decodedReport.blockFarmName || decodedReport.blockFarmId}</strong><span>{decodedReport.periodKey}</span></div>
-          <p className="mt-2 text-hug-muted">Manager: {decodedReport.compiledByName || decodedReport.compiledByUserId}</p>
-          <p className="text-hug-muted">{decodedReport.fieldCount} fields · {decodedReport.memberCount} members · {decodedReport.operationCount} operations · PHP {Number(decodedReport.totalCost || 0).toLocaleString()}</p>
-          <div className="mt-3 max-h-28 overflow-y-auto rounded-lg border border-border bg-white dark:bg-surface divide-y divide-border">
-            {(decodedReport.fieldSnapshots || []).map(field => (
-              <div key={field.fieldId} className="p-2 flex items-start justify-between gap-3">
-                <div className="min-w-0"><strong className="block truncate">{field.fieldId}</strong><span className="text-[10px] text-hug-muted">{field.memberName || field.memberId || 'Vacant / Unallocated'} · {field.cropYearCycle || 'No crop cycle'}</span></div>
-                <span className="text-[10px] font-semibold whitespace-nowrap">{Number(field.areaHa || 0).toLocaleString()} Ha · {field.operationCount} logs</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 max-h-36 overflow-y-auto rounded-lg border border-border bg-white dark:bg-surface divide-y divide-border">
-            {(decodedReport.operationSnapshots || []).map(operation => (
-              <div key={operation.operationLogId} className="p-2 flex items-start justify-between gap-3">
-                <div className="min-w-0"><strong className="block truncate">{operation.operationName || operation.operationDefinitionId}</strong><span className="text-[10px] text-hug-muted">{operation.fieldId} · {operation.performedOn}</span></div>
-                <span className="font-semibold whitespace-nowrap">PHP {Number(operation.totalCost || 0).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-          <Button variant="primary" size="md" className="w-full justify-center mt-3" icon={Inbox} onClick={confirmImport} disabled={isProcessing} isLoading={isProcessing} loadingText="Importing report...">
-            Import to Audit Inbox
+      {mode === 'choice' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          <Button variant="primary" size="md" className="w-full" icon={ImageUp} onClick={() => fileInputRef.current?.click()} disabled={isProcessing} isLoading={isProcessing} loadingText="Reading QR...">
+            Upload QR
+          </Button>
+          <Button variant="secondary" size="md" className="w-full" icon={Keyboard} onClick={() => { setFeedback(null); setMode('manual'); }}>
+            Input Code
           </Button>
         </div>
       )}
 
-      {/* Status Feedback Banner */}
+      {mode === 'manual' && (
+        <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
+          <div>
+            <label htmlFor="audit-transfer-code" className="block text-xs font-semibold text-hug-text mb-1.5">Code</label>
+            <input
+              id="audit-transfer-code"
+              value={inputCode}
+              onChange={event => setInputCode(event.target.value)}
+              placeholder="AUD-... or HUG-..."
+              autoCapitalize="characters"
+              autoComplete="off"
+              className="w-full rounded-xl border border-border bg-bg px-3 py-2.5 font-mono text-sm text-hug-text"
+              disabled={isProcessing}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant="secondary" size="md" onClick={resetReceiver} disabled={isProcessing}>Cancel</Button>
+            <Button type="submit" variant="primary" size="md" isLoading={isProcessing} loadingText="Looking up...">Submit</Button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'preview' && decodedReport && (
+        <div className="rounded-xl border border-border bg-bg p-3 text-xs">
+          <h4 className="text-sm font-bold text-hug-text">Audit Report Found</h4>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-hug-muted">
+            <dt>Report ID</dt><dd className="text-right font-semibold text-hug-text break-all">{reportIdentity(decodedReport)}</dd>
+            <dt>Block Farm</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.blockFarmName || decodedReport.blockFarmId}</dd>
+            <dt>Manager</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.compiledByName || decodedReport.compiledByUserId}</dd>
+            <dt>Period</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.periodKey}</dd>
+            <dt>Fields</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.fieldCount ?? decodedReport.fieldSnapshots?.length ?? 0}</dd>
+            <dt>Operations</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.operationCount ?? decodedReport.operationSnapshots?.length ?? 0}</dd>
+            <dt>Total Cost</dt><dd className="text-right font-semibold text-hug-text">PHP {Number(decodedReport.totalCost || 0).toLocaleString()}</dd>
+            <dt>Generated</dt><dd className="text-right font-semibold text-hug-text">{decodedReport.compiledAt ? new Date(decodedReport.compiledAt).toLocaleString() : 'Unavailable'}</dd>
+          </dl>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button variant="secondary" size="sm" onClick={cancelPreview} disabled={isProcessing}>Cancel</Button>
+            {alreadyImported ? (
+              <Button variant="primary" size="sm" icon={Inbox} onClick={viewExistingReport}>View Existing Report</Button>
+            ) : (
+              <Button variant="primary" size="sm" icon={Inbox} onClick={confirmImport} isLoading={isProcessing} loadingText="Importing...">Import Report</Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {feedback && (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`p-3 rounded-xl text-xs flex items-start gap-2.5 transition-all ${
-            feedback.type === 'success'
-              ? 'bg-success-bg text-success border border-success/30'
-              : feedback.type === 'error'
+        <div role="status" aria-live="polite" className={`p-3 rounded-xl text-xs flex items-start gap-2.5 ${
+          feedback.type === 'success'
+            ? 'bg-success-bg text-success border border-success/30'
+            : feedback.type === 'error'
               ? 'bg-danger-bg dark:bg-danger/20 text-danger border border-danger/30'
               : 'bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light border border-primary/20'
-          }`}
-        >
-          {feedback.type === 'success' ? (
-            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-success" />
-          ) : (
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          )}
+        }`}>
+          {feedback.type === 'success'
+            ? <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+            : <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />}
           <span className="flex-1 leading-relaxed">{feedback.message}</span>
         </div>
       )}

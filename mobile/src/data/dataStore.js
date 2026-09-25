@@ -2345,6 +2345,28 @@ export const listenToCloudSync = () => {
         const reportId = String(report.reportId || report.id);
         reconciledReportsById.set(reportId, { ...(reconciledReportsById.get(reportId) || {}), ...report });
       });
+      // Manager audit reports are append-only lifecycle records. A background
+      // read may have started before compilation was acknowledged, so its
+      // response can omit the just-created report. Preserve the manager's
+      // canonical local acknowledgement until a later scoped read includes it.
+      // SRA inbox reads deliberately do not use this merge because omission
+      // there can mean a report was certified and moved into history.
+      if (activeRole === ROLES.FARM_MANAGER) {
+        const assignedFarmIds = new Set(remoteBlockFarms
+          .filter(farm => String(farm.managerUserId || '').trim() === sessionUserId)
+          .map(farm => String(farm.id)));
+        auditReports.forEach(report => {
+          const reportId = String(report?.reportId || report?.id || '').trim();
+          if (!reportId) return;
+          if (!assignedFarmIds.has(String(report.blockFarmId || ''))) return;
+          const remoteReport = reconciledReportsById.get(reportId);
+          const localUpdatedAt = Date.parse(report.updatedAt || report.compiledAt || report.createdAt || '') || 0;
+          const remoteUpdatedAt = Date.parse(remoteReport?.updatedAt || remoteReport?.compiledAt || remoteReport?.createdAt || '') || 0;
+          if (!remoteReport || localUpdatedAt > remoteUpdatedAt) {
+            reconciledReportsById.set(reportId, { ...(remoteReport || {}), ...report });
+          }
+        });
+      }
       const reconciledReports = sortNewestFirst(Array.from(reconciledReportsById.values()), ['compiledAt', 'createdAt']);
       const remoteHistory = isMember ? [] : sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt']);
 
@@ -2797,7 +2819,10 @@ export const initializeOfflineStorage = async () => {
     if (Array.isArray(stored[STORAGE_KEYS.AUDIT_REPORTS]) && stored[STORAGE_KEYS.AUDIT_REPORTS].length > 0) {
       auditReports.length = 0;
       auditReports.push(...sortNewestFirst(
-        stored[STORAGE_KEYS.AUDIT_REPORTS].filter(a => a && ['PENDING', 'COMPILED', 'PENDING_SUBMISSION', 'PENDING_REVIEW', 'RETURNED', 'CERTIFIED'].includes(a.status)),
+        stored[STORAGE_KEYS.AUDIT_REPORTS]
+          .filter(Boolean)
+          .map(report => fromAuditReportDocument(report.id || report.reportId, report))
+          .filter(report => ['PENDING_REVIEW', 'COMPILED', 'PENDING_SUBMISSION', 'RETURNED', 'CERTIFIED'].includes(report.status)),
         ['compiledAt', 'createdAt']
       ));
     }

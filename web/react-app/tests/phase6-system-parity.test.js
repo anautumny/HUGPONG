@@ -120,6 +120,24 @@ test('web and Android select the newest audit only inside the assigned farm and 
   }
 });
 
+test('web and Android mark submitted operations with their authoritative audit state', async () => {
+  const mobileAuditWorkflow = await loadMobileAuditWorkflow();
+  const reports = [
+    { id: 'AUD-COMPILED', status: 'COMPILED', sourceLogIds: ['LOG-1', 'LOG-2'] },
+    { id: 'AUD-SUBMITTED', status: 'PENDING_REVIEW', sourceLogIds: ['LOG-2'] },
+    { id: 'AUD-CERTIFIED', status: 'CERTIFIED', sourceLogIds: ['LOG-1'] },
+    { id: 'AUD-RETURNED', status: 'RETURNED', sourceLogIds: ['LOG-3'] }
+  ];
+
+  for (const workflow of [webAuditWorkflow, mobileAuditWorkflow]) {
+    const coverage = workflow.operationAuditCoverage(reports);
+    assert.equal(coverage.get('LOG-1').label, 'Compiled · SRA Certified');
+    assert.equal(coverage.get('LOG-2').label, 'Compiled · Submitted to SRA');
+    assert.equal(coverage.get('LOG-3').label, 'Compiled · Returned for Correction');
+    assert.deepEqual([...workflow.reportedOperationIds(reports)].sort(), ['LOG-1', 'LOG-2']);
+  }
+});
+
 test('server, web, and Android QR transfers reconstruct the same complete canonical report', async () => {
   const mobileAuditWorkflow = await loadMobileAuditWorkflow();
   const operation = {
@@ -127,6 +145,7 @@ test('server, web, and Android QR transfers reconstruct the same complete canoni
     blockFarmId: 'BF-001', cropYearCycle: '2026-2027', operationDefinitionId: 'SRA-04',
     operationName: 'Planting', category: 'plant', variety: 'VMC 84-524', stageNumber: 2,
     performedOn: '2026-09-20', areaHa: 2, peopleCount: 4, quantity: null, totalCost: 1000,
+    notes: Array.from({ length: 400 }, (_, index) => `${index}:${Math.sin(index + 0.123456789).toString(36)}`).join('|'),
     lineItems: [{ lineItemId: 'LINE-1', description: 'Seedcane', quantity: 1, unit: 'lot', unitCost: 1000, subtotal: 1000 }],
     amendments: [], submittedByUserId: 'MEM-001', submissionSource: 'MEMBER',
     createdAt: '2026-09-20T08:00:00.000Z', updatedAt: '2026-09-20T08:00:00.000Z'
@@ -148,9 +167,17 @@ test('server, web, and Android QR transfers reconstruct the same complete canoni
   assert.equal(serverDecoded.operationSnapshots.length, 1);
   assert.equal(serverDecoded.fieldSnapshots[0].memberName, 'Farmer One');
   const serverParts = serverAuditWorkflow.encodeQrParts(report);
+  assert.ok(serverParts.length > 1, 'large complete reports must use a multipart QR transfer');
   assert.deepEqual(webAuditWorkflow.createAuditQrParts(report), serverParts);
   assert.deepEqual(mobileAuditWorkflow.createAuditQrParts(report), serverParts);
-  serverParts.forEach(part => assert.doesNotThrow(() => QRCode.create(part, { errorCorrectionLevel: 'M' })));
+  assert.deepEqual(plain(serverAuditWorkflow.assembleQrParts([...serverParts].reverse())), plain(serverDecoded));
+  assert.deepEqual(plain(webAuditWorkflow.assembleAuditQrParts([...serverParts].reverse())), plain(serverDecoded));
+  assert.deepEqual(plain(mobileAuditWorkflow.assembleAuditQrParts([...serverParts].reverse())), plain(serverDecoded));
+  serverParts.forEach(part => assert.ok(new TextEncoder().encode(part).length <= 700));
+  serverParts.forEach(part => {
+    const qr = QRCode.create(part, { errorCorrectionLevel: 'M' });
+    assert.ok(qr.modules.size <= 101, 'each QR part must stay sparse enough for mobile scanning');
+  });
 });
 
 test('Farm Manager Field Operations exposes monthly audit compilation directly', () => {

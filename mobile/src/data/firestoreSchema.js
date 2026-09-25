@@ -462,8 +462,10 @@ export function toAuditReportDocument(value = {}, context = {}) {
     submittedByUserId: value.submittedByUserId || null,
     submissionMethod: value.submissionMethod || null,
     submissionMethods: Array.isArray(value.submissionMethods) ? value.submissionMethods : [],
-    deliveryMethod: value.deliveryMethod || null,
-    deliveryStatus: value.deliveryStatus || 'READY',
+    deliveryMethod: value.deliveryMethod ? String(value.deliveryMethod).toLowerCase() : null,
+    deliveryStatus: value.deliveryStatus ? String(value.deliveryStatus).toLowerCase() : 'ready',
+    reviewStatus: value.reviewStatus || (status === 'PENDING_REVIEW' ? 'pending_review' : status === 'CERTIFIED' ? 'complete' : status === 'RETURNED' ? 'returned' : 'not_submitted'),
+    certificationStatus: value.certificationStatus || (status === 'CERTIFIED' ? 'certified' : 'not_certified'),
     returnReason: value.returnReason || ''
   };
 }

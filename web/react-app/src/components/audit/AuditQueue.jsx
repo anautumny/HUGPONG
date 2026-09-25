@@ -13,7 +13,7 @@ export default function AuditQueue({ reports = [], selectedReportId = null, onSe
           <Inbox className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-bold uppercase tracking-wider text-hug-text">{title}</h3>
         </div>
-        <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">{reports.length} {title === 'Audit Inbox' ? 'Awaiting Review' : 'Reports'}</span>
+        <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">{reports.length} {title === 'Audit Inbox' ? 'Awaiting Review' : 'Active'}</span>
       </div>
       <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1">
         {isLoading && reports.length === 0 ? [1, 2, 3].map(key => <div key={key} className="h-20 rounded-xl bg-bg animate-pulse" />) : error ? (
@@ -24,8 +24,8 @@ export default function AuditQueue({ reports = [], selectedReportId = null, onSe
         ) : reports.length === 0 ? (
           <div className="py-10 text-center border border-dashed border-border rounded-xl">
             <Inbox className="w-8 h-8 mx-auto text-hug-muted opacity-50" />
-            <p className="text-xs font-semibold text-hug-text mt-2">Inbox is clear</p>
-            <p className="text-[11px] text-hug-muted mt-1">No audits currently require SRA review.</p>
+            <p className="text-xs font-semibold text-hug-text mt-2">{title === 'Audit Inbox' ? 'Inbox is clear' : 'No active audit reports'}</p>
+            <p className="text-[11px] text-hug-muted mt-1">{title === 'Audit Inbox' ? 'No audits currently require SRA review.' : 'Compiled and submitted reports remain here until certification.'}</p>
           </div>
         ) : reports.map(report => {
           const selected = selectedReportId === report.id || selectedReportId === report.reportId;

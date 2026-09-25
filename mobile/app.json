@@ -25,6 +25,12 @@
           "barcodeScannerEnabled": true
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "HUGPONG needs photo access only when you choose an image containing an SRA audit QR code."
+        }
+      ],
       "expo-status-bar",
       "expo-font",
       [

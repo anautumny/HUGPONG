@@ -348,7 +348,8 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const report = {
       rootReportId: rootAuditReportId(farm.id, period), reportVersion: version, previousVersionId: latest?.id || null,
       blockFarmId: farm.id, blockFarmName: farm.name || farm.code || farm.id, periodKey: period,
-      status: AUDIT_STATUS.COMPILED, operationSnapshots, fieldSnapshots, sourceLogIds,
+      status: AUDIT_STATUS.COMPILED, reviewStatus: 'not_submitted', certificationStatus: 'not_certified',
+      operationSnapshots, fieldSnapshots, sourceLogIds,
       memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,
       ...summarizeSnapshots(operationSnapshots, activeFields),
       compiledByUserId: actorId, compiledByName: actorName, compiledAt: now,
@@ -408,6 +409,8 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
           ...canonicalPayload,
           rootReportId: canonicalPayload.rootReportId || rootAuditReportId(canonicalPayload.blockFarmId, canonicalPayload.periodKey),
           status: AUDIT_STATUS.PENDING_REVIEW,
+          reviewStatus: 'pending_review',
+          certificationStatus: 'not_certified',
           qrSchemaVersion: QR_SCHEMA_VERSION,
           integrityHash: canonicalPayload.integrityHash,
           qrHash: canonicalPayload.qrHash || canonicalPayload.integrityHash,
@@ -430,7 +433,7 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
       const expectedHash = createAuditHash(snapshot.id, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
       if (expectedHash !== payload.integrityHash || expectedHash !== (report.integrityHash || report.qrHash)) throw Object.assign(new Error('The audit QR integrity check failed.'), { status: 422 });
       if (report.status !== AUDIT_STATUS.COMPILED) return { report, integrityVerified: true, alreadyImported: true };
-      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submissionMethod: AUDIT_DELIVERY_METHOD.QR, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), AUDIT_DELIVERY_METHOD.QR])), deliveryMethod: AUDIT_DELIVERY_METHOD.QR, deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED, updatedAt: now };
+      const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submissionMethod: AUDIT_DELIVERY_METHOD.QR, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), AUDIT_DELIVERY_METHOD.QR])), deliveryMethod: AUDIT_DELIVERY_METHOD.QR, deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED, updatedAt: now };
       transaction.update(ref, update);
       return { report: { ...report, ...update }, integrityVerified: true, alreadyImported: false };
     });
@@ -443,7 +446,7 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
 router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     const { actorId } = identity(req);
-    const method = String(req.body.submissionMethod || 'CLOUD').trim().toUpperCase();
+    const method = String(req.body.submissionMethod || 'cloud').trim().toLowerCase();
     if (method !== AUDIT_DELIVERY_METHOD.CLOUD) throw new Error('This endpoint accepts Cloud Submission only. QR Transfer is received through the SRA import workflow.');
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
@@ -456,7 +459,7 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       if ([AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(report.status)) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.COMPILED) throw new Error('Only a compiled audit can be submitted to SRA.');
       validateCanonicalAuditReport(report);
-      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, updatedAt: now };
+      const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, updatedAt: now };
       transaction.update(ref, update);
       return { ...report, ...update };
     });
@@ -481,7 +484,7 @@ router.post('/:id/return', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (r
       if (report.status === AUDIT_STATUS.RETURNED && report.returnReason === returnReason) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.PENDING_REVIEW) throw new Error('Only an audit awaiting review can be returned.');
       assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
-      const update = { status: AUDIT_STATUS.RETURNED, returnReason, returnedByUserId: actorId, returnedByName: actorName, returnedAt: now, updatedAt: now };
+      const update = { status: AUDIT_STATUS.RETURNED, reviewStatus: 'returned', certificationStatus: 'not_certified', returnReason, returnedByUserId: actorId, returnedByName: actorName, returnedAt: now, updatedAt: now };
       transaction.update(ref, update);
       transaction.create(db.collection(COLLECTIONS.AUDIT_LOGS).doc(), { eventType: 'AUDIT_REPORT_RETURNED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId, details: returnReason, outcome: 'SUCCESS', createdAt: now });
       return { ...report, ...update };
@@ -510,7 +513,7 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
       const expectedHash = createAuditHash(reportId, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
       if (expectedHash !== (report.integrityHash || report.qrHash)) throw new Error('Audit snapshot integrity validation failed. Certification was blocked.');
       const certificationNotes = optionalString(req.body.certificationNotes, { max: 2000 });
-      const update = { status: AUDIT_STATUS.CERTIFIED, certificationNotes, certifiedByUserId: actorId, certifiedByName: actorName, certifiedAt: now, certifiedReportVersion: report.reportVersion, certifiedIntegrityHash: expectedHash, updatedAt: now };
+      const update = { status: AUDIT_STATUS.CERTIFIED, reviewStatus: 'complete', certificationStatus: 'certified', certificationNotes, certifiedByUserId: actorId, certifiedByName: actorName, certifiedAt: now, certifiedReportVersion: report.reportVersion, certifiedIntegrityHash: expectedHash, updatedAt: now };
       transaction.update(reportRef, update);
       transaction.create(db.collection(COLLECTIONS.AUDIT_LOGS).doc(), { eventType: 'AUDIT_REPORT_CERTIFIED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: report.blockFarmId, details: `Certified audit report ${reportId}, version ${report.reportVersion}.`, outcome: 'SUCCESS', createdAt: now });
       return { ...report, ...update };

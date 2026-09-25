@@ -21,7 +21,7 @@ test('web agricultural reads use authenticated server scope without direct Fires
 
   contracts.forEach(([file, endpoints]) => {
     const source = webService(file);
-    assert.doesNotMatch(source, /from ['"]\.\/firebaseClient['"]|onSnapshot|collection\(db|doc\(db/);
+    assert.doesNotMatch(source, /from ['"]\.\/firebaseClient['"]|\bonSnapshot\b|\bcollection\s*\(db|\bdoc\s*\(db/);
     endpoints.forEach(endpoint => assert.match(source, new RegExp(endpoint.replaceAll('/', '\\/'))));
   });
 });
@@ -33,6 +33,8 @@ test('web API reads coalesce in-flight work and invalidate after authoritative m
   assert.match(source, /inFlightReads\.has\(path\)/);
   assert.match(source, /announceServerMutation\(path\)/);
   assert.match(source, /hugpong:server-mutation/);
+  assert.match(source, /forcedRefreshQueued/);
+  assert.match(source, /void refresh\(\{ force: true \}\)/);
 });
 
 test('web startup excludes the Firestore SDK and lazy-loads role workspaces', () => {

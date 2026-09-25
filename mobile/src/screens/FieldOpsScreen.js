@@ -26,7 +26,7 @@ import {
   AUDIT_STATUS, AUDIT_QR_SCHEMA_VERSION, canonicalAuditStatus, createAuditQrPayload, createAuditQrParts,
   decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts,
   buildAuditFieldSnapshots, validateCanonicalAuditReport,
-  businessPeriodKey, displayPeriod, auditReportsForFarmPeriod, reportedOperationIds
+  businessPeriodKey, displayPeriod, auditReportsForFarmPeriod, reportedOperationIds, operationAuditCoverage
 } from '../domain/auditWorkflow';
 import { safeAlert } from '../utils/dialogs';
 import { canonicalStoredCropYear, cleanDataForFirestore, cleanupDuplicateLogs, formatDisplayDate, toISODateString, sortOperationsNewestFirst, sortNewestFirst, cropYearCycleForDate, formatCropYearDisplay, uniqueCropYears } from '../utils/dataHelpers';
@@ -54,6 +54,17 @@ const { height, width } = Dimensions.get('window');
 // Persistent parcel attributes for Field Plot Registration (Web & Mobile Parity)
 const SOIL_TYPES = ['Clay Loam', 'Sandy Loam', 'Loam', 'Clay', 'Silt Loam'];
 const INITIAL_STAGES = INITIAL_CROP_STAGES;
+
+const verifyLocalAuditIntegrity = async report => {
+  const canonical = JSON.stringify({
+    reportId: report?.reportId || report?.id,
+    blockFarmId: report?.blockFarmId,
+    period: report?.periodKey || report?.period,
+    operationSnapshots: report?.operationSnapshots || []
+  });
+  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, canonical);
+  return `HUG-${digest.slice(0, 24).toUpperCase()}` === (report?.integrityHash || report?.qrHash);
+};
 
 // Official SRA Sugarcane 6 Growth Stages Templates
 const CROP_CYCLE_STAGES_BY_TYPE = {
@@ -362,6 +373,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
   onViewAuditTrail,
   canEdit = true,
   cropYear,
+  auditCoverage,
   s,
 }) {
   const archivedLog = log.status === 'ARCHIVED';
@@ -447,6 +459,25 @@ const CompactLogItem = React.memo(function CompactLogItem({
                   {`Amended (${editCount}x)`}
                 </Text>
               </TouchableOpacity>
+            )}
+
+            {!isDraft && auditCoverage && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 3,
+                backgroundColor: auditCoverage.status === AUDIT_STATUS.CERTIFIED ? '#EBF7EE' : auditCoverage.status === AUDIT_STATUS.PENDING_REVIEW ? '#EFF6FF' : auditCoverage.status === AUDIT_STATUS.RETURNED ? '#FEF3C7' : COLORS.primaryBg,
+                paddingHorizontal: 6,
+                paddingVertical: 1.5,
+                borderRadius: RADIUS.xs,
+                borderWidth: 1,
+                borderColor: auditCoverage.status === AUDIT_STATUS.CERTIFIED ? '#B7DEC0' : auditCoverage.status === AUDIT_STATUS.PENDING_REVIEW ? '#BFDBFE' : auditCoverage.status === AUDIT_STATUS.RETURNED ? '#FDE68A' : COLORS.primaryBorder
+              }}>
+                <Ionicons name="document-text-outline" size={10} color={auditCoverage.status === AUDIT_STATUS.CERTIFIED ? COLORS.success : auditCoverage.status === AUDIT_STATUS.PENDING_REVIEW ? '#1D4ED8' : auditCoverage.status === AUDIT_STATUS.RETURNED ? '#92400E' : COLORS.primary} />
+                <Text style={{ fontSize: 9.5, fontWeight: '800', color: auditCoverage.status === AUDIT_STATUS.CERTIFIED ? COLORS.success : auditCoverage.status === AUDIT_STATUS.PENDING_REVIEW ? '#1D4ED8' : auditCoverage.status === AUDIT_STATUS.RETURNED ? '#92400E' : COLORS.primary }}>
+                  {auditCoverage.label}
+                </Text>
+              </View>
             )}
 
             {/* Operation-log lifecycle is independent of audit-report certification. */}
@@ -535,6 +566,11 @@ const CompactLogItem = React.memo(function CompactLogItem({
             {!isDraft && log.updatedAt && (
               <Text style={{ fontSize: 11.5, color: COLORS.textSecondary }}>
                 Last Modified: {formatDisplayDate(log.updatedAt)}
+              </Text>
+            )}
+            {!isDraft && auditCoverage && (
+              <Text style={{ fontSize: 11.5, color: COLORS.textSecondary }}>
+                Audit Report: <Text style={{ fontWeight: '800', color: COLORS.text }}>{auditCoverage.reportId}</Text> · {auditCoverage.label}
               </Text>
             )}
             {archivedLog && log.archivedAt && (
@@ -868,7 +904,6 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [auditHistoryCursor, setAuditHistoryCursor] = useState(null);
   const [auditHistoryHasMore, setAuditHistoryHasMore] = useState(false);
   const [isLoadingAuditHistory, setIsLoadingAuditHistory] = useState(false);
-  const [selectedManagerAuditId, setSelectedManagerAuditId] = useState('AUD-2026-05');
   const currentRealMonth = displayPeriod(businessPeriodKey());
   const [compileMonth, setCompileMonth] = useState(currentRealMonth);
   const [managerLedgerScope, setManagerLedgerScope] = useState('selected');
@@ -1003,7 +1038,11 @@ export default function FieldOpsScreen({ navigation, route }) {
   }, [selectedField?.id]);
   const [showLog, setShowLog] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [showAuditReceiveOptions, setShowAuditReceiveOptions] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [showTransferCodeInput, setShowTransferCodeInput] = useState(false);
+  const [manualTransferCode, setManualTransferCode] = useState('');
+  const [isResolvingTransferCode, setIsResolvingTransferCode] = useState(false);
   const [activeQRData, setActiveQRData] = useState(null);
   const [activeQrPartIndex, setActiveQrPartIndex] = useState(0);
   const [isSavingQrImage, setIsSavingQrImage] = useState(false);
@@ -1012,6 +1051,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const qrSvgRef = useRef(null);
   const [scannedAuditReport, setScannedAuditReport] = useState(null);
   const [pendingScannedPayload, setPendingScannedPayload] = useState('');
+  const [scannedAuditDuplicate, setScannedAuditDuplicate] = useState(false);
   const qrTransferPartsRef = useRef(new Map());
   const [showSRAInspectModal, setShowSRAInspectModal] = useState(false);
   const [auditReturnReason, setAuditReturnReason] = useState('');
@@ -1416,6 +1456,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         }, { width: 1200, height: 1200 });
       });
       const safeReportId = String(activeQRData.reportId || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
+      const partSuffix = activeQRData.qrParts.length > 1 ? `-part-${activeQrPartIndex + 1}-of-${activeQRData.qrParts.length}` : '';
 
       if (Platform.OS === 'android') {
         const downloadsUri = FileSystem.StorageAccessFramework.getUriForDirectoryInRoot('Download');
@@ -1426,7 +1467,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         }
         const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
           permission.directoryUri,
-          `${safeReportId}-QR`,
+          `${safeReportId}${partSuffix}-QR`,
           'image/png'
         );
         await FileSystem.StorageAccessFramework.writeAsStringAsync(fileUri, base64, {
@@ -1437,7 +1478,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
 
       if (!FileSystem.cacheDirectory) throw new Error('Temporary storage is unavailable.');
-      const fileUri = `${FileSystem.cacheDirectory}${safeReportId}-QR.png`;
+      const fileUri = `${FileSystem.cacheDirectory}${safeReportId}${partSuffix}-QR.png`;
       try {
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
         if (!(await Sharing.isAvailableAsync())) throw new Error('The system save sheet is unavailable.');
@@ -1647,6 +1688,8 @@ export default function FieldOpsScreen({ navigation, route }) {
       rootReportId,
       reportVersion,
       status: AUDIT_STATUS.COMPILED,
+      reviewStatus: 'not_submitted',
+      certificationStatus: 'not_certified',
       compiledByUserId: compilerUserId,
       compiledByName: session?.name || 'Farm Manager',
       compiledAt,
@@ -1659,7 +1702,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       integrityHash: hash,
       qrSchemaVersion: AUDIT_QR_SCHEMA_VERSION,
       deliveryMethod: null,
-      deliveryStatus: 'READY',
+      deliveryStatus: 'ready',
       verifiedBy: null,
       stageBreakdown: stageBreakdown.length > 0 ? stageBreakdown : [],
       operationSnapshots: serializedOps,
@@ -1712,7 +1755,10 @@ export default function FieldOpsScreen({ navigation, route }) {
     } else {
       auditReports.unshift(newReport);
     }
-    saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+    const reportSaved = await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+    if (!reportSaved) {
+      safeAlert('Compilation Saved to Server', 'The canonical report was created, but this device could not update its local audit cache. Refresh after checking device storage.');
+    }
     notifyDataUpdate();
 
     const deltaCount = logsCount;
@@ -1835,13 +1881,41 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
 
-  const handleScanOrSubmitCode = async (code) => {
+  const handleScanOrSubmitCode = async (code, { source = 'camera' } = {}) => {
     if (!code) return;
     const rawStr = String(code).trim();
     if (!rawStr) return;
     try {
+      if (source === 'manual') {
+        const transferCode = rawStr.toUpperCase();
+        if (!/^(AUD|RPT|HUG)-[A-Z0-9-]+$/.test(transferCode)) {
+          throw new Error('Enter a valid AUD-, RPT-, or HUG- transfer code.');
+        }
+        if (!getNetworkStatus()) {
+          throw new Error('A live connection is required to look up a transfer code.');
+        }
+        const verified = await verifyAuditQr(transferCode);
+        if (!verified.data?.integrityVerified || !verified.data?.report) {
+          throw new Error('No audit report was found for this transfer code.');
+        }
+        const canonical = validateCanonicalAuditReport(verified.data.report);
+        if (!await verifyLocalAuditIntegrity(canonical)) throw new Error('The audit report integrity check failed.');
+        setPendingScannedPayload(transferCode);
+        setScannedAuditDuplicate(Boolean(verified.data.alreadyImported));
+        setScannedAuditReport({
+          ...canonical,
+          id: canonical.reportId,
+          integrityStatus: verified.data.alreadyImported ? 'VERIFIED' : 'DECODED'
+        });
+        setShowTransferCodeInput(false);
+        setShowAuditReceiveOptions(false);
+        setShowSRAInspectModal(true);
+        return;
+      }
+
       let report;
       let payload = rawStr;
+      let duplicate = false;
       try {
         const suppliedParts = rawStr.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
         if (suppliedParts.length > 1) {
@@ -1871,17 +1945,47 @@ export default function FieldOpsScreen({ navigation, route }) {
           const verified = await verifyAuditQr(rawStr);
           if (!verified.data?.integrityVerified || !verified.data?.report) throw new Error('The server could not verify this audit report.');
           report = verified.data.report;
+          duplicate = Boolean(verified.data.alreadyImported);
         }
       }
 
       const canonical = validateCanonicalAuditReport(report);
+      if (!await verifyLocalAuditIntegrity(canonical)) throw new Error('The audit QR integrity check failed.');
       setPendingScannedPayload(payload);
-      setScannedAuditReport({ ...canonical, id: canonical.reportId, integrityStatus: getNetworkStatus() ? 'DECODED' : 'OFFLINE_DECODED' });
+      setScannedAuditDuplicate(duplicate);
+      setScannedAuditReport({
+        ...canonical,
+        id: canonical.reportId,
+        integrityStatus: duplicate ? 'VERIFIED' : (getNetworkStatus() ? 'DECODED' : 'OFFLINE_DECODED')
+      });
       setShowScanner(false);
+      setShowTransferCodeInput(false);
+      setShowAuditReceiveOptions(false);
       setShowSRAInspectModal(true);
     } catch (error) {
-      Alert.alert('Unable to Load Audit Report', `Unable to load this audit report because the transferred data is incomplete or incompatible.\n\n${error.message || ''}`.trim());
-      setShowScanner(false);
+      if (source !== 'manual') {
+        return {
+          continueScanning: true,
+          message: 'This QR code is not a valid HUGPONG audit report.'
+        };
+      }
+      Alert.alert(
+        'No Audit Report Found',
+        error.status === 404
+          ? 'No audit report was found for this transfer code.'
+          : (error.message || 'No audit report was found for this transfer code.')
+      );
+    }
+  };
+
+  const handleManualTransferSubmit = async () => {
+    const code = manualTransferCode.trim();
+    if (!code || isResolvingTransferCode) return;
+    setIsResolvingTransferCode(true);
+    try {
+      await handleScanOrSubmitCode(code, { source: 'manual' });
+    } finally {
+      setIsResolvingTransferCode(false);
     }
   };
 
@@ -1905,7 +2009,14 @@ export default function FieldOpsScreen({ navigation, route }) {
       else auditReports.unshift(report);
       await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
       setScannedAuditReport(report);
-      Alert.alert(result.data.alreadyImported ? 'Audit Already Imported' : 'Audit Imported', result.data.alreadyImported ? 'The existing authoritative record is open.' : 'The report is now in the SRA Audit Inbox and ready for review.');
+      if (result.data.alreadyImported) {
+        setScannedAuditDuplicate(true);
+        Alert.alert('Audit Already Imported', 'This audit report has already been imported. You can open the existing record.');
+      } else {
+        setShowSRAInspectModal(false);
+        setScannedAuditDuplicate(false);
+        Alert.alert('Audit Imported', 'The report is now in the SRA Audit Inbox awaiting review. It has not been certified.');
+      }
     } catch (error) {
       Alert.alert('Import Failed', error.message || 'The complete audit report could not be imported.');
     } finally {
@@ -3689,6 +3800,14 @@ export default function FieldOpsScreen({ navigation, route }) {
     return fieldLogs;
   }, [managerLedgerScope, allFarmSubmittedLogs, fieldLogs]);
 
+  const auditCoverageSignature = auditReports
+    .map(report => `${report.reportId || report.id}:${report.status}:${report.updatedAt || report.compiledAt || ''}`)
+    .join('|');
+  const auditCoverageByOperationId = React.useMemo(
+    () => operationAuditCoverage(auditReports),
+    [auditCoverageSignature]
+  );
+
   const unsynced = React.useMemo(() => {
     return accessibleFields.filter(f => !fieldSyncState(f).isSynced);
   }, [accessibleFields, synced]);
@@ -4027,6 +4146,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 setShowLogAuditModal(true);
               }}
               cropYear={log.cropYearCycle || cropCycles.find(cycle => cycle.id === log.cycleId)?.cropYear}
+              auditCoverage={isDraft ? null : auditCoverageByOperationId.get(String(log.id))}
               s={s}
             />
           );
@@ -5485,15 +5605,15 @@ export default function FieldOpsScreen({ navigation, route }) {
             ))}
 
             {/* Scanner Card */}
-            <TouchableOpacity style={[s.scannerCard, { marginBottom: SPACING.xl }]} onPress={() => setShowScanner(true)}>
+            <TouchableOpacity style={[s.scannerCard, { marginBottom: SPACING.xl }]} onPress={() => setShowAuditReceiveOptions(true)}>
               <View style={s.scannerIcon}>
                 <Ionicons name="qr-code" size={48} color={COLORS.primary} />
               </View>
-              <Text style={s.scannerTitle}>{t('scanner_title', 'Scan Manager QR Code')}</Text>
-              <Text style={s.scannerSub}>{t('scanner_sub', "Point camera at the Farm Manager's phone screen to import this month's compiled field report.")}</Text>
+              <Text style={s.scannerTitle}>Receive Audit Report</Text>
+              <Text style={s.scannerSub}>Scan the Farm Manager's real QR transfer or resolve its report ID online.</Text>
               <View style={s.scannerBtn}>
                 <Ionicons name="camera-outline" size={18} color="#fff" />
-                <Text style={s.scannerBtnText}>{t('open_scanner_btn', 'Open QR Scanner')}</Text>
+                <Text style={s.scannerBtnText}>Choose Receive Method</Text>
               </View>
             </TouchableOpacity>
 
@@ -5512,7 +5632,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Ionicons name="qr-code-outline" size={36} color={COLORS.textMuted} style={{ marginBottom: 8 }} />
                     <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>No Report Scanned Yet</Text>
                     <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, textAlign: 'center', paddingHorizontal: 24, lineHeight: 16 }}>
-                      Tap "Open QR Scanner" above to scan a Farm Manager's QR certificate or submit an audit ID manually.
+                      Choose Scan QR or Input Code above to receive a Farm Manager audit report.
                     </Text>
                   </View>
                 );
@@ -6150,10 +6270,12 @@ export default function FieldOpsScreen({ navigation, route }) {
               />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.success }}>
-                  Complete Single QR Transfer
+                  {activeQRData?.qrParts?.length > 1 ? 'Complete Multi-Part QR Transfer' : 'Complete QR Transfer'}
                 </Text>
                 <Text style={{ fontSize: 9.5, color: COLORS.textMuted }}>
-                  Scan this code once on the SRA device to read the full report.
+                  {activeQRData?.qrParts?.length > 1
+                    ? `Scan every part in order. Part ${activeQrPartIndex + 1} of ${activeQRData.qrParts.length}.`
+                    : 'Scan this code once on the SRA device to read the full report.'}
                 </Text>
               </View>
             </View>
@@ -6162,10 +6284,21 @@ export default function FieldOpsScreen({ navigation, route }) {
               <OfflineQRCode
                 ref={qrSvgRef}
                 value={activeQRData?.qrParts?.[activeQrPartIndex] || ''}
-                size={190}
-                color={COLORS.primary}
+                size={Math.min(300, width - 72)}
+                color="#000000"
               />
-              <Text selectable={true} style={[s.qrCode, { marginTop: 10, letterSpacing: 2 }]}>{activeQRData?.hash || 'No report hash'}</Text>
+              {activeQRData?.qrParts?.length > 1 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 10 }}>
+                  <TouchableOpacity disabled={activeQrPartIndex === 0} onPress={() => setActiveQrPartIndex(index => Math.max(0, index - 1))}>
+                    <Text style={{ color: activeQrPartIndex === 0 ? COLORS.textMuted : COLORS.primary, fontWeight: '800' }}>Previous</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: COLORS.text, fontWeight: '800' }}>Part {activeQrPartIndex + 1} of {activeQRData.qrParts.length}</Text>
+                  <TouchableOpacity disabled={activeQrPartIndex >= activeQRData.qrParts.length - 1} onPress={() => setActiveQrPartIndex(index => Math.min(activeQRData.qrParts.length - 1, index + 1))}>
+                    <Text style={{ color: activeQrPartIndex >= activeQRData.qrParts.length - 1 ? COLORS.textMuted : COLORS.primary, fontWeight: '800' }}>Next</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              <Text selectable={true} style={[s.qrCode, { marginTop: 10, letterSpacing: 0 }]}>{activeQRData?.reportId || ''}</Text>
             </View>
             <Text style={s.qrNote}>{activeQRData?.totalFields || uniqueFieldsCount} field{(activeQRData?.totalFields || uniqueFieldsCount) !== 1 ? 's' : ''} · {activeQRData?.totalLogs || totalLogsCount} log{(activeQRData?.totalLogs || totalLogsCount) !== 1 ? 's' : ''} · Total: Php {(activeQRData?.totalCost || totalOperationalCost).toLocaleString()}</Text>
             <View style={{ flexDirection: 'column', gap: 8, marginTop: 14, width: '100%' }}>
@@ -6346,10 +6479,66 @@ export default function FieldOpsScreen({ navigation, route }) {
       </Modal>
 
       {/* ── REAL SRA QR SCANNER & VERIFIER MODAL ── */}
+      {/* SRA audit receive method selection. Camera and manual entry are separate modes. */}
+      <Modal visible={showAuditReceiveOptions} transparent animationType="fade" onRequestClose={() => setShowAuditReceiveOptions(false)}>
+        <View style={s.qrOverlay}>
+          <View style={[s.qrModal, { width: width > 500 ? 400 : '90%', padding: 22 }]}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text, textAlign: 'center' }}>Receive Audit Report</Text>
+            <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 6, marginBottom: 18 }}>Choose one receive method.</Text>
+            <TouchableOpacity
+              style={{ width: '100%', paddingVertical: 14, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+              onPress={() => { setShowAuditReceiveOptions(false); setShowScanner(true); }}
+            >
+              <Ionicons name="camera-outline" size={19} color="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>Scan QR</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ width: '100%', marginTop: 10, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: COLORS.primary, backgroundColor: '#FFFFFF', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+              onPress={() => { setShowAuditReceiveOptions(false); setManualTransferCode(''); setShowTransferCodeInput(true); }}
+            >
+              <Ionicons name="keypad-outline" size={19} color={COLORS.primary} />
+              <Text style={{ color: COLORS.primary, fontSize: 14, fontWeight: '800' }}>Input Code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 8 }} onPress={() => setShowAuditReceiveOptions(false)}>
+              <Text style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: '700' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showTransferCodeInput} transparent animationType="fade" onRequestClose={() => setShowTransferCodeInput(false)}>
+        <View style={s.qrOverlay}>
+          <View style={[s.qrModal, { width: width > 500 ? 420 : '90%', padding: 22 }]}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text }}>Enter Transfer Code</Text>
+            <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 5, marginBottom: 14 }}>Enter the real report ID or audit hash supplied by the Farm Manager. An internet connection is required.</Text>
+            <TextInput
+              value={manualTransferCode}
+              onChangeText={setManualTransferCode}
+              placeholder="AUD-… or HUG-…"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!isResolvingTransferCode}
+              style={{ width: '100%', borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, backgroundColor: '#FFFFFF' }}
+            />
+            <TouchableOpacity
+              disabled={!manualTransferCode.trim() || isResolvingTransferCode}
+              style={{ width: '100%', marginTop: 12, paddingVertical: 13, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: 'center', opacity: !manualTransferCode.trim() || isResolvingTransferCode ? 0.55 : 1 }}
+              onPress={handleManualTransferSubmit}
+            >
+              {isResolvingTransferCode ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>Submit</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity disabled={isResolvingTransferCode} style={{ marginTop: 12, paddingVertical: 8 }} onPress={() => setShowTransferCodeInput(false)}>
+              <Text style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: '700' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Real SRA QR scanner with camera and image-upload inputs. */}
       <LiveQRScanner
         visible={showScanner}
         onClose={() => setShowScanner(false)}
-        onCodeDetected={(code) => handleScanOrSubmitCode(code)}
+        onCodeDetected={(code, metadata) => handleScanOrSubmitCode(code, metadata)}
       />
 
       {/* ── SRA Audit Inspection & Certification Modal ── */}
@@ -6358,8 +6547,16 @@ export default function FieldOpsScreen({ navigation, route }) {
           <View style={[s.qrModal, { width: width > 500 ? 460 : '92%', maxHeight: '85%', padding: 20 }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingBottom: 12, marginBottom: 14 }}>
               <View>
-                <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.primary }}>SRA Compliance Inspection</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>Silay City District Regulatory Oversight</Text>
+                <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.primary }}>
+                  {scannedAuditDuplicate
+                    ? 'Audit Already Imported'
+                    : scannedAuditReport?.integrityStatus === 'VERIFIED'
+                      ? 'SRA Compliance Inspection'
+                      : 'Audit Report Found'}
+                </Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
+                  {scannedAuditReport?.reportId || scannedAuditReport?.id || 'HUGPONG Audit Report'}
+                </Text>
               </View>
               <TouchableOpacity onPress={() => setShowSRAInspectModal(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={22} color={COLORS.text} />
@@ -6392,6 +6589,10 @@ export default function FieldOpsScreen({ navigation, route }) {
               {/* Farm Metadata */}
               <View style={{ backgroundColor: '#F8FAF5', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 14 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Report ID:</Text>
+                  <Text style={{ maxWidth: '65%', fontSize: 11, fontWeight: '700', color: COLORS.text, textAlign: 'right' }}>{scannedAuditReport?.reportId || scannedAuditReport?.id || 'Unavailable'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Block Farm:</Text>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.blockFarmName || scannedAuditReport?.blockFarmId || 'District Block Farm'}</Text>
                 </View>
@@ -6422,6 +6623,10 @@ export default function FieldOpsScreen({ navigation, route }) {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Total Production Cost:</Text>
                   <Text style={{ fontSize: 13, fontWeight: '900', color: COLORS.primary }}>Php {Number(scannedAuditReport?.totalCost || 0).toLocaleString()}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Generated:</Text>
+                  <Text style={{ maxWidth: '65%', fontSize: 11, fontWeight: '700', color: COLORS.text, textAlign: 'right' }}>{scannedAuditReport?.compiledAt ? new Date(scannedAuditReport.compiledAt).toLocaleString() : 'Unavailable'}</Text>
                 </View>
               </View>
 
@@ -6455,17 +6660,26 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             {/* Actions */}
             <View style={{ marginTop: 14, gap: 8 }}>
-              {scannedAuditReport?.integrityStatus !== 'VERIFIED' && (
+              {scannedAuditDuplicate && (
+                <TouchableOpacity
+                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                  onPress={() => setScannedAuditDuplicate(false)}
+                >
+                  <Ionicons name="document-text-outline" size={18} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>View Existing Report</Text>
+                </TouchableOpacity>
+              )}
+              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus !== 'VERIFIED' && (
                 <TouchableOpacity
                   disabled={isAuditActionPending}
                   style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, opacity: isAuditActionPending ? 0.6 : 1 }}
                   onPress={handleImportScannedAudit}
                 >
                   <Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{isAuditActionPending ? 'Importing...' : 'Import to SRA Audit Inbox'}</Text>
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{isAuditActionPending ? 'Importing...' : 'Import Report'}</Text>
                 </TouchableOpacity>
               )}
-              {scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
+              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
                 <>
                   <TextInput
                     value={auditReturnReason}
@@ -6483,7 +6697,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </>
               )}
-              {scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
+              {!scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
                 <TouchableOpacity
                   style={{ backgroundColor: COLORS.success, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
                   onPress={() => handleCertifyReport(scannedAuditReport)}
@@ -6491,21 +6705,23 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <Ionicons name="checkmark-seal" size={18} color="#fff" />
                   <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Issue Official SRA Digital Seal</Text>
                 </TouchableOpacity>
-              ) : scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED ? (
+              ) : !scannedAuditDuplicate && scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED ? (
                 <View style={{ backgroundColor: '#EBF7EE', paddingVertical: 10, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.success }}>
                   <Ionicons name="checkmark-done" size={18} color={COLORS.success} />
                   <Text style={{ color: COLORS.success, fontWeight: '800', fontSize: 12 }}>Certified &amp; Immutable</Text>
                 </View>
-              ) : (
+              ) : !scannedAuditDuplicate ? (
                 <View style={{ backgroundColor: '#FEF3C7', paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#F59E0B' }}>
                   <Text style={{ color: '#92400E', fontWeight: '800', fontSize: 12 }}>Integrity / cloud confirmation pending</Text>
                 </View>
-              )}
+              ) : null}
               <TouchableOpacity
                 style={{ paddingVertical: 11, borderRadius: 10, alignItems: 'center', backgroundColor: '#F1F5E9' }}
                 onPress={() => setShowSRAInspectModal(false)}
               >
-                <Text style={{ color: COLORS.text, fontWeight: '700', fontSize: 12 }}>Close Inspector</Text>
+                <Text style={{ color: COLORS.text, fontWeight: '700', fontSize: 12 }}>
+                  {scannedAuditReport?.integrityStatus === 'VERIFIED' && !scannedAuditDuplicate ? 'Close Inspector' : 'Cancel'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

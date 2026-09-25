@@ -6,6 +6,7 @@ import {
   archiveOperations
 } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
+import { subscribeToAuditReports } from '../../services/auditService';
 import {
   appendUniqueArchiveRecords,
   fetchArchivedOperations,
@@ -16,6 +17,7 @@ import {
 import { SRA_OPERATIONS_CATALOGUE } from '../../domain/operationCatalogue';
 import { operationPresentation } from '../../domain/presentationContract';
 import { getOperationCapabilities, normalizeActorId } from '../../domain/operationAuthorization';
+import { AUDIT_STATUS, operationAuditCoverage } from '../../domain/auditWorkflow';
 import {
   completeLocalDraftSubmission,
   deleteLocalOperationDraft,
@@ -122,6 +124,26 @@ function AmendmentHistory({ operation }) {
   );
 }
 
+function AuditCoverageBadge({ coverage }) {
+  if (!coverage) return <span className="text-[11px] text-hug-muted">Not yet compiled</span>;
+  const tone = coverage.status === AUDIT_STATUS.CERTIFIED
+    ? 'bg-success-bg text-success border-success/30'
+    : coverage.status === AUDIT_STATUS.PENDING_REVIEW
+      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900'
+      : coverage.status === AUDIT_STATUS.RETURNED
+        ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900'
+        : 'bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light border-primary/30';
+  return (
+    <span
+      title={coverage.reportId ? `Audit report ${coverage.reportId}` : coverage.label}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${tone}`}
+    >
+      <FileCheck2 className="w-3 h-3" />
+      {coverage.label}
+    </span>
+  );
+}
+
 export default function OperationsView() {
   const { user, roleKey } = useAuth();
   const navigate = useNavigate();
@@ -140,6 +162,7 @@ export default function OperationsView() {
     isLoading: true,
     error: null
   });
+  const [auditReports, setAuditReports] = useState([]);
 
   // Fields data for selection
   const [fieldsData, setFieldsData] = useState({
@@ -272,6 +295,18 @@ export default function OperationsView() {
   }, [user?.id, user?.employeeId]);
 
   useEffect(() => {
+    if (!isManager) {
+      setAuditReports([]);
+      return undefined;
+    }
+    return subscribeToAuditReports({
+      limit: 50,
+      onUpdate: ({ reports }) => setAuditReports(reports),
+      onError: () => setAuditReports([])
+    });
+  }, [isManager, user?.id, user?.employeeId]);
+
+  useEffect(() => {
     if (!archivePreferenceKey) {
       setHydratedArchivePreferenceKey('');
       return;
@@ -390,6 +425,11 @@ export default function OperationsView() {
     });
     return grouped;
   }, [scopedOperations]);
+
+  const auditCoverageByOperationId = useMemo(
+    () => operationAuditCoverage(auditReports),
+    [auditReports]
+  );
 
   const cropYearByCycleId = useMemo(() => new Map(
     (fieldsData.cropCycles || []).map(cycle => [cycle.id, cycle.cropYear])
@@ -712,6 +752,12 @@ export default function OperationsView() {
       render: (val) => <StatusBadge status={val || 'ACTIVE'} />
     },
     {
+      key: 'auditCoverage',
+      header: 'Audit',
+      width: '220px',
+      render: (_, row) => <AuditCoverageBadge coverage={auditCoverageByOperationId.get(String(row.id))} />
+    },
+    {
       key: 'actions',
       header: 'Action',
       align: 'right',
@@ -1017,6 +1063,7 @@ export default function OperationsView() {
                             {fieldOperations.map(operation => {
                               const isArchived = operation.status === 'ARCHIVED';
                               const presentation = operationPresentation(operation);
+                              const auditCoverage = auditCoverageByOperationId.get(String(operation.id));
                               return (
                                 <div
                                   key={operation.id}
@@ -1055,6 +1102,7 @@ export default function OperationsView() {
                                           Active
                                         </span>
                                       )}
+                                      {auditCoverage && <AuditCoverageBadge coverage={auditCoverage} />}
                                     </div>
 
                                     {/* Metadata Row: Spacious and clearly formatted */}

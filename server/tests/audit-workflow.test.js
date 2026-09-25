@@ -84,6 +84,18 @@ test('a certified monthly report starts a new version only for newly eligible lo
   assert.equal(batch.latest.id, certified.id);
 });
 
+test('sourceLogIds are the canonical duplicate-compilation boundary', () => {
+  const certified = {
+    id: 'AUD-BF1-2026-09-V1', reportVersion: 1, status: AUDIT_STATUS.CERTIFIED,
+    sourceLogIds: ['LOG-1', 'LOG-2'],
+    operationSnapshots: []
+  };
+  const batch = selectAuditCompilationBatch([
+    { id: 'LOG-1' }, { id: 'LOG-2' }, { id: 'LOG-3' }
+  ], [certified]);
+  assert.deepEqual(batch.operations.map(operation => operation.id), ['LOG-3']);
+});
+
 test('compilation is idempotent while a report is awaiting submission or SRA review', () => {
   for (const status of [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION, AUDIT_STATUS.PENDING_REVIEW]) {
     const current = { id: `AUD-${status}`, reportVersion: 2, status, operationSnapshots: [{ operationLogId: 'LOG-3' }] };
@@ -115,7 +127,7 @@ test('a returned latest report never recaptures logs covered by an older non-ret
   assert.deepEqual(batch.operations.map(operation => operation.id), ['LOG-2', 'LOG-3']);
 });
 
-test('QR transfer carries the complete canonical report in one compressed code', () => {
+test('QR transfer carries the complete canonical report in scan-friendly parts', () => {
   const report = {
     id: 'AUD-BF1-2026-09-V1', rootReportId: 'AUD-BF1-2026-09', blockFarmId: 'BF-1',
     blockFarmName: 'Central Farm', periodKey: '2026-09', reportVersion: 1, operationCount: 1, fieldCount: 1,
@@ -133,8 +145,9 @@ test('QR transfer carries the complete canonical report in one compressed code',
   assert.equal(decoded.operationSnapshots[0].operationLogId, 'LOG-IN-QR');
   assert.equal(decoded.fieldSnapshots[0].memberName, 'Farmer One');
   const qrCodes = encodeQrParts(report);
-  assert.equal(qrCodes.length, 1);
-  assert.deepEqual(decodeQrPayload(qrCodes[0]), decoded);
+  assert.ok(qrCodes.length > 1);
+  qrCodes.forEach(code => assert.ok(Buffer.byteLength(code, 'utf8') <= 700));
+  assert.deepEqual(assembleQrParts([...qrCodes].reverse()), decoded);
 
   // Previously issued version-2 multipart codes remain readable during migration.
   const legacyPayload = JSON.stringify({ type: 'HUGPONG_AUDIT_TRANSFER', schemaVersion: 2, report: decoded });
@@ -157,6 +170,22 @@ test('canonical audit validation rejects an empty successful report', () => {
   }), /contains no operation data/i);
 });
 
+test('QR decoding rejects unrelated, malformed, and incomplete transfer data', () => {
+  assert.throws(() => decodeQrPayload('NOT-A-HUGPONG-QR'), /not a supported/i);
+  assert.throws(() => decodeQrPayload('{"type":"HUGPONG_AUDIT_TRANSFER"'), /malformed/i);
+  assert.throws(() => assembleQrParts([
+    JSON.stringify({
+      type: 'HUGPONG_AUDIT_PART',
+      schemaVersion: 2,
+      transferId: 'AUD-ONE:HUG-ONE',
+      partNumber: 1,
+      partCount: 2,
+      encoding: 'RAW',
+      data: '{}'
+    })
+  ]), /incomplete/i);
+});
+
 test('audit route exposes separate idempotent submit, QR import, return, and certify transitions', () => {
   const source = fs.readFileSync(path.join(repositoryRoot, 'server', 'routes', 'auditReports.js'), 'utf8');
   assert.match(source, /router\.post\('\/:id\/submit'/);
@@ -165,6 +194,11 @@ test('audit route exposes separate idempotent submit, QR import, return, and cer
   assert.match(source, /router\.post\('\/:id\/certify'/);
   assert.match(source, /status: AUDIT_STATUS\.COMPILED/);
   assert.match(source, /status: AUDIT_STATUS\.PENDING_REVIEW/);
+  assert.match(source, /reviewStatus: 'pending_review'/);
+  assert.match(source, /certificationStatus: 'not_certified'/);
+  assert.match(source, /deliveryMethod: AUDIT_DELIVERY_METHOD\.QR/);
+  assert.match(source, /deliveryStatus: AUDIT_DELIVERY_STATUS\.RECEIVED/);
+  assert.match(source, /reviewStatus: 'complete', certificationStatus: 'certified'/);
   assert.match(source, /expectedHash !== \(report\.integrityHash \|\| report\.qrHash\)/);
   assert.match(source, /transaction\.create\(ref, imported\)/);
   assert.match(source, /validateCanonicalAuditReport\(payload\)/);

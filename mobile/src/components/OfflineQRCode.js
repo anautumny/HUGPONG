@@ -5,7 +5,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import React, { forwardRef, useMemo } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import QRCode from 'qrcode';
 
@@ -14,21 +14,22 @@ import QRCode from 'qrcode';
  *
  * @param {string} value - Text or envelope payload to encode
  * @param {number} size - Dimension in pixels (width and height)
- * @param {string} color - Color of the dark QR modules (default #1B381A)
+ * @param {string} color - Color of the dark QR modules (always black in production use)
  * @param {string} backgroundColor - Background fill color (default #FFFFFF)
  * @param {string} errorCorrectionLevel - 'L' | 'M' | 'Q' | 'H' (default 'M')
  */
 const OfflineQRCode = forwardRef(function OfflineQRCode({
-  value = 'HUGPONG-OFFLINE',
+  value = '',
   size = 200,
-  color = '#1B381A',
+  color = '#000000',
   backgroundColor = '#FFFFFF',
   errorCorrectionLevel = 'M',
   style
 }, ref) {
   const { pathData, moduleCount } = useMemo(() => {
     try {
-      const qr = QRCode.create(value || 'HUGPONG', {
+      if (!value) return { pathData: '', moduleCount: 0 };
+      const qr = QRCode.create(String(value), {
         errorCorrectionLevel,
       });
 
@@ -50,18 +51,14 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
       return { pathData: path, moduleCount: count };
     } catch (err) {
       console.warn('[OfflineQRCode] QR generation error:', err);
-      return { pathData: '', moduleCount: 21 };
+      return { pathData: '', moduleCount: 0 };
     }
   }, [value, errorCorrectionLevel]);
 
-  if (!pathData) {
-    return (
-      <View style={[styles.fallback, { width: size, height: size }, style]} />
-    );
-  }
+  if (!pathData || !moduleCount) return null;
 
-  // Adding quiet zone padding (2 modules on each side)
-  const quietZone = 2;
+  // ISO/IEC 18004 recommends a four-module quiet zone.
+  const quietZone = 4;
   const totalGrid = moduleCount + quietZone * 2;
 
   return (
@@ -86,12 +83,3 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
 });
 
 export default OfflineQRCode;
-
-const styles = StyleSheet.create({
-  fallback: {
-    backgroundColor: '#F1F5E9',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D4E2D0',
-  },
-});
