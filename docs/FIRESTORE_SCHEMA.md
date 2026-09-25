@@ -215,15 +215,17 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
   status: "COMPILED" | "PENDING_SUBMISSION" | "PENDING_REVIEW" | "RETURNED" | "CERTIFIED",
   integrityHash: string,
   qrHash: string,                   // compatibility alias for integrityHash
-  qrSchemaVersion: 1,
+  qrSchemaVersion: 3,
   integrityAlgorithm: "SHA-256",
   compiledByUserId: string,
   compiledByName: string,
   compiledAt: string,
   operationCount: number,
   fieldCount: number,
+  memberCount: number,
   hectaresAudited: number,
   totalCost: number,
+  sourceLogIds: Array<string>,
   operationSnapshots: Array<{
     operationLogId: string,
     fieldId: string,
@@ -240,6 +242,19 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
     totalCost: number,
     lineItems: Array<object>
   }>,
+  fieldSnapshots: Array<{
+    fieldId: string,
+    memberId: string | null,
+    memberName: string | null,
+    areaHa: number,
+    cropYearCycle: string | null,
+    cycleId: string | null,
+    operationLogIds: Array<string>,
+    operationCount: number,
+    totalCost: number
+  }>,
+  deliveryMethod: "CLOUD" | "QR" | null,
+  deliveryStatus: "READY" | "SUBMITTED" | "RECEIVED",
   submittedAt: string | null,
   submittedByUserId: string | null,
   submissionMethod: "CLOUD" | "QR" | null,
@@ -258,7 +273,7 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
 }
 ```
 
-The operation snapshot is the intentional denormalization that preserves exactly what the SRA reviewed even if an ACTIVE source log is later amended. Summary values are stored with the immutable snapshot for bounded Inbox and History list reads. The QR image itself is not stored: clients regenerate it from a compact, versioned transport payload. `PENDING` is read as legacy `PENDING_REVIEW`; new writes use only the canonical statuses above.
+The operation and field snapshots intentionally preserve exactly what the SRA reviewed even if an ACTIVE source log or assignment is later amended. Summary values are stored with the immutable snapshot for bounded Inbox and History list reads. The QR image itself is not stored: clients regenerate a compressed version-3 single-QR transfer containing the complete canonical report. If the compressed report exceeds safe QR capacity, QR generation is blocked and Cloud delivery is required; data is never truncated. `PENDING` is read as legacy `PENDING_REVIEW`; new writes use only the canonical statuses above.
 
 ### `audit_logs/{auditEventId}`
 

@@ -578,7 +578,7 @@ export const isValidUserIdentifier = (inputStr, requireExisting = true) => {
 export const resolveFieldMember = (field) => {
   if (!field) return 'Unassigned';
   const u = users.find(user => (user.id || user.employeeId) === field.memberUserId);
-  return u ? u.name : 'Unassigned';
+  return u?.displayName || u?.name || field.memberName || field.member || field.memberUserId || 'Unassigned';
 };
 
 export const resolveFieldMemberId = (field) => {
@@ -2321,9 +2321,31 @@ export const listenToCloudSync = () => {
       const remoteUsers = isMember
         ? []
         : responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record));
+      const remoteUserById = new Map(remoteUsers.flatMap(user => {
+        const ids = [user.id, user.employeeId, user.userId].filter(Boolean).map(String);
+        return ids.map(id => [id, user]);
+      }));
+      [...remoteFields, ...remoteArchivedFields].forEach(field => {
+        const memberId = String(field.memberUserId || '').trim();
+        const member = remoteUserById.get(memberId);
+        const memberName = member?.displayName || member?.name || field.memberName || field.member || memberId || '';
+        field.memberName = memberName;
+        field.member = memberName;
+      });
       const remoteReports = isMember
         ? []
         : sortNewestFirst(responseRecords(reportsResponse).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt']);
+      const pendingAuditIds = new Set(getOutboxQueue()
+        .filter(item => ['audit_report', 'audit_submission', 'audit_return', 'audit_certification', 'audit_qr_import'].includes(item.type))
+        .map(item => String(item.payload?.id || item.payload?.reportId || '').trim())
+        .filter(Boolean));
+      const pendingAuditOverlays = auditReports.filter(report => pendingAuditIds.has(String(report.reportId || report.id || '').trim()));
+      const reconciledReportsById = new Map(remoteReports.map(report => [String(report.reportId || report.id), report]));
+      pendingAuditOverlays.forEach(report => {
+        const reportId = String(report.reportId || report.id);
+        reconciledReportsById.set(reportId, { ...(reconciledReportsById.get(reportId) || {}), ...report });
+      });
+      const reconciledReports = sortNewestFirst(Array.from(reconciledReportsById.values()), ['compiledAt', 'createdAt']);
       const remoteHistory = isMember ? [] : sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt']);
 
       blockFarms.length = 0;
@@ -2344,7 +2366,7 @@ export const listenToCloudSync = () => {
         users.length = 0;
         users.push(...remoteUsers);
         auditReports.length = 0;
-        auditReports.push(...remoteReports);
+        auditReports.push(...reconciledReports);
         systemHistory.length = 0;
         systemHistory.push(...remoteHistory);
       }

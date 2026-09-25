@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ShieldCheck,
   History,
@@ -28,6 +29,7 @@ import { subscribeToFieldsData } from '../../services/fieldsService';
 
 export default function AuditCenterView() {
   const { user, roleKey } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [reports, setReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
@@ -52,6 +54,21 @@ export default function AuditCenterView() {
 
   const isFarmManager = roleKey === ROLE_KEYS.FARM_MANAGER;
   const isSraAdmin = roleKey === ROLE_KEYS.SRA_ADMIN;
+
+  useEffect(() => {
+    if (isFarmManager && searchParams.get('compile') === '1') {
+      setShowCompileModal(true);
+    }
+  }, [isFarmManager, searchParams]);
+
+  const closeCompileModal = useCallback(() => {
+    setShowCompileModal(false);
+    if (searchParams.has('compile')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('compile');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const showToast = (msg, type = 'info') => {
     setToastMessage({ msg, type });
@@ -311,7 +328,7 @@ export default function AuditCenterView() {
         <div className="print:hidden no-print">
           <AuditCompilationModal
             isOpen={showCompileModal}
-            onClose={() => setShowCompileModal(false)}
+            onClose={closeCompileModal}
             blockFarm={assignedBlockFarm}
             fields={fields}
             operations={operations}

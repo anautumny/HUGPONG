@@ -4,7 +4,7 @@ Date: 2026-09-25
 
 ## 1. Root causes found
 
-The previous implementation had one `audit_reports` collection and server-side snapshot compilation, but the user journey and status model treated compilation and submission as the same event. Web and mobile selected a month locally, mobile could compile with unsynchronized data, and mobile automatically queued the compiled report as a submission. Web QR encoded only a hash while mobile used an unrelated pipe-delimited summary, so the transports did not share a versioned contract. QR verification looked up existing reports but did not consistently recompute the authoritative snapshot hash. The SRA queue downloaded a broad report set and filtered it client-side, so certified records remained mixed into active work. Return/version handling and explicit `COMPILED`, `PENDING_SUBMISSION`, `PENDING_REVIEW`, and `RETURNED` states were missing or inconsistent. Duplicate protection relied on lookups rather than a deterministic per-farm/period/version identity.
+The previous implementation had one `audit_reports` collection and server-side snapshot compilation, but compilation and delivery were presented as one event. More importantly, the QR paths did not transport a report: web encoded only an identifier/hash and mobile used a separate summary string. An SRA scan therefore depended on finding a cloud document and could show an empty or incomplete shell when that lookup failed or the stored document lacked snapshots. The SRA Inbox also could not receive a report that intentionally travelled only by QR. Duplicate protection relied on lookups rather than one stable report identity shared by Cloud and QR.
 
 The existing verifier's main performance bottlenecks were broad report reads, client-side status filtering, linear hash searches, repeated QR construction in render paths, and rendering active and historical records together.
 
@@ -26,7 +26,6 @@ Server and shared persistence contract:
 - `server/routes/auditReports.js`
 - `server/schema/firestoreSchema.js`
 - `server/tests/audit-workflow.test.js`
-- `firestore.indexes.json`
 - `docs/FIRESTORE_SCHEMA.md`
 
 Web:
@@ -36,25 +35,18 @@ Web:
 - `web/react-app/src/services/firestoreSchema.js`
 - `web/react-app/src/components/audit/AuditCompilationModal.jsx`
 - `web/react-app/src/components/audit/AuditDossierCard.jsx`
-- `web/react-app/src/components/audit/AuditHistoryModal.jsx`
 - `web/react-app/src/components/audit/AuditQueue.jsx`
 - `web/react-app/src/components/audit/QRVerifierPanel.jsx`
 - `web/react-app/src/views/audit/AuditCenterView.jsx`
-- `web/react-app/src/views/dashboard/SraAdminDashboard.jsx`
+- `web/react-app/src/views/operations/OperationsView.jsx`
+- `web/react-app/tests/phase6-system-parity.test.js`
 
 Mobile:
 
 - `mobile/src/domain/auditWorkflow.js`
-- `mobile/src/data/dataStore.js`
 - `mobile/src/data/firestoreSchema.js`
-- `mobile/src/services/mutationOutboxCore.js`
-- `mobile/src/services/mutationService.js`
-- `mobile/src/services/syncEngine.js`
-- `mobile/src/components/AuditHistoryModal.js`
+- `mobile/src/components/LiveQRScanner.js`
 - `mobile/src/screens/FieldOpsScreen.js`
-- `mobile/src/screens/sra/SRAHomeView.js`
-- `mobile/package.json`
-- `mobile/package-lock.json`
 
 ## 4. Firestore/schema changes
 
@@ -62,9 +54,9 @@ Mobile:
 
 - lifecycle status: `COMPILED`, `PENDING_SUBMISSION`, `PENDING_REVIEW`, `RETURNED`, or `CERTIFIED`
 - `periodKey`, `rootReportId`, `reportVersion`, and `previousVersionId`
-- immutable `operationSnapshots` and derived summary values
+- immutable `operationSnapshots`, `fieldSnapshots`, `sourceLogIds`, and derived summary values
 - compiler, submission, return, certification, and integrity metadata
-- `submissionMethod` plus the cumulative `submissionMethods` provenance array
+- `deliveryMethod`/`deliveryStatus`, `submissionMethod`, and the cumulative `submissionMethods` provenance array
 
 No duplicate `audit_history`, `cloud_audits`, `qr_audits`, or `certified_audits` collection was added.
 
@@ -94,13 +86,13 @@ Snapshots include stable operation log identity, field/cycle data, operation val
 
 ## 9. QR payload changes
 
-Web, mobile, and server now use one compact JSON envelope with a HUGPONG audit type, schema version, report identity, Block Farm, period, report version, summary values, compiler/timestamp, and integrity hash. Operation snapshots and QR image blobs are deliberately excluded. The QR is generated from stable compiled identity rather than from an ever-growing Base64 monthly document.
+Web, mobile, and server now use one compressed version-3 JSON envelope containing the complete canonical report: identity, Block Farm, period/version, compiler, operation snapshots, field/member snapshots, source log IDs, totals, lifecycle metadata, and integrity hash. Normal reports are transferred through exactly one QR. If a compressed report exceeds safe physical QR capacity, QR generation is blocked and the manager is directed to Cloud; no operation data is truncated. QR image blobs are not persisted.
 
 ## 10. QR integrity changes
 
-The server recomputes SHA-256 over the canonical report identity, Block Farm, period, and immutable operation snapshots, then compares it with both the QR envelope and stored report. The verifier reports decoding, report discovery, integrity verification, review state, and certification separately. A decodable QR is never labeled certified.
+The server recomputes SHA-256 over the canonical report identity, Block Farm, period, and immutable operation snapshots, then compares it with the QR envelope and, when one exists, the stored report. Canonical validation also requires nonempty unique operations, matching source IDs, valid field attachment, complete field-operation references, and matching counts, acreage, and total cost. A decodable QR is never labeled certified.
 
-SRA QR verification is online-only. Both camera scans and manually entered report IDs, hashes, or envelopes are sent to the server, which resolves the authoritative report and recomputes its integrity hash before the mobile client may open it. The camera is unmounted while the separate manual-entry screen is active.
+The complete QR package can be reconstructed and inspected locally before import. The SRA sees the manager, fields, members, operations, area, and total before confirming. Import and certification still require the authoritative server. A typed report ID is only an online lookup fallback; it is not an offline report substitute.
 
 ## 11. Cloud submission changes
 
@@ -108,7 +100,7 @@ Compilation and submission are separate endpoints and UI actions. `POST /api/aud
 
 ## 12. QR/Cloud deduplication logic
 
-Cloud and QR use the same deterministic report document ID and report version. QR import reads and updates that document; it does not create a second business record. Repeated QR import reports `alreadyImported`. A cloud submission after QR import, or QR import after cloud submission, resolves to the same `PENDING_REVIEW` or later report. Farm Manager submission remains retryable; SRA QR verification/import is a direct online server operation and is never accepted as an offline authority.
+Cloud and QR use the same deterministic report document ID and report version. If Cloud already persisted the compiled report, QR import transitions that document. If the report travelled only by QR, the server validates the complete payload and creates the full canonical `audit_reports/{reportId}` document directly in `PENDING_REVIEW`; it never creates a placeholder or second business record. Repeated import reports `alreadyImported`. Farm Manager Cloud submission remains retryable, while SRA import is a direct online server operation.
 
 ## 13. SRA Inbox changes
 
@@ -128,23 +120,23 @@ SRA can return a pending review only after supplying a reason. The workflow reco
 
 ## 17. Web changes
 
-The compile modal now loads the automatic period preview and no longer asks for a normal month selection. Compiled reports expose a separate Submit to SRA action. The SRA workspace separates Inbox and paginated History, gives QR import secondary placement, shows status-appropriate review/certificate content, supports Return and Certify feedback states, and uses human compiler names where available. Manual report/hash entry remains a fallback.
+The Farm Operations screen now exposes the manager-only compile action without changing the Dashboard action styling. After compilation, the modal shows the saved report summary and exactly two primary delivery choices: **Send Through Cloud** and **Generate QR Transfer**. QR presents one compressed code with PNG download and a separate short report-ID copy action. The SRA verifier reconstructs the report and shows the full summary and operations before the separate Import confirmation. Manual report-ID entry remains an online fallback.
 
 ## 18. Mobile changes
 
-Mobile now shares the canonical lifecycle and QR contract, computes the oldest unresolved local preview, performs scoped sync blocking, separates compile from submit, and offers Submit to SRA immediately after successful compilation. Its audit card is restricted to the signed-in manager's assigned Block Farm, counts the authoritative report snapshots, exposes newly eligible logs after an earlier certificate, queues offline Farm Manager submission work, shows returned reasons, uses an actionable SRA Inbox, loads history separately, and requires server confirmation for SRA verification, import, return, and certification. `expo-crypto` supplies compatible SHA-256 hashing for locally retained compiled packages.
+Mobile now shares the canonical lifecycle, full-report validator, and compressed single-QR contract. A compiled report opens the same two delivery choices as web instead of silently submitting. The QR viewer can save the code as a PNG photo. The copy action copies only the short online report ID, never raw transfer JSON. The SRA scanner reconstructs locally and displays the complete report before confirmation. Cloud delivery can use the existing durable manager outbox when connectivity is unavailable. SRA import, return, and certification require server confirmation.
 
 ## 19. Offline behavior changes
 
-An offline Farm Manager can retain the compiled package, display its compact QR, and queue submission for retry. SRA Admin has no offline operating mode: loss of internet or API reachability ends the SRA mobile session, and QR scan/manual verification, import, return, price publication, user approval, and certification require a live authoritative server response. SRA-only actions bypass the mobile outbox, and obsolete SRA queue entries from earlier builds are discarded when the SRA session starts.
+An offline Farm Manager can retain a complete compiled package, generate its compressed single-QR transfer, or queue Cloud submission for retry. A signed-in SRA device can reconstruct and inspect that QR package without performing a report lookup, but the application intentionally does not grant SRA an offline authority mode: importing into the Inbox, returning, certifying, publishing prices, and approving users require a live authoritative server response.
 
 ## 20. Performance improvements
 
 - Inbox and History are separate bounded server queries.
 - History supports cursor pagination instead of downloading all certified reports.
 - QR lookup uses the canonical document ID; hash fallback is limited to one result.
-- QR payloads omit operation arrays and image blobs.
-- QR data derives from stable compiled report identity.
+- The compressed QR contains the canonical report but omits generated image blobs and unrelated source documents.
+- The code derives from one stable compiled identity and is generated only when requested.
 - Certification, return, import, and submit use direct document transactions.
 - Mobile history is fetched separately rather than mixed into its active Inbox render.
 
@@ -154,21 +146,21 @@ Readers normalize legacy `PENDING`, `SUBMITTED`, and `VERIFIED` values to `PENDI
 
 ## 22. Tests performed and results
 
-- Server test suite: 242 tests passed, including the certified-batch and returned-batch audit workflow regressions.
-- Web test suite: 23 tests passed.
+- Server test suite: 243 tests passed, including full-report QR reconstruction, empty-report rejection, certified-batch, and returned-batch regressions.
+- Web test suite: 25 tests passed, including server/web/mobile QR contract parity and Farm Operations placement.
 - Web production build: passed.
 - Android Expo export: passed; 1,151 modules bundled. The temporary export directory was removed afterward.
 - Server syntax checks for the new domain and route modules: passed.
 - `git diff --check`: no audit-source whitespace errors after final cleanup; line-ending conversion warnings remain because the Windows working tree uses CRLF.
 
-The automated audit tests cover lifecycle constants, deterministic version IDs, Manila business-date rollover, snapshot summaries, compact QR exclusions/round-trip, route separation, and bounded one-collection query intent. Existing server tests also cover mutation outbox behavior and security regressions.
+The automated audit tests cover lifecycle constants, deterministic version IDs, Manila business-date rollover, snapshot summaries, compressed single-QR round-trip and cross-platform parity, empty-report rejection, route separation, and bounded one-collection query intent. Existing server tests also cover mutation outbox behavior and security regressions.
 
 ## 23. Remaining limitations or risks
 
 - A live Farm Manager-to-SRA staging run was not executed because no isolated Firestore emulator/staging credential set was configured, and exercising the endpoints against an unknown live database would create regulatory records. The release gate should run the requested cloud, QR, duplicate, return/version, rollover, 48-report pagination, latency, and reconnect scenarios against an emulator or dedicated staging project.
 - Firestore composite indexes must be deployed before rollout.
 - The current data model has no canonical district ID relationship between SRA users and Block Farms. Role authorization is enforced, but true per-district SRA isolation cannot be safely inferred from display strings. Add canonical `districtId` fields and scoped rules/API queries before operating multiple districts.
-- The compact QR uses a deterministic SHA-256 integrity identifier, not an asymmetric digital signature. Server verification is authoritative, so SRA verification is deliberately unavailable offline.
+- The QR uses a deterministic SHA-256 integrity identifier, not an asymmetric digital signature. Local reconstruction detects corruption and inconsistent summaries; authenticated server import remains authoritative.
 - Existing legacy reports receive read compatibility but are not retroactively versioned or rehashed. A controlled migration is required if every old record must expose the full new metadata.
 - The project dependency install reported npm audit findings (1 low, 14 moderate, 1 high, 1 critical). They were not auto-fixed because dependency upgrades were outside this audit workflow change and could be breaking.
 - Audit-specific notifications were not added because the repository does not expose an existing notification delivery pipeline for these events; creating a parallel notification system would violate the requirement.

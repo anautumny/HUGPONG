@@ -321,7 +321,11 @@ function buildOperationSnapshot(logId, log) {
     quantity: log.quantity || null,
     totalCost: log.totalCost,
     lineItems: Array.isArray(log.lineItems) ? log.lineItems : [],
-    amendments: amendments(log.amendments)
+    amendments: amendments(log.amendments),
+    submittedByUserId: log.submittedByUserId || null,
+    submissionSource: log.submissionSource || null,
+    createdAt: log.createdAt || null,
+    updatedAt: log.updatedAt || null
   };
 }
 

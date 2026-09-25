@@ -13,6 +13,8 @@ const { readMutationContext, assertBaseVersion } = require('../services/mutation
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots,
+  buildFieldSnapshots, validateCanonicalAuditReport,
+  AUDIT_DELIVERY_METHOD, AUDIT_DELIVERY_STATUS,
   encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
 } = require('../domain/auditWorkflow');
 
@@ -66,6 +68,23 @@ async function loadFarmAuditData(blockFarmId, period) {
     .map(document => ({ id: document.id, ...document.data() }));
   if (!activeFields.length) throw new Error('The assigned Block Farm has no active fields to audit.');
 
+  const memberIds = Array.from(new Set(activeFields.map(field => field.memberUserId).filter(Boolean)));
+  if (memberIds.length) {
+    try {
+      const memberDocuments = typeof db.getAll === 'function'
+        ? await db.getAll(...memberIds.map(id => db.collection(COLLECTIONS.USERS).doc(id)))
+        : await Promise.all(memberIds.map(id => db.collection(COLLECTIONS.USERS).doc(id).get()));
+      const memberNames = new Map(memberDocuments.filter(document => document.exists).map(document => [
+        document.id,
+        document.data().displayName || document.data().name || document.id
+      ]));
+      activeFields.forEach(field => { field.memberName = memberNames.get(field.memberUserId) || field.memberUserId || null; });
+    } catch (error) {
+      console.warn('[Audit Reports] Member names could not be embedded in the snapshot:', error.message);
+      activeFields.forEach(field => { field.memberName = field.memberName || field.memberUserId || null; });
+    }
+  }
+
   const logDocuments = [];
   for (let index = 0; index < activeFields.length; index += 10) {
     const fieldIds = activeFields.slice(index, index + 10).map(field => field.id);
@@ -90,22 +109,29 @@ async function reportsForFarmPeriod(blockFarmId, period) {
 
 async function resolveQrInput(rawPayload) {
   try {
-    const payload = decodeQrPayload(rawPayload);
-    return { payload, snapshot: await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId).get() };
+    let payload = decodeQrPayload(rawPayload);
+    const snapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId).get();
+    // Legacy v1 codes contained only an identifier and summary. Keep them as an
+    // online lookup path, but never mistake them for a complete offline transfer.
+    if (payload.legacyLookupOnly) {
+      if (!snapshot.exists) throw Object.assign(new Error('This legacy QR code requires its authoritative audit report to be online.'), { status: 404 });
+      payload = validateCanonicalAuditReport(normalizedReport(snapshot));
+    }
+    return { payload, snapshot };
   } catch (decodeError) {
     const code = String(rawPayload || '').trim().toUpperCase();
     if (/^(AUD|RPT)-[A-Z0-9-]+$/.test(code)) {
       const snapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(code).get();
       if (!snapshot.exists) throw Object.assign(new Error('Audit report not found.'), { status: 404 });
       const report = normalizedReport(snapshot);
-      return { payload: JSON.parse(encodeQrPayload(report)), snapshot };
+      return { payload: validateCanonicalAuditReport(report), snapshot };
     }
     if (/^HUG-[A-Z0-9-]+$/.test(code)) {
       const query = await db.collection(COLLECTIONS.AUDIT_REPORTS).where('qrHash', '==', code).limit(1).get();
       if (query.empty) throw Object.assign(new Error('Audit hash not found.'), { status: 404 });
       const snapshot = query.docs[0];
       const report = normalizedReport(snapshot);
-      return { payload: JSON.parse(encodeQrPayload(report)), snapshot };
+      return { payload: validateCanonicalAuditReport(report), snapshot };
     }
     throw decodeError;
   }
@@ -194,7 +220,7 @@ async function listReports(req) {
       ]);
     }
     const unique = new Map([...primarySnapshot.docs, ...legacySnapshot.docs].map(document => [document.id, normalizedReport(document)]));
-    return sortAndPageReports(Array.from(unique.values()).map(report => ({
+    return sortAndPageReports(Array.from(unique.values()).filter(report => Array.isArray(report.operationSnapshots) && report.operationSnapshots.length > 0).map(report => ({
       ...report,
       submittedAt: report.submittedAt || report.compiledAt
     })), 'submittedAt', req.query.cursor, limit);
@@ -315,19 +341,25 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     if (req.body.id && String(req.body.id) !== reportId) return res.status(409).json({ success: false, error: `The canonical report identity for this audit is ${reportId}.` });
     const operationSnapshots = batch.operations.sort((left, right) => left.id.localeCompare(right.id))
       .map(document => buildOperationSnapshot(document.id, document.data()));
+    const fieldSnapshots = buildFieldSnapshots(operationSnapshots, activeFields);
+    const sourceLogIds = operationSnapshots.map(operation => operation.operationLogId);
     const now = nowIso();
     const integrityHash = createAuditHash(reportId, farm.id, period, operationSnapshots);
     const report = {
       rootReportId: rootAuditReportId(farm.id, period), reportVersion: version, previousVersionId: latest?.id || null,
       blockFarmId: farm.id, blockFarmName: farm.name || farm.code || farm.id, periodKey: period,
-      status: AUDIT_STATUS.COMPILED, operationSnapshots, ...summarizeSnapshots(operationSnapshots, activeFields),
+      status: AUDIT_STATUS.COMPILED, operationSnapshots, fieldSnapshots, sourceLogIds,
+      memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,
+      ...summarizeSnapshots(operationSnapshots, activeFields),
       compiledByUserId: actorId, compiledByName: actorName, compiledAt: now,
       qrSchemaVersion: QR_SCHEMA_VERSION, integrityHash, qrHash: integrityHash, integrityAlgorithm: 'SHA-256',
+      deliveryMethod: null, deliveryStatus: AUDIT_DELIVERY_STATUS.READY,
       submittedAt: null, submittedByUserId: null, submissionMethod: null, submissionMethods: [],
       returnReason: '', returnedByUserId: null, returnedAt: null,
       certificationNotes: '', certifiedByUserId: null, certifiedByName: '', certifiedAt: null,
       createdAt: now, updatedAt: now
     };
+    validateCanonicalAuditReport({ id: reportId, ...report });
     try {
       await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId).create(report);
     } catch (error) {
@@ -345,14 +377,16 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
 router.post('/qr/verify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     const { payload, snapshot } = await resolveQrInput(req.body.payload);
-    if (!snapshot.exists) return res.status(404).json({ success: false, code: 'AUDIT_NOT_FOUND', error: 'Audit package decoded, but the authoritative audit is not available in HUGPONG yet.' });
-    const report = normalizedReport(snapshot);
+    const transferHash = createAuditHash(payload.reportId, payload.blockFarmId, payload.periodKey, payload.operationSnapshots || []);
+    if (transferHash !== payload.integrityHash) return res.status(422).json({ success: false, code: 'AUDIT_INTEGRITY_FAILED', error: 'The transferred audit data does not match its integrity hash.' });
+    if (!snapshot.exists) return res.json({ success: true, data: { report: payload, integrityVerified: true, authoritativeFound: false, alreadyImported: false } });
+    const report = validateCanonicalAuditReport(normalizedReport(snapshot));
     const expectedHash = createAuditHash(snapshot.id, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
     const identityMatches = report.blockFarmId === payload.blockFarmId && report.periodKey === payload.periodKey
-      && report.reportVersion === Number(payload.reportVersion);
-    const integrityVerified = identityMatches && expectedHash === payload.integrityHash && expectedHash === (report.integrityHash || report.qrHash);
+      && report.reportVersion === Number(payload.reportVersion) && report.reportId === payload.reportId;
+    const integrityVerified = identityMatches && expectedHash === payload.integrityHash && expectedHash === report.integrityHash;
     if (!integrityVerified) return res.status(422).json({ success: false, code: 'AUDIT_INTEGRITY_FAILED', error: 'The audit QR integrity check failed.' });
-    return res.json({ success: true, data: { report, integrityVerified: true, alreadyImported: report.status !== AUDIT_STATUS.COMPILED } });
+    return res.json({ success: true, data: { report, integrityVerified: true, authoritativeFound: true, alreadyImported: report.status !== AUDIT_STATUS.COMPILED } });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });
   }
@@ -361,16 +395,42 @@ router.post('/qr/verify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
 router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     const { payload } = await resolveQrInput(req.body.payload);
+    const transferHash = createAuditHash(payload.reportId, payload.blockFarmId, payload.periodKey, payload.operationSnapshots || []);
+    if (transferHash !== payload.integrityHash) throw Object.assign(new Error('The transferred audit data does not match its integrity hash.'), { status: 422 });
     const now = nowIso();
+    const { actorId } = identity(req);
     const result = await db.runTransaction(async transaction => {
       const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId);
       const snapshot = await transaction.get(ref);
-      if (!snapshot.exists) throw Object.assign(new Error('The authoritative audit is not available yet. Reconnect after the Farm Manager synchronizes it.'), { status: 404 });
-      const report = normalizedReport(snapshot);
+      if (!snapshot.exists) {
+        const { reportId, ...canonicalPayload } = validateCanonicalAuditReport(payload);
+        const imported = {
+          ...canonicalPayload,
+          rootReportId: canonicalPayload.rootReportId || rootAuditReportId(canonicalPayload.blockFarmId, canonicalPayload.periodKey),
+          status: AUDIT_STATUS.PENDING_REVIEW,
+          qrSchemaVersion: QR_SCHEMA_VERSION,
+          integrityHash: canonicalPayload.integrityHash,
+          qrHash: canonicalPayload.qrHash || canonicalPayload.integrityHash,
+          integrityAlgorithm: 'SHA-256',
+          submissionMethod: AUDIT_DELIVERY_METHOD.QR,
+          submissionMethods: [AUDIT_DELIVERY_METHOD.QR],
+          deliveryMethod: AUDIT_DELIVERY_METHOD.QR,
+          deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED,
+          submittedAt: now,
+          submittedByUserId: canonicalPayload.compiledByUserId,
+          importedAt: now,
+          importedByUserId: actorId,
+          createdAt: canonicalPayload.createdAt || canonicalPayload.compiledAt,
+          updatedAt: now
+        };
+        transaction.create(ref, imported);
+        return { report: { id: reportId, reportId, ...imported }, integrityVerified: true, alreadyImported: false };
+      }
+      const report = validateCanonicalAuditReport(normalizedReport(snapshot));
       const expectedHash = createAuditHash(snapshot.id, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
       if (expectedHash !== payload.integrityHash || expectedHash !== (report.integrityHash || report.qrHash)) throw Object.assign(new Error('The audit QR integrity check failed.'), { status: 422 });
       if (report.status !== AUDIT_STATUS.COMPILED) return { report, integrityVerified: true, alreadyImported: true };
-      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submissionMethod: 'QR', submissionMethods: Array.from(new Set([...(report.submissionMethods || []), 'QR'])), updatedAt: now };
+      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submissionMethod: AUDIT_DELIVERY_METHOD.QR, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), AUDIT_DELIVERY_METHOD.QR])), deliveryMethod: AUDIT_DELIVERY_METHOD.QR, deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED, updatedAt: now };
       transaction.update(ref, update);
       return { report: { ...report, ...update }, integrityVerified: true, alreadyImported: false };
     });
@@ -384,7 +444,7 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
   try {
     const { actorId } = identity(req);
     const method = String(req.body.submissionMethod || 'CLOUD').trim().toUpperCase();
-    if (!['CLOUD', 'QR'].includes(method)) throw new Error('submissionMethod must be CLOUD or QR.');
+    if (method !== AUDIT_DELIVERY_METHOD.CLOUD) throw new Error('This endpoint accepts Cloud Submission only. QR Transfer is received through the SRA import workflow.');
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
       const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.params.id || ''));
@@ -395,7 +455,8 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       if (!farm.exists || farm.data().managerUserId !== actorId) throw Object.assign(new Error('Only the assigned Farm Manager may submit this audit.'), { status: 403 });
       if ([AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(report.status)) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.COMPILED) throw new Error('Only a compiled audit can be submitted to SRA.');
-      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), updatedAt: now };
+      validateCanonicalAuditReport(report);
+      const update = { status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, updatedAt: now };
       transaction.update(ref, update);
       return { ...report, ...update };
     });

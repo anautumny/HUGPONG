@@ -3,14 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as webSchema from '../src/services/firestoreSchema.js';
 import * as webAnalytics from '../src/services/analyticsSelectors.js';
 import * as webAuditWorkflow from '../src/domain/auditWorkflow.js';
 
 const require = createRequire(import.meta.url);
+const QRCode = require('qrcode');
 const serverSchema = require('../../../server/schema/firestoreSchema.js');
+const serverAuditWorkflow = require('../../../server/domain/auditWorkflow.js');
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function importSource(relativePath, transform = source => source) {
@@ -47,7 +49,11 @@ async function loadMobileAnalytics() {
 }
 
 async function loadMobileAuditWorkflow() {
-  return importSource('../../../mobile/src/domain/auditWorkflow.js');
+  const pakoUrl = pathToFileURL(path.resolve(testDir, '../../../mobile/node_modules/pako/dist/pako.mjs')).href;
+  return importSource('../../../mobile/src/domain/auditWorkflow.js', source => source.replace(
+    "import { deflateRaw, inflateRaw } from 'pako';",
+    `const { deflateRaw, inflateRaw } = await import('${pakoUrl}');`
+  ));
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -112,6 +118,52 @@ test('web and Android select the newest audit only inside the assigned farm and 
     assert.deepEqual([...workflow.reportedOperationIds(scoped)].sort(), ['LOG-1', 'LOG-2']);
     assert.deepEqual([...workflow.certifiedOperationIds(scoped)], ['LOG-1']);
   }
+});
+
+test('server, web, and Android QR transfers reconstruct the same complete canonical report', async () => {
+  const mobileAuditWorkflow = await loadMobileAuditWorkflow();
+  const operation = {
+    operationLogId: 'LOG-001', fieldId: 'FIELD-001', cycleId: 'CYC-FIELD-001-001',
+    blockFarmId: 'BF-001', cropYearCycle: '2026-2027', operationDefinitionId: 'SRA-04',
+    operationName: 'Planting', category: 'plant', variety: 'VMC 84-524', stageNumber: 2,
+    performedOn: '2026-09-20', areaHa: 2, peopleCount: 4, quantity: null, totalCost: 1000,
+    lineItems: [{ lineItemId: 'LINE-1', description: 'Seedcane', quantity: 1, unit: 'lot', unitCost: 1000, subtotal: 1000 }],
+    amendments: [], submittedByUserId: 'MEM-001', submissionSource: 'MEMBER',
+    createdAt: '2026-09-20T08:00:00.000Z', updatedAt: '2026-09-20T08:00:00.000Z'
+  };
+  const report = {
+    id: 'AUD-BF001-2026-09-V1', rootReportId: 'AUD-BF001-2026-09', reportVersion: 1,
+    blockFarmId: 'BF-001', blockFarmName: 'North Farm', periodKey: '2026-09',
+    compiledByUserId: 'MGR-001', compiledByName: 'Manager One', compiledAt: '2026-09-21T08:00:00.000Z',
+    operationSnapshots: [operation],
+    fieldSnapshots: [{ fieldId: 'FIELD-001', memberId: 'MEM-001', memberName: 'Farmer One', areaHa: 2, cropYearCycle: '2026-2027', cycleId: 'CYC-FIELD-001-001', operationLogIds: ['LOG-001'], operationCount: 1, totalCost: 1000 }],
+    sourceLogIds: ['LOG-001'], operationCount: 1, fieldCount: 1, memberCount: 1,
+    hectaresAudited: 2, totalCost: 1000, status: 'COMPILED', integrityHash: 'HUG-TEST-HASH', qrHash: 'HUG-TEST-HASH'
+  };
+  const serverDecoded = serverAuditWorkflow.decodeQrPayload(serverAuditWorkflow.encodeQrPayload(report));
+  const webDecoded = webAuditWorkflow.decodeAuditQrPayload(webAuditWorkflow.createAuditQrPayload(report));
+  const mobileDecoded = mobileAuditWorkflow.decodeAuditQrPayload(mobileAuditWorkflow.createAuditQrPayload(report));
+  assert.deepEqual(plain(webDecoded), plain(serverDecoded));
+  assert.deepEqual(plain(mobileDecoded), plain(serverDecoded));
+  assert.equal(serverDecoded.operationSnapshots.length, 1);
+  assert.equal(serverDecoded.fieldSnapshots[0].memberName, 'Farmer One');
+  const serverParts = serverAuditWorkflow.encodeQrParts(report);
+  assert.deepEqual(webAuditWorkflow.createAuditQrParts(report), serverParts);
+  assert.deepEqual(mobileAuditWorkflow.createAuditQrParts(report), serverParts);
+  serverParts.forEach(part => assert.doesNotThrow(() => QRCode.create(part, { errorCorrectionLevel: 'M' })));
+});
+
+test('Farm Manager Field Operations exposes monthly audit compilation directly', () => {
+  const dashboard = fs.readFileSync(path.resolve(testDir, '../src/views/dashboard/FarmManagerDashboard.jsx'), 'utf8');
+  const operations = fs.readFileSync(path.resolve(testDir, '../src/views/operations/OperationsView.jsx'), 'utf8');
+  const auditCenter = fs.readFileSync(path.resolve(testDir, '../src/views/audit/AuditCenterView.jsx'), 'utf8');
+
+  assert.match(operations, /label: 'Compile Monthly Audit'[\s\S]*?to: '\/audit\?compile=1'/);
+  assert.doesNotMatch(dashboard, /label: 'Compile Monthly Audit'/);
+  assert.match(dashboard, /label: 'Field Operations'[\s\S]*?variant: 'primary'/);
+  assert.match(dashboard, /label: 'Farm & Field Registry'[\s\S]*?variant: 'primary'/);
+  assert.match(auditCenter, /searchParams\.get\('compile'\) === '1'/);
+  assert.match(auditCenter, /setShowCompileModal\(true\)/);
 });
 
 test('server, web, and Android serialize the same canonical operation record', async () => {

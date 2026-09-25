@@ -8,14 +8,14 @@ import {
   User,
   Hash,
   CheckCircle2,
-  Clock
+  Clock,
+  QrCode
 } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import QRCodeView from './QRCodeView';
 import Textarea from '../ui/Textarea';
-import { AUDIT_STATUS, auditStatusLabel, canonicalAuditStatus, createAuditQrPayload } from '../../domain/auditWorkflow';
+import { AUDIT_STATUS, auditStatusLabel, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
 export default function AuditDossierCard({
   report = null,
@@ -116,11 +116,9 @@ export default function AuditDossierCard({
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-primary pb-5">
         <div className="flex items-start gap-3.5">
-          <QRCodeView
-            value={createAuditQrPayload(report)}
-            size={72}
-            className="shrink-0 hidden sm:inline-flex"
-          />
+          <div className="w-[72px] h-[72px] shrink-0 hidden sm:flex items-center justify-center rounded-xl border border-border bg-bg text-primary" title="Use Generate QR Transfer to display every report part">
+            <QrCode className="w-8 h-8" />
+          </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg sm:text-xl font-black text-primary dark:text-primary-light uppercase tracking-wide">

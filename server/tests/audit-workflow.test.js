@@ -13,7 +13,10 @@ const {
   summarizeSnapshots,
   selectAuditCompilationBatch,
   encodeQrPayload,
-  decodeQrPayload
+  decodeQrPayload,
+  encodeQrParts,
+  assembleQrParts,
+  validateCanonicalAuditReport
 } = require('../domain/auditWorkflow');
 
 const repositoryRoot = path.join(__dirname, '..', '..');
@@ -101,21 +104,57 @@ test('a returned batch recompiles uncertified logs without duplicating certified
   assert.deepEqual(batch.operations.map(operation => operation.id), ['LOG-2', 'LOG-3']);
 });
 
-test('compact QR package is self-identifying, versioned, and excludes operation snapshots', () => {
+test('a returned latest report never recaptures logs covered by an older non-returned report', () => {
+  const batch = selectAuditCompilationBatch([
+    { id: 'LOG-1' }, { id: 'LOG-2' }, { id: 'LOG-3' }
+  ], [
+    { id: 'AUD-V1', reportVersion: 1, status: AUDIT_STATUS.COMPILED, operationSnapshots: [{ operationLogId: 'LOG-1' }] },
+    { id: 'AUD-V2', reportVersion: 2, status: AUDIT_STATUS.RETURNED, operationSnapshots: [{ operationLogId: 'LOG-2' }] }
+  ]);
+  assert.equal(batch.replay, null);
+  assert.deepEqual(batch.operations.map(operation => operation.id), ['LOG-2', 'LOG-3']);
+});
+
+test('QR transfer carries the complete canonical report in one compressed code', () => {
   const report = {
     id: 'AUD-BF1-2026-09-V1', rootReportId: 'AUD-BF1-2026-09', blockFarmId: 'BF-1',
-    periodKey: '2026-09', reportVersion: 1, operationCount: 14, fieldCount: 5,
-    hectaresAudited: 15.25, totalCost: 125430, compiledByUserId: '03000001',
+    blockFarmName: 'Central Farm', periodKey: '2026-09', reportVersion: 1, operationCount: 1, fieldCount: 1,
+    hectaresAudited: 1.25, totalCost: 125430, compiledByUserId: '03000001', compiledByName: 'Farm Manager',
     compiledAt: '2026-09-30T08:00:00.000Z', integrityHash: 'HUG-ABC123',
-    operationSnapshots: [{ operationLogId: 'LOG-SHOULD-NOT-BE-IN-QR' }]
+    operationSnapshots: [{ operationLogId: 'LOG-IN-QR', fieldId: 'FLD-1', operationName: 'Planting', totalCost: 125430 }],
+    fieldSnapshots: [{ fieldId: 'FLD-1', memberId: 'MEM-1', memberName: 'Farmer One', areaHa: 1.25, operationLogIds: ['LOG-IN-QR'], operationCount: 1, totalCost: 125430 }],
+    memberCount: 1,
+    sourceLogIds: ['LOG-IN-QR']
   };
   const encoded = encodeQrPayload(report);
   const decoded = decodeQrPayload(encoded);
-  assert.equal(decoded.type, 'HUGPONG_AUDIT');
-  assert.equal(decoded.schemaVersion, 1);
   assert.equal(decoded.reportId, report.id);
   assert.equal(decoded.integrityHash, report.integrityHash);
-  assert.doesNotMatch(encoded, /operationSnapshots|LOG-SHOULD-NOT-BE-IN-QR/);
+  assert.equal(decoded.operationSnapshots[0].operationLogId, 'LOG-IN-QR');
+  assert.equal(decoded.fieldSnapshots[0].memberName, 'Farmer One');
+  const qrCodes = encodeQrParts(report);
+  assert.equal(qrCodes.length, 1);
+  assert.deepEqual(decodeQrPayload(qrCodes[0]), decoded);
+
+  // Previously issued version-2 multipart codes remain readable during migration.
+  const legacyPayload = JSON.stringify({ type: 'HUGPONG_AUDIT_TRANSFER', schemaVersion: 2, report: decoded });
+  const midpoint = Math.ceil(legacyPayload.length / 2);
+  const legacyParts = [legacyPayload.slice(0, midpoint), legacyPayload.slice(midpoint)].map((data, index) => JSON.stringify({
+    type: 'HUGPONG_AUDIT_PART', schemaVersion: 2, transferId: 'legacy-transfer',
+    partNumber: index + 1, partCount: 2, data
+  }));
+  assert.deepEqual(assembleQrParts([...legacyParts].reverse()), decoded);
+  assert.throws(() => assembleQrParts(legacyParts.slice(1)), /incomplete/i);
+});
+
+test('canonical audit validation rejects an empty successful report', () => {
+  assert.throws(() => validateCanonicalAuditReport({
+    id: 'AUD-BF1-2026-09-V1', blockFarmId: 'BF-1', periodKey: '2026-09',
+    compiledByUserId: 'MGR-1', compiledAt: '2026-09-30T08:00:00.000Z',
+    integrityHash: 'HUG-EMPTY', operationSnapshots: [], sourceLogIds: [],
+    fieldSnapshots: [], operationCount: 0, fieldCount: 0, memberCount: 0,
+    hectaresAudited: 0, totalCost: 0
+  }), /contains no operation data/i);
 });
 
 test('audit route exposes separate idempotent submit, QR import, return, and certify transitions', () => {
@@ -127,6 +166,9 @@ test('audit route exposes separate idempotent submit, QR import, return, and cer
   assert.match(source, /status: AUDIT_STATUS\.COMPILED/);
   assert.match(source, /status: AUDIT_STATUS\.PENDING_REVIEW/);
   assert.match(source, /expectedHash !== \(report\.integrityHash \|\| report\.qrHash\)/);
+  assert.match(source, /transaction\.create\(ref, imported\)/);
+  assert.match(source, /validateCanonicalAuditReport\(payload\)/);
+  assert.doesNotMatch(source, /fields:\s*\[\],\s*operations:\s*\[\]/);
 });
 
 test('active SRA reads are bounded server queries and history remains one canonical collection', () => {
@@ -139,8 +181,8 @@ test('active SRA reads are bounded server queries and history remains one canoni
 
 test('SRA audit inbox falls back to a status-scoped query while its composite index is unavailable', async () => {
   const reports = [
-    { id: 'AUD-OLD', status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: '2026-09-24T00:00:00.000Z' },
-    { id: 'AUD-NEW', status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: '2026-09-25T00:00:00.000Z' },
+    { id: 'AUD-OLD', status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: '2026-09-24T00:00:00.000Z', operationSnapshots: [{ operationLogId: 'LOG-OLD' }] },
+    { id: 'AUD-NEW', status: AUDIT_STATUS.PENDING_REVIEW, submittedAt: '2026-09-25T00:00:00.000Z', operationSnapshots: [{ operationLogId: 'LOG-NEW' }] },
     { id: 'AUD-CERTIFIED', status: AUDIT_STATUS.CERTIFIED, certifiedAt: '2026-09-26T00:00:00.000Z' }
   ];
   let usedStatusOnlyFallback = false;

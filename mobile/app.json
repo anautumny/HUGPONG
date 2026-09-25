@@ -34,7 +34,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#F7F9F4"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "web": {
       "favicon": "./assets/HUGPONG LOGO.png"

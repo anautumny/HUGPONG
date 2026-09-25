@@ -40,7 +40,8 @@ export default function AuditQueue({ reports = [], selectedReportId = null, onSe
                 </div>
                 <Badge variant={status === 'RETURNED' ? 'danger' : 'warning'} size="sm">{auditStatusLabel(status)}</Badge>
               </div>
-              <p className="text-[10px] text-hug-muted mt-2">{report.operationCount || report.operationSnapshots?.length || 0} Operations · {Number(report.hectaresAudited || 0).toFixed(2)} Ha · Submitted {report.submittedAt ? new Date(report.submittedAt).toLocaleDateString() : '—'}</p>
+              <p className="text-[10px] text-hug-muted mt-2">Manager: {report.compiledByName || report.compiledByUserId || 'Unknown'} · {report.deliveryMethod || report.submissionMethod || 'Compiled'}</p>
+              <p className="text-[10px] text-hug-muted mt-1">{report.operationCount || report.operationSnapshots?.length || 0} Operations · {report.fieldCount || report.fieldSnapshots?.length || 0} Fields · Submitted {report.submittedAt ? new Date(report.submittedAt).toLocaleString() : '—'}</p>
             </button>
           );
         })}

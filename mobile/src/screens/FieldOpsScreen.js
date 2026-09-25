@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Alert, Share,
-  ActivityIndicator,
+  Modal, Dimensions, TextInput, Alert,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
@@ -19,7 +22,12 @@ import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
-import { AUDIT_STATUS, canonicalAuditStatus, createAuditQrPayload, businessPeriodKey, displayPeriod, auditReportsForFarmPeriod, reportedOperationIds, certifiedOperationIds } from '../domain/auditWorkflow';
+import {
+  AUDIT_STATUS, AUDIT_QR_SCHEMA_VERSION, canonicalAuditStatus, createAuditQrPayload, createAuditQrParts,
+  decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts,
+  buildAuditFieldSnapshots, validateCanonicalAuditReport,
+  businessPeriodKey, displayPeriod, auditReportsForFarmPeriod, reportedOperationIds
+} from '../domain/auditWorkflow';
 import { safeAlert } from '../utils/dialogs';
 import { canonicalStoredCropYear, cleanDataForFirestore, cleanupDuplicateLogs, formatDisplayDate, toISODateString, sortOperationsNewestFirst, sortNewestFirst, cropYearCycleForDate, formatCropYearDisplay, uniqueCropYears } from '../utils/dataHelpers';
 import {
@@ -744,6 +752,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [session, setSessionLocal] = useState(() => getCurrentSession() || {});
   const [activeRole, setActiveRole] = useState(getCurrentSession().role);
   const [deviceOnline, setDeviceOnline] = useState(getNetworkStatus());
+  const [managerFieldFilter, setManagerFieldFilter] = useState('all');
   const sessionUserId = session?.employeeId || session?.id || '';
 
   useEffect(() => {
@@ -793,6 +802,12 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
     return true;
   });
+  const personalFields = accessibleFields.filter(field => (
+    field.memberUserId === sessionUserId || (session?.fieldId && field.id === session.fieldId)
+  ));
+  const scopedFields = activeRole === 'Farm Manager' && deviceOnline && managerFieldFilter === 'my'
+    ? personalFields
+    : accessibleFields;
   const targetFarm = blockFarms.find(farm => managedFarmIds.has(farm.id))?.name || session?.farm || session?.blockFarm || 'Unassigned Block Farm';
   const [selectedFarm, setSelectedFarm] = useState('All Block Farms');
   const [selectedField, setSelectedField] = useState(() => {
@@ -835,7 +850,8 @@ export default function FieldOpsScreen({ navigation, route }) {
     return (fields && fields.length > 0 ? fields[0] : null);
   });
 
-  const safeField = selectedField || accessibleFields[0] || {
+  const scopedSelectedField = selectedField && scopedFields.find(field => field.id === selectedField.id);
+  const safeField = scopedSelectedField || scopedFields[0] || {
     id: 'Unassigned',
     ha: '0.0',
     member: session?.name || 'Farm Member',
@@ -926,6 +942,9 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (targetFieldId) {
       const targetF = accessibleFields.find(f => f && f.id === targetFieldId);
       if (targetF) {
+        if (activeRole === 'Farm Manager' && !personalFields.some(field => field.id === targetF.id)) {
+          setManagerFieldFilter('all');
+        }
         setSelectedField(targetF);
         updateSessionFieldId(targetF.id);
         if (route?.params?.requestTakeOver || route?.params?.isTakeOver || route?.params?.takeOverFieldId) {
@@ -956,10 +975,12 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
 
-    if (!selectedField && accessibleFields.length > 0) {
-      setSelectedField(accessibleFields[0]);
+    if ((!selectedField || !scopedFields.some(field => field.id === selectedField.id)) && scopedFields.length > 0) {
+      setSelectedField(scopedFields[0]);
+    } else if (scopedFields.length === 0 && selectedField) {
+      setSelectedField(null);
     }
-  }, [route?.params, fields]);
+  }, [route?.params, fields, managerFieldFilter, deviceOnline]);
 
   // Real-time bidirectional synchronization listener with Cloud Firestore & Web
   useEffect(() => {
@@ -974,21 +995,28 @@ export default function FieldOpsScreen({ navigation, route }) {
         if (updatedField) {
           setSelectedField({ ...updatedField });
         }
-      } else if (getCurrentSession()?.role !== 'Farm Member' && accessibleFields.length > 0) {
-        setSelectedField(accessibleFields[0]);
+      } else if (getCurrentSession()?.role !== 'Farm Member' && scopedFields.length > 0) {
+        setSelectedField(scopedFields[0]);
       }
     });
     return unsubscribe;
   }, [selectedField?.id]);
   const [showLog, setShowLog] = useState(false);
   const [showQR, setShowQR] = useState(false);
-  const [copiedHash, setCopiedHash] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [activeQRData, setActiveQRData] = useState(null);
+  const [activeQrPartIndex, setActiveQrPartIndex] = useState(0);
+  const [isSavingQrImage, setIsSavingQrImage] = useState(false);
+  const [isCompilingAudit, setIsCompilingAudit] = useState(false);
+  const auditCompilationLockRef = useRef(false);
+  const qrSvgRef = useRef(null);
   const [scannedAuditReport, setScannedAuditReport] = useState(null);
+  const [pendingScannedPayload, setPendingScannedPayload] = useState('');
+  const qrTransferPartsRef = useRef(new Map());
   const [showSRAInspectModal, setShowSRAInspectModal] = useState(false);
   const [auditReturnReason, setAuditReturnReason] = useState('');
   const [isAuditActionPending, setIsAuditActionPending] = useState(false);
+
   const [logForm, setLogForm] = useState({
     id: null,
     fieldId: '',
@@ -1024,7 +1052,6 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [selectedDraftIds, setSelectedDraftIds] = useState(new Set());
   const [isDraftSelectMode, setIsDraftSelectMode] = useState(false);
   const [logTab, setLogTab] = useState('submitted');
-  const [managerFieldFilter, setManagerFieldFilter] = useState('all');
   const [logSearch, setLogSearch] = useState('');
   const [logCategoryFilter, setLogCategoryFilter] = useState('all');
   const [expandedLogId, setExpandedLogId] = useState(null);
@@ -1345,8 +1372,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     return farmFields.filter(field => !fieldSyncState(field).isSynced);
   };
 
-  // Preview QR code specifically for an existing or historical audit report
-  const handleViewHistoricalAuditQR = (audit) => {
+  const openAuditQrTransfer = (audit) => {
     if (!audit) return;
     const session = getCurrentSession();
     const hash = audit.qrSignature || audit.qrHash;
@@ -1355,21 +1381,83 @@ export default function FieldOpsScreen({ navigation, route }) {
       Alert.alert('Report Unavailable', 'This audit report is missing its canonical ID, block farm ID, or QR hash.');
       return;
     }
-    const envelope = audit.envelope || createAuditQrPayload(audit);
-
-    setActiveQRData({
-      reportId: reportId,
-      month: audit.month || compileMonth,
-      blockFarm: audit.blockFarm || session?.farm || (session?.farm || session?.blockFarm || 'District Central'),
-      totalCost: audit.totalCost,
-      totalHectares: audit.totalHectares || 0,
-      totalFields: audit.fieldsReported || 0,
-      totalLogs: audit.logsCount || 0,
-      hash: hash,
-      envelope: envelope
-    });
-    setShowQR(true);
+    try {
+      const report = validateCanonicalAuditReport(audit);
+      const qrParts = createAuditQrParts(report);
+      setActiveQrPartIndex(0);
+      setActiveQRData({
+        report,
+        reportId,
+        month: audit.month || displayPeriod(report.periodKey),
+        blockFarm: report.blockFarmName || audit.blockFarm || session?.farm || session?.blockFarm || 'District Central',
+        totalCost: report.totalCost,
+        totalHectares: report.hectaresAudited,
+        totalFields: report.fieldCount,
+        totalLogs: report.operationCount,
+        hash,
+        qrParts
+      });
+      setShowQR(true);
+    } catch (error) {
+      Alert.alert('QR Transfer Unavailable', error.message || 'This saved report is incomplete and cannot be transferred.');
+    }
   };
+
+  const saveCurrentQrImage = async () => {
+    if (!qrSvgRef.current?.toDataURL || !activeQRData?.qrParts?.length) return;
+    setIsSavingQrImage(true);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('The QR image could not be prepared.')), 10000);
+        qrSvgRef.current.toDataURL(data => {
+          clearTimeout(timeout);
+          if (data) resolve(data);
+          else reject(new Error('The QR image could not be prepared.'));
+        }, { width: 1200, height: 1200 });
+      });
+      const safeReportId = String(activeQRData.reportId || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
+
+      if (Platform.OS === 'android') {
+        const downloadsUri = FileSystem.StorageAccessFramework.getUriForDirectoryInRoot('Download');
+        const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(downloadsUri);
+        if (!permission.granted) {
+          Alert.alert('Save Cancelled', 'Choose a folder when you are ready to save the QR image.');
+          return;
+        }
+        const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+          permission.directoryUri,
+          `${safeReportId}-QR`,
+          'image/png'
+        );
+        await FileSystem.StorageAccessFramework.writeAsStringAsync(fileUri, base64, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+        Alert.alert('QR Image Saved', 'The complete audit QR was saved in the selected folder.');
+        return;
+      }
+
+      if (!FileSystem.cacheDirectory) throw new Error('Temporary storage is unavailable.');
+      const fileUri = `${FileSystem.cacheDirectory}${safeReportId}-QR.png`;
+      try {
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        if (!(await Sharing.isAvailableAsync())) throw new Error('The system save sheet is unavailable.');
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'image/png',
+          dialogTitle: 'Save or share audit QR',
+          UTI: 'public.png'
+        });
+      } finally {
+        await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+      }
+    } catch (error) {
+      Alert.alert('Unable to Save QR', error.message || 'The QR image could not be saved.');
+    } finally {
+      setIsSavingQrImage(false);
+    }
+  };
+
+  // Preview QR code specifically for an existing or historical audit report
+  const handleViewHistoricalAuditQR = (audit) => openAuditQrTransfer(audit);
 
   // Dynamic calculations & compilation for month-level Hybrid Cloud-Anchored QR package
   const handleGenerateAudit = () => {
@@ -1435,27 +1523,13 @@ export default function FieldOpsScreen({ navigation, route }) {
     const farmTotalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
     const existing = auditReportsForFarmPeriod(auditReports, farm?.id, toReportPeriod(compileMonth))[0];
     if (existing) {
-      const haVal = existing.totalHectares || farmTotalHa;
-      setActiveQRData({
-        reportId: existing.reportId || existing.id,
-        month: existing.month || compileMonth,
-        blockFarm: existing.blockFarm || targetFarm,
-        totalCost: existing.totalCost || 0,
-        totalHectares: haVal,
-        totalFields: existing.fieldsReported || farmFields.length || 0,
-        totalLogs: existing.logsCount || 0,
-        hash: existing.qrSignature || existing.qrHash,
-        envelope: existing.envelope || createAuditQrPayload(existing),
-        cloudQueueStatus: existing.cloudQueueStatus || (existing.status === 'CERTIFIED' ? 'transmitted' : 'offline_queued'),
-        cloudQueuedAt: existing.cloudQueuedAt || existing.dateGenerated
-      });
-      setShowQR(true);
+      openAuditQrTransfer({ ...existing, totalHectares: existing.totalHectares || farmTotalHa, blockFarm: existing.blockFarm || targetFarm });
     } else {
       handleGenerateAudit();
     }
   };
 
-  const compileAndShow = async () => {
+  const compileAndShowUnlocked = async () => {
     const session = getCurrentSession();
     const compilerUserId = session?.employeeId || session?.id || '';
     if (canonicalRole(session?.role) !== 'FARM_MANAGER') {
@@ -1486,8 +1560,8 @@ export default function FieldOpsScreen({ navigation, route }) {
     // Existing reports for this month
     const orderedReports = auditReportsForFarmPeriod(auditReports, targetFarmId, periodKey);
     const latestReport = orderedReports[0] || null;
-    const certifiedIds = certifiedOperationIds(orderedReports);
-    let logsToCompile = farmLogs.filter(log => !certifiedIds.has(String(log.id)));
+    const coveredIds = reportedOperationIds(orderedReports);
+    let logsToCompile = farmLogs.filter(log => !coveredIds.has(String(log.id)));
     const latestStatus = latestReport ? canonicalAuditStatus(latestReport.status) : null;
 
     if (latestReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION, AUDIT_STATUS.PENDING_REVIEW].includes(latestStatus)) {
@@ -1497,18 +1571,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             ? `${compileMonth} report ${latestReport.reportId || latestReport.id} is already awaiting SRA review.`
             : `${compileMonth} already has report ${latestReport.reportId || latestReport.id}. Submit that compiled report before creating another version.`
         );
-        setActiveQRData({
-          reportId: latestReport.reportId || latestReport.id, month: latestReport.month || compileMonth,
-          blockFarm: latestReport.blockFarmName || latestReport.blockFarm || targetFarm,
-          totalCost: latestReport.totalCost || 0, totalHectares: latestReport.hectaresAudited || latestReport.totalHectares || totalHa,
-          totalFields: latestReport.fieldCount || latestReport.fieldsReported || farmFields.length || 0,
-          totalLogs: latestReport.operationCount || latestReport.logsCount || latestReport.totalLogs || 0,
-          hash: latestReport.integrityHash || latestReport.qrSignature || latestReport.qrHash,
-          envelope: createAuditQrPayload(latestReport),
-          cloudQueueStatus: canonicalAuditStatus(latestReport.status) === AUDIT_STATUS.PENDING_SUBMISSION ? 'offline_queued' : 'transmitted',
-          cloudQueuedAt: latestReport.submittedAt || latestReport.compiledAt
-        });
-        setShowQR(true);
+        openAuditQrTransfer(latestReport);
         return;
     }
 
@@ -1531,7 +1594,6 @@ export default function FieldOpsScreen({ navigation, route }) {
     const rootReportId = `AUD-${targetFarmId.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${periodKey}`;
     const reportId = `${rootReportId}-V${reportVersion}`;
     let hash = '';
-    let envelope = '';
 
     const nowIso = new Date().toISOString();
 
@@ -1552,6 +1614,8 @@ export default function FieldOpsScreen({ navigation, route }) {
 
     // Serialize operations for audit package
     const serializedOps = [...logsToCompile].sort((left, right) => String(left.id).localeCompare(String(right.id))).map(l => operationSnapshot(l.id, l));
+    const fieldSnapshots = buildAuditFieldSnapshots(serializedOps, farmFields);
+    const hectaresAudited = Number(fieldSnapshots.reduce((sum, field) => sum + Number(field.areaHa || 0), 0).toFixed(4));
     const canonicalIntegrity = JSON.stringify({ reportId, blockFarmId: targetFarmId, period: periodKey, operationSnapshots: serializedOps });
     hash = `HUG-${(await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, canonicalIntegrity)).slice(0, 24).toUpperCase()}`;
 
@@ -1572,14 +1636,19 @@ export default function FieldOpsScreen({ navigation, route }) {
       blockFarmName: targetFarm,
       blockFarmId: targetFarmId,
       totalCost: totalCost,
-      totalHectares: totalHa,
-      fieldsReported: farmFields.length,
+      totalHectares: hectaresAudited,
+      hectaresAudited,
+      fieldsReported: fieldSnapshots.length,
+      fieldCount: fieldSnapshots.length,
       logsCount: logsCount,
       totalLogs: logsCount,
+      operationCount: logsCount,
+      memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,
       rootReportId,
       reportVersion,
-      status: AUDIT_STATUS.PENDING_SUBMISSION,
+      status: AUDIT_STATUS.COMPILED,
       compiledByUserId: compilerUserId,
+      compiledByName: session?.name || 'Farm Manager',
       compiledAt,
       createdAt: compiledAt,
       updatedAt: compiledAt,
@@ -1588,15 +1657,18 @@ export default function FieldOpsScreen({ navigation, route }) {
       qrSignature: hash,
       qrHash: hash,
       integrityHash: hash,
-      qrSchemaVersion: 1,
+      qrSchemaVersion: AUDIT_QR_SCHEMA_VERSION,
+      deliveryMethod: null,
+      deliveryStatus: 'READY',
       verifiedBy: null,
       stageBreakdown: stageBreakdown.length > 0 ? stageBreakdown : [],
       operationSnapshots: serializedOps,
+      fieldSnapshots,
+      sourceLogIds: serializedOps.map(operation => operation.operationLogId),
       operations: serializedOps,
       notes: `Compiled by Farm Manager ${session?.name || 'Farm Manager'}. Awaiting SRA District inspection.`
     };
-    envelope = createAuditQrPayload(newReport);
-    newReport.envelope = envelope;
+    validateCanonicalAuditReport(newReport);
 
     try {
       const outcome = await commitExplicitMutation('audit_report', {
@@ -1621,9 +1693,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         newReport.totalCost = authoritativeSnapshots.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
         logsCount = newReport.logsCount;
         totalCost = newReport.totalCost;
-        envelope = createAuditQrPayload({ ...newReport, ...outcome.response.data, id: outcome.response.data.id || targetReportId, integrityHash: hash });
         newReport.qrSignature = hash;
-        newReport.envelope = envelope;
       }
       if (!outcome.queued) {
         cloudQueueStatus = 'compiled';
@@ -1645,55 +1715,47 @@ export default function FieldOpsScreen({ navigation, route }) {
     saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
     notifyDataUpdate();
 
-    setActiveQRData({
-      reportId: effectiveReportId,
-      month: compileMonth,
-      blockFarm: targetFarm,
-      totalCost,
-      totalHectares: totalHa,
-      totalFields: farmFields.length,
-      totalLogs: logsCount,
-      hash,
-      envelope,
-      cloudQueueStatus,
-      cloudQueuedAt
-    });
-
     const deltaCount = logsCount;
     const countLabel = `${deltaCount} operation log${deltaCount !== 1 ? 's' : ''}`;
     const finalStatus = canonicalAuditStatus(newReport.status);
 
     if (cloudQueueStatus === 'compiled') {
-      if (wasReplayed && finalStatus === AUDIT_STATUS.CERTIFIED) {
+      if (wasReplayed) {
+        const replayTitle = finalStatus === AUDIT_STATUS.CERTIFIED
+          ? 'Audit Already Up to Date'
+          : finalStatus === AUDIT_STATUS.PENDING_REVIEW
+            ? 'Already Submitted'
+            : 'Audit Already Compiled';
+        const replayMessage = finalStatus === AUDIT_STATUS.CERTIFIED
+          ? `The server confirmed that all eligible ${compileMonth} logs are already covered by certificate ${effectiveReportId}.`
+          : finalStatus === AUDIT_STATUS.PENDING_REVIEW
+            ? `Report ${effectiveReportId} is already in the SRA Audit Inbox and awaiting review.`
+            : `Report ${effectiveReportId} already contains these operation logs. No duplicate report was created.`;
         safeAlert(
-          'Audit Already Up to Date',
-          `The server confirmed that all eligible ${compileMonth} logs are already covered by certificate ${effectiveReportId}.`,
-          [{ text: 'View Certificate QR', onPress: () => setShowQR(true) }]
-        );
-        return;
-      }
-      if (wasReplayed && finalStatus === AUDIT_STATUS.PENDING_REVIEW) {
-        safeAlert(
-          'Already Submitted',
-          `Report ${effectiveReportId} is already in the SRA Audit Inbox and awaiting review.`,
-          [{ text: 'View Submitted Audit QR', onPress: () => setShowQR(true) }]
+          replayTitle,
+          replayMessage,
+          [{ text: finalStatus === AUDIT_STATUS.CERTIFIED ? 'View Certificate QR' : 'View Existing QR', onPress: () => openAuditQrTransfer(newReport) }]
         );
         return;
       }
       safeAlert(
         'Monthly Audit Compiled',
-        `Successfully compiled ${countLabel} for ${compileMonth}.\n\nThe snapshot is saved. Review it, then use Submit to SRA.`,
+        `Successfully compiled ${countLabel} for ${compileMonth}.\n\nChoose how to deliver the complete report to SRA.`,
         [
           { text: 'Later', style: 'cancel' },
-          { text: 'Review QR', onPress: () => setShowQR(true) },
-          { text: 'Submit to SRA', onPress: () => handleSubmitAuditReport(newReport) }
+          { text: 'Generate QR Transfer', onPress: () => openAuditQrTransfer(newReport) },
+          { text: 'Send Through Cloud', onPress: () => handleSubmitAuditReport(newReport) }
         ]
       );
     } else {
       safeAlert(
         'Compilation Pending Sync',
-        `The audit package is saved on this device and will be confirmed after reconnection. It has not been submitted to SRA.`,
-        [{ text: 'View QR Package', onPress: () => setShowQR(true) }]
+        `The complete audit package is saved on this device. Cloud submission will wait for reconnection, or you can transfer it by QR now.`,
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Generate QR Transfer', onPress: () => openAuditQrTransfer(newReport) },
+          { text: 'Send Through Cloud', onPress: () => handleSubmitAuditReport(newReport) }
+        ]
       );
     }
   };
@@ -1721,12 +1783,27 @@ export default function FieldOpsScreen({ navigation, route }) {
       safeAlert(
         outcome.queued ? 'Submission Pending' : 'Submitted to SRA',
         outcome.queued
-          ? 'No internet connection. Your compiled audit remains saved on this device and will submit when connectivity returns. You can still show its QR package.'
+          ? 'No internet connection. Your compiled audit remains saved and its Cloud Submission will retry when connectivity returns.'
           : 'The audit is now in the SRA Audit Inbox and is awaiting review.',
-        [{ text: 'Show QR Code', onPress: () => handleViewHistoricalAuditQR(auditReports[index] || report) }]
+        [{ text: 'OK' }]
       );
     } catch (error) {
       safeAlert('Submission Not Completed', `${error.message || 'Unable to submit the audit.'}\n\nThe compiled audit remains saved on this device.`);
+    }
+  };
+
+  const compileAndShow = async () => {
+    if (auditCompilationLockRef.current) {
+      safeAlert('Compilation in Progress', 'Please wait for the current monthly audit compilation to finish.');
+      return;
+    }
+    auditCompilationLockRef.current = true;
+    setIsCompilingAudit(true);
+    try {
+      await compileAndShowUnlocked();
+    } finally {
+      auditCompilationLockRef.current = false;
+      setIsCompilingAudit(false);
     }
   };
 
@@ -1762,37 +1839,77 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (!code) return;
     const rawStr = String(code).trim();
     if (!rawStr) return;
-    if (!getNetworkStatus()) {
-      Alert.alert('Connection Required', 'SRA report verification requires a live HUGPONG connection. Reconnect and sign in again.');
-      setShowScanner(false);
-      return;
-    }
-
     try {
-      const verified = await verifyAuditQr(rawStr);
-      if (!verified.data?.integrityVerified) throw new Error('The server could not verify this audit report.');
-      const result = verified.data.alreadyImported ? verified : await importAuditQr(rawStr);
-      const serverReport = result.data?.report;
-      if (!serverReport) throw new Error('The authoritative audit report was not returned.');
-
-      const report = { ...serverReport, integrityStatus: 'VERIFIED' };
-      const reportId = report.reportId || report.id;
-      const updatedReports = [...(auditReports || [])];
-      const index = updatedReports.findIndex(candidate => (candidate.reportId || candidate.id) === reportId);
-      if (index >= 0) updatedReports[index] = { ...updatedReports[index], ...report };
-      else updatedReports.unshift(report);
-      auditReports.splice(0, auditReports.length, ...updatedReports);
-      await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
-
-      if (result.data.alreadyImported) {
-        Alert.alert('Audit Already Imported', 'This audit already exists in HUGPONG. The authoritative record will be opened.');
+      let report;
+      let payload = rawStr;
+      try {
+        const suppliedParts = rawStr.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+        if (suppliedParts.length > 1) {
+          report = assembleAuditQrParts(suppliedParts);
+          payload = createAuditQrPayload(report);
+        } else {
+          const part = decodeAuditQrPart(rawStr);
+          if (!qrTransferPartsRef.current.has(part.transferId)) qrTransferPartsRef.current.set(part.transferId, new Map());
+          const collected = qrTransferPartsRef.current.get(part.transferId);
+          collected.set(part.partNumber, rawStr);
+          if (collected.size < part.partCount) {
+            return {
+              continueScanning: true,
+              message: `${collected.size} of ${part.partCount} QR parts captured. Keep scanning.`
+            };
+          }
+          report = assembleAuditQrParts(Array.from(collected.values()));
+          payload = createAuditQrPayload(report);
+          qrTransferPartsRef.current.delete(part.transferId);
+        }
+      } catch (partError) {
+        try {
+          report = decodeAuditQrPayload(rawStr);
+          if (report.legacyLookupOnly) throw partError;
+        } catch {
+          if (!getNetworkStatus()) throw new Error('A typed report ID or legacy lookup QR requires a live connection. Scan the complete audit QR for offline viewing.');
+          const verified = await verifyAuditQr(rawStr);
+          if (!verified.data?.integrityVerified || !verified.data?.report) throw new Error('The server could not verify this audit report.');
+          report = verified.data.report;
+        }
       }
-      setScannedAuditReport(report);
+
+      const canonical = validateCanonicalAuditReport(report);
+      setPendingScannedPayload(payload);
+      setScannedAuditReport({ ...canonical, id: canonical.reportId, integrityStatus: getNetworkStatus() ? 'DECODED' : 'OFFLINE_DECODED' });
       setShowScanner(false);
       setShowSRAInspectModal(true);
     } catch (error) {
-      Alert.alert('Verification Failed', error.message || 'The report code could not be verified by HUGPONG.');
+      Alert.alert('Unable to Load Audit Report', `Unable to load this audit report because the transferred data is incomplete or incompatible.\n\n${error.message || ''}`.trim());
       setShowScanner(false);
+    }
+  };
+
+  const handleImportScannedAudit = async () => {
+    if (!pendingScannedPayload || !scannedAuditReport) return;
+    if (!getNetworkStatus()) {
+      Alert.alert('Connection Required', 'The full report can be reviewed offline, but importing it into the SRA Audit Inbox requires the authoritative server.');
+      return;
+    }
+    setIsAuditActionPending(true);
+    try {
+      const verified = await verifyAuditQr(pendingScannedPayload);
+      if (!verified.data?.integrityVerified) throw new Error('The server could not verify this audit report.');
+      const result = verified.data.alreadyImported ? verified : await importAuditQr(pendingScannedPayload);
+      const serverReport = result.data?.report;
+      if (!serverReport) throw new Error('The authoritative audit report was not returned.');
+      const report = { ...serverReport, integrityStatus: 'VERIFIED' };
+      const reportId = report.reportId || report.id;
+      const index = auditReports.findIndex(candidate => (candidate.reportId || candidate.id) === reportId);
+      if (index >= 0) auditReports[index] = { ...auditReports[index], ...report };
+      else auditReports.unshift(report);
+      await saveItem(STORAGE_KEYS.AUDIT_REPORTS, auditReports);
+      setScannedAuditReport(report);
+      Alert.alert(result.data.alreadyImported ? 'Audit Already Imported' : 'Audit Imported', result.data.alreadyImported ? 'The existing authoritative record is open.' : 'The report is now in the SRA Audit Inbox and ready for review.');
+    } catch (error) {
+      Alert.alert('Import Failed', error.message || 'The complete audit report could not be imported.');
+    } finally {
+      setIsAuditActionPending(false);
     }
   };
 
@@ -4741,7 +4858,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 .filter(report => canonicalAuditStatus(report.status) !== AUDIT_STATUS.RETURNED)
                 .reduce((sum, report) => sum + Number(report.operationCount || report.logsCount || report.operationSnapshots?.length || 0), 0);
               const statusText = needsSubmission
-                ? (isOfflineQueued ? 'Submission Queued' : 'Ready to Submit')
+                ? (isOfflineQueued ? 'Submission Queued' : 'Choose Delivery')
                 : isAwaitingReview
                   ? 'Awaiting SRA Review'
                   : auditStatus === AUDIT_STATUS.RETURNED
@@ -4826,6 +4943,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                   {/* Polished Primary Action Button */}
                   <TouchableOpacity
+                    disabled={isCompilingAudit}
                     style={{
                       backgroundColor: isAllCompiled ? '#234D1E' : COLORS.primary,
                       paddingVertical: 13,
@@ -4835,11 +4953,20 @@ export default function FieldOpsScreen({ navigation, route }) {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 8,
+                      opacity: isCompilingAudit ? 0.7 : 1,
                       ...SHADOW.card,
                     }}
                     onPress={() => {
                       if (needsSubmission) {
-                        handleSubmitAuditReport(monthReport);
+                        safeAlert(
+                          'Compiled Report Ready',
+                          `${displayPeriod(monthReport.periodKey || selectedPeriod)}\n${monthReport.blockFarmName || targetFarm}\n\n${monthReport.fieldCount || monthReport.fieldSnapshots?.length || 0} Fields\n${monthReport.operationCount || monthReport.operationSnapshots?.length || 0} Operations\nPhp ${Number(monthReport.totalCost || 0).toLocaleString()} Total Production Cost\n\nChoose how to deliver this report to SRA:`,
+                          [
+                            { text: 'Later', style: 'cancel' },
+                            { text: 'Generate QR Transfer', onPress: () => openAuditQrTransfer(monthReport) },
+                            { text: 'Send Through Cloud', onPress: () => handleSubmitAuditReport(monthReport) }
+                          ]
+                        );
                       } else if (monthReport && (isAwaitingReview || (auditStatus === AUDIT_STATUS.CERTIFIED && !needsCompilation))) {
                         handleViewHistoricalAuditQR(monthReport);
                       } else {
@@ -4861,13 +4988,15 @@ export default function FieldOpsScreen({ navigation, route }) {
                     activeOpacity={0.85}
                   >
                     <Ionicons 
-                      name={needsSubmission ? "cloud-upload-outline" : (isAllCompiled ? "qr-code" : "flash")}
+                      name={isCompilingAudit ? "hourglass-outline" : (needsSubmission ? "swap-horizontal-outline" : (isAllCompiled ? "qr-code" : "flash"))}
                       size={17} 
                       color="#fff" 
                     />
                     <Text style={{ color: '#fff', fontSize: 13.5, fontWeight: '800', letterSpacing: 0.3 }}>
-                      {needsSubmission
-                        ? 'Submit to SRA'
+                      {isCompilingAudit
+                        ? 'Compiling Monthly Audit...'
+                        : needsSubmission
+                        ? 'Choose Delivery Method'
                         : isAwaitingReview
                         ? 'View Submitted Audit QR'
                         : auditStatus === AUDIT_STATUS.CERTIFIED && !needsCompilation
@@ -4951,15 +5080,8 @@ export default function FieldOpsScreen({ navigation, route }) {
             {/* Field Scope Filter Switcher */}
             {/* Field Selector & Segmented Scope Switcher */}
             {(() => {
-              const sess = getCurrentSession() || {};
-              const myFieldList = (fields || []).filter(f =>
-                f.memberUserId === sess.employeeId ||
-                f.memberUserId === sess.id ||
-                (sess.fieldId && f.id === sess.fieldId)
-              );
-              const displayedFields = !deviceOnline
-                ? myFieldList
-                : (managerFieldFilter === 'my' ? myFieldList : accessibleFields);
+              const myFieldList = personalFields;
+              const displayedFields = scopedFields;
 
               return (
                 <View style={{ marginBottom: 4 }}>
@@ -5006,9 +5128,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                           style={[{ flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' }, managerFieldFilter === 'my' && { backgroundColor: '#fff', ...SHADOW.card }]}
                           onPress={() => {
                             setManagerFieldFilter('my');
-                            if (myFieldList.length > 0) {
-                              setSelectedField(myFieldList[0]);
-                            }
+                            setSelectedField(myFieldList[0] || null);
                           }}
                         >
                           <Text style={{ fontSize: 12.5, fontWeight: managerFieldFilter === 'my' ? '900' : '700', color: managerFieldFilter === 'my' ? COLORS.primary : COLORS.textMuted }}>
@@ -5068,7 +5188,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             })()}
 
             {/* Selected Field Detail */}
-            {accessibleFields.length > 0 && safeField?.id && safeField.id !== 'Unassigned' ? (
+            {scopedFields.length > 0 && safeField?.id && safeField.id !== 'Unassigned' ? (
               <View style={s.fieldCard}>
                 <View style={s.fieldCardTop}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap', marginRight: 6 }}>
@@ -5114,7 +5234,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     return null;
                   })()}
                 </View>
-                <Text style={[s.fieldMember, { fontSize: 14.5 }]}>{t('member_label', 'Farm Member')}: {safeField.member || 'Vacant / Unallocated'}</Text>
+                <Text style={[s.fieldMember, { fontSize: 14.5 }]}>{t('member_label', 'Farm Member')}: {resolveFieldMember(safeField)}</Text>
                 <Text style={{ fontSize: 12.5, color: COLORS.textSecondary, marginTop: 4 }}>
                   Crop Year Cycle: <Text style={{ fontWeight: '800', color: COLORS.text }}>{formatCropYearDisplay(safeField.cropYear)}</Text>
                 </Text>
@@ -5132,7 +5252,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     onPress={() => {
                       Alert.alert(
                         t('sync_info_alert_title', 'Offline Synchronization Info'),
-                        `${t('my_field', 'Field')} ${safeField.id} (${safeField.member || 'Unallocated'})\n\n` +
+                        `${t('my_field', 'Field')} ${safeField.id} (${resolveFieldMember(safeField)})\n\n` +
                         t('sync_info_alert_msg', 'When a member records operations offline in the field, logs are securely saved on the device. Records automatically upload once reconnected to internet or synced at the office.')
                       );
                     }}
@@ -5142,7 +5262,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </View>
               </View>
-            ) : (
+            ) : managerFieldFilter === 'my' && deviceOnline ? null : (
               <View style={{ padding: 18, backgroundColor: '#fff', borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md }}>
                 <Ionicons name="layers-outline" size={26} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
                 <Text style={{ fontSize: 12.5, fontWeight: '800', color: COLORS.text }}>No Field Plots Registered Yet</Text>
@@ -5153,7 +5273,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             )}
 
             {/* Crop Cycle Timeline */}
-            {renderTimeline()}
+            {scopedFields.length > 0 && safeField.id !== 'Unassigned' ? renderTimeline() : null}
           </>
         )}
 
@@ -5346,13 +5466,15 @@ export default function FieldOpsScreen({ navigation, route }) {
               <TouchableOpacity
                 key={report.reportId || report.id}
                 style={[s.auditCard, { marginBottom: 8 }]}
-                onPress={() => { setScannedAuditReport({ ...report, integrityStatus: 'SERVER_VERIFIED' }); setShowSRAInspectModal(true); }}
+                onPress={() => { setPendingScannedPayload(''); setScannedAuditReport({ ...report, integrityStatus: 'VERIFIED' }); setShowSRAInspectModal(true); }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.text }}>{report.blockFarmName || report.blockFarm || report.blockFarmId}</Text>
                     <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>{displayPeriod(report.periodKey || report.period)}</Text>
-                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 5 }}>{report.operationCount || report.logsCount || report.operationSnapshots?.length || 0} Operations · {Number(report.hectaresAudited || report.totalHectares || 0).toFixed(2)} Ha</Text>
+                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3 }}>Manager: {report.compiledByName || report.compiledByUserId || 'Unknown'} · {report.deliveryMethod || report.submissionMethod || 'CLOUD'}</Text>
+                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3 }}>{report.operationCount || report.operationSnapshots?.length || 0} Operations · {report.fieldCount || report.fieldSnapshots?.length || 0} Fields · {Number(report.hectaresAudited || 0).toFixed(2)} Ha</Text>
+                    <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 3 }}>Submitted: {report.submittedAt ? new Date(report.submittedAt).toLocaleString() : '—'}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 10, fontWeight: '800', color: '#92400E' }}>AWAITING REVIEW</Text>
@@ -5396,11 +5518,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                 );
               }
 
-              const repFields = activeReport.fieldsReported || (activeReport.fields && activeReport.fields.length) || 0;
+              const repFields = activeReport.fieldCount || activeReport.fieldSnapshots?.length || 0;
               const repCost = Number(activeReport.totalCost || 0);
-              const repLogs = activeReport.logsCount || 0;
-              const repDate = activeReport.dateGenerated || activeReport.date || '—';
-              const repTitle = `${activeReport.blockFarm || selectedFarm} — ${activeReport.month || compileMonth} Report`;
+              const repLogs = activeReport.operationCount || activeReport.operationSnapshots?.length || 0;
+              const repDate = activeReport.submittedAt || activeReport.compiledAt || activeReport.dateGenerated || activeReport.date || '—';
+              const repTitle = `${activeReport.blockFarmName || activeReport.blockFarmId || selectedFarm} — ${activeReport.periodKey ? displayPeriod(activeReport.periodKey) : compileMonth} Report`;
 
               return (
                 <View style={s.auditCard}>
@@ -6007,14 +6129,14 @@ export default function FieldOpsScreen({ navigation, route }) {
             <Text style={s.qrModalTitle}>SRA Monthly Audit QR</Text>
             <Text style={s.qrModalSub}>{activeQRData?.month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} — {activeQRData?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')}, Silay</Text>
 
-            {/* Cloud Audit Queue Status Chip */}
+            {/* QR transfer status is intentionally separate from Cloud Submission. */}
             <View style={{
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
-              backgroundColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FFFBEB' : '#EBF7EE',
+              backgroundColor: '#EBF7EE',
               borderWidth: 1,
-              borderColor: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#FEF0D0' : '#B7E4C7',
+              borderColor: '#B7E4C7',
               paddingHorizontal: 10,
               paddingVertical: 7,
               borderRadius: RADIUS.md,
@@ -6022,25 +6144,24 @@ export default function FieldOpsScreen({ navigation, route }) {
               width: '100%'
             }}>
               <Ionicons 
-                name={activeQRData?.cloudQueueStatus === 'offline_queued' ? "archive" : "cloud-done"} 
+                name="qr-code"
                 size={16} 
-                color={activeQRData?.cloudQueueStatus === 'offline_queued' ? '#B45309' : COLORS.success} 
+                color={COLORS.success}
               />
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 11, fontWeight: '800', color: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#92400E' : COLORS.success }}>
-                  {activeQRData?.cloudQueueStatus === 'offline_queued' ? 'Saved on Device · Confirmation Pending' : 'Compiled Audit Package'}
+                <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.success }}>
+                  Complete Single QR Transfer
                 </Text>
-                <Text style={{ fontSize: 9.5, color: activeQRData?.cloudQueueStatus === 'offline_queued' ? '#B45309' : COLORS.textMuted }}>
-                  {activeQRData?.cloudQueueStatus === 'offline_queued' 
-                    ? 'Saved on phone · Will synchronize when online · Not yet submitted to SRA'
-                    : 'Use Submit to SRA to place this report in the Audit Inbox.'}
+                <Text style={{ fontSize: 9.5, color: COLORS.textMuted }}>
+                  Scan this code once on the SRA device to read the full report.
                 </Text>
               </View>
             </View>
             {/* Real Scannable Vector SVG QR Code */}
             <View style={[s.qrBox, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: '#e2e8dc' }]}>
               <OfflineQRCode
-                value={activeQRData?.envelope || ''}
+                ref={qrSvgRef}
+                value={activeQRData?.qrParts?.[activeQrPartIndex] || ''}
                 size={190}
                 color={COLORS.primary}
               />
@@ -6060,23 +6181,39 @@ export default function FieldOpsScreen({ navigation, route }) {
                   paddingVertical: 12,
                   borderRadius: RADIUS.md
                 }}
+                onPress={saveCurrentQrImage}
+                disabled={isSavingQrImage}
+                activeOpacity={0.8}
+              >
+                {isSavingQrImage ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="download-outline" size={16} color={COLORS.primary} />}
+                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
+                  {isSavingQrImage ? 'Saving QR Image...' : 'Save QR Image'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  backgroundColor: '#F0F8EC',
+                  borderWidth: 1,
+                  borderColor: COLORS.primary,
+                  paddingVertical: 12,
+                  borderRadius: RADIUS.md
+                }}
                 onPress={async () => {
-                  const hashToCopy = activeQRData?.hash || '';
-                  if (!hashToCopy) return;
-                  try {
-                    await Share.share({
-                      message: hashToCopy,
-                      title: 'HUGPONG SRA Audit Code'
-                    });
-                  } catch (e) {
-                    Alert.alert('Audit Code', hashToCopy);
-                  }
+                  const reportReference = activeQRData?.reportId;
+                  if (!reportReference) return;
+                  await Clipboard.setStringAsync(reportReference);
+                  Alert.alert('Report ID Copied', 'The short report ID was copied. It requires an online SRA lookup; use the QR images for offline transfer.');
                 }}
                 activeOpacity={0.8}
               >
-                <Ionicons name="share-social-outline" size={16} color={COLORS.primary} />
+                <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
                 <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
-                  {t('btn_share_hash', 'Share / Copy Audit Code')}
+                  Copy Report ID (Online Lookup)
                 </Text>
               </TouchableOpacity>
 
@@ -6236,13 +6373,19 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <Ionicons name={scannedAuditReport?.status === 'CERTIFIED' ? "shield-checkmark" : "time"} size={20} color={scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#D97706'} />
                   <View>
                     <Text style={{ fontSize: 12, fontWeight: '800', color: scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#92400E' }}>
-                      {scannedAuditReport?.status === 'CERTIFIED' ? 'SRA Certified Record' : 'Awaiting Certification'}
+                      {scannedAuditReport?.status === 'CERTIFIED'
+                        ? 'SRA Certified Record'
+                        : scannedAuditReport?.integrityStatus === 'VERIFIED'
+                          ? 'Awaiting Certification'
+                          : 'Complete Report Decoded'}
                     </Text>
                     <Text style={{ fontSize: 10, color: COLORS.textMuted }}>Hash: {scannedAuditReport?.qrSignature || scannedAuditReport?.qrHash || 'Unavailable'}</Text>
                   </View>
                 </View>
                 <Text style={{ fontSize: 10, fontWeight: '800', textTransform: 'uppercase', color: scannedAuditReport?.status === 'CERTIFIED' ? COLORS.success : '#92400E' }}>
-                  {scannedAuditReport?.status || 'Pending'}
+                  {scannedAuditReport?.integrityStatus === 'VERIFIED' || scannedAuditReport?.status === 'CERTIFIED'
+                    ? (scannedAuditReport?.status || 'Pending')
+                    : 'Decoded'}
                 </Text>
               </View>
 
@@ -6250,23 +6393,31 @@ export default function FieldOpsScreen({ navigation, route }) {
               <View style={{ backgroundColor: '#F8FAF5', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 14 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Block Farm:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.blockFarm || (session?.farm || session?.blockFarm || 'District Central')}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.blockFarmName || scannedAuditReport?.blockFarmId || 'District Block Farm'}</Text>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Audit Period:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.periodKey ? displayPeriod(scannedAuditReport.periodKey) : 'Unknown period'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Farm Manager:</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.compiledByName || scannedAuditReport?.compiledByUserId || 'Unknown'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Fields / Members:</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.fieldSnapshots?.length || 0} / {scannedAuditReport?.memberCount || 0}</Text>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Total Block Farm Area:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{(Number(scannedAuditReport?.totalHectares) || fields.filter(f => !f.blockFarm || f.blockFarm === (scannedAuditReport?.blockFarm || session?.farm || session?.blockFarm || 'District Central')).reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0).toFixed(2)} Ha</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha</Text>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Active Operations Area:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{scannedAuditReport?.totalHectares || 0} Ha</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha</Text>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Compiled Operations:</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.logsCount || 14} logs</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>{scannedAuditReport?.operationSnapshots?.length || 0} logs</Text>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Total Production Cost:</Text>
@@ -6274,11 +6425,22 @@ export default function FieldOpsScreen({ navigation, route }) {
                 </View>
               </View>
 
+              <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 14 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, marginBottom: 8 }}>Compiled Operation Snapshots</Text>
+                {(scannedAuditReport?.operationSnapshots || []).map(operation => (
+                  <View key={operation.operationLogId} style={{ paddingVertical: 7, borderTopWidth: 1, borderTopColor: COLORS.border }}>
+                    <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text }}>{operation.operationName || operation.operationDefinitionId}</Text>
+                    <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>{operation.fieldId} · {operation.performedOn} · Stage {operation.stageNumber}</Text>
+                    <Text style={{ fontSize: 10.5, color: COLORS.primary }}>Php {Number(operation.totalCost || 0).toLocaleString()}</Text>
+                  </View>
+                ))}
+              </View>
+
               {/* SRA Agronomic Benchmark Evaluation */}
               <View style={{ backgroundColor: '#F0F9FF', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BAE6FD', marginBottom: 14 }}>
                 <Text style={{ fontSize: 11, fontWeight: '800', color: '#0369A1', marginBottom: 3 }}>SRA District Agronomic Benchmark</Text>
                 <Text style={{ fontSize: 11, color: '#0C4A6E', lineHeight: 16 }}>
-                  Average cost per hectare: Php {Math.round(Number(scannedAuditReport?.totalCost || 0) / Math.max(Number(scannedAuditReport?.totalHectares || 0), 0.01)).toLocaleString()} / Ha (calculated against {scannedAuditReport?.totalHectares || 0} Ha new plant input area).
+                  Average cost per hectare: Php {Math.round(Number(scannedAuditReport?.totalCost || 0) / Math.max(Number(scannedAuditReport?.hectaresAudited || 0), 0.01)).toLocaleString()} / Ha (calculated against {Number(scannedAuditReport?.hectaresAudited || 0).toFixed(2)} Ha audited area).
                 </Text>
               </View>
 
@@ -6293,7 +6455,17 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             {/* Actions */}
             <View style={{ marginTop: 14, gap: 8 }}>
-              {canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
+              {scannedAuditReport?.integrityStatus !== 'VERIFIED' && (
+                <TouchableOpacity
+                  disabled={isAuditActionPending}
+                  style={{ backgroundColor: COLORS.primary, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, opacity: isAuditActionPending ? 0.6 : 1 }}
+                  onPress={handleImportScannedAudit}
+                >
+                  <Ionicons name="cloud-upload" size={18} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{isAuditActionPending ? 'Importing...' : 'Import to SRA Audit Inbox'}</Text>
+                </TouchableOpacity>
+              )}
+              {scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW && (
                 <>
                   <TextInput
                     value={auditReturnReason}
@@ -6311,7 +6483,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </>
               )}
-              {canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
+              {scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.PENDING_REVIEW ? (
                 <TouchableOpacity
                   style={{ backgroundColor: COLORS.success, paddingVertical: 13, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
                   onPress={() => handleCertifyReport(scannedAuditReport)}
@@ -6319,7 +6491,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <Ionicons name="checkmark-seal" size={18} color="#fff" />
                   <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Issue Official SRA Digital Seal</Text>
                 </TouchableOpacity>
-              ) : canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED ? (
+              ) : scannedAuditReport?.integrityStatus === 'VERIFIED' && canonicalAuditStatus(scannedAuditReport?.status) === AUDIT_STATUS.CERTIFIED ? (
                 <View style={{ backgroundColor: '#EBF7EE', paddingVertical: 10, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.success }}>
                   <Ionicons name="checkmark-done" size={18} color={COLORS.success} />
                   <Text style={{ color: COLORS.success, fontWeight: '800', fontSize: 12 }}>Certified &amp; Immutable</Text>

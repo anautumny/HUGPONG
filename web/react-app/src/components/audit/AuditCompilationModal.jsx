@@ -1,18 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileCheck2,
-  Calendar,
   AlertTriangle,
   CheckCircle2,
-  Layers,
-  ArrowRight,
-  ShieldCheck
+  CloudUpload,
+  QrCode,
+  Download,
+  Copy
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { compileAuditReport, fetchNextAuditPeriod, createAuditQrPayload } from '../../services/auditService';
-import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, certifiedOperationIds } from '../../domain/auditWorkflow';
+import { compileAuditReport, fetchNextAuditPeriod, submitAuditReport, createAuditQrParts } from '../../services/auditService';
+import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, reportedOperationIds } from '../../domain/auditWorkflow';
 
 export default function AuditCompilationModal({
   isOpen = false,
@@ -23,7 +24,7 @@ export default function AuditCompilationModal({
   existingReports = [],
   onSuccess
 }) {
-  const [step, setStep] = useState(1); // 1 = setup/preview, 2 = success
+  const [step, setStep] = useState(1); // 1 = compile, 2 = choose delivery, 3 = QR transfer
   const [selectedPeriod, setSelectedPeriod] = useState(() => {
     const now = new Date();
     const y = now.getFullYear();
@@ -35,6 +36,12 @@ export default function AuditCompilationModal({
   const [compiledResult, setCompiledResult] = useState(null);
   const [periodInfo, setPeriodInfo] = useState(null);
   const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPreparingQr, setIsPreparingQr] = useState(false);
+  const [deliveryMessage, setDeliveryMessage] = useState('');
+  const [qrParts, setQrParts] = useState([]);
+  const [qrPartIndex, setQrPartIndex] = useState(0);
+  const [qrActionMessage, setQrActionMessage] = useState('');
 
   useEffect(() => {
     if (!isOpen || !blockFarm?.id) return;
@@ -73,10 +80,10 @@ export default function AuditCompilationModal({
   );
   const latestReport = periodReports[0] || null;
   const latestStatus = latestReport ? canonicalAuditStatus(latestReport.status) : null;
-  const certifiedIds = useMemo(() => certifiedOperationIds(periodReports), [periodReports]);
+  const coveredOperationIds = useMemo(() => reportedOperationIds(periodReports), [periodReports]);
   const eligibleLogs = useMemo(
-    () => matchingMonthLogs.filter(log => !certifiedIds.has(String(log.id))),
-    [matchingMonthLogs, certifiedIds]
+    () => matchingMonthLogs.filter(log => !coveredOperationIds.has(String(log.id))),
+    [matchingMonthLogs, coveredOperationIds]
   );
   const compilationBlockedByActiveReport = [
     AUDIT_STATUS.COMPILED,
@@ -159,7 +166,74 @@ export default function AuditCompilationModal({
     setStep(1);
     setCompileError(null);
     setCompiledResult(null);
+    setDeliveryMessage('');
+    setIsPreparingQr(false);
+    setQrParts([]);
+    setQrPartIndex(0);
+    setQrActionMessage('');
     onClose();
+  };
+
+  const handleCloudSubmission = async () => {
+    if (!compiledResult?.id) return;
+    setIsSubmitting(true);
+    setCompileError(null);
+    try {
+      const response = await submitAuditReport(compiledResult.id);
+      if (!response.success || !response.data) throw new Error(response.error || 'Cloud submission failed.');
+      setCompiledResult(response.data);
+      setDeliveryMessage('Submitted through Cloud. The report is now visible in the SRA Audit Inbox.');
+      if (onSuccess) onSuccess(response.data);
+    } catch (error) {
+      setCompileError(error.message || 'Unable to submit the compiled report through Cloud.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGenerateQr = () => {
+    setIsPreparingQr(true);
+    setCompileError(null);
+    setTimeout(() => {
+      try {
+        setQrParts(createAuditQrParts(compiledResult));
+        setQrPartIndex(0);
+        setQrActionMessage('');
+        setStep(3);
+      } catch (error) {
+        setCompileError(error.message || 'Unable to build the complete QR transfer package.');
+      } finally {
+        setIsPreparingQr(false);
+      }
+    }, 0);
+  };
+
+  const downloadCurrentQr = async () => {
+    const value = qrParts[qrPartIndex];
+    if (!value) return;
+    setCompileError(null);
+    try {
+      const dataUrl = await QRCode.toDataURL(value, { width: 1200, margin: 4, errorCorrectionLevel: 'M' });
+      const reportId = String(compiledResult?.reportId || compiledResult?.id || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `${reportId}-QR.png`;
+      link.click();
+      setQrActionMessage('Saved the complete audit QR image.');
+    } catch (error) {
+      setCompileError(error.message || 'Unable to save the QR image.');
+    }
+  };
+
+  const copyReportReference = async () => {
+    const reportId = compiledResult?.reportId || compiledResult?.id;
+    if (!reportId) return;
+    try {
+      await navigator.clipboard.writeText(reportId);
+      setQrActionMessage('Report ID copied. This short reference requires an online SRA lookup.');
+    } catch {
+      setCompileError('The browser could not copy the report ID.');
+    }
   };
 
   const footer = step === 1 ? (
@@ -179,27 +253,28 @@ export default function AuditCompilationModal({
         Compile Report
       </Button>
     </>
+  ) : step === 2 && !deliveryMessage ? (
+    <div className="grid w-full grid-cols-1 sm:grid-cols-2 gap-2">
+      <Button variant="primary" size="md" onClick={handleCloudSubmission} disabled={isSubmitting} isLoading={isSubmitting} loadingText="Submitting report..." icon={CloudUpload}>
+        Send Through Cloud
+      </Button>
+      <Button variant="primary" size="md" onClick={handleGenerateQr} disabled={isSubmitting || isPreparingQr} isLoading={isPreparingQr} loadingText="Preparing QR transfer..." icon={QrCode}>
+        Generate QR Transfer
+      </Button>
+    </div>
   ) : (
-    <Button
-      variant="primary"
-      size="md"
-      className="w-full justify-center"
-      onClick={handleClose}
-      icon={ArrowRight}
-    >
-      Done / Review Compiled Audit
-    </Button>
+    <Button variant="primary" size="md" className="w-full justify-center" onClick={handleClose}>Done</Button>
   );
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={step === 1 ? 'Compile Monthly SRA Audit Dossier' : 'Audit Report Successfully Compiled'}
+      title={step === 1 ? 'Compile Monthly SRA Audit Dossier' : step === 2 ? 'Choose Report Delivery' : 'QR Audit Transfer'}
       size="lg"
       footer={footer}
-      preventBackdropClose={isCompiling}
-      preventEscapeClose={isCompiling}
+      preventBackdropClose={isCompiling || isSubmitting || isPreparingQr}
+      preventEscapeClose={isCompiling || isSubmitting || isPreparingQr}
     >
       {step === 1 ? (
         <div className="flex flex-col gap-4 text-xs">
@@ -280,7 +355,7 @@ export default function AuditCompilationModal({
                 Total Expenditure
               </span>
               <span className="text-xs font-black text-primary dark:text-primary-light block mt-0.5">
-                ₱{totalExpenditure.toLocaleString()}
+                ₱{Number(compiledResult?.totalCost ?? totalExpenditure).toLocaleString()}
               </span>
               <span className="text-[10px] text-hug-muted font-mono">PHP Direct</span>
             </div>
@@ -333,11 +408,11 @@ export default function AuditCompilationModal({
               <strong className="font-bold block mb-0.5">
                 Official Regulatory Submission Notice:
               </strong>
-              Compiling creates an immutable monthly snapshot for review. It is <strong>not submitted</strong> until you choose Submit to SRA.
+              Compiling creates an immutable monthly snapshot for review. It is <strong>not delivered</strong> until you choose Cloud Submission or QR Transfer.
             </div>
           </div>
         </div>
-      ) : (
+      ) : step === 2 ? (
         <div className="flex flex-col items-center text-center gap-4 py-2">
           <div className="w-14 h-14 rounded-full bg-primary/10 text-primary dark:text-primary-light border border-primary/20 flex items-center justify-center shadow-xs">
             <CheckCircle2 className="w-7 h-7" />
@@ -345,43 +420,27 @@ export default function AuditCompilationModal({
 
           <div>
             <h4 className="text-base font-bold text-hug-text">
-              Monthly Operations Audit Compiled!
+              Compiled Report Ready
             </h4>
             <p className="text-xs text-hug-muted mt-0.5 max-w-sm">
-              Package sealed and saved. Review it before submitting to SRA.
+              The canonical report is saved. Choose Cloud Submission or QR Transfer to deliver this same report to SRA.
             </p>
           </div>
 
-          {/* QR Code and Hash Envelope */}
-          <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-xs shadow-2xs">
-            <QRCodeView
-              value={compiledResult ? createAuditQrPayload(compiledResult) : ''}
-              size={150}
-              className="p-2"
-            />
-
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-hug-muted font-bold uppercase">Audit Hash:</span>
-              <code className="font-mono text-xs font-bold text-primary dark:text-primary-light bg-primary-bg dark:bg-primary/20 px-2 py-0.5 rounded">
-                {compiledResult?.qrHash || compiledResult?.id}
-              </code>
-            </div>
-
-            <span className="text-[10px] text-hug-muted">
-              Scan with SRA Mobile App or Officer Tablet for zero-network validation
-            </span>
-          </div>
-
           {/* Result Statistics */}
-          <div className="grid grid-cols-3 gap-2 w-full max-w-xs text-center text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full text-center text-xs">
             <div className="p-2 rounded-xl bg-bg border border-border">
               <span className="text-[10px] text-hug-muted block">Period</span>
-              <span className="font-bold text-hug-text">{compiledResult?.period || selectedPeriod}</span>
+              <span className="font-bold text-hug-text">{compiledResult?.periodKey || selectedPeriod}</span>
+            </div>
+            <div className="p-2 rounded-xl bg-bg border border-border">
+              <span className="text-[10px] text-hug-muted block">Fields</span>
+              <span className="font-bold text-hug-text">{compiledResult?.fieldCount || 0}</span>
             </div>
             <div className="p-2 rounded-xl bg-bg border border-border">
               <span className="text-[10px] text-hug-muted block">Operations</span>
               <span className="font-bold text-hug-text">
-                {compiledResult?.operationSnapshots?.length || eligibleLogs.length} Logs
+                {compiledResult?.operationCount || compiledResult?.operationSnapshots?.length || 0} Logs
               </span>
             </div>
             <div className="p-2 rounded-xl bg-bg border border-border">
@@ -390,6 +449,28 @@ export default function AuditCompilationModal({
                 ₱{totalExpenditure.toLocaleString()}
               </span>
             </div>
+          </div>
+          {compileError && <div className="w-full p-3 bg-danger-bg text-danger border border-danger/30 rounded-xl text-xs font-semibold">{compileError}</div>}
+          {deliveryMessage && <div className="w-full p-3 bg-primary-bg text-primary border border-primary/30 rounded-xl text-xs font-semibold">{deliveryMessage}</div>}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center text-center gap-4 py-2">
+          <div>
+            <h4 className="text-base font-bold text-hug-text">Complete Single QR Transfer</h4>
+            <p className="text-xs text-hug-muted mt-1 max-w-md">
+              Scan this code once on the SRA device. It contains the complete compressed audit report.
+            </p>
+          </div>
+          <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-sm">
+            <QRCodeView value={qrParts[qrPartIndex] || ''} size={190} className="p-2" />
+            <strong className="text-xs text-hug-text">One QR · Complete Report</strong>
+            <code className="max-w-full truncate text-[10px] text-hug-muted">{compiledResult?.integrityHash || compiledResult?.qrHash}</code>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+              <Button variant="secondary" size="sm" icon={Download} onClick={downloadCurrentQr}>Save QR Image</Button>
+              <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference}>Copy Report ID</Button>
+            </div>
+            {qrActionMessage && <p className="text-[10px] text-success">{qrActionMessage}</p>}
+            {compileError && <p className="text-[10px] text-danger">{compileError}</p>}
           </div>
         </div>
       )}

@@ -9,7 +9,10 @@
 import { fromReport, reportPeriod } from './firestoreSchema';
 import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 import { sortNewestFirst } from '../utils/recordOrdering';
-import { createAuditQrPayload, decodeAuditQrPayload } from '../domain/auditWorkflow';
+import {
+  createAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
+  decodeAuditQrPart, assembleAuditQrParts, validateCanonicalAuditReport
+} from '../domain/auditWorkflow';
 
 /**
  * Real-time subscription to audit reports collection
@@ -107,7 +110,10 @@ export async function importAuditQr(payload) {
   return authenticatedRequest('/api/audit-reports/qr/import', { method: 'POST', body: { payload } });
 }
 
-export { createAuditQrPayload, decodeAuditQrPayload };
+export {
+  createAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
+  decodeAuditQrPart, assembleAuditQrParts, validateCanonicalAuditReport
+};
 
 /**
  * Extract canonical HUGPONG audit hash or report ID from raw QR text or URL

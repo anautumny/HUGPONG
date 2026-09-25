@@ -196,6 +196,8 @@ export function fromFieldDocument(id, value = {}, cycle = null) {
     id,
     ...value,
     memberId: value.memberUserId || '',
+    memberName: value.memberName || value.member || value.memberUserId || '',
+    member: value.memberName || value.member || value.memberUserId || '',
     ha: Number(value.areaHa || 0),
     stageNumber: canonicalStageNumber,
     month: Number(cycle?.elapsedMonths || 0),
@@ -367,7 +369,11 @@ export function operationSnapshot(id, value) {
     quantity: log.quantity,
     totalCost: log.totalCost,
     lineItems: log.lineItems,
-    amendments: log.amendments
+    amendments: log.amendments,
+    submittedByUserId: log.submittedByUserId || null,
+    submissionSource: log.submissionSource || null,
+    createdAt: log.createdAt || null,
+    updatedAt: log.updatedAt || null
   };
 }
 
@@ -408,13 +414,17 @@ export function toAuditReportDocument(value = {}, context = {}) {
       quantity: item.quantity && typeof item.quantity === 'object' ? item.quantity : null,
       totalCost: Number(item.totalCost || 0),
       lineItems: canonicalLineItems(item),
-      amendments: canonicalAmendments(item.amendments)
+      amendments: canonicalAmendments(item.amendments),
+      submittedByUserId: item.submittedByUserId || null,
+      submissionSource: item.submissionSource || null,
+      createdAt: item.createdAt || null,
+      updatedAt: item.updatedAt || null
     };
     return operationSnapshot(item.id || item.operationLogId, item);
   });
   const status = canonicalAuditStatus(context.status || value.status || 'COMPILED');
   const blockFarmId = String(value.blockFarmId || '').trim().toUpperCase();
-  const period = toReportPeriod(value.period || value.month);
+  const period = toReportPeriod(value.periodKey || value.period || value.month);
   const qrHash = value.qrHash || value.qrSignature || '';
   const compiledByUserId = context.compiledByUserId || value.compiledByUserId || '';
   if (!blockFarmId || !period) throw new Error('Audit report requires blockFarmId and YYYY-MM period.');
@@ -431,6 +441,10 @@ export function toAuditReportDocument(value = {}, context = {}) {
     compiledByUserId,
     compiledAt: value.compiledAt || value.createdAt || new Date().toISOString(),
     operationSnapshots,
+    fieldSnapshots: Array.isArray(value.fieldSnapshots) ? value.fieldSnapshots : [],
+    sourceLogIds: Array.isArray(value.sourceLogIds) ? value.sourceLogIds : operationSnapshots.map(item => item.operationLogId),
+    blockFarmName: value.blockFarmName || value.blockFarm || blockFarmId,
+    compiledByName: value.compiledByName || '',
     certificationNotes: value.certificationNotes || '',
     certifiedByUserId,
     certifiedAt,
@@ -441,10 +455,15 @@ export function toAuditReportDocument(value = {}, context = {}) {
     integrityHash: value.integrityHash || qrHash,
     operationCount: Number(value.operationCount || operationSnapshots.length),
     fieldCount: Number(value.fieldCount || new Set(operationSnapshots.map(item => item.fieldId)).size),
+    memberCount: Number(value.memberCount || 0),
     hectaresAudited: Number(value.hectaresAudited || 0),
     totalCost: Number(value.totalCost || operationSnapshots.reduce((sum, item) => sum + Number(item.totalCost || 0), 0)),
     submittedAt: value.submittedAt || null,
+    submittedByUserId: value.submittedByUserId || null,
     submissionMethod: value.submissionMethod || null,
+    submissionMethods: Array.isArray(value.submissionMethods) ? value.submissionMethods : [],
+    deliveryMethod: value.deliveryMethod || null,
+    deliveryStatus: value.deliveryStatus || 'READY',
     returnReason: value.returnReason || ''
   };
 }

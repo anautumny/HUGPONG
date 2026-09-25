@@ -33,6 +33,7 @@ export default function LiveQRScanner({
   const [cameraKey, setCameraKey] = useState(0);
   const [cameraState, setCameraState] = useState('idle');
   const [cameraError, setCameraError] = useState('');
+  const [scanProgress, setScanProgress] = useState('');
 
   // Scanning laser animation
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -45,6 +46,7 @@ export default function LiveQRScanner({
     setScanned(false);
     setTorch(false);
     setShowManualInput(false);
+    setScanProgress('');
 
     const animation = Animated.loop(
       Animated.sequence([
@@ -95,12 +97,21 @@ export default function LiveQRScanner({
     setCameraState('error');
   };
 
-  const handleBarcodeScanned = ({ data }) => {
+  const handleBarcodeScanned = async ({ data }) => {
     if (scanned || showManualInput || !data) return;
     setScanned(true);
 
     if (onCodeDetected) {
-      onCodeDetected(data, { source: 'camera' });
+      try {
+        const outcome = await onCodeDetected(data, { source: 'camera' });
+        if (outcome?.continueScanning) {
+          setScanProgress(outcome.message || 'QR part captured. Keep the scanner pointed at the next part.');
+          setTimeout(() => setScanned(false), 650);
+        }
+      } catch (error) {
+        setScanProgress(error.message || 'Unable to read this QR part.');
+        setTimeout(() => setScanned(false), 650);
+      }
     }
   };
 
@@ -133,9 +144,9 @@ export default function LiveQRScanner({
           </TouchableOpacity>
 
           <View style={styles.headerTextCol}>
-            <Text style={styles.headerTitle}>{showManualInput ? 'Manual Report Verification' : 'SRA Live QR Scanner'}</Text>
+            <Text style={styles.headerTitle}>{showManualInput ? 'Manual Audit Package Entry' : 'SRA Live QR Scanner'}</Text>
             <Text style={styles.headerSub}>
-              {showManualInput ? 'Verify through the HUGPONG server' : "Point at Farm Manager's QR Code"}
+              {showManualInput ? 'Paste a complete package or use an online report ID' : "Scan the Farm Manager's QR code"}
             </Text>
           </View>
 
@@ -174,14 +185,14 @@ export default function LiveQRScanner({
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 value={manualCode}
                 onChangeText={setManualCode}
-                autoCapitalize="characters"
+                autoCapitalize="none"
                 autoCorrect={false}
                 multiline
                 autoFocus
               />
               <View style={styles.onlineNotice}>
                 <Ionicons name="cloud-done-outline" size={18} color="#7BC043" />
-                <Text style={styles.onlineNoticeText}>A live HUGPONG connection is required for verification.</Text>
+                <Text style={styles.onlineNoticeText}>Complete QR packages can be read offline. Report IDs and final import require a live connection.</Text>
               </View>
               <TouchableOpacity
                 style={[styles.manualSubmitBtn, !manualCode.trim() && styles.manualSubmitBtnDisabled]}
@@ -190,7 +201,7 @@ export default function LiveQRScanner({
                 activeOpacity={0.8}
               >
                 {scanned ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="shield-checkmark-outline" size={19} color="#FFF" />}
-                <Text style={styles.manualSubmitBtnText}>{scanned ? 'Verifying...' : 'Verify with HUGPONG'}</Text>
+                <Text style={styles.manualSubmitBtnText}>{scanned ? 'Reading...' : 'Read Audit Package'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.backToCameraBtn}
@@ -315,7 +326,7 @@ export default function LiveQRScanner({
                 <View style={styles.helperPill}>
                   <Ionicons name="scan-outline" size={16} color='#267326' />
                   <Text style={styles.helperText}>
-                    Align the QR code within the frame to scan
+                    {scanProgress || 'Align the QR code within the frame to scan'}
                   </Text>
                 </View>
 

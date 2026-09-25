@@ -220,19 +220,20 @@ test('Android QR scanner accelerates its modal and exposes camera readiness and 
   assert.match(liveQrScanner, /cameraState !== 'ready'/);
 });
 
-test('SRA manual report entry replaces the camera session and remains server-authoritative', () => {
+test('SRA manual report entry reads full packages offline while import remains server-authoritative', () => {
   const manualScreen = liveQrScanner.indexOf('{showManualInput ? (');
   const cameraView = liveQrScanner.indexOf('<CameraView');
   assert.ok(manualScreen >= 0 && cameraView > manualScreen, 'manual entry must be the first mutually exclusive scanner branch');
   assert.match(liveQrScanner, /!permission\?\.granted \|\| showManualInput/);
   assert.match(liveQrScanner, /Enter Report Code Manually/);
   assert.match(liveQrScanner, /Back to Scanner/);
-  assert.match(liveQrScanner, /A live HUGPONG connection is required for verification/);
+  assert.match(liveQrScanner, /Complete QR packages can be read offline/);
   assert.doesNotMatch(liveQrScanner, /manualDrawer|Enter Hash Manually/);
 
   assert.match(mutationService, /\/api\/audit-reports\/qr\/verify/);
-  assert.match(fieldOps, /await verifyAuditQr\(rawStr\)/);
-  assert.match(fieldOps, /await importAuditQr\(rawStr\)/);
+  assert.match(fieldOps, /assembleAuditQrParts/);
+  assert.match(fieldOps, /await verifyAuditQr\(pendingScannedPayload\)/);
+  assert.match(fieldOps, /await importAuditQr\(pendingScannedPayload\)/);
   assert.doesNotMatch(fieldOps, /commitExplicitMutation\('audit_qr_import'/);
   assert.doesNotMatch(fieldOps, /STRUCTURE_VALID_CLOUD_PENDING|CACHED_AUTHORITY_MATCH|offline structural verification/);
 });

@@ -4,7 +4,7 @@
 // Zero external internet requests, 100% offline-first.
 // ══════════════════════════════════════════════════════════════
 
-import React, { useMemo } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import QRCode from 'qrcode';
@@ -18,14 +18,14 @@ import QRCode from 'qrcode';
  * @param {string} backgroundColor - Background fill color (default #FFFFFF)
  * @param {string} errorCorrectionLevel - 'L' | 'M' | 'Q' | 'H' (default 'M')
  */
-export default function OfflineQRCode({
+const OfflineQRCode = forwardRef(function OfflineQRCode({
   value = 'HUGPONG-OFFLINE',
   size = 200,
   color = '#1B381A',
   backgroundColor = '#FFFFFF',
   errorCorrectionLevel = 'M',
   style
-}) {
+}, ref) {
   const { pathData, moduleCount } = useMemo(() => {
     try {
       const qr = QRCode.create(value || 'HUGPONG', {
@@ -67,6 +67,7 @@ export default function OfflineQRCode({
   return (
     <View style={[{ width: size, height: size, backgroundColor }, style]}>
       <Svg
+        ref={ref}
         viewBox={`-${quietZone} -${quietZone} ${totalGrid} ${totalGrid}`}
         width={size}
         height={size}
@@ -82,7 +83,9 @@ export default function OfflineQRCode({
       </Svg>
     </View>
   );
-}
+});
+
+export default OfflineQRCode;
 
 const styles = StyleSheet.create({
   fallback: {

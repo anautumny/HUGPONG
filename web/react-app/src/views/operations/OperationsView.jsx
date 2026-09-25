@@ -60,8 +60,10 @@ import {
   Layers,
   UserCheck,
   MapPin,
-  Users
-  , FileText, Trash2
+  Users,
+  FileCheck2,
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -588,12 +590,18 @@ export default function OperationsView() {
 
   // Header Actions
   const headerActions = useMemo(() => {
-    const actions = [];
+    const actions = isManager ? [{
+      label: 'Compile Monthly Audit',
+      to: '/audit?compile=1',
+      icon: FileCheck2,
+      variant: 'primary'
+    }] : [];
     if (isManager && activeTakeOverFieldId) {
       actions.push({
         label: 'Exit Manager Takeover',
         icon: LogOut,
-        onClick: handleExitTakeOver
+        onClick: handleExitTakeOver,
+        variant: 'secondary'
       });
     }
     return actions;

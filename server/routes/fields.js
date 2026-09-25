@@ -73,8 +73,21 @@ router.get('/', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list fields.' });
     }
     const snapshot = await query.get();
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const fields = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const memberIds = Array.from(new Set(fields.map(field => field.memberUserId).filter(Boolean)));
+    const memberDocuments = await Promise.all(memberIds.map(memberId => (
+      db.collection(COLLECTIONS.USERS).doc(memberId).get()
+    )));
+    const memberNames = new Map(memberDocuments
+      .filter(document => document.exists)
+      .map(document => [
+        document.id,
+        document.data().displayName || document.data().name || document.id
+      ]));
+    const data = fields.map(field => ({
+      ...field,
+      memberName: field.memberUserId ? (memberNames.get(field.memberUserId) || field.memberUserId) : null
+    })).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
