@@ -8,6 +8,7 @@ function buildFirebaseClaims(sessionUser) {
     roleKey: sessionUser.roleKey,
     blockFarmId: sessionUser.blockFarmId || '',
     fieldId: sessionUser.fieldId || '',
+    authVersion: Number(sessionUser.authVersion || 1),
     accountReady: sessionUser.phoneVerified === true && sessionUser.requiresPasswordChange !== true
   };
 }

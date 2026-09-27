@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
@@ -59,6 +59,60 @@ export default function LoginScreen({ navigation, route }) {
   const [phoneVerificationResending, setPhoneVerificationResending] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
   const [setupSigningOut, setSetupSigningOut] = useState(false);
+  const [isRetryingOffline, setIsRetryingOffline] = useState(false);
+  const [offlineRetryFeedback, setOfflineRetryFeedback] = useState('');
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  const loopAnimRef = useRef(null);
+
+  const startSpinAnimation = () => {
+    spinAnim.setValue(0);
+    loopAnimRef.current = Animated.loop(
+      Animated.timing(spinAnim, {
+        toValue: 1,
+        duration: 800,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loopAnimRef.current.start();
+  };
+
+  const stopSpinAnimation = () => {
+    if (loopAnimRef.current) {
+      loopAnimRef.current.stop();
+    }
+    spinAnim.setValue(0);
+  };
+
+  const handleRetryOffline = async () => {
+    if (isRetryingOffline) return;
+    setIsRetryingOffline(true);
+    setOfflineRetryFeedback('');
+    startSpinAnimation();
+
+    try {
+      const reachable = await checkConnectivity({ force: true });
+      if (reachable) {
+        setDeviceOnline(true);
+        setConnectivityStatus(CONNECTIVITY_STATUS.ONLINE);
+      } else {
+        const details = getConnectivityDetails();
+        setConnectivityStatus(details.status);
+        setOfflineRetryFeedback(
+          details.status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE
+            ? 'Server is temporarily unreachable. Please retry shortly.'
+            : 'No internet connection detected. Please check Wi-Fi or mobile data.'
+        );
+      }
+    } catch {
+      setOfflineRetryFeedback('Unable to connect. Please check your network.');
+    } finally {
+      setTimeout(() => {
+        stopSpinAnimation();
+        setIsRetryingOffline(false);
+      }, 500);
+    }
+  };
 
   useEffect(() => {
     const unsubNet = addNetworkListener((status, details) => {
@@ -309,6 +363,70 @@ export default function LoginScreen({ navigation, route }) {
   const reqNum = /[0-9]/.test(newPassword);
   const reqDiff = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase()) && newPassword.trim().length > 0;
   const isReqValid = reqLen && reqCase && reqNum && reqDiff && newPassword === confirmPassword && confirmPassword.length > 0;
+
+  if (!deviceOnline && connectivityStatus !== CONNECTIVITY_STATUS.CHECKING && !showFirstLoginModal && !showPhoneVerificationModal) {
+    const isServerDown = connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
+    const spin = spinAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '360deg'],
+    });
+
+    return (
+      <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+        <View style={s.offlineScreenContainer}>
+          {/* Header */}
+          <View style={s.offlineHeader}>
+            <Image source={LOGO} style={s.offlineLogoImg} resizeMode="contain" />
+          </View>
+
+          {/* Center Minimal State (Exact Instagram Style) */}
+          <View style={s.offlineCenterContent}>
+            <TouchableOpacity
+              onPress={handleRetryOffline}
+              disabled={isRetryingOffline}
+              activeOpacity={0.65}
+              style={s.offlineIconWrap}
+              accessibilityRole="button"
+              accessibilityLabel="Retry internet connection"
+            >
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <Ionicons
+                  name="reload"
+                  size={48}
+                  color="#111827"
+                />
+              </Animated.View>
+            </TouchableOpacity>
+
+            <Text style={s.offlineTitle}>
+              {isServerDown ? 'Server Unavailable' : 'No Internet Connection'}
+            </Text>
+
+            {offlineRetryFeedback ? (
+              <Text style={s.offlineFeedbackText}>{offlineRetryFeedback}</Text>
+            ) : null}
+          </View>
+
+          {/* Footer Notice */}
+          <View style={s.offlineFooter}>
+            <TouchableOpacity
+              style={s.legalNoticeRow}
+              onPress={() => setShowLegalModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Open privacy, terms, and compliance information"
+            >
+              <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
+              <Text style={s.legalNoticeText}>
+                Privacy, Terms &amp; Compliance
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <LegalPolicyModal visible={showLegalModal} onClose={() => setShowLegalModal(false)} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -755,6 +873,57 @@ export default function LoginScreen({ navigation, route }) {
 }
 
 const s = StyleSheet.create({
+  // Minimal Instagram-style Offline Screen
+  offlineScreenContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
+    backgroundColor: '#FFFFFF',
+  },
+  offlineHeader: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  offlineLogoImg: {
+    width: 44,
+    height: 44,
+  },
+  offlineCenterContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 320,
+    marginTop: -20,
+  },
+  offlineIconWrap: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  offlineTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  offlineFeedbackText: {
+    fontSize: 12,
+    color: '#B45309',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  offlineFooter: {
+    width: '100%',
+    alignItems: 'center',
+  },
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flexGrow: 1, padding: SPACING.lg, gap: SPACING.lg, paddingBottom: 32, justifyContent: 'center' },
   header: { alignItems: 'center', gap: 6, paddingTop: 10 },

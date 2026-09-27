@@ -28,7 +28,7 @@ export default function CurrentPriceCard({
         <div>
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-hug-muted uppercase tracking-wider">
-              Current Official SRA Price
+              Current Price Reference
             </span>
             <div className="w-8 h-8 rounded-xl bg-surface-subtle text-hug-muted flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
@@ -38,7 +38,7 @@ export default function CurrentPriceCard({
             No published SRA price available.
           </p>
           <p className="text-xs text-hug-text2 mt-1">
-            Official price records will appear here once published by the Sugar Regulatory Administration.
+            A price record will appear here after an administrator publishes it with a verifiable source.
           </p>
         </div>
 
@@ -52,7 +52,7 @@ export default function CurrentPriceCard({
                   onClick={onPublishClick}
                   className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <span>Post Official SRA Price</span>
+                  <span>Publish Price Reference</span>
                 </button>
               )}
               <Link
@@ -89,9 +89,9 @@ export default function CurrentPriceCard({
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-hug-muted uppercase tracking-wider">
-              Current Official SRA Price
+              Current Price Reference
             </span>
-            <span className="w-2 h-2 rounded-full bg-success animate-pulse" title="Official Published Data" />
+            <span className="w-2 h-2 rounded-full bg-success animate-pulse" title="Published source-referenced data" />
           </div>
 
           <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -190,7 +190,7 @@ export default function CurrentPriceCard({
                 onClick={onPublishClick}
                 className="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
-                <span>Post Official SRA Price</span>
+                <span>Publish Price Reference</span>
               </button>
             )}
             <Link

@@ -23,6 +23,8 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     supportTickets = [],
     terminalDiagnostics = [],
     systemDiagnostics = {},
+    activityMonitoringError = null,
+    systemDiagnosticsError = null,
     isLoading = false
   } = data;
 
@@ -34,15 +36,18 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     });
   }, [supportTickets]);
 
-  const activeAccountCount = terminalDiagnostics.length;
+  const diagnosticsReported = Object.keys(systemDiagnostics).length > 0;
+  const monitoringUnavailable = !isLoading && Boolean(activityMonitoringError || systemDiagnosticsError || !diagnosticsReported);
+  const activeAccountCount = activityMonitoringError ? '—' : terminalDiagnostics.length;
   const accountsWithSyncReports = terminalDiagnostics.filter(subject => Boolean(subject.sync?.lastReportedAt)).length;
   const withinWindowAccounts = terminalDiagnostics.filter(subject => subject.activity?.attentionStatus === 'WITHIN_WINDOW');
   const attentionAccounts = terminalDiagnostics.filter(subject => subject.activity?.attentionStatus === 'NEEDS_ATTENTION');
   const criticalAccounts = terminalDiagnostics.filter(subject => subject.activity?.attentionStatus === 'CRITICAL');
-  const diagnosticsReported = Object.keys(systemDiagnostics).length > 0;
   const activityAlertCount = attentionAccounts.length + criticalAccounts.length;
   const platformAttentionCount = activityAlertCount + openTickets.length;
-  const platformStatus = criticalAccounts.length > 0
+  const platformStatus = monitoringUnavailable
+    ? { label: 'Monitoring unavailable', tone: 'border-danger/30 bg-danger-bg/40 text-danger' }
+    : criticalAccounts.length > 0
     ? { label: 'Critical review required', tone: 'border-danger/30 bg-danger-bg/40 text-danger' }
     : platformAttentionCount > 0
       ? { label: 'Review required', tone: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400' }
@@ -54,6 +59,17 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
   // Platform attention items
   const attentionItems = useMemo(() => {
     const items = [];
+
+    if (monitoringUnavailable) {
+      items.push({
+        id: 'monitoring-unavailable',
+        title: 'Monitoring Data Unavailable',
+        description: [activityMonitoringError, systemDiagnosticsError].filter(Boolean).join(' ') || 'The server did not provide a valid monitoring snapshot.',
+        type: 'danger',
+        to: '/maintenance',
+        actionLabel: 'Review System'
+      });
+    }
 
     if (criticalAccounts.length > 0) {
       items.push({
@@ -89,7 +105,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     }
 
     return items;
-  }, [openTickets, attentionAccounts, criticalAccounts]);
+  }, [openTickets, attentionAccounts, criticalAccounts, monitoringUnavailable, activityMonitoringError, systemDiagnosticsError]);
 
   const headerActions = [
     {
@@ -115,21 +131,21 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     },
     {
       label: 'Within 3-Day Window',
-      value: withinWindowAccounts.length,
-      subtext: 'No inactivity alert',
+      value: activityMonitoringError ? '—' : withinWindowAccounts.length,
+      subtext: activityMonitoringError ? 'Activity data unavailable' : 'No inactivity alert',
       icon: Users
     },
     {
       label: 'Needs Attention',
-      value: attentionAccounts.length,
-      subtext: 'Not active for 3 to 4 days',
+      value: activityMonitoringError ? '—' : attentionAccounts.length,
+      subtext: activityMonitoringError ? 'Activity data unavailable' : 'Not active for 3 to 4 days',
       icon: LifeBuoy,
       tone: 'warning'
     },
     {
       label: 'Critical',
-      value: criticalAccounts.length,
-      subtext: 'Not active for at least 5 days',
+      value: activityMonitoringError ? '—' : criticalAccounts.length,
+      subtext: activityMonitoringError ? 'Activity data unavailable' : 'Not active for at least 5 days',
       icon: ShieldAlert,
       tone: 'danger'
     }
@@ -153,9 +169,8 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
               <span className="text-xs font-bold text-hug-muted uppercase tracking-wider truncate">
                 System Pulse
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-bg text-success shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                Monitoring Active
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${monitoringUnavailable ? 'bg-danger-bg text-danger' : 'bg-success-bg text-success'}`}>
+                {monitoringUnavailable ? 'Monitoring Unavailable' : 'Monitoring Active'}
               </span>
             </div>
 
@@ -189,7 +204,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
                   Account Activity
                 </span>
                 <span className="font-semibold text-hug-text">
-                  {withinWindowAccounts.length} Within 3-Day Window
+                  {activityMonitoringError ? 'Unavailable' : `${withinWindowAccounts.length} Within 3-Day Window`}
                 </span>
               </div>
             </div>

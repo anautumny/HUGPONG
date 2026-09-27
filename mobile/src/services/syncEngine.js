@@ -1,4 +1,6 @@
 import { STORAGE_KEYS, getItem, saveItem, localOutboxStorageKey } from './storageService';
+import { createClientRecordId } from './secureId';
+import { toOperationLogDocument } from '../data/firestoreSchema';
 import {
   createOperation,
   amendOperation,
@@ -6,13 +8,13 @@ import {
   createTicket,
   addTicketMessage,
   updateCycleStage,
-  createAuditEvent,
   createField,
   updateField,
   archiveField,
   publishPrice,
   saveCustomStages,
   saveCustomOperations,
+  saveOperationSchedule,
   compileAuditReport,
   submitAuditReport,
   returnAuditReport,
@@ -24,6 +26,7 @@ const {
   createMutationEnvelope,
   migrateOutbox,
   appendUniqueMutation,
+  requeueCorrectableMutations,
   classifyMutationError,
   createSingleFlightRunner,
   drainMutationQueue
@@ -166,37 +169,13 @@ export function getSemanticDatePrefix() {
  * 03xxxxxx: Farm Manager
  * 04xxxxxx: Member / Farmer
  */
-export function generateUserNumericId(role, seedIndex = null) {
-  let prefix = '04'; // Default to Member
-  const roleLower = String(role || '').toLowerCase();
-
-  if (roleLower.includes('super admin') || roleLower.includes('super_admin')) {
-    prefix = '01';
-  } else if (roleLower.includes('sra') || (roleLower.includes('admin') && !roleLower.includes('farm'))) {
-    prefix = '02';
-  } else if (roleLower.includes('manager') || roleLower.includes('farm manager')) {
-    prefix = '03';
-  } else {
-    prefix = '04';
-  }
-
-  if (seedIndex !== null && seedIndex !== undefined) {
-    return `${prefix}${String(seedIndex).padStart(6, '0')}`;
-  }
-
-  const randomSeq = Math.floor(100000 + Math.random() * 900000);
-  return `${prefix}${randomSeq}`;
-}
-
 /**
  * Generate a unique deterministic production-grade ID for operational logs
  * Format: LOG-{FIELD}-{TIMESTAMP_HEX}-{RAND} e.g. LOG-FLDNCY001-M7A9X2-8F2A
  */
 export function generateDeterministicLogId(fieldId) {
   const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const timeHex = Date.now().toString(36).toUpperCase();
-  const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `LOG-${cleanField}-${timeHex}-${randHex}`;
+  return createClientRecordId('LOG', cleanField);
 }
 
 export function generateLogId(fieldId) {
@@ -209,9 +188,7 @@ export function generateLogId(fieldId) {
  */
 export function generateDraftId(fieldId) {
   const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const timeHex = Date.now().toString(36).toUpperCase();
-  const randHex = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `DFT-${cleanField}-${timeHex}-${randHex}`;
+  return createClientRecordId('DFT', cleanField);
 }
 
 /**
@@ -231,13 +208,31 @@ export function generateTicketId(seq = null) {
   if (seq !== null && seq !== undefined) {
     return `TCK-${year}-${String(seq).padStart(5, '0')}`;
   }
-  const timeHex = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `TCK-${year}-${timeHex}-${random}`;
+  return createClientRecordId('TCK', year);
 }
 
 function normalizeOutboxOwnerId(userId) {
   return String(userId || '').trim();
+}
+
+function migrateQueuedPayload(type, payload = {}) {
+  if (type !== 'operation_log' && type !== 'takeover_log') return { ...payload };
+  try {
+    const submissionSource = ['MEMBER', 'FIELD_OWNER', 'MANAGER_TAKEOVER'].includes(payload.submissionSource)
+      ? payload.submissionSource
+      : type === 'takeover_log' ? 'MANAGER_TAKEOVER' : 'MEMBER';
+    const normalized = toOperationLogDocument(payload, {
+      cycleId: payload.cycleId,
+      submittedByUserId: payload.submittedByUserId || activeOutboxOwnerId,
+      submissionSource,
+      status: payload.status || 'ACTIVE',
+      updatedAt: payload.updatedAt
+    });
+    return { id: payload.id, ...normalized };
+  } catch (error) {
+    console.warn(`[syncEngine] Queued ${type} requires manual correction:`, error.message);
+    return { ...payload };
+  }
 }
 
 async function persistOutboxQueue(queue = outboxQueue, ownerUserId = activeOutboxOwnerId) {
@@ -250,8 +245,7 @@ async function persistOutboxQueue(queue = outboxQueue, ownerUserId = activeOutbo
  * Generate a custom operation ID
  */
 export function generateCustomOpId(stageNumber = 1) {
-  const timeHex = Date.now().toString(36).toUpperCase();
-  return `COP-STG${stageNumber}-${timeHex}`;
+  return createClientRecordId('COP', `STG${stageNumber}`);
 }
 
 /**
@@ -269,7 +263,9 @@ export async function initSyncEngine(userId = '') {
     }
 
     const savedOutbox = await getItem(localOutboxStorageKey(activeOutboxOwnerId), []);
-    outboxQueue = migrateOutbox(savedOutbox).map(item => ({
+    outboxQueue = migrateOutbox(savedOutbox, { migratePayload: migrateQueuedPayload })
+      .filter(item => item.type !== 'audit_log' && item.type !== 'system_event')
+      .map(item => ({
       ...item,
       ownerUserId: activeOutboxOwnerId
     }));
@@ -328,6 +324,56 @@ export async function enqueueOutboxItem(type, payload, options = {}) {
     ...options,
     ownerUserId: activeOutboxOwnerId
   }, outboxQueue);
+
+  // A schedule mutation contains the field's complete current schedule, so a
+  // newer save supersedes older unsent or correctable schedule snapshots. If
+  // those snapshots are left in the queue, the newest save becomes dependent
+  // on a rejected item and can never be attempted.
+  if (type === 'operation_schedule') {
+    const replaceableStatuses = new Set(['queued', 'retryable', 'failed', 'server_failure', 'validation', 'rejected']);
+    const superseded = outboxQueue.filter(item => (
+      item.type === type
+      && item.entityKey === outboxItem.entityKey
+      && replaceableStatuses.has(item.status)
+    ));
+    if (superseded.length > 0) {
+      const previousQueue = outboxQueue;
+      const supersededIds = new Set(superseded.map(item => item.mutationId));
+      const byMutationId = new Map(previousQueue.map(item => [item.mutationId, item]));
+      const resolveSurvivingDependency = dependencyId => {
+        let currentId = dependencyId || null;
+        const visited = new Set();
+        while (currentId && supersededIds.has(currentId) && !visited.has(currentId)) {
+          visited.add(currentId);
+          currentId = byMutationId.get(currentId)?.dependsOnMutationId || null;
+        }
+        return currentId;
+      };
+      const compactedQueue = previousQueue
+        .filter(item => !supersededIds.has(item.mutationId))
+        .map(item => supersededIds.has(item.dependsOnMutationId)
+          ? { ...item, dependsOnMutationId: resolveSurvivingDependency(item.dependsOnMutationId) }
+          : item);
+      const predecessor = [...compactedQueue].reverse().find(item => item.entityKey === outboxItem.entityKey);
+      const replacement = {
+        ...outboxItem,
+        // Preserve the last confirmed server version from the first queued
+        // schedule instead of an optimistic local timestamp.
+        baseVersion: superseded[0].baseVersion ?? outboxItem.baseVersion,
+        dependsOnMutationId: predecessor?.mutationId || null
+      };
+      outboxQueue = [...compactedQueue, replacement];
+      const persisted = await persistOutboxQueue();
+      if (!persisted) {
+        outboxQueue = previousQueue;
+        throw new Error('The updated farm schedule could not be saved to the persistent synchronization queue.');
+      }
+      console.info(`[SYNC] Replaced ${superseded.length} older schedule update(s): ${replacement.mutationId}`);
+      notifySyncEngine();
+      return replacement;
+    }
+  }
+
   const appended = appendUniqueMutation(outboxQueue, outboxItem);
   if (!appended.inserted) return appended.item;
   outboxQueue = appended.queue;
@@ -358,7 +404,11 @@ export async function enqueueAndFlushMutation(type, payload, options = {}) {
  * Remove an item from the outbox after confirmed upload
  */
 export async function removeOutboxItem(outboxId) {
-  outboxQueue = outboxQueue.filter(item => item.outboxId !== outboxId && item.id !== outboxId);
+  outboxQueue = outboxQueue.filter(item => (
+    item.mutationId !== outboxId
+    && item.outboxId !== outboxId
+    && item.id !== outboxId
+  ));
   await persistOutboxQueue();
   notifySyncEngine();
 }
@@ -378,6 +428,18 @@ export async function markOutboxItemFailed(outboxId, errorMessage) {
   }
 }
 
+export async function retryCorrectableOutboxItems() {
+  const migrated = migrateOutbox(outboxQueue, { migratePayload: migrateQueuedPayload });
+  const requeued = requeueCorrectableMutations(migrated);
+  if (requeued.requeuedCount === 0) return 0;
+  outboxQueue = requeued.queue;
+  if (!(await persistOutboxQueue())) {
+    throw new Error('The corrected synchronization queue could not be saved.');
+  }
+  notifySyncEngine();
+  return requeued.requeuedCount;
+}
+
 /**
  * Process all queued outbox items (FIFO) with remote upload handler
  * @param {Function} remoteUploadHandler - Async callback `async (item) => boolean`
@@ -392,6 +454,20 @@ export async function processOutbox(remoteUploadHandler) {
       throw new Error('A signed-in user is required before the synchronization queue can be processed.');
     }
     console.info(`[SYNC] Queue size: ${outboxQueue.length}`);
+    const processingMutationIds = new Set(outboxQueue.map(item => item.mutationId));
+    const mergeConcurrentItems = (nextQueue, acknowledgedResponses = {}) => {
+      const nextIds = new Set(nextQueue.map(item => item.mutationId));
+      const concurrentItems = outboxQueue
+        .filter(item => !processingMutationIds.has(item.mutationId) && !nextIds.has(item.mutationId))
+        .map(item => {
+          const dependencyResponse = acknowledgedResponses[item.dependsOnMutationId];
+          const serverVersion = dependencyResponse?.success ? responseVersion(dependencyResponse) : null;
+          return serverVersion
+            ? { ...item, baseVersion: serverVersion, dependsOnMutationId: null }
+            : item;
+        });
+      return [...nextQueue, ...concurrentItems];
+    };
     const drained = await drainMutationQueue(
       outboxQueue,
       async item => {
@@ -408,11 +484,12 @@ export async function processOutbox(remoteUploadHandler) {
           throw error;
         }
       },
-      async nextQueue => {
-        const persisted = await persistOutboxQueue(nextQueue, processingOwnerId);
+      async (nextQueue, acknowledgedResponses) => {
+        const mergedQueue = mergeConcurrentItems(nextQueue, acknowledgedResponses);
+        const persisted = await persistOutboxQueue(mergedQueue, processingOwnerId);
         if (!persisted) throw new Error('The synchronization queue state could not be persisted.');
         if (activeOutboxOwnerId === processingOwnerId) {
-          outboxQueue = nextQueue;
+          outboxQueue = mergedQueue;
           notifySyncEngine();
         }
       },
@@ -421,7 +498,7 @@ export async function processOutbox(remoteUploadHandler) {
     if (activeOutboxOwnerId !== processingOwnerId) {
       return { success: false, error: 'Signed-in account changed during synchronization.', reason: 'ACCOUNT_CHANGED', remainingCount: drained.queue.length };
     }
-    outboxQueue = drained.queue;
+    outboxQueue = mergeConcurrentItems(drained.queue, drained.responses);
 
     if (!(await persistOutboxQueue(outboxQueue, processingOwnerId))) {
       throw new Error('The synchronization result could not be persisted.');
@@ -429,7 +506,22 @@ export async function processOutbox(remoteUploadHandler) {
     await saveItem(STORAGE_KEYS.LAST_SYNC, new Date().toISOString());
     notifySyncEngine();
 
-    const { queue: _persistedQueue, ...result } = drained;
+    const { queue: _persistedQueue, ...drainedResult } = drained;
+    const result = {
+      ...drainedResult,
+      success: drainedResult.failedCount === 0 && outboxQueue.length === 0,
+      remainingCount: outboxQueue.length,
+      remainingItems: outboxQueue.map(item => ({
+        mutationId: item.mutationId,
+        entityKey: item.entityKey,
+        type: item.type,
+        status: item.status,
+        retryCount: Number(item.retryCount || 0),
+        lastError: item.lastError || null,
+        ...(item.nextAttemptAt ? { nextAttemptAt: item.nextAttemptAt } : {}),
+        dependsOnMutationId: item.dependsOnMutationId || null
+      }))
+    };
     console.info(`[SYNC] Remaining: ${result.remainingCount}`);
     if (result.remainingCount === 0) {
       console.info('[SYNC] Complete');
@@ -467,10 +559,9 @@ export async function executeMutationViaApi(item, { includeMutation = true } = {
         if (!payload.cycleId) throw new Error('Queued stage update requires cycleId.');
         return updateCycleStage(payload.cycleId, {
           currentStageNumber: Number(payload.currentStageNumber || payload.stageNumber),
-          elapsedMonths: Number(payload.elapsedMonths || 0)
+          elapsedMonths: Number(payload.elapsedMonths || 0),
+          ...(Object.prototype.hasOwnProperty.call(payload, 'isCompleted') ? { isCompleted: payload.isCompleted === true } : {})
         }, mutation, takeoverGrant);
-      } else if (type === 'audit_log' || type === 'system_event') {
-        return createAuditEvent(payload, mutation);
       } else if (type === 'operation_amendment') {
         return amendOperation(payload.id, payload.changes, payload.amendment, mutation, takeoverGrant);
       } else if (type === 'operation_archive') {
@@ -490,6 +581,8 @@ export async function executeMutationViaApi(item, { includeMutation = true } = {
         return saveCustomStages(payload.fieldId, payload.customStages, mutation);
       } else if (type === 'custom_operations') {
         return saveCustomOperations(payload.fieldId, payload.customOperations, mutation);
+      } else if (type === 'operation_schedule') {
+        return saveOperationSchedule(payload.fieldId, payload.operationSchedule, mutation);
       } else if (type === 'audit_report') {
         return compileAuditReport(payload, mutation);
       } else if (type === 'audit_submission') {

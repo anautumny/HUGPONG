@@ -10,10 +10,11 @@ const {
   reportPeriod, nowIso, optionalString
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
+const { queueAuditEvent } = require('../services/auditWriter');
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots,
-  buildFieldSnapshots, validateCanonicalAuditReport,
+  buildFieldSnapshots, auditCropYearCycles, validateCanonicalAuditReport,
   AUDIT_DELIVERY_METHOD, AUDIT_DELIVERY_STATUS,
   encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
 } = require('../domain/auditWorkflow');
@@ -23,9 +24,10 @@ const MAX_PAGE_SIZE = 50;
 let missingIndexFallbackLogged = false;
 
 function identity(req) {
+  const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
   return {
-    actorId: String(req.session.user.employeeId || req.session.user.userId || '').trim(),
-    actorName: String(req.session.user.name || req.session.user.displayName || 'HUGPONG User').trim(),
+    actorId,
+    actorName: String(req.session.user.name || req.session.user.displayName || actorId).trim(),
     actorRole: canonicalRole(req.session.user.role || req.session.user.roleKey)
   };
 }
@@ -111,11 +113,16 @@ async function resolveQrInput(rawPayload) {
   try {
     let payload = decodeQrPayload(rawPayload);
     const snapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId).get();
-    // Legacy v1 codes contained only an identifier and summary. Keep them as an
-    // online lookup path, but never mistake them for a complete offline transfer.
-    if (payload.legacyLookupOnly) {
-      if (!snapshot.exists) throw Object.assign(new Error('This legacy QR code requires its authoritative audit report to be online.'), { status: 404 });
-      payload = validateCanonicalAuditReport(normalizedReport(snapshot));
+    // Current reference QRs and legacy v1 lookup codes resolve exclusively to
+    // the server-owned report. The integrity hash in a current QR must match
+    // before any report data is returned.
+    if (payload.referenceOnly || payload.legacyLookupOnly) {
+      if (!snapshot.exists) throw Object.assign(new Error('The authoritative audit report is not available.'), { status: 404 });
+      const authoritative = validateCanonicalAuditReport(normalizedReport(snapshot));
+      if (payload.referenceOnly && payload.integrityHash !== authoritative.integrityHash) {
+        throw Object.assign(new Error('The audit QR reference does not match the authoritative report.'), { status: 422 });
+      }
+      payload = authoritative;
     }
     return { payload, snapshot };
   } catch (decodeError) {
@@ -342,12 +349,15 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const operationSnapshots = batch.operations.sort((left, right) => left.id.localeCompare(right.id))
       .map(document => buildOperationSnapshot(document.id, document.data()));
     const fieldSnapshots = buildFieldSnapshots(operationSnapshots, activeFields);
+    const cropYearCycles = auditCropYearCycles({}, operationSnapshots, fieldSnapshots);
+    if (!cropYearCycles.length) throw new Error('Eligible operation records are missing their Crop Year Cycle. Correct the source records before compiling this audit.');
     const sourceLogIds = operationSnapshots.map(operation => operation.operationLogId);
     const now = nowIso();
     const integrityHash = createAuditHash(reportId, farm.id, period, operationSnapshots);
     const report = {
       rootReportId: rootAuditReportId(farm.id, period), reportVersion: version, previousVersionId: latest?.id || null,
       blockFarmId: farm.id, blockFarmName: farm.name || farm.code || farm.id, periodKey: period,
+      cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null, cropYearCycles,
       status: AUDIT_STATUS.COMPILED, reviewStatus: 'not_submitted', certificationStatus: 'not_certified',
       operationSnapshots, fieldSnapshots, sourceLogIds,
       memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,
@@ -362,7 +372,14 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     };
     validateCanonicalAuditReport({ id: reportId, ...report });
     try {
-      await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId).create(report);
+      const writeBatch = db.batch();
+      writeBatch.create(db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId), report);
+      queueAuditEvent(writeBatch, db, {
+        eventType: 'AUDIT_REPORT_COMPILED', actorUserId: actorId,
+        entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: farm.id,
+        details: `Compiled audit report ${reportId} from ${sourceLogIds.length} operation records.`, createdAt: now
+      });
+      await writeBatch.commit();
     } catch (error) {
       if (!/already exists/i.test(error.message) && Number(error.code) !== 6) throw error;
       const replay = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId).get();
@@ -427,6 +444,11 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
           updatedAt: now
         };
         transaction.create(ref, imported);
+        queueAuditEvent(transaction, db, {
+          eventType: 'AUDIT_REPORT_QR_IMPORTED', actorUserId: actorId,
+          entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: imported.blockFarmId,
+          details: `Imported audit report ${reportId} by QR transfer.`, createdAt: now
+        });
         return { report: { id: reportId, reportId, ...imported }, integrityVerified: true, alreadyImported: false };
       }
       const report = validateCanonicalAuditReport(normalizedReport(snapshot));
@@ -435,6 +457,11 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
       if (report.status !== AUDIT_STATUS.COMPILED) return { report, integrityVerified: true, alreadyImported: true };
       const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submissionMethod: AUDIT_DELIVERY_METHOD.QR, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), AUDIT_DELIVERY_METHOD.QR])), deliveryMethod: AUDIT_DELIVERY_METHOD.QR, deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED, updatedAt: now };
       transaction.update(ref, update);
+      queueAuditEvent(transaction, db, {
+        eventType: 'AUDIT_REPORT_QR_IMPORTED', actorUserId: actorId,
+        entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId,
+        details: `Received audit report ${snapshot.id} by QR transfer.`, createdAt: now
+      });
       return { report: { ...report, ...update }, integrityVerified: true, alreadyImported: false };
     });
     return res.json({ success: true, data: result });
@@ -461,6 +488,11 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       validateCanonicalAuditReport(report);
       const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, updatedAt: now };
       transaction.update(ref, update);
+      queueAuditEvent(transaction, db, {
+        eventType: 'AUDIT_REPORT_SUBMITTED', actorUserId: actorId,
+        entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId,
+        details: `Submitted audit report ${snapshot.id} for SRA review.`, createdAt: now
+      });
       return { ...report, ...update };
     });
     return res.json({ success: true, data: result });
@@ -486,7 +518,7 @@ router.post('/:id/return', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (r
       assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
       const update = { status: AUDIT_STATUS.RETURNED, reviewStatus: 'returned', certificationStatus: 'not_certified', returnReason, returnedByUserId: actorId, returnedByName: actorName, returnedAt: now, updatedAt: now };
       transaction.update(ref, update);
-      transaction.create(db.collection(COLLECTIONS.AUDIT_LOGS).doc(), { eventType: 'AUDIT_REPORT_RETURNED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId, details: returnReason, outcome: 'SUCCESS', createdAt: now });
+      queueAuditEvent(transaction, db, { eventType: 'AUDIT_REPORT_RETURNED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId, details: returnReason, createdAt: now });
       return { ...report, ...update };
     });
     return res.json({ success: true, data: result });
@@ -515,7 +547,7 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
       const certificationNotes = optionalString(req.body.certificationNotes, { max: 2000 });
       const update = { status: AUDIT_STATUS.CERTIFIED, reviewStatus: 'complete', certificationStatus: 'certified', certificationNotes, certifiedByUserId: actorId, certifiedByName: actorName, certifiedAt: now, certifiedReportVersion: report.reportVersion, certifiedIntegrityHash: expectedHash, updatedAt: now };
       transaction.update(reportRef, update);
-      transaction.create(db.collection(COLLECTIONS.AUDIT_LOGS).doc(), { eventType: 'AUDIT_REPORT_CERTIFIED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: report.blockFarmId, details: `Certified audit report ${reportId}, version ${report.reportVersion}.`, outcome: 'SUCCESS', createdAt: now });
+      queueAuditEvent(transaction, db, { eventType: 'AUDIT_REPORT_CERTIFIED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: report.blockFarmId, details: `Certified audit report ${reportId}, version ${report.reportVersion}.`, createdAt: now });
       return { ...report, ...update };
     });
     return res.json({ success: true, data: result });

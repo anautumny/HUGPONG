@@ -11,10 +11,12 @@ import {
   createOperation
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
-import { SRA_OPERATIONS_CATALOGUE, getOperationsForStage } from '../../domain/operationCatalogue';
+import { SRA_OPERATIONS_CATALOGUE, getOperationDefinition, getSelectableOperationsForStage } from '../../domain/operationCatalogue';
+import { OPERATION_UNITS } from '../../domain/operationUnits';
 import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { formatCurrency, formatHectares } from '../../utils/formatters';
+import { createClientRecordId } from '../../utils/secureId';
 import {
   Plus,
   Trash2,
@@ -23,6 +25,11 @@ import {
   Sprout,
   ShieldCheck
 } from 'lucide-react';
+
+const canonicalLineItemId = value => String(value || '')
+  .trim()
+  .toUpperCase()
+  .replace(/^SI-SRA-(\d+)-(\d+)$/, 'SI-$1-$2');
 
 export default function AddOperationModal({
   field,
@@ -34,10 +41,13 @@ export default function AddOperationModal({
   canSaveDraft = false,
   initialDraft = null,
   onSaveDraft = null,
-  validateBeforeSubmit = null
+  validateBeforeSubmit = null,
+  submittedOperations = []
 }) {
   const [selectedStageNumber, setSelectedStageNumber] = useState(1);
   const [selectedOpId, setSelectedOpId] = useState('SRA-02');
+  const [selectedChildOpId, setSelectedChildOpId] = useState('');
+  const [customChildName, setCustomChildName] = useState('');
   const [inputMode, setInputMode] = useState('group'); // 'group' or 'direct'
 
   // Details
@@ -45,11 +55,15 @@ export default function AddOperationModal({
   const [performedOn, setPerformedOn] = useState(new Date().toISOString().slice(0, 10));
   const [areaHa, setAreaHa] = useState('');
   const [workersCount, setWorkersCount] = useState('');
+  const [laborEntries, setLaborEntries] = useState([]);
+  const [newWorker, setNewWorker] = useState({ workerCount: '1', days: '1', rate: '' });
   const [advanceStage, setAdvanceStage] = useState(false);
   const [variety, setVariety] = useState('');
 
   // Group Mode sub-items
   const [subItems, setSubItems] = useState([]);
+  const [showNewExpense, setShowNewExpense] = useState(false);
+  const [newExpense, setNewExpense] = useState({ description: '', quantity: '1', unit: 'bag', unitCost: '', itemType: 'MATERIAL' });
 
   // Direct Mode inputs
   const [directQty, setDirectQty] = useState('');
@@ -58,9 +72,21 @@ export default function AddOperationModal({
 
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingLineItemId, setSubmittingLineItemId] = useState(null);
   const [serverError, setServerError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
   const submissionLockRef = useRef(false);
+
+  const isLineItemSubmitted = (operationId, lineItemId) => {
+    const cycleId = String(field?.currentCycleId || field?.cropCycle?.id || '').trim().toUpperCase();
+    return submittedOperations.some(operation => (
+      operation.status === 'ACTIVE'
+      && String(operation.fieldId || '').trim().toUpperCase() === String(field?.id || '').trim().toUpperCase()
+      && (!cycleId || String(operation.cycleId || '').trim().toUpperCase() === cycleId)
+      && String(operation.operationDefinitionId || operation.sraOperationId || '').trim().toUpperCase() === String(operationId || '').trim().toUpperCase()
+      && canonicalLineItemId(operation.childOperationDefinitionId) === canonicalLineItemId(lineItemId)
+    ));
+  };
 
   // Reset and synchronize form when opened or field changes
   useEffect(() => {
@@ -81,18 +107,29 @@ export default function AddOperationModal({
     if (initialDraft?.form) {
       const draft = initialDraft.form;
       setSelectedStageNumber(Number(draft.selectedStageNumber || currentStage));
-      setSelectedOpId(draft.selectedOpId || 'CUSTOM');
+      const draftDefinition = getOperationDefinition(draft.selectedOpId);
+      setSelectedOpId(draftDefinition?.parentOperationDefinitionId || draft.selectedOpId || 'CUSTOM');
+      setSelectedChildOpId(draft.selectedChildOpId || draft.childOperationDefinitionId || (draftDefinition?.parentOperationDefinitionId ? draftDefinition.id : ''));
+      setCustomChildName(draft.customChildName || draft.childOperationName || '');
       setInputMode(draft.inputMode || 'direct');
       setActivityName(draft.activityName || '');
       setPerformedOn(draft.performedOn || new Date().toISOString().slice(0, 10));
       setAreaHa(String(draft.areaHa || defaultHa));
       setWorkersCount(String(draft.workersCount || ''));
+      setLaborEntries(Array.isArray(draft.laborEntries) ? draft.laborEntries : []);
+      const draftWorker = Array.isArray(draft.laborEntries) ? draft.laborEntries[0] : null;
+      setNewWorker({
+        workerCount: String(draftWorker?.workerCount ?? draft.workersCount ?? ''),
+        days: String(draftWorker?.days ?? 1),
+        rate: draftWorker?.rate == null ? '' : String(draftWorker.rate)
+      });
       setAdvanceStage(Boolean(draft.advanceStage));
       setVariety(draft.variety || '');
       setSubItems(Array.isArray(draft.subItems) ? draft.subItems : []);
       setDirectQty(String(draft.directQty || ''));
       setDirectUnit(draft.directUnit || 'ha');
       setDirectRate(String(draft.directRate || ''));
+      setShowNewExpense(false);
       return;
     }
 
@@ -106,11 +143,21 @@ export default function AddOperationModal({
   const applyTemplate = (tmpl) => {
     if (!tmpl) return;
     setSelectedOpId(tmpl.id);
+    const firstChild = tmpl.childOperations?.[0] || null;
+    setSelectedChildOpId(firstChild?.id || '');
+    setCustomChildName('');
     setActivityName(tmpl.name);
     setSelectedStageNumber(tmpl.stageNumber);
-    setInputMode(tmpl.inputType || (tmpl.isGroup ? 'group' : 'direct'));
+    setInputMode(tmpl.childOperations?.length ? 'direct' : (tmpl.inputType || (tmpl.isGroup ? 'group' : 'direct')));
+    setLaborEntries([]);
+    setNewWorker({ workerCount: '', days: '1', rate: '' });
 
-    if (tmpl.isGroup && tmpl.subItems) {
+    if (tmpl.childOperations?.length) {
+      setSubItems([]);
+      setDirectQty(String(firstChild?.perHa || '1'));
+      setDirectUnit(firstChild?.unit || 'ha');
+      setDirectRate(String(firstChild?.rate || '0'));
+    } else if (tmpl.isGroup && tmpl.subItems) {
       setSubItems(tmpl.subItems.map((item, idx) => ({
         lineItemId: item.lineItemId || `SI-${idx + 1}`,
         description: item.description,
@@ -118,7 +165,7 @@ export default function AddOperationModal({
         unit: item.unit || 'ha',
         unitCost: item.unitCost || 0,
         subtotal: item.subtotal || 0
-      })));
+      })).filter(item => !isLineItemSubmitted(tmpl.id, item.lineItemId)));
     } else {
       setDirectQty(String(tmpl.perHa || tmpl.quantity || '1'));
       setDirectUnit(tmpl.unit || 'ha');
@@ -130,6 +177,8 @@ export default function AddOperationModal({
     const num = Number(newStageNum);
     setSelectedStageNumber(num);
     setSelectedOpId('');
+    setSelectedChildOpId('');
+    setCustomChildName('');
     setActivityName('');
     setSubItems([]);
   };
@@ -137,6 +186,8 @@ export default function AddOperationModal({
   const handleTemplateChange = (opId) => {
     if (opId === 'CUSTOM') {
       setSelectedOpId('CUSTOM');
+      setSelectedChildOpId('');
+      setCustomChildName('');
       setActivityName('');
       setInputMode('direct');
       setSubItems([]);
@@ -167,17 +218,45 @@ export default function AddOperationModal({
   };
 
   const handleAddSubItem = () => {
-    setSubItems(prev => [
-      ...prev,
-      {
-        lineItemId: `SI-${Date.now().toString(36).toUpperCase()}`,
-        description: '',
-        quantity: 1,
-        unit: 'ha',
-        unitCost: 0,
-        subtotal: 0
-      }
-    ]);
+    setShowNewExpense(true);
+  };
+
+  const handleChildOperationChange = (childId) => {
+    setSelectedChildOpId(childId);
+    setCustomChildName('');
+    if (childId === 'CUSTOM') {
+      setDirectQty(areaHa || '1');
+      setDirectUnit('ha');
+      setDirectRate('0');
+      return;
+    }
+    const child = getOperationDefinition(childId);
+    if (child) {
+      setDirectQty(String(child.perHa || '1'));
+      setDirectUnit(child.unit || 'ha');
+      setDirectRate(String(child.rate || '0'));
+    }
+  };
+
+  const confirmAddSubItem = () => {
+    const quantity = Number(newExpense.quantity);
+    const unitCost = Number(newExpense.unitCost);
+    if (!newExpense.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0) {
+      setValidationErrors(previous => ({ ...previous, newExpense: 'Enter a description, positive quantity, and valid unit cost.' }));
+      return;
+    }
+    setSubItems(previous => [...previous, {
+      lineItemId: createClientRecordId('SI'),
+      itemType: newExpense.itemType,
+      description: newExpense.description.trim(),
+      quantity,
+      unit: newExpense.unit,
+      unitCost,
+      subtotal: quantity * unitCost
+    }]);
+    setNewExpense({ description: '', quantity: '1', unit: 'bag', unitCost: '', itemType: 'MATERIAL' });
+    setShowNewExpense(false);
+    setValidationErrors(previous => ({ ...previous, newExpense: null }));
   };
 
   const handleRemoveSubItem = (index) => {
@@ -185,15 +264,15 @@ export default function AddOperationModal({
   };
 
   // Calculations
-  const totalCost = useMemo(() => {
+  const expenseCost = useMemo(() => {
     if (inputMode === 'group') {
       return subItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-    } else {
-      const q = Number(directQty || 0);
-      const r = Number(directRate || 0);
-      return q * r;
     }
+    return 0;
   }, [inputMode, subItems, directQty, directRate]);
+  const baseCost = inputMode === 'direct' ? Number(directQty || 0) * Number(directRate || 0) : 0;
+  const laborCost = Number(workersCount || 0) * Number(newWorker.days || 0) * Number(newWorker.rate || 0);
+  const totalCost = baseCost + expenseCost + laborCost;
 
   const costPerHa = useMemo(() => {
     const ha = Number(areaHa || 1);
@@ -202,9 +281,37 @@ export default function AddOperationModal({
 
   if (!isOpen || !field) return null;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, submissionTarget = null) => {
+    e?.preventDefault?.();
     if (submissionLockRef.current) return;
+    const singleLineItem = submissionTarget?.type === 'lineItem' ? subItems[submissionTarget.index] : null;
+    const isSingleItemSubmission = Boolean(singleLineItem);
+    const submittedLineItems = singleLineItem ? [singleLineItem] : (inputMode === 'group' && !isSingleItemSubmission ? subItems : []);
+    const laborWorkerCount = Number(workersCount || 0);
+    const laborDays = Number(newWorker.days || 0);
+    const laborRate = Number(newWorker.rate || 0);
+    if (!String(workersCount ?? '').trim()
+      || !Number.isInteger(laborWorkerCount)
+      || laborWorkerCount < 0
+      || (laborWorkerCount > 0 && (
+        !String(newWorker.days ?? '').trim()
+        || !String(newWorker.rate ?? '').trim()
+        || !Number.isFinite(laborDays)
+        || laborDays <= 0
+        || !Number.isFinite(laborRate)
+        || laborRate < 0
+      ))) {
+      setValidationErrors(previous => ({ ...previous, workersCount: 'Enter a valid worker count, work days, and daily rate.' }));
+      return;
+    }
+    const submittedLaborEntries = laborWorkerCount > 0 ? [{
+      laborEntryId: createClientRecordId('LAB'),
+      workerCount: laborWorkerCount,
+      days: laborDays,
+      unit: 'day',
+      rate: laborRate,
+      subtotal: laborWorkerCount * laborDays * laborRate
+    }] : [];
     setServerError(null);
     if (typeof validateBeforeSubmit === 'function') {
       const preflight = validateBeforeSubmit();
@@ -223,6 +330,8 @@ export default function AddOperationModal({
 
     if (!performedOn) {
       errors.performedOn = 'Completion date is required.';
+    } else if (Number.isNaN(Date.parse(`${performedOn}T00:00:00`))) {
+      errors.performedOn = 'Enter a valid completion date.';
     }
 
     const numArea = Number(areaHa);
@@ -230,17 +339,32 @@ export default function AddOperationModal({
       errors.areaHa = 'Enter a valid field area (> 0 ha).';
     }
 
-    const numWorkers = workersCount === '' ? 0 : Number(workersCount);
+    const numWorkers = submittedLaborEntries.length
+      ? submittedLaborEntries.reduce((sum, item) => sum + Number(item.workerCount || 0), 0)
+      : (isSingleItemSubmission ? 0 : (workersCount === '' ? 0 : Number(workersCount)));
     if (isNaN(numWorkers) || numWorkers < 0) {
       errors.workersCount = 'Workers count must be 0 or greater.';
     }
 
     if (inputMode === 'group') {
-      if (subItems.length === 0) {
+      if (submittedLineItems.length === 0 && submittedLaborEntries.length === 0) {
         errors.subItems = 'Add at least one line item.';
-      } else if (subItems.some(i => !i.description.trim())) {
-        errors.subItems = 'All line items must have a description.';
+      } else if (submittedLineItems.some(item => (
+        !item.description.trim()
+        || !String(item.unit || '').trim()
+        || !Number.isFinite(Number(item.quantity))
+        || Number(item.quantity) <= 0
+        || !Number.isFinite(Number(item.unitCost))
+        || Number(item.unitCost) < 0
+      ))) {
+        errors.subItems = 'Every line item needs a description, quantity, unit, and valid unit cost.';
       }
+    } else if (!String(directQty ?? '').trim() || !Number.isFinite(Number(directQty)) || Number(directQty) <= 0) {
+      errors.directQty = 'Enter a quantity greater than zero.';
+    } else if (!String(directUnit || '').trim()) {
+      errors.directQty = 'Select a unit.';
+    } else if (!String(directRate ?? '').trim() || !Number.isFinite(Number(directRate)) || Number(directRate) < 0) {
+      errors.directRate = 'Enter a valid unit rate or cost.';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -248,9 +372,17 @@ export default function AddOperationModal({
       return;
     }
 
+    const currentStageNumber = Number(field.cropCycle?.currentStageNumber ?? field.stageNumber);
+    const submittingSupplemental = Number(selectedStageNumber) < currentStageNumber
+      || (Number(selectedStageNumber) === currentStageNumber && Boolean(field.cropCycle?.completedAt || field.isCompleted));
+    if (submittingSupplemental && !window.confirm('This stage is already completed. Continue and record this operation as a Supplemental Entry?')) {
+      return;
+    }
+
     setValidationErrors({});
     submissionLockRef.current = true;
     setIsSubmitting(true);
+    setSubmittingLineItemId(singleLineItem?.lineItemId || null);
 
     try {
       const cycleId = field.currentCycleId || field.cropCycle?.id;
@@ -262,8 +394,18 @@ export default function AddOperationModal({
         throw new Error('The field Current Stage is unavailable. Refresh the Crop Year Cycle before recording an operation.');
       }
 
+      const submittedBaseCost = inputMode === 'direct' ? baseCost : 0;
+      const submittedComponentCost = submittedLineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+        + submittedLaborEntries.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+      const submittedTotalCost = inputMode === 'direct' ? baseCost + submittedComponentCost : submittedComponentCost;
+      const submittedChildId = singleLineItem?.lineItemId || null;
+      const submittedChildName = singleLineItem?.description || '';
+      const remainingSubItems = singleLineItem
+        ? subItems.filter((_, index) => index !== submissionTarget.index)
+        : subItems;
+      const remainingLaborEntries = [];
       const payload = {
-        ...(initialDraft?.submittedOperationId ? { id: initialDraft.submittedOperationId } : {}),
+        ...(initialDraft?.submittedOperationId && !isSingleItemSubmission ? { id: initialDraft.submittedOperationId } : {}),
         fieldId: field.id,
         cycleId,
         blockFarmId: field.blockFarmId,
@@ -271,23 +413,29 @@ export default function AddOperationModal({
         stageNumberAtRecord: stageAtRecord,
         operationDefinitionId: selectedOpId || 'CUSTOM',
         operationName: activityName.trim(),
-        category: SRA_OPERATIONS_CATALOGUE.find(o => o.id === selectedOpId)?.category || 'General Care',
+        parentOperationDefinitionId: null,
+        childOperationDefinitionId: submittedChildId,
+        childOperationName: submittedChildName,
+        category: getOperationDefinition(selectedOpId)?.category || 'General Care',
         stageNumber: Number(selectedStageNumber) || 1,
         variety: selectedStageNumber === 2 ? variety.trim() : '',
         performedOn,
         areaHa: numArea,
         peopleCount: numWorkers,
-        totalCost,
+        baseCost: submittedBaseCost,
+        totalCost: submittedTotalCost,
         submissionSource: isTakeOver ? 'MANAGER_TAKEOVER' : 'FIELD_OWNER',
-        isSupplemental: false,
-        lineItems: inputMode === 'group' ? subItems.map(item => ({
+        isSupplemental: submittingSupplemental,
+        lineItems: submittedLineItems.map(item => ({
           lineItemId: item.lineItemId,
+          itemType: item.itemType || 'EXPENSE',
           description: item.description.trim(),
           quantity: Number(item.quantity || 0),
           unit: item.unit || 'unit',
           unitCost: Number(item.unitCost || 0),
           subtotal: Number(item.subtotal || 0)
-        })) : [],
+        })),
+        laborEntries: submittedLaborEntries,
         quantity: inputMode === 'direct' ? {
           value: Number(directQty || 0),
           unit: directUnit || 'unit',
@@ -298,7 +446,7 @@ export default function AddOperationModal({
       await createOperation(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
-      if (advanceStage) {
+      if (advanceStage && !isSingleItemSubmission) {
         try {
           const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
@@ -312,15 +460,47 @@ export default function AddOperationModal({
       }
 
       setIsSubmitting(false);
+      setSubmittingLineItemId(null);
       submissionLockRef.current = false;
       if (typeof onSuccess === 'function') {
-        onSuccess(payload);
+        onSuccess(payload, {
+          keepOpen: isSingleItemSubmission,
+          remainingDraftForm: isSingleItemSubmission && initialDraft?.id ? {
+            selectedStageNumber,
+            selectedOpId,
+            selectedChildOpId,
+            customChildName,
+            inputMode,
+            activityName,
+            performedOn,
+            areaHa,
+            workersCount: '',
+            laborEntries: remainingLaborEntries,
+            advanceStage,
+            variety,
+            subItems: remainingSubItems,
+            directQty,
+            directUnit,
+            directRate,
+            plannedOperationId: initialDraft?.form?.plannedOperationId || null,
+            plannedDate: initialDraft?.form?.plannedDate || null,
+            estimatedCost: initialDraft?.form?.estimatedCost || null
+          } : null
+        });
       }
-      onClose();
+      if (isSingleItemSubmission) {
+        if (singleLineItem) setSubItems(remainingSubItems);
+        setLaborEntries([]);
+        setWorkersCount('');
+        setNewWorker({ workerCount: '', days: '1', rate: '' });
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('[AddOperationModal] Submit error:', err);
       setServerError(err.message || 'Unable to record operation.');
       setIsSubmitting(false);
+      setSubmittingLineItemId(null);
       submissionLockRef.current = false;
     }
   };
@@ -329,11 +509,52 @@ export default function AddOperationModal({
 
   const handleSaveDraft = () => {
     if (!canSaveDraft || typeof onSaveDraft !== 'function') return;
+    const workerCount = Number(workersCount || 0);
+    const days = Number(newWorker.days || 0);
+    const rate = Number(newWorker.rate || 0);
+    const attachedLabor = workerCount > 0 ? [{
+      laborEntryId: createClientRecordId('LAB'), workerCount, days, unit: 'day', rate, subtotal: workerCount * days * rate
+    }] : [];
     onSaveDraft({
-      selectedStageNumber, selectedOpId, inputMode, activityName, performedOn,
-      areaHa, workersCount, advanceStage, variety, subItems,
-      directQty, directUnit, directRate
+      selectedStageNumber, selectedOpId, selectedChildOpId, customChildName, inputMode, activityName, performedOn,
+      areaHa, workersCount, laborEntries: attachedLabor, advanceStage, variety, subItems,
+      directQty, directUnit, directRate,
+      plannedOperationId: initialDraft?.form?.plannedOperationId || null,
+      plannedDate: initialDraft?.form?.plannedDate || null,
+      estimatedCost: initialDraft?.form?.estimatedCost || null
     }, initialDraft?.id || null);
+  };
+
+  const handleSaveItemDraft = (index) => {
+    if (!canSaveDraft || typeof onSaveDraft !== 'function') return;
+    const item = subItems[index];
+    if (!item?.description?.trim()) {
+      setValidationErrors(previous => ({ ...previous, subItems: 'Enter the item description before saving it.' }));
+      return;
+    }
+    const workerCount = Number(workersCount || 0);
+    const days = Number(newWorker.days || 0);
+    const rate = Number(newWorker.rate || 0);
+    if (!Number.isInteger(workerCount) || workerCount < 0
+      || (workerCount > 0 && (!Number.isFinite(days) || days <= 0 || !Number.isFinite(rate) || rate < 0))) {
+      setValidationErrors(previous => ({ ...previous, workersCount: 'Enter a valid worker count, work days, and daily rate.' }));
+      return;
+    }
+    const attachedLabor = workerCount > 0 ? [{
+      laborEntryId: createClientRecordId('LAB'), workerCount, days, unit: 'day', rate, subtotal: workerCount * days * rate
+    }] : [];
+    const savedDraft = onSaveDraft({
+      selectedStageNumber, selectedOpId, selectedChildOpId: item.lineItemId, customChildName: item.description,
+      inputMode, activityName, performedOn, areaHa, workersCount, laborEntries: attachedLabor,
+      advanceStage, variety, subItems: [item], directQty, directUnit, directRate,
+      plannedOperationId: initialDraft?.form?.plannedOperationId || null,
+      plannedDate: initialDraft?.form?.plannedDate || null,
+      estimatedCost: initialDraft?.form?.estimatedCost || null
+    }, null, { keepOpen: true, itemLabel: item.description });
+    if (!savedDraft) return;
+    setSubItems(previous => previous.filter((_, itemIndex) => itemIndex !== index));
+    setWorkersCount('');
+    setNewWorker({ workerCount: '', days: '1', rate: '' });
   };
 
   return (
@@ -353,24 +574,26 @@ export default function AddOperationModal({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
-          {canSaveDraft && (
+          {canSaveDraft && inputMode === 'direct' && (
             <Button variant="outline" onClick={handleSaveDraft} disabled={isSubmitting}>
               Save Draft
             </Button>
           )}
-          <Button
-            variant="primary"
-            onClick={handleSubmit}
-            isLoading={isSubmitting}
-            loadingText="Recording Operation..."
-            icon={Plus}
-          >
-            Record Operation
-          </Button>
+          {inputMode === 'direct' && (
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              isLoading={isSubmitting}
+              loadingText="Recording Operation..."
+              icon={Plus}
+            >
+              Record Operation
+            </Button>
+          )}
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={inputMode === 'direct' ? handleSubmit : event => event.preventDefault()} className="space-y-4">
         {/* Supervisor Context Indicator */}
         {isTakeOver && (
           <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-300">
@@ -417,7 +640,7 @@ export default function AddOperationModal({
               placeholder="Select an operation..."
               options={[
                 { value: 'CUSTOM', label: 'CUSTOM: Enter a Custom Operation' },
-                ...getOperationsForStage(selectedStageNumber).map(o => ({
+                ...getSelectableOperationsForStage(selectedStageNumber).map(o => ({
                   value: o.id,
                   label: `${o.id}: ${o.name}`
                 }))
@@ -462,6 +685,7 @@ export default function AddOperationModal({
                 if (validationErrors.activityName) setValidationErrors(prev => ({ ...prev, activityName: null }));
               }}
               placeholder="e.g. Land Preparation"
+              readOnly={selectedOpId !== 'CUSTOM'}
             />
           </FormField>
 
@@ -507,8 +731,9 @@ export default function AddOperationModal({
 
           <FormField
             id="add-op-workers"
-            label="Labor / Workers Count"
+            label="Workers / Crew"
             error={validationErrors.workersCount}
+            helperText="Worker totals are calculated from workers × days × daily rate."
           >
             <Input
               id="add-op-workers"
@@ -517,12 +742,29 @@ export default function AddOperationModal({
               placeholder="0"
               suffix="workers"
               value={workersCount}
-              onChange={(e) => {
-                setWorkersCount(e.target.value);
-                if (validationErrors.workersCount) setValidationErrors(prev => ({ ...prev, workersCount: null }));
-              }}
+              onChange={(event) => setWorkersCount(event.target.value)}
             />
           </FormField>
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-hug-text">Crew costs</span>
+            <span className="text-xs font-semibold text-primary">{formatCurrency(laborCost)}</span>
+          </div>
+          {laborEntries.map((worker, index) => (
+            <div key={worker.laborEntryId} className="flex items-center justify-between gap-3 rounded-lg bg-bg px-3 py-2 text-xs">
+              <span className="font-semibold text-hug-text">{worker.workerCount} workers · {worker.days} day × {formatCurrency(worker.rate)}</span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setLaborEntries(previous => previous.filter((_, itemIndex) => itemIndex !== index))} className="text-danger">Delete</button>
+              </div>
+            </div>
+          ))}
+          <p className="text-xs text-hug-muted">These labor details are attached to the item you submit or save as a draft.</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="Days" />
+            <Input type="number" min="0" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="Rate / day" />
+          </div>
         </div>
 
         {/* Cost Structure Input Mode */}
@@ -540,7 +782,7 @@ export default function AddOperationModal({
                   : 'text-hug-muted hover:text-hug-text'
               }`}
             >
-              Child Items
+              Itemized Costs
             </button>
             <button
               type="button"
@@ -578,7 +820,7 @@ export default function AddOperationModal({
                   key={item.lineItemId || idx}
                   className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 rounded-xl border border-border/80 bg-bg/50 dark:bg-[#0C1015]/40 items-center"
                 >
-                  <div className="sm:col-span-5">
+                  <div className="sm:col-span-3">
                     <input
                       type="text"
                       placeholder="Item description..."
@@ -611,19 +853,55 @@ export default function AddOperationModal({
                       {formatCurrency(item.subtotal)}
                     </span>
                   </div>
-                  <div className="sm:col-span-1 text-right">
+                  <div className="sm:col-span-3 text-right flex flex-wrap items-center justify-end gap-1">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      disabled={isSubmitting}
+                      isLoading={isSubmitting && canonicalLineItemId(submittingLineItemId) === canonicalLineItemId(item.lineItemId)}
+                      loadingText="Submitting..."
+                      onClick={event => handleSubmit(event, { type: 'lineItem', index: idx })}
+                    >
+                      Submit
+                    </Button>
+                    {canSaveDraft && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleSaveItemDraft(idx)}>
+                        Draft
+                      </Button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleRemoveSubItem(idx)}
-                      disabled={subItems.length <= 1}
-                      className="p-1 rounded text-hug-muted hover:text-danger disabled:opacity-30 cursor-pointer"
+                      className="p-1 rounded text-hug-muted hover:text-danger cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
               ))}
+              {subItems.length === 0 && (
+                <div className="rounded-xl border border-primary/20 bg-primary-bg/60 px-3 py-4 text-center text-xs font-semibold text-primary">
+                  All child items for this operation have been submitted.
+                </div>
+              )}
             </div>
+
+            {showNewExpense && (
+              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary-bg/40 p-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
+                  <Input className="sm:col-span-2" value={newExpense.description} onChange={event => setNewExpense(previous => ({ ...previous, description: event.target.value }))} placeholder="Material or expense" />
+                  <Input type="number" min="0.01" step="0.1" value={newExpense.quantity} onChange={event => setNewExpense(previous => ({ ...previous, quantity: event.target.value }))} placeholder="Quantity" />
+                  <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} />
+                  <Input type="number" min="0" value={newExpense.unitCost} onChange={event => setNewExpense(previous => ({ ...previous, unitCost: event.target.value }))} placeholder="Unit cost" />
+                </div>
+                {validationErrors.newExpense && <p className="text-xs font-semibold text-danger">{validationErrors.newExpense}</p>}
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowNewExpense(false)}>Cancel</Button>
+                  <Button type="button" variant="primary" size="sm" onClick={confirmAddSubItem}>Confirm item</Button>
+                </div>
+              </div>
+            )}
 
             <Button
               variant="secondary"
@@ -631,34 +909,42 @@ export default function AddOperationModal({
               onClick={handleAddSubItem}
               icon={Plus}
               type="button"
+              disabled={showNewExpense}
             >
-              Add Line Item
+              Add Material / Expense
             </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-bg/50 dark:bg-[#0C1015]/40 rounded-xl border border-border">
-            <FormField id="direct-qty" label="Quantity">
+            <FormField id="direct-qty" label="Quantity" error={validationErrors.directQty}>
               <Input
                 id="direct-qty"
                 type="number"
                 step="0.1"
                 value={directQty}
-                onChange={(e) => setDirectQty(e.target.value)}
+                onChange={(e) => {
+                  setDirectQty(e.target.value);
+                  if (validationErrors.directQty) setValidationErrors(previous => ({ ...previous, directQty: null }));
+                }}
               />
             </FormField>
             <FormField id="direct-unit" label="Unit">
-              <Input
+              <Select
                 id="direct-unit"
                 value={directUnit}
                 onChange={(e) => setDirectUnit(e.target.value)}
+                options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))}
               />
             </FormField>
-            <FormField id="direct-rate" label="Rate / Unit (₱)">
+            <FormField id="direct-rate" label="Rate / Unit (₱)" error={validationErrors.directRate}>
               <Input
                 id="direct-rate"
                 type="number"
                 value={directRate}
-                onChange={(e) => setDirectRate(e.target.value)}
+                onChange={(e) => {
+                  setDirectRate(e.target.value);
+                  if (validationErrors.directRate) setValidationErrors(previous => ({ ...previous, directRate: null }));
+                }}
               />
             </FormField>
           </div>
@@ -672,6 +958,7 @@ export default function AddOperationModal({
               <span className="text-base font-mono font-black text-primary dark:text-primary-light">
                 {formatCurrency(totalCost)}
               </span>
+              {laborCost > 0 && <span className="block text-[10px] text-hug-muted">Includes {formatCurrency(laborCost)} crew cost</span>}
             </div>
             {Number(areaHa) > 0 && (
               <div className="border-l border-border pl-4">

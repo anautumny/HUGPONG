@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   createMutationEnvelope,
   migrateOutbox,
+  requeueCorrectableMutations,
   appendUniqueMutation,
   classifyMutationError,
   getPendingOperationPayloads,
@@ -55,6 +56,41 @@ test('restart migration preserves the same idempotency key', () => {
   assert.equal(once[0].idempotencyKey, 'OUT-PERSISTED-1');
   assert.equal(twice[0].idempotencyKey, once[0].idempotencyKey);
   assert.equal(twice[0].status, 'retryable');
+});
+
+test('outbox schema upgrade normalizes and retries legacy validation failures once', () => {
+  const saved = [{
+    schemaVersion: 1,
+    mutationId: 'MUT-LEGACY-VALIDATION',
+    type: 'operation_log',
+    payload: { id: 'LOG-LEGACY', unit: 'bags' },
+    status: 'validation',
+    lastError: 'Unsupported unit'
+  }];
+  const migrated = migrateOutbox(saved, {
+    migratePayload: (type, payload) => ({ ...payload, unit: payload.unit === 'bags' ? 'bag' : payload.unit })
+  });
+
+  assert.equal(migrated[0].schemaVersion, 2);
+  assert.equal(migrated[0].payload.unit, 'bag');
+  assert.equal(migrated[0].status, 'queued');
+  assert.equal(migrated[0].lastError, null);
+
+  const restarted = migrateOutbox([{ ...migrated[0], status: 'validation', lastError: 'Still invalid' }]);
+  assert.equal(restarted[0].status, 'validation', 'the same schema does not loop automatically');
+});
+
+test('manual retry requeues correctable failures without retrying conflicts or permission failures', () => {
+  const result = requeueCorrectableMutations([
+    { mutationId: 'MUT-VALIDATION', status: 'validation', nextAttemptAt: 'later' },
+    { mutationId: 'MUT-REJECTED', status: 'rejected' },
+    { mutationId: 'MUT-CONFLICT', status: 'conflict' },
+    { mutationId: 'MUT-FORBIDDEN', status: 'authorization' }
+  ]);
+
+  assert.equal(result.requeuedCount, 2);
+  assert.deepEqual(result.queue.map(item => item.status), ['queued', 'queued', 'conflict', 'authorization']);
+  assert.equal(result.queue[0].nextAttemptAt, null);
 });
 
 test('duplicate retry with the same key does not append a second mutation', () => {

@@ -15,7 +15,7 @@ The stop-gate audit passed. Web and Android contained exactly 14 unique canonica
 
 ## Ownership and lifecycle
 
-- A Field remains the persistent parcel. Enrollment/editing contains its generated ID, Block Farm, Farm Member, area, and soil type; it no longer accepts sugarcane variety or an initial stage.
+- A Field remains the persistent parcel. Enrollment/editing contains its generated ID, Block Farm, Farm Member, and area; it no longer accepts soil type, sugarcane variety, or an initial stage.
 - Every new Crop Year Cycle starts at Stage 1 with `variety: ""`.
 - Variety is required when a Stage 2 operation is submitted. The API transaction writes it to the Planting operation and, when unset, the active Crop Year Cycle.
 - A conflicting submitted variety is rejected. Correction uses the existing amendment workflow and updates only that operation and its owning active cycle.

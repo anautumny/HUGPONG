@@ -3,7 +3,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
-      return request.auth != null && request.auth.token.accountReady == true;
+      return request.auth != null
+        && request.auth.token.accountReady == true
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'ACTIVE'
+        && (
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAny(['authVersion'])
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.authVersion == request.auth.token.authVersion)
+          || (!get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAny(['authVersion'])
+            && request.auth.token.authVersion == 1)
+        );
     }
 
     function role() {
@@ -57,6 +66,11 @@ service cloud.firestore {
 
     // Password material is server-only. Firebase Admin bypasses these rules.
     match /user_credentials/{userId} {
+      allow read, write: if false;
+    }
+
+    // Server-owned uniqueness claims (for example, normalized phone numbers).
+    match /account_identifiers/{identifierId} {
       allow read, write: if false;
     }
 
@@ -122,6 +136,14 @@ service cloud.firestore {
       // server's canonical role-scoped aggregation endpoint.
       allow read: if false;
       allow write: if false;
+    }
+
+    match /server_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /security_rate_limits/{limitId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

@@ -21,7 +21,8 @@ const emptyDashboard = () => ({
   prices: [], currentPrice: null, previousPrice: null,
   fields: [], scopedFields: [], blockFarms: [], assignedBlockFarm: null,
   operations: [], recentOperations: [], cropCycles: [],
-  supportTickets: [], auditReports: [], terminalDiagnostics: [], activityMonitoringError: null
+  supportTickets: [], auditReports: [], terminalDiagnostics: [],
+  activityMonitoringError: null, systemDiagnosticsError: null
 });
 
 function terminalDiagnostic(data) {
@@ -73,11 +74,14 @@ async function readRecentOperations(force) {
 export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
   return subscribeToAuthenticatedLoader(async ({ force }) => {
     if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-      const [ticketsResult, diagnosticsResult, telemetryResult] = await Promise.all([
+      const [ticketsResult, diagnosticsState, telemetryState] = await Promise.all([
         dashboardRead('Support tickets', '/api/tickets', force),
-        dashboardRead('System diagnostics', '/api/system-diagnostics', force).catch(() => ({ data: {} })),
+        dashboardRead('System diagnostics', '/api/system-diagnostics', force)
+          .then(result => ({ result, error: null }))
+          .catch(error => ({ result: { data: {} }, error: error.message })),
         dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
-          .catch(() => ({ data: { subjects: [] } }))
+          .then(result => ({ result, error: null }))
+          .catch(error => ({ result: { data: { subjects: [] } }, error: error.message }))
       ]);
       return {
         ...emptyDashboard(),
@@ -85,15 +89,17 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
           (ticketsResult.data || []).map(ticket => fromTicket(ticket.id, ticket)),
           ['createdAt']
         ),
-        terminalDiagnostics: telemetryResult.data?.subjects || [],
-        systemDiagnostics: diagnosticsResult.data || {}
+        terminalDiagnostics: telemetryState.result.data?.subjects || [],
+        systemDiagnostics: diagnosticsState.result.data || {},
+        activityMonitoringError: telemetryState.error,
+        systemDiagnosticsError: diagnosticsState.error
       };
     }
 
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
     const includeActivityMonitoring = roleKey === ROLE_KEYS.FARM_MANAGER;
     const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult] = await Promise.all([
-      dashboardRead('Official prices', '/api/prices', force),
+      dashboardRead('Published prices', '/api/prices', force),
       dashboardRead('Fields', '/api/fields', force),
       dashboardRead('Block farms', '/api/block-farms', force),
       dashboardRead('Crop Year Cycles', '/api/crop-cycles', force),

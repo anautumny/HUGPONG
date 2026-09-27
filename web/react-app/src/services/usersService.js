@@ -18,8 +18,11 @@ import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiCli
 export function subscribeToUsersData({ user, onUpdate, onError }) {
   return subscribeToAuthenticatedResource('/api/users', {
     onData: response => {
-      const users = (response.data || [])
-        .map(record => fromUser(record.id || record.employeeId, record))
+      const records = Array.isArray(response?.data) ? response.data : [];
+      const users = records
+        .filter(record => record && typeof record === 'object')
+        .map(record => fromUser(String(record.id || record.employeeId || '').trim(), record))
+        .filter(record => record.id)
         .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
       const active = users.filter(record => record.status !== 'PENDING');
       const pendingUsers = users.filter(record => record.status === 'PENDING');
@@ -67,25 +70,5 @@ export async function toggleUserStatus(userId, currentStatus) {
   return authenticatedRequest(`/api/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
     body: { status: newStatus }
-  });
-}
-
-/**
- * Request SMS OTP for personnel phone verification
- */
-export async function requestPhoneVerification(phone, displayName) {
-  return authenticatedRequest('/api/users/phone-verification/request', {
-    method: 'POST',
-    body: { phone, displayName }
-  });
-}
-
-/**
- * Verify SMS OTP for personnel phone verification
- */
-export async function verifyPhoneOtp(phone, code) {
-  return authenticatedRequest('/api/users/phone-verification/verify', {
-    method: 'POST',
-    body: { phone, code }
   });
 }

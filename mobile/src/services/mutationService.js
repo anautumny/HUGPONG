@@ -25,6 +25,7 @@ export const startCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/a
 export const rolloverCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, 'POST', payload, mutation, takeoverGrant);
 export const saveCustomStages = (fieldId, customStages, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-stages`, 'PUT', { customStages }, mutation);
 export const saveCustomOperations = (fieldId, customOperations, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-operations`, 'PUT', { customOperations }, mutation);
+export const saveOperationSchedule = (fieldId, operationSchedule, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/operation-schedule`, 'PUT', { operationSchedule }, mutation);
 
 export const createOperation = (payload, mutation, takeoverGrant) => api('/api/logs', 'POST', payload, mutation, takeoverGrant);
 export const amendOperation = (id, changes, amendment, mutation, takeoverGrant) => api(`/api/logs/${encodeURIComponent(id)}`, 'PATCH', { changes, amendment }, mutation, takeoverGrant);
@@ -33,7 +34,6 @@ export const archiveOperations = (operationLogIds, mutation, takeoverGrant) => a
 export const publishPrice = (payload, mutation) => api('/api/prices', 'POST', payload, mutation);
 export const createTicket = (payload, mutation) => api('/api/tickets', 'POST', payload, mutation);
 export const addTicketMessage = (payload, mutation) => api(`/api/tickets/${encodeURIComponent(payload.id)}/messages`, 'POST', payload, mutation);
-export const createAuditEvent = (payload, mutation) => api('/api/audit-events', 'POST', payload, mutation);
 export const compileAuditReport = (payload, mutation) => api('/api/audit-reports', 'POST', payload, mutation);
 export const submitAuditReport = (id, submissionMethod = 'CLOUD', mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/submit`, 'POST', { submissionMethod }, mutation);
 export const returnAuditReport = (id, returnReason, mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/return`, 'POST', { returnReason }, mutation);

@@ -14,6 +14,13 @@ function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
     throw new Error('Password must contain between 8 and 256 characters.');
   }
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    throw new Error('Password must contain at least one letter and one number.');
+  }
+  const normalized = password.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['password', 'password123', 'hugpong', 'hugpong123', '12345678'].includes(normalized)) {
+    throw new Error('Choose a less predictable password.');
+  }
 }
 
 async function hashPassword(password) {

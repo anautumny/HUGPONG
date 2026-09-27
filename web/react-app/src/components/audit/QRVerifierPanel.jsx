@@ -6,7 +6,7 @@ import {
   verifyAuditQr,
   importAuditQr,
   verifyAuditReportIntegrity,
-  createAuditQrPayload,
+  createLegacyAuditQrPayload,
   decodeAuditQrPayload,
   decodeAuditQrPart,
   assembleAuditQrParts
@@ -76,13 +76,14 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
           return { continueScanning: true, message };
         }
         report = assembleAuditQrParts(Array.from(collected.values()));
-        payload = createAuditQrPayload(report);
+        payload = createLegacyAuditQrPayload(report);
         transferPartsRef.current.delete(part.transferId);
-      } catch (partError) {
-        try {
-          report = decodeAuditQrPayload(raw);
-          if (report.legacyLookupOnly) throw partError;
-        } catch {
+      } catch {
+        let decoded = null;
+        try { decoded = decodeAuditQrPayload(raw); } catch { /* Resolve non-payload report codes through the server. */ }
+        if (decoded && !decoded.referenceOnly && !decoded.legacyLookupOnly) {
+          report = decoded;
+        } else {
           const verified = await verifyAuditQr(raw);
           if (!verified.data?.integrityVerified || !verified.data?.report) {
             throw new Error('The server could not verify this audit report.');

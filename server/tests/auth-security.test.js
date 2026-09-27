@@ -11,7 +11,7 @@ const { pathToFileURL } = require('node:url');
 const { hashPassword, verifyPassword, PASSWORD_HASH_FORMAT } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
-const { issueToken } = require('../security/token');
+const { issueToken, verifyToken } = require('../security/token');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
@@ -78,19 +78,19 @@ test('Firebase accountReady is false until phone verification and first-login pa
   assert.equal(buildFirebaseClaims({ canonicalRole: ROLES.MEMBER_FARMER, roleKey: 'member', phoneVerified: true, requiresPasswordChange: true }).accountReady, false);
 });
 
-test('missing and forged bearer credentials are rejected', () => {
+test('missing and forged bearer credentials are rejected', async () => {
   for (const authorization of ['', 'Bearer forged.value.here']) {
     const req = { headers: { authorization }, session: {} };
     const res = responseRecorder();
     let nextCalled = false;
-    requireAuth(req, res, () => { nextCalled = true; });
+    await requireAuth(req, res, () => { nextCalled = true; });
     assert.equal(nextCalled, false);
     assert.equal(res.statusCode, 401);
     assert.equal(res.body.code, 'UNAUTHENTICATED');
   }
 });
 
-test('a server-issued bearer authenticates but cannot cross a role guard', () => {
+test('a server-issued bearer is verifiable but cannot cross a role guard', () => {
   const user = {
     employeeId: '04000001',
     name: 'Member',
@@ -99,11 +99,9 @@ test('a server-issued bearer authenticates but cannot cross a role guard', () =>
     phoneVerified: true,
     requiresPasswordChange: false
   };
-  const req = { headers: { authorization: `Bearer ${issueToken(user, 'member')}` }, session: {} };
-  const authRes = responseRecorder();
-  let authenticated = false;
-  requireAuth(req, authRes, () => { authenticated = true; });
-  assert.equal(authenticated, true);
+  const verified = verifyToken(issueToken(user, 'member'));
+  assert.equal(verified.employeeId, user.employeeId);
+  const req = { session: { user } };
 
   const roleRes = responseRecorder();
   let authorized = false;
@@ -258,7 +256,7 @@ test('Firestore rules deny all client access to credentials and deny unmatched c
 
 test('canonical Firestore collections deny every client write', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
-  for (const collection of ['users', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics']) {
+  for (const collection of ['account_identifiers', 'users', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics']) {
     const block = new RegExp(`match \/${collection}\/\\{[^}]+\\}[\\s\\S]*?allow (?:create, update, delete|write): if false;`);
     assert.match(rules, block, `${collection} must be server-write-only`);
   }
@@ -266,10 +264,29 @@ test('canonical Firestore collections deny every client write', () => {
 
 test('official SRA price publication remains SRA-admin-only and writes the audit ledger', () => {
   const route = fs.readFileSync(path.resolve(__dirname, '../routes/prices.js'), 'utf8');
+  const service = fs.readFileSync(path.resolve(__dirname, '../services/priceService.js'), 'utf8');
   assert.match(route, /router\.post\('\/', requireAuth, requireRole\(\[ROLES\.SRA_ADMIN\]\)/);
-  assert.match(route, /COLLECTIONS\.AUDIT_LOGS/);
-  assert.match(route, /eventType:\s*'SRA_PRICE_PUBLISHED'/);
-  assert.match(route, /ensurePricePublicationAudit\(publication\)/);
+  assert.match(service, /database\.runTransaction/);
+  assert.match(service, /eventType:\s*'SRA_PRICE_PUBLISHED'/);
+  assert.match(service, /queueAuditEvent\(transaction/);
+});
+
+test('administrator-provisioned accounts verify their own phone and replace the temporary password on first login', () => {
+  const userRoute = fs.readFileSync(path.resolve(__dirname, '../routes/users.js'), 'utf8');
+  const webForm = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/users/UserFormModal.jsx'), 'utf8');
+  const webUsersService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/usersService.js'), 'utf8');
+  const webLogin = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/LoginView.jsx'), 'utf8');
+  const mobileLogin = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/auth/LoginScreen.js'), 'utf8');
+
+  assert.match(userRoute, /phoneVerifiedAt: null/);
+  assert.match(userRoute, /requiresPasswordChange: true/);
+  assert.match(userRoute, /passwordChangedAt: null/);
+  assert.doesNotMatch(userRoute, /req\.body\.phoneVerified|personnel-phone|\/phone-verification\/request|\/phone-verification\/verify/);
+  assert.doesNotMatch(webForm, /Verify SIM|phoneVerified:|verifyPhoneOtp|requestPhoneVerification/);
+  assert.doesNotMatch(webUsersService, /\/api\/users\/phone-verification/);
+  assert.match(webForm, /account owner will receive and enter the verification code on first login/i);
+  assert.ok(webLogin.indexOf('result.needsVerification') < webLogin.indexOf('result.needsPasswordChange'));
+  assert.ok(mobileLogin.indexOf('pendingFirstLoginVerification') < mobileLogin.indexOf('res.requiresPasswordChange'));
 });
 
 test('web and mobile runtime source contain no direct Firestore mutation calls', () => {

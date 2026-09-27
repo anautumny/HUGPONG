@@ -408,13 +408,13 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
     return (
       <Card style={styles.priceCard}>
         <AnalyticsEmptyState
-          title="No official price circular available"
-          subtitle="Prices will appear after an SRA Admin publishes a complete official circular."
+          title="No price reference available"
+          subtitle="Prices will appear after an administrator publishes a complete source-referenced record."
         />
         {canPost && (
           <TouchableOpacity style={styles.postPriceBtn} onPress={onPostPricePress} activeOpacity={0.7}>
             <Ionicons name="add-circle" size={14} color="#fff" />
-            <Text style={styles.postPriceBtnText}>Publish Official Circular</Text>
+            <Text style={styles.postPriceBtnText}>Publish Price Reference</Text>
           </TouchableOpacity>
         )}
       </Card>
@@ -427,7 +427,7 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
     <Card style={styles.priceCard}>
       <View style={styles.priceHeader}>
         <View style={{ flex: 1, marginRight: 8 }}>
-          <Text style={styles.scopeHeaderTag}>OFFICIAL SRA SUGAR BENCHMARK</Text>
+          <Text style={styles.scopeHeaderTag}>PUBLISHED SUGAR PRICE REFERENCE</Text>
           <Text style={styles.priceCircularTitle} numberOfLines={1}>{circularNum}</Text>
           <Text style={styles.priceCircularSub}>{periodLabel}</Text>
         </View>

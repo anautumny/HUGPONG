@@ -15,10 +15,13 @@ const {
   nowIso
 } = require('../schema/firestoreSchema');
 const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
+const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
+const { queueAuditEvent } = require('../services/auditWriter');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    readMutationContext(req);
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const role = canonicalRole(req.session.user.role || req.session.user.roleKey);
     let query = db.collection(COLLECTIONS.BLOCK_FARMS);
@@ -29,14 +32,14 @@ router.get('/', requireAuth, async (req, res) => {
       const farmIds = Array.from(new Set(fields.docs.map(doc => doc.data().blockFarmId).filter(Boolean)));
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
-      const data = farms.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }))
+      const data = farms.filter(doc => doc.exists).map(doc => ({ ...doc.data(), id: doc.id }))
         .sort((left, right) => String(left.id).localeCompare(String(right.id)));
       return res.json({ success: true, count: data.length, data });
     } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list block farms.' });
     }
     const snapshot = await query.get();
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
@@ -70,7 +73,18 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
       updatedAt: now,
       archivedAt: null
     };
-    await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).create(payload);
+    const batch = db.batch();
+    batch.create(db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId), payload);
+    queueAuditEvent(batch, db, {
+      eventType: 'BLOCK_FARM_CREATED',
+      actorUserId: req.session.user.employeeId || req.session.user.userId,
+      entityType: 'BLOCK_FARM',
+      entityId: blockFarmId,
+      blockFarmId,
+      details: `Created block farm ${name}.`,
+      createdAt: now
+    });
+    await batch.commit();
     return res.status(201).json({ success: true, data: { id: blockFarmId, ...payload } });
   } catch (error) {
     const status = /already exists/i.test(error.message) ? 409 : 400;
@@ -82,6 +96,7 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const blockFarmId = String(req.params.id || '').trim().toUpperCase();
+    const mutationContext = readMutationContext(req);
     assertNoClientIdentity(req.body, ['id', 'blockFarmId', 'code'], 'Block Farm');
     const ref = db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId);
     const snapshot = await ref.get();
@@ -105,10 +120,25 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
       updatedAt: nowIso(),
       archivedAt: existing.archivedAt || null
     };
-    await ref.set(payload);
+    await db.runTransaction(async transaction => {
+      const latestSnapshot = await transaction.get(ref);
+      if (!latestSnapshot.exists) throw Object.assign(new Error('Block farm not found.'), { status: 404 });
+      const latest = latestSnapshot.data();
+      assertBaseVersion(latest.updatedAt, mutationContext, blockFarmId, { id: blockFarmId, ...latest });
+      transaction.set(ref, payload);
+      queueAuditEvent(transaction, db, {
+        eventType: 'BLOCK_FARM_UPDATED',
+        actorUserId: req.session.user.employeeId || req.session.user.userId,
+        entityType: 'BLOCK_FARM',
+        entityId: blockFarmId,
+        blockFarmId,
+        details: `Updated block farm ${payload.name}.`,
+        createdAt: payload.updatedAt
+      });
+    });
     return res.json({ success: true, data: { id: blockFarmId, ...payload } });
   } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
 

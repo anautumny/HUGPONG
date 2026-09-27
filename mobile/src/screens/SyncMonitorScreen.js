@@ -49,6 +49,28 @@ function activityStatusLabel(activity = {}) {
   return 'Within 3-Day Window';
 }
 
+function mutationTypeLabel(type) {
+  const labels = {
+    operation_log: 'Field operation',
+    takeover_log: 'Manager field operation',
+    stage_update: 'Crop stage update',
+    operation_amendment: 'Operation correction',
+    operation_archive: 'Operation archive',
+    ticket: 'Support request',
+    ticket_message: 'Support message'
+  };
+  return labels[type] || 'Saved change';
+}
+
+function mutationStatusLabel(status) {
+  if (status === 'validation' || status === 'rejected') return 'Needs correction';
+  if (status === 'conflict') return 'Needs review';
+  if (status === 'authorization') return 'Permission changed';
+  if (status === 'authentication') return 'Sign-in required';
+  if (status === 'syncing') return 'Synchronizing';
+  return 'Waiting to sync';
+}
+
 function StatusRow({ label, value }) {
   return (
     <View style={s.row}>
@@ -112,7 +134,7 @@ export default function SyncMonitorScreen({ navigation }) {
 
   const outbox = React.useMemo(() => getOutboxDiagnostics(), [localRevision]);
   const localPending = outbox.length;
-  const localFailed = outbox.filter(item => !['queued', 'retryable'].includes(item.status)).length;
+  const localFailed = outbox.filter(item => !['queued', 'retryable', 'syncing'].includes(item.status)).length;
   const own = monitor?.subjects?.find(subject => subject.isSelf) || null;
   const members = monitor?.subjects?.filter(subject => !subject.isSelf) || [];
   const ownSync = {
@@ -185,6 +207,23 @@ export default function SyncMonitorScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
+            {outbox.length > 0 ? (
+              <View>
+                <Text style={s.sectionTitle}>Changes Waiting on This Device</Text>
+                <Text style={s.sectionSub}>Each saved change is shown with the server response so a failed item is not hidden behind the total count.</Text>
+                {outbox.map((item, index) => (
+                  <View key={item.mutationId || `${item.type}-${index}`} style={s.queueCard}>
+                    <View style={s.queueHeading}>
+                      <Text style={s.queueTitle}>{mutationTypeLabel(item.type)}</Text>
+                      <Text style={s.queueStatus}>{mutationStatusLabel(item.status)}</Text>
+                    </View>
+                    {item.lastError ? <Text style={s.queueError}>{item.lastError}</Text> : null}
+                    <Text style={s.queueMeta}>Attempted {Number(item.retryCount || 0)} time{Number(item.retryCount || 0) === 1 ? '' : 's'}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             {role === 'Farm Manager' ? (
               <View>
                 <Text style={s.sectionTitle}>Member Activity Status</Text>
@@ -221,6 +260,12 @@ const s = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 28 },
   card: { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: COLORS.border, padding: 16, ...SHADOW.sm },
   memberCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, padding: 15, marginTop: 10 },
+  queueCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, padding: 14, marginTop: 10 },
+  queueHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  queueTitle: { flex: 1, fontSize: 13, fontWeight: '900', color: COLORS.text },
+  queueStatus: { fontSize: 10.5, fontWeight: '900', color: '#805D13' },
+  queueError: { marginTop: 8, fontSize: 11.5, lineHeight: 17, color: '#B42318' },
+  queueMeta: { marginTop: 6, fontSize: 10.5, color: COLORS.textMuted },
   cardHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 },
   eyebrow: { fontSize: 10, letterSpacing: 1, fontWeight: '900', color: COLORS.textMuted },
   name: { fontSize: 18, fontWeight: '900', color: COLORS.text, marginTop: 2 },

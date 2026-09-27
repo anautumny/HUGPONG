@@ -15,10 +15,12 @@ const API_BASE_URL = String(process.env.HUGPONG_API_BASE_URL || 'http://127.0.0.
 const PASSWORD = process.env.DEVELOPMENT_TEST_PASSWORD;
 const TEST_ACCOUNTS = Object.freeze({
   superAdmin: DEVELOPMENT_SUPER_ADMIN,
-  sraAdmin: { userId: '02000001', displayName: 'Development SRA Admin', phone: '09170000002', role: ROLES.SRA_ADMIN },
-  farmManager: { userId: '03000001', displayName: 'Development Farm Manager', phone: '09170000003', role: ROLES.FARM_MANAGER },
+  sraAdmin: { userId: '02000001', firstName: 'Development', lastName: 'SRA Admin', displayName: 'Development SRA Admin', phone: '09170000002', role: ROLES.SRA_ADMIN },
+  farmManager: { userId: '03000001', firstName: 'Development', lastName: 'Farm Manager', displayName: 'Development Farm Manager', phone: '09170000003', role: ROLES.FARM_MANAGER },
   memberFarmer: {
     userId: '04000001',
+    firstName: 'Development',
+    lastName: 'Farm Member',
     displayName: 'Development Farm Member',
     phone: '09170000004',
     role: ROLES.MEMBER_FARMER,
@@ -89,7 +91,10 @@ async function ensureAccount(token, account) {
     token,
     body: {
       id: account.userId,
-      displayName: account.displayName,
+      firstName: account.firstName,
+      middleName: account.middleName || '',
+      lastName: account.lastName,
+      suffix: account.suffix || '',
       phone: account.phone,
       role: account.role,
       password: PASSWORD,

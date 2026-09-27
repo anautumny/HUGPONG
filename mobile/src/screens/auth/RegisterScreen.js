@@ -21,7 +21,7 @@ const ROLE_DESCRIPTIONS = {
 };
 
 const getAvailableBlockFarms = () => {
-  return blockFarms.map(b => b.name);
+  return blockFarms.filter(farm => farm?.id && farm?.name && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
 };
 
 function ProgressBar({ step, totalSteps, t }) {
@@ -86,8 +86,10 @@ export default function RegisterScreen({ navigation }) {
     firstName: '',
     middleInitial: '',
     lastName: '',
+    suffix: '',
     role: 'Farm Member',
     blockFarm: '',
+    blockFarmId: '',
     contactNumber: '',
     password: '', 
     confirmPassword: '',
@@ -137,7 +139,7 @@ export default function RegisterScreen({ navigation }) {
 
   const stepTitles = [
     { title: t('reg_step_personal', 'Personal Info'), sub: t('reg_step_personal_sub', 'Enter your official Farm Member identity') },
-    { title: t('reg_step_farm', 'Select Block Farm'), sub: t('reg_step_farm_sub', 'Assign your sugarcane block farm cooperative') },
+    { title: t('reg_step_farm', 'Block Farm'), sub: t('reg_step_farm_sub', 'Select it if known, or continue unassigned') },
     { 
       title: t('reg_step_contact', 'Contact Number'), 
       sub: codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : 'Used for SMS verification. Permanent User ID issued upon signup' 
@@ -206,9 +208,6 @@ export default function RegisterScreen({ navigation }) {
     if (step === 1) {
       if (!form.firstName.trim()) e.firstName = 'First name is required';
       if (!form.lastName.trim()) e.lastName = 'Last name is required';
-    }
-    if (step === 2) {
-      if (!form.blockFarm) e.blockFarm = 'Please select your block farm';
     }
     if (step === 3) {
       const cleaned = form.contactNumber.replace(/[^0-9]/g, '');
@@ -345,28 +344,57 @@ export default function RegisterScreen({ navigation }) {
               <Field label={t('reg_last_name', 'Last Name *')} error={errors.lastName}>
                 <InputBox value={form.lastName} onChangeText={v => set('lastName', v)} placeholder="e.g. Dela Cruz" error={errors.lastName} autoCapitalize="words" />
               </Field>
+              <Field label={t('reg_suffix', 'Suffix (Optional)')}>
+                <InputBox value={form.suffix} onChangeText={v => set('suffix', v)} placeholder="e.g. Jr. or III" autoCapitalize="characters" />
+              </Field>
             </>}
 
             {/* STEP 2: BLOCK FARM */}
             {step === 2 && <>
-              <Field label={t('reg_select_farm_label', 'Select Your Assigned Block Farm *')} error={errors.blockFarm}>
+              <Field label={t('reg_select_farm_label', 'Select Your Assigned Block Farm (Optional)')} error={errors.blockFarm}>
                 <View style={{ gap: 8 }}>
+                  <TouchableOpacity
+                    style={[rc.chip, !form.blockFarmId && rc.selected, { paddingVertical: 14 }]}
+                    onPress={() => {
+                      setForm(current => ({ ...current, blockFarm: '', blockFarmId: '' }));
+                      setErrors(current => ({ ...current, blockFarm: null }));
+                    }}
+                  >
+                    <View style={rc.chipHeader}>
+                      <Ionicons name={!form.blockFarmId ? 'radio-button-on' : 'radio-button-off'} size={18} color={!form.blockFarmId ? COLORS.primary : COLORS.border} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[rc.text, !form.blockFarmId && rc.textSelected]}>Not assigned yet / Farm not listed</Text>
+                        <Text style={{ marginTop: 3, fontSize: 11, color: COLORS.textMuted }}>An SRA Admin will assign your Block Farm before approval.</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
                   {getAvailableBlockFarms().map(farm => (
                     <TouchableOpacity 
-                      key={farm}
-                      style={[rc.chip, form.blockFarm === farm && rc.selected, { paddingVertical: 14 }]}
-                      onPress={() => set('blockFarm', farm)}
+                      key={farm.id}
+                      style={[rc.chip, form.blockFarmId === farm.id && rc.selected, { paddingVertical: 14 }]}
+                      onPress={() => {
+                        setForm(current => ({ ...current, blockFarm: farm.name, blockFarmId: farm.id }));
+                        setErrors(current => ({ ...current, blockFarm: null }));
+                      }}
                     >
                       <View style={rc.chipHeader}>
-                        {form.blockFarm === farm ? (
+                        {form.blockFarmId === farm.id ? (
                           <Ionicons name="radio-button-on" size={18} color={COLORS.primary} />
                         ) : (
                           <Ionicons name="radio-button-off" size={18} color={COLORS.border} />
                         )}
-                        <Text style={[rc.text, form.blockFarm === farm && rc.textSelected]}>{farm}</Text>
+                        <Text style={[rc.text, form.blockFarmId === farm.id && rc.textSelected]}>
+                          {farm.name} ({farm.code || farm.id})
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   ))}
+                  {getAvailableBlockFarms().length === 0 && (
+                    <View style={s.infoNoticeBox}>
+                      <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
+                      <Text style={s.infoNoticeText}>No Block Farms are available yet. You can continue and an SRA Admin will assign one later.</Text>
+                    </View>
+                  )}
                 </View>
               </Field>
             </>}
@@ -627,7 +655,7 @@ export default function RegisterScreen({ navigation }) {
               </View>
               <View style={s.metaCol}>
                 <Text style={s.metaLabel}>Block Farm</Text>
-                <Text style={s.metaVal} numberOfLines={1}>{registeredAccount?.blockFarm || form.blockFarm}</Text>
+                <Text style={s.metaVal} numberOfLines={1}>{registeredAccount?.blockFarm || form.blockFarm || 'Awaiting assignment'}</Text>
               </View>
             </View>
 
@@ -647,7 +675,7 @@ export default function RegisterScreen({ navigation }) {
                   const id = registeredAccount?.accountId || registeredAccount?.employeeId;
                   try {
                     await Share.share({
-                      message: `HUGPONG Farm Member Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
+                      message: `HUGPONG Farm Member Credentials\nName: ${registeredAccount?.name || `${form.firstName} ${form.lastName}`}\nPermanent User ID: ${id}\nMobile: ${registeredAccount?.contact || form.contactNumber}\nFarm: ${registeredAccount?.blockFarm || form.blockFarm || 'Awaiting assignment'}\n\nKeep your User ID safe! It remains valid even if your phone or SIM changes.`,
                       title: 'HUGPONG Farm Member Credentials'
                     });
                   } catch (e) {

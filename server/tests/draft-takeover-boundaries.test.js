@@ -53,8 +53,25 @@ test('Planner lists and mutates only the signed-in field owner plots', () => {
   const fieldRoutes = read('../routes/fields.js');
 
   assert.match(planner, /allFields\.filter\(field => getOperationCapabilities\(session, field\)\.canPlan\)/);
-  assert.match(planner, /displayedFields\.filter\(f =>/);
+  assert.match(planner, /fields\.map\(item =>/);
   assert.doesNotMatch(planner, /All Plots/);
   assert.match(mobileStore, /getOperationCapabilities\(CURRENT_SESSION, field\)\.canPlan/);
   assert.match(fieldRoutes, /operationAuthorization\(req\.session\.user, \{ id: fieldId, \.\.\.latest \}\)\.canPlan/);
+  assert.match(fieldRoutes, /Farm schedules can only be changed for your own assigned field/);
+});
+
+test('the Mobile-only Planner is free-form and carries the activity into local drafts', () => {
+  const mobilePlanner = read('../../mobile/src/screens/PlannerScreen.js');
+  const mobileSchedule = read('../../mobile/src/domain/operationSchedule.js');
+  const webApp = read('../../web/react-app/src/App.jsx');
+  const webSidebar = read('../../web/react-app/src/components/layout/Sidebar.jsx');
+  assert.match(mobileSchedule, /operationDefinitionId: 'CUSTOM'/);
+  assert.match(mobileSchedule, /operationName: 'Custom Operation'/);
+  assert.doesNotMatch(mobileSchedule, /SRA_OPERATIONS_CATALOGUE/);
+  assert.match(mobilePlanner, /Planned Activity/);
+  assert.match(mobilePlanner, /stageNumber: null/);
+  assert.match(mobilePlanner, /operationDefinitionId === 'CUSTOM'/);
+  assert.match(mobilePlanner, /plannedOperationId/);
+  assert.doesNotMatch(webApp, /PlannerView|path="\/planner"/);
+  assert.doesNotMatch(webSidebar, /Farm Planner|to: '\/planner'/);
 });

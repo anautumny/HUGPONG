@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════
-// HUGPONG Mobile — Post Official SRA Price Modal Component
+// HUGPONG Mobile — Publish Price Reference Modal Component
 // Synchronous parity with Web: PublishPriceModal.jsx
 // Role: SRA Admin Weekly Benchmark Broadcast
 // ══════════════════════════════════════════════════════════════
@@ -42,7 +42,7 @@ export default function PublishPriceModal({
   const [sugarPrice, setSugarPrice] = useState('');
   const [molassesPrice, setMolassesPrice] = useState('');
   const [circularNumber, setCircularNumber] = useState('');
-  const [source, setSource] = useState('Official SRA Sugar & Molasses Price Monitor');
+  const [source, setSource] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -71,7 +71,7 @@ export default function PublishPriceModal({
       setSugarPrice(prevSugar != null ? String(prevSugar) : '');
       setMolassesPrice(prevMolasses != null ? String(prevMolasses) : '');
       setCircularNumber('');
-      setSource('Official SRA Sugar & Molasses Price Monitor');
+      setSource('');
       setFormError(null);
       setSuccessMessage(null);
       setIsSubmitting(false);
@@ -125,11 +125,11 @@ export default function PublishPriceModal({
       return;
     }
     if (!circularNumber.trim()) {
-      setFormError('Official Circular / Reference Number is required.');
+      setFormError('Circular or reference number is required.');
       return;
     }
     if (!source.trim()) {
-      setFormError('Official Source description is required.');
+      setFormError('A verifiable source description is required.');
       return;
     }
 
@@ -140,15 +140,13 @@ export default function PublishPriceModal({
         effectiveDate,
         weekLabel: weekLabel.trim(),
         sugarPricePerLkg: curSugarNum,
-        sugarPriceChange: sugarChange,
         molassesPricePerMetricTon: curMolassesNum,
-        molassesPriceChange: molassesChange,
         circularNumber: circularNumber.trim(),
         source: source.trim()
       };
 
       const result = await publishSraPrice(payload);
-      setSuccessMessage('Official SRA price posted successfully.');
+      setSuccessMessage('Price reference published successfully.');
       if (typeof onPublished === 'function') {
         onPublished(result);
       }
@@ -179,10 +177,10 @@ export default function PublishPriceModal({
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                   <Ionicons name="trending-up" size={20} color={COLORS.primary} />
-                  <Text style={s.modalTitle}>Post Official SRA Price</Text>
+                  <Text style={s.modalTitle}>Publish Price Reference</Text>
                 </View>
                 <Text style={s.modalSub}>
-                  Broadcast weekly domestic millsite sugar and molasses prices.
+                  Publish a traceable domestic millsite sugar and molasses price record.
                 </Text>
               </View>
               <TouchableOpacity onPress={onClose} style={s.closeBtn} disabled={isSubmitting}>
@@ -213,7 +211,7 @@ export default function PublishPriceModal({
                 </View>
               )}
 
-              {/* Row 1: Effective Date & SRA Week Label */}
+              {/* Row 1: Effective Date & Reporting Period */}
               <View style={s.rowTwoCol}>
                 {/* Effective Date with Calendar Picker Button */}
                 <View style={{ flex: 1 }}>
@@ -234,10 +232,10 @@ export default function PublishPriceModal({
                   <Text style={s.helperText}>Date circular takes millsite effect</Text>
                 </View>
 
-                {/* SRA Week Label */}
+                {/* Reporting Period */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    SRA Week Label <Text style={{ color: COLORS.danger }}>*</Text>
+                    Reporting Period <Text style={{ color: COLORS.danger }}>*</Text>
                   </Text>
                   <TextInput
                     style={s.input}
@@ -247,7 +245,7 @@ export default function PublishPriceModal({
                     placeholder="e.g. Week 3, September 2026"
                     placeholderTextColor={COLORS.textDisabled}
                   />
-                  <Text style={s.helperText}>Official reporting period title</Text>
+                  <Text style={s.helperText}>Reporting period shown on the source document</Text>
                 </View>
               </View>
 
@@ -324,10 +322,10 @@ export default function PublishPriceModal({
                 </View>
               </View>
 
-              {/* Official Circular / Reference No. */}
+              {/* Circular / Reference No. */}
               <View style={{ marginTop: 10 }}>
                 <Text style={s.fieldLabel}>
-                  Official Circular / Reference No. <Text style={{ color: COLORS.danger }}>*</Text>
+                  Circular / Reference No. <Text style={{ color: COLORS.danger }}>*</Text>
                 </Text>
                 <View style={s.inputWithIcon}>
                   <Ionicons name="document-text-outline" size={17} color={COLORS.textMuted} style={{ marginRight: 8 }} />
@@ -340,7 +338,7 @@ export default function PublishPriceModal({
                     placeholderTextColor={COLORS.textDisabled}
                   />
                 </View>
-                <Text style={s.helperText}>Official document reference code published by SRA</Text>
+                <Text style={s.helperText}>Reference code from the source document</Text>
               </View>
 
               {/* Issuing Authority / Source */}
@@ -353,14 +351,14 @@ export default function PublishPriceModal({
                   value={source}
                   onChangeText={setSource}
                   editable={!isSubmitting}
-                  placeholder="Official SRA Sugar & Molasses Price Monitor"
+                  placeholder="e.g. issuing agency, circular, or millsite bulletin"
                   placeholderTextColor={COLORS.textDisabled}
                 />
                 <Text style={s.helperText}>Originating agency or millsite market monitoring division</Text>
               </View>
             </ScrollView>
 
-            {/* Footer Buttons: Cancel + Post Official SRA Price */}
+            {/* Footer Buttons */}
             <View style={s.modalActionRow}>
               <TouchableOpacity
                 onPress={onClose}
@@ -382,7 +380,7 @@ export default function PublishPriceModal({
                   <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
                 )}
                 <Text style={s.publishBtnText}>
-                  {isSubmitting ? 'Posting official price...' : 'Post Official SRA Price'}
+                  {isSubmitting ? 'Publishing price...' : 'Publish Price Reference'}
                 </Text>
               </TouchableOpacity>
             </View>

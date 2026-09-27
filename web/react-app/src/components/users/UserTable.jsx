@@ -24,7 +24,7 @@ export default function UserTable({
 
   // Filtered users
   const filteredUsers = useMemo(() => {
-    let result = [...users];
+    let result = (Array.isArray(users) ? users : []).filter(user => user && typeof user === 'object');
 
     if (roleFilter !== 'ALL') {
       result = result.filter(u => u.canonicalRole === roleFilter);
@@ -37,10 +37,10 @@ export default function UserTable({
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       result = result.filter(u =>
-        (u.id && u.id.toLowerCase().includes(q)) ||
-        (u.displayName && u.displayName.toLowerCase().includes(q)) ||
-        (u.phone && u.phone.toLowerCase().includes(q)) ||
-        (u.role && u.role.toLowerCase().includes(q))
+        String(u.id || '').toLowerCase().includes(q) ||
+        String(u.displayName || '').toLowerCase().includes(q) ||
+        String(u.phone || '').toLowerCase().includes(q) ||
+        String(u.role || '').toLowerCase().includes(q)
       );
     }
 
@@ -204,15 +204,17 @@ export default function UserTable({
 
                 // Relationship data arrives already resolved by the authoritative API.
                 const assignment = u.assignment || null;
-                const farmPlotDisplay = assignment?.displayLabel || 'Assignment unavailable';
+                const farmPlotDisplay = typeof assignment?.displayLabel === 'string'
+                  ? assignment.displayLabel
+                  : 'Assignment unavailable';
                 const assignmentNeedsReview = ['ORPHANED', 'CONFLICT'].includes(assignment?.status);
 
                 return (
-                  <tr key={u.id} className="hover:bg-bg/40 dark:hover:bg-surface-subtle/40 transition-colors">
+                  <tr key={String(u.id || u.employeeId)} className="hover:bg-bg/40 dark:hover:bg-surface-subtle/40 transition-colors">
                     {/* User ID */}
                     <td className="px-5 py-4 whitespace-nowrap">
                       <span className="font-mono text-xs font-semibold text-hug-text bg-surface-subtle px-2.5 py-1 rounded border border-border">
-                        {u.id}
+                        {String(u.id || u.employeeId || 'Unknown')}
                       </span>
                     </td>
 

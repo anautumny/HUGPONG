@@ -66,7 +66,7 @@
 - [ ] C-03 SRA Admin sees district oversight, report audit/certification, price publication, block farms, fields, and users.
 - [ ] C-04 Super Admin sees platform governance, district monitoring, history, telemetry, tickets, maintenance, and settings on web.
 - [ ] C-05 SRA Admin mobile Planner tab is absent.
-- [ ] C-06 SRA Admin mobile signs out when internet or the HUGPONG API is unavailable and requires a fresh online login.
+- [ ] C-06 SRA Admin remains signed in when internet or the HUGPONG API is unavailable, sees timestamped read-only cached analytics and certified history when available, cannot access pending review state or perform official mutations, and regains live scoped data automatically after reconnection.
 - [ ] C-07 Super Admin mobile remains unavailable by explicit design.
 - [ ] C-08 Direct navigation to another web role's URL is denied or rerouted.
 - [ ] C-09 Changing browser local role state cannot grant authority. **Required; current UI design needs characterization.**

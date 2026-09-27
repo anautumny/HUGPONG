@@ -31,7 +31,9 @@ export default function AuditHistoryModal({
   reports = null,
   onLoadMore,
   hasMore = false,
-  isLoading = false
+  isLoading = false,
+  isOffline = false,
+  lastSyncedAt = null
 }) {
   const { t, formatPhaseMonth } = useTranslation();
   const [exportingReportId, setExportingReportId] = useState(null);
@@ -81,6 +83,9 @@ export default function AuditHistoryModal({
   const isCertified = activeAudit.status === 'CERTIFIED' || activeAudit.certificationStatus === 'certified';
   const displayVerifier = activeAudit.verifiedBy || activeAudit.certifiedByName || (isCertified ? 'SRA Certified Inspector' : 'Pending SRA Inspection');
   const displayFarm = activeAudit.blockFarmName || activeAudit.blockFarm || activeAudit.blockFarmId || 'District Block Farm';
+  const lastSyncedLabel = lastSyncedAt
+    ? new Date(lastSyncedAt).toLocaleString()
+    : 'Unknown';
 
   const handleExportPdf = async report => {
     const reportId = report?.reportId || report?.id || report?.periodKey || report?.period || report?.month || 'report';
@@ -120,6 +125,26 @@ export default function AuditHistoryModal({
         </View>
 
         <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+          {isOffline && (
+            <View style={s.offlineBanner}>
+              <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.offlineBannerTitle}>Cached certified history</Text>
+                <Text style={s.offlineBannerText}>Last synchronized: {lastSyncedLabel}. Pending reviews and regulatory actions require a live connection.</Text>
+              </View>
+            </View>
+          )}
+
+          {orderedAudits.length === 0 ? (
+            <View style={s.emptyState}>
+              <Ionicons name="documents-outline" size={34} color={COLORS.textMuted} />
+              <Text style={s.emptyStateTitle}>No certified audit history available</Text>
+              <Text style={s.emptyStateText}>
+                {isOffline ? 'Reconnect once to download the latest certified monthly reports.' : 'Certified monthly reports will appear here.'}
+              </Text>
+            </View>
+          ) : (
+            <>
           {/* Monthly Selector Horizontal Chips */}
           <View style={{ gap: 6 }}>
             <Text style={s.sectionLabel}>{t('select_report_month', 'SELECT REPORT MONTH')}</Text>
@@ -156,7 +181,7 @@ export default function AuditHistoryModal({
               <View style={[s.statusBadge, !isCertified && { backgroundColor: '#FEF3C7' }]}>
                 <Ionicons name={isCertified ? "checkmark-done-circle" : "shield-checkmark"} size={14} color={isCertified ? COLORS.primary : '#D97706'} />
                 <Text style={[s.statusText, !isCertified && { color: '#B45309' }]}>
-                  {isCertified ? t('verified_sra_badge', 'Verified SRA') : 'Pending SRA Review'}
+                  {isCertified ? t('verified_sra_badge', 'Certified Audit') : 'Pending Administrator Review'}
                 </Text>
               </View>
             </View>
@@ -254,6 +279,11 @@ export default function AuditHistoryModal({
                           ₱{Number(op.totalCost || op.cost || 0).toLocaleString()}
                         </Text>
                       </View>
+                      {op.childOperationName ? (
+                        <Text style={{ marginTop: 2, fontSize: 11, fontWeight: '700', color: COLORS.textSecondary }}>
+                          Child operation: {op.childOperationName}
+                        </Text>
+                      ) : null}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                         <View style={{ backgroundColor: '#F3F4F6', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: RADIUS.xs }}>
                           <Text style={{ fontSize: 10.5, fontWeight: '700', color: COLORS.textSecondary }}>
@@ -285,6 +315,8 @@ export default function AuditHistoryModal({
               <Text style={s.qrBtnText}>{isLoading ? 'Loading...' : 'Load More Certified Audits'}</Text>
             </TouchableOpacity>
           )}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -308,6 +340,13 @@ const s = StyleSheet.create({
   closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
 
   content: { padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 },
+
+  offlineBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: RADIUS.md, padding: 12 },
+  offlineBannerTitle: { fontSize: 12.5, fontWeight: '900', color: '#92400E' },
+  offlineBannerText: { fontSize: 11, lineHeight: 16, color: '#B45309', marginTop: 2 },
+  emptyState: { alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: RADIUS.lg, paddingVertical: 36, paddingHorizontal: 20 },
+  emptyStateTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  emptyStateText: { fontSize: 11.5, lineHeight: 17, color: COLORS.textMuted, textAlign: 'center' },
 
   sectionLabel: { fontSize: 11, fontWeight: '800', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
 

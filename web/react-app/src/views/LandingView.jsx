@@ -84,7 +84,7 @@ export default function LandingView() {
 
           {/* Main Headline */}
           <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-hug-text leading-tight">
-            Silay Sugarcane Block Farm &amp;{' '}
+            Sugarcane Block Farm &amp;{' '}
             <span className="text-primary">Agricultural Operations Platform</span>
           </h1>
 
@@ -101,7 +101,7 @@ export default function LandingView() {
             </div>
             <div className="flex items-center gap-2.5">
               <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
-              <span>Official SRA 6-Stage Timeline</span>
+              <span>Six-Stage Sugarcane Timeline</span>
             </div>
             <div className="flex items-center gap-2.5">
               <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
@@ -157,7 +157,7 @@ export default function LandingView() {
                 02
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Official SRA Price Monitoring
+                Source-Referenced Price Monitoring
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
                 Official millsite circulars for raw sugar and industrial molasses with regulatory verification.

@@ -19,7 +19,7 @@ export default function PublishPriceModal({
   const [sugarPrice, setSugarPrice] = useState('');
   const [molassesPrice, setMolassesPrice] = useState('');
   const [circularNumber, setCircularNumber] = useState('');
-  const [source, setSource] = useState('Official SRA Sugar & Molasses Price Monitor');
+  const [source, setSource] = useState('');
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -33,7 +33,7 @@ export default function PublishPriceModal({
       setSugarPrice(latestPrice?.sugarPricePerLkg != null ? String(latestPrice.sugarPricePerLkg) : '');
       setMolassesPrice(latestPrice?.molassesPricePerMetricTon != null ? String(latestPrice.molassesPricePerMetricTon) : '');
       setCircularNumber('');
-      setSource('Official SRA Sugar & Molasses Price Monitor');
+      setSource('');
       setFormError(null);
       setSuccessMessage(null);
       setIsSubmitting(false);
@@ -83,11 +83,11 @@ export default function PublishPriceModal({
       return;
     }
     if (!circularNumber.trim()) {
-      setFormError('Official Circular / Reference Number is required.');
+      setFormError('Circular or reference number is required.');
       return;
     }
     if (!source.trim()) {
-      setFormError('Official Source description is required.');
+      setFormError('A verifiable source description is required.');
       return;
     }
 
@@ -98,16 +98,14 @@ export default function PublishPriceModal({
         effectiveDate,
         weekLabel: weekLabel.trim(),
         sugarPricePerLkg: curSugarNum,
-        sugarPriceChange: sugarChange,
         molassesPricePerMetricTon: curMolassesNum,
-        molassesPriceChange: molassesChange,
         circularNumber: circularNumber.trim(),
         source: source.trim()
       };
 
       const result = await publishPrice(payload);
       if (result.success) {
-        setSuccessMessage('Official SRA price posted successfully.');
+        setSuccessMessage('Price reference published successfully.');
         if (typeof onPublished === 'function') {
           onPublished(result.data);
         }
@@ -126,8 +124,8 @@ export default function PublishPriceModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Post Official SRA Price"
-      subtitle="Broadcast weekly domestic millsite sugar and molasses prices."
+      title="Publish Price Reference"
+      subtitle="Publish a traceable domestic millsite sugar and molasses price record."
       icon={TrendingUp}
       badge="SRA Admin"
       size="md"
@@ -149,9 +147,9 @@ export default function PublishPriceModal({
             size="md"
             onClick={handleSubmit}
             isLoading={isSubmitting}
-            loadingText="Posting official price..."
+            loadingText="Publishing price..."
           >
-            Post Official SRA Price
+            Publish Price Reference
           </Button>
         </div>
       }
@@ -191,9 +189,9 @@ export default function PublishPriceModal({
 
           <FormField
             id="price-week-label"
-            label="SRA Week Label"
+            label="Reporting Period"
             required
-            helperText="Official reporting period title"
+            helperText="Reporting period shown on the source document"
           >
             <Input
               type="text"
@@ -273,9 +271,9 @@ export default function PublishPriceModal({
         {/* Circular Number & Source */}
         <FormField
           id="price-circular-number"
-          label="Official Circular / Reference No."
+          label="Circular / Reference No."
           required
-          helperText="Official document reference code published by SRA"
+          helperText="Reference code from the source document"
         >
           <Input
             type="text"
@@ -298,7 +296,7 @@ export default function PublishPriceModal({
           <Input
             type="text"
             id="price-source"
-            placeholder="Official SRA Sugar & Molasses Price Monitor"
+            placeholder="e.g. issuing agency, circular, or millsite bulletin"
             value={source}
             onChange={(e) => setSource(e.target.value)}
             disabled={isSubmitting}

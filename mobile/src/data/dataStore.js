@@ -1,5 +1,6 @@
-import { STORAGE_KEYS, saveItem, getItem, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey } from '../services/storageService';
-import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
+import { STORAGE_KEYS, saveItem, getItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
+import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId, removeOutboxItem } from '../services/syncEngine';
+import { createClientRecordId } from '../services/secureId';
 import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -32,7 +33,6 @@ import {
   fromUserDocument,
   toFieldDocument,
   toOperationLogDocument,
-  toPriceDocument,
   toSupportTicketDocument,
   formatCropYear
 } from './firestoreSchema';
@@ -47,7 +47,8 @@ import {
   toISODateString,
   sortNewestFirst,
   sortOperationsNewestFirst,
-  cropYearCycleForDate
+  cropYearCycleForDate,
+  uniqueRecordsById
 } from '../utils/dataHelpers';
 
 export {
@@ -63,7 +64,7 @@ export const commitExplicitMutation = async (type, payload, options = {}) => {
   const bypassOfflineOutbox = activeRole === ROLES.SRA_ADMIN || sraOnlineOnlyMutations.has(type);
   if (bypassOfflineOutbox) {
     if (!getNetworkStatus()) {
-      throw new Error('SRA Admin actions require a live HUGPONG connection. Reconnect and sign in again.');
+      throw new Error('SRA Admin actions require a live HUGPONG connection. You remain signed in; reconnect to continue.');
     }
     const response = await executeMutationViaApi({ type, payload, baseVersion: options.baseVersion, takeoverGrant: options.takeoverGrant }, { includeMutation: false });
     return {
@@ -84,8 +85,9 @@ export const commitExplicitMutation = async (type, payload, options = {}) => {
   const retained = getOutboxQueue().find(queued => queued.mutationId === item.mutationId);
   const outcome = { item: retained || item, result, queued: Boolean(retained), response: result.responses?.[item.mutationId] };
   const retainedStatus = outcome.queued ? outcome.item?.status : null;
-  const terminalStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected']);
-  if (terminalStatuses.has(retainedStatus) || result.reason === 'AUTHORIZATION_FAILURE' || result.reason === 'AUTHENTICATION_RECOVERY') {
+  const nonOfflineFailureStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected', 'server_failure']);
+  if (nonOfflineFailureStatuses.has(retainedStatus) || result.reason === 'AUTHORIZATION_FAILURE' || result.reason === 'AUTHENTICATION_RECOVERY') {
+    await removeOutboxItem(item.mutationId);
     const error = new Error(outcome.item?.lastError || 'The server rejected this mutation.');
     error.status = retainedStatus === 'conflict' ? 409 : 400;
     error.data = outcome.item?.conflict || null;
@@ -166,6 +168,18 @@ export const draftLogs = [];
 
 export const auditReports = [];
 export const auditLogs = auditReports; // Backward compatibility alias
+const sraCertifiedAuditHistory = [];
+const SRA_OFFLINE_SNAPSHOT_SCHEMA_VERSION = 1;
+let sraOfflineSnapshotStatus = {
+  available: false,
+  source: 'none',
+  syncedAt: null,
+  ownerUserId: null,
+  districtId: null
+};
+
+export const getSraCertifiedAuditHistory = () => [...sraCertifiedAuditHistory];
+export const getSraOfflineSnapshotStatus = () => ({ ...sraOfflineSnapshotStatus });
 
 export const assignmentRequests = [];
 
@@ -176,7 +190,7 @@ export const systemHistory = [];
 export const requestFieldAssignment = (fieldId, memberName, ha, memberId = null) => {
   const curSession = getCurrentSession();
   const newReq = {
-    id: 'REQ-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+    id: createClientRecordId('REQ'),
     fieldId: String(fieldId || '').trim().toUpperCase(),
     member: memberName || curSession.name || 'Unassigned',
     memberUserId: memberId || curSession.employeeId || curSession.id || '',
@@ -231,6 +245,88 @@ const clearCanonicalRuntimeData = () => {
   ].forEach(collection => {
     collection.length = 0;
   });
+  sraCertifiedAuditHistory.length = 0;
+  sraOfflineSnapshotStatus = {
+    available: false,
+    source: 'none',
+    syncedAt: null,
+    ownerUserId: null,
+    districtId: null
+  };
+};
+
+const sessionDistrictId = session => String(
+  session?.districtId || session?.districtCode || session?.district || ''
+).trim();
+
+const applySraOfflineSnapshot = (snapshot, session) => {
+  const ownerUserId = String(session?.employeeId || session?.id || '').trim();
+  const snapshotOwnerId = String(snapshot?.ownerUserId || '').trim();
+  const currentDistrictId = sessionDistrictId(session);
+  const snapshotDistrictId = String(snapshot?.districtId || '').trim();
+  if (!ownerUserId
+    || Number(snapshot?.schemaVersion) !== SRA_OFFLINE_SNAPSHOT_SCHEMA_VERSION
+    || snapshotOwnerId !== ownerUserId
+    || (currentDistrictId && snapshotDistrictId && currentDistrictId !== snapshotDistrictId)) {
+    return false;
+  }
+
+  const restoredCycles = (Array.isArray(snapshot.cropCycles) ? snapshot.cropCycles : [])
+    .filter(Boolean)
+    .map(record => fromCycleDocument(record.id, record));
+  const cycleById = new Map(restoredCycles.map(cycle => [cycle.id, cycle]));
+  const restoredFields = (Array.isArray(snapshot.fields) ? snapshot.fields : [])
+    .filter(Boolean)
+    .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
+  const restoredArchivedFields = (Array.isArray(snapshot.archivedFields) ? snapshot.archivedFields : [])
+    .filter(Boolean)
+    .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
+  const restoredPrices = [];
+  (Array.isArray(snapshot.prices) ? snapshot.prices : []).forEach(record => {
+    try {
+      restoredPrices.push(fromPriceDocument(record.id, record));
+    } catch (error) {
+      console.warn('[Mobile] Ignoring invalid cached SRA price record:', record?.id || '(missing id)', error.message);
+    }
+  });
+  const restoredCertifiedHistory = (Array.isArray(snapshot.certifiedAuditReports) ? snapshot.certifiedAuditReports : [])
+    .filter(Boolean)
+    .map(record => fromAuditReportDocument(record.id || record.reportId, record))
+    .filter(report => String(report.status || '').toUpperCase() === 'CERTIFIED');
+
+  blockFarms.push(...uniqueRecordsById((Array.isArray(snapshot.blockFarms) ? snapshot.blockFarms : [])
+    .filter(Boolean)
+    .map(record => fromBlockFarmDocument(record.id, record))));
+  cropCycles.push(...restoredCycles);
+  fields.push(...restoredFields.filter(field => field.status !== 'ARCHIVED'));
+  archivedFields.push(...restoredArchivedFields.map(field => ({ ...field, status: 'ARCHIVED' })));
+  operationLogs.push(...sortOperationsNewestFirst((Array.isArray(snapshot.operationLogs) ? snapshot.operationLogs : [])
+    .filter(Boolean)
+    .map(record => fromOperationLogDocument(record.id, record))));
+  priceHistory.push(...sortNewestFirst(restoredPrices, ['effectiveDate', 'publishedAt']));
+  sraCertifiedAuditHistory.push(...sortNewestFirst(restoredCertifiedHistory, ['certifiedAt', 'compiledAt', 'createdAt']));
+  sraOfflineSnapshotStatus = {
+    available: true,
+    source: 'cache',
+    syncedAt: snapshot.syncedAt || null,
+    ownerUserId,
+    districtId: snapshotDistrictId || currentDistrictId || null
+  };
+  return true;
+};
+
+export const activateSraOfflineSnapshot = async () => {
+  if (canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey) !== ROLES.SRA_ADMIN) return false;
+  const userId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+  clearCanonicalRuntimeData();
+  if (!userId) {
+    notify();
+    return false;
+  }
+  const snapshot = await getItem(sraOfflineSnapshotStorageKey(userId), null);
+  const restored = applySraOfflineSnapshot(snapshot, CURRENT_SESSION);
+  notify();
+  return restored;
 };
 
 export const approvePendingRegistration = async (contact, options = {}) => {
@@ -242,71 +338,71 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
   if (!assignedFarm) return { success: false, message: 'Select an existing block farm before approving this registration.' };
 
+  const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const empId = applicant.employeeId || applicant.id || ('04' + cleanContact.slice(-6).padStart(6, '0'));
+  if (activeRole === ROLES.SRA_ADMIN) {
+    try {
+      const approvalOutcome = await commitExplicitMutation('user_approve', {
+        id: empId,
+        role: 'MEMBER_FARMER',
+        blockFarmId: assignedFarm.id
+      }, { baseVersion: applicant.updatedAt || null });
+      const approved = approvalOutcome.response;
+      const publicAccount = fromUserDocument(empId, approved?.data || applicant);
+      const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
+      if (existingIndex >= 0) users[existingIndex] = publicAccount;
+      else users.push(publicAccount);
+      pendingUsers.splice(idx, 1);
+      await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+      await saveItem(STORAGE_KEYS.USERS, users);
+      notifyDataUpdate();
+      return {
+        success: true,
+        applicant,
+        accountId: approved?.accountId || approved?.data?.id || empId,
+        blockFarmId: assignedFarm.id,
+        fieldId: null
+      };
+    } catch (error) {
+      return { success: false, message: error.message || 'Server approval failed.' };
+    }
+  }
+
   // The API creates the canonical Field ID after approval details are validated.
   const rawHa = options.area || applicant.area;
   const assignedHa = parseFloat(String(rawHa || '').replace(/[^0-9.]/g, ''));
   if (!Number.isFinite(assignedHa) || assignedHa <= 0) {
     return { success: false, message: 'A valid field area is required before approving this registration.' };
   }
-  const empId = applicant.employeeId || ('04' + cleanContact.slice(-6).padStart(6, '0'));
 
-  // Update or create active user account
-  const existingUser = users.find(u => (u.contact || '').replace(/\D/g, '') === cleanContact || u.employeeId === empId);
-  const existingUserSnapshot = existingUser ? { ...existingUser } : null;
-  let createdUser = null;
-  if (existingUser) {
-    existingUser.status = 'Active';
-    existingUser.phoneVerified = true;
-    existingUser.isPhoneVerified = true;
-    existingUser.pendingFirstLoginVerification = false;
-    existingUser.phoneVerifiedAt = existingUser.phoneVerifiedAt || new Date().toISOString();
-    existingUser.updatedAt = new Date().toISOString();
-  } else {
-    createdUser = {
-      employeeId: empId,
-      name: applicant.name,
-      contact: cleanContact,
-      role: applicant.role || 'Farm Member',
-      roleKey: 'member',
-      status: 'Active',
-      phoneVerified: true,
-      isPhoneVerified: true,
-      pendingFirstLoginVerification: false,
-      phoneVerifiedAt: new Date().toISOString(),
-      regDate: applicant.regDate || new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    users.push(createdUser);
+  // Approval must happen before field creation because only ACTIVE members can
+  // be assigned to a canonical field. The affiliation keeps the member visible
+  // to the responsible manager even if plot enrollment is completed later.
+  let approvedAccountId = empId;
+  let approvedData = null;
+  try {
+    const approvalOutcome = await commitExplicitMutation('user_approve', {
+      id: empId,
+      role: 'MEMBER_FARMER',
+      blockFarmId: assignedFarm.id
+    }, { baseVersion: applicant.updatedAt || null });
+    const approved = approvalOutcome.response;
+    approvedAccountId = approved?.accountId || approved?.data?.id || empId;
+    approvedData = approved?.data || applicant;
+    const publicAccount = fromUserDocument(empId, approvedData);
+    const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
+    if (existingIndex >= 0) users[existingIndex] = publicAccount;
+    else users.push(publicAccount);
+  } catch (error) {
+    return { success: false, message: error.message || 'Server approval failed.' };
   }
 
-  // Allocate through the canonical field writer so a new field and its first
-  // crop cycle are persisted together with a stable currentCycleId.
   const fieldResult = await saveFieldPlot({
     blockFarmId: assignedFarm.id,
     memberUserId: empId,
     ha: assignedHa,
     status: 'ACTIVE'
   }, true);
-  if (!fieldResult.success) {
-    if (createdUser) users.splice(users.indexOf(createdUser), 1);
-    if (existingUser && existingUserSnapshot) Object.assign(existingUser, existingUserSnapshot);
-    return fieldResult;
-  }
-
-  let approvedAccountId = empId;
-  try {
-    const approvalOutcome = await commitExplicitMutation('user_approve', {
-      id: empId,
-      role: 'MEMBER_FARMER'
-    }, { baseVersion: existingUserSnapshot?.updatedAt || applicant.updatedAt || null });
-    const approved = approvalOutcome.response;
-    approvedAccountId = approved?.accountId || approved?.data?.id || empId;
-    const activeUser = users.find(user => user.employeeId === empId);
-    if (activeUser && approved.data) Object.assign(activeUser, fromUserDocument(empId, approved.data));
-  } catch (error) {
-    return { success: false, message: error.message || 'Server approval failed.' };
-  }
 
   pendingUsers.splice(idx, 1);
   await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
@@ -317,7 +413,9 @@ export const approvePendingRegistration = async (contact, options = {}) => {
     success: true,
     applicant,
     accountId: approvedAccountId,
-    fieldId: fieldResult.field.id
+    blockFarmId: assignedFarm.id,
+    fieldId: fieldResult.success ? fieldResult.field.id : null,
+    warning: fieldResult.success ? null : (fieldResult.message || 'The account was approved, but its field plot still needs to be assigned.')
   };
 };
 
@@ -599,10 +697,10 @@ export const resolveFieldBlockFarm = (field) => {
 };
 
 export const resolveBlockFarmManager = (blockFarm) => {
-  if (!blockFarm) return 'Pending Appointment';
+  if (!blockFarm) return 'Unassigned';
   const u = users.find(user => (user.id || user.employeeId) === blockFarm.managerUserId);
-  if (u) return u.name;
-  return 'Pending Appointment';
+  if (u) return u.displayName || u.name || u.id || u.employeeId;
+  return 'Unassigned';
 };
 
 export const getSortedPrices = () => {
@@ -620,8 +718,10 @@ export const currentPrice = {
     return sorted.length > 0 ? sorted[0].sugarPriceChange : null;
   },
   get unit() { return 'Lkg'; },
-  get mill() { return 'HPCo'; },
-  get location() { return 'Silay'; },
+  get source() {
+    const sorted = getSortedPrices();
+    return sorted.length > 0 ? sorted[0].source : 'Published price reference';
+  },
   get lastUpdated() {
     const sorted = getSortedPrices();
     return sorted.length > 0 ? sorted[0].effectiveDate : 'No records';
@@ -703,12 +803,31 @@ export const priceAnalytics = {
 
 export const clearAuthSessionStorage = async () => {
   try {
-    await saveItem(STORAGE_KEYS.AUTH_TOKEN, null);
-    await saveItem(STORAGE_KEYS.SESSION, null);
+    await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
   } catch (e) {
     console.warn('[dataStore] Error clearing auth session:', e);
   }
 };
+
+const clearSharedAccountCache = () => removeItems([
+  STORAGE_KEYS.USERS,
+  STORAGE_KEYS.BLOCK_FARMS,
+  STORAGE_KEYS.CROP_CYCLES,
+  STORAGE_KEYS.LOGS,
+  STORAGE_KEYS.FIELDS,
+  STORAGE_KEYS.ARCHIVED_FIELDS,
+  STORAGE_KEYS.PRICES,
+  STORAGE_KEYS.TICKETS,
+  STORAGE_KEYS.PENDING_ASSIGNMENTS,
+  STORAGE_KEYS.PENDING_USERS,
+  STORAGE_KEYS.CUSTOM_STAGES,
+  STORAGE_KEYS.LAST_SYNC,
+  STORAGE_KEYS.AUDIT_REPORTS,
+  STORAGE_KEYS.SYSTEM_HISTORY,
+  STORAGE_KEYS.READ_NOTIF_IDS,
+  STORAGE_KEYS.DISMISSED_NOTIF_IDS,
+  STORAGE_KEYS.ARCHIVE_VIEW_PREFERENCES
+]);
 
 export const verifyCurrentPassword = async (password, fieldId = null) => {
   try {
@@ -731,6 +850,7 @@ export const restoreSessionFromToken = async () => {
       await initSyncEngine('');
       if (auth?.currentUser) await logoutFromServer();
       await clearAuthSessionStorage();
+      await clearSharedAccountCache();
       return { success: false, reason: 'no_stored_session' };
     }
     if (!auth?.currentUser || auth.currentUser.uid !== session.employeeId) {
@@ -738,25 +858,23 @@ export const restoreSessionFromToken = async () => {
       await initSyncEngine('');
       if (auth?.currentUser) await logoutFromServer();
       await clearAuthSessionStorage();
+      await clearSharedAccountCache();
       return { success: false, reason: 'firebase_session_missing' };
     }
     const restoredSession = normalizeSessionUser(session);
     const restoredRole = canonicalRole(restoredSession.canonicalRole || restoredSession.role || restoredSession.roleKey);
-    if (restoredRole === ROLES.SRA_ADMIN && !(await checkConnectivity({ force: true }))) {
-      stopActiveCloudSync();
-      clearCanonicalRuntimeData();
-      CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
-      await initSyncEngine('');
-      await logoutFromServer({ skipRemote: true });
-      await clearAuthSessionStorage();
-      notify();
-      return { success: false, reason: 'sra_online_required', adminOnlineRequired: true };
-    }
     // Offline restoration trusts only a session previously issued after a
     // successful server login. Online validation refreshes both server and
     // Firebase credentials without exposing password material to the client.
     CURRENT_SESSION = { ...restoredSession, lastActiveAt: Date.now() };
-    if (restoredRole === ROLES.SRA_ADMIN) clearCanonicalRuntimeData();
+    if (restoredRole === ROLES.SRA_ADMIN) {
+      clearCanonicalRuntimeData();
+      const restoredUserId = String(CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '').trim();
+      if (restoredUserId) {
+        const snapshot = await getItem(sraOfflineSnapshotStorageKey(restoredUserId), null);
+        applySraOfflineSnapshot(snapshot, CURRENT_SESSION);
+      }
+    }
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
     if (restoredRole === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
@@ -767,11 +885,19 @@ export const restoreSessionFromToken = async () => {
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       } catch (error) {
-        if (error.status === 401) {
+        if (error.status === 401 || error.status === 403) {
           stopActiveCloudSync();
+          if (restoredRole === ROLES.SRA_ADMIN) {
+            const restoredUserId = String(restoredSession.employeeId || restoredSession.id || '').trim();
+            if (restoredUserId) await removeItems([
+              sraOfflineSnapshotStorageKey(restoredUserId),
+              lastScannedAuditStorageKey(restoredUserId)
+            ]);
+          }
           CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
           await initSyncEngine('');
           await clearAuthSessionStorage();
+          await clearSharedAccountCache();
           if (auth?.currentUser) await logoutFromServer();
           return { success: false, reason: 'server_session_rejected' };
         }
@@ -783,17 +909,7 @@ export const restoreSessionFromToken = async () => {
       stopActiveCloudSync();
       return { success: false, reason: 'account_setup_required' };
     }
-    const liveDataReady = await restartCloudSyncIfReady();
-    if (restoredRole === ROLES.SRA_ADMIN && !liveDataReady) {
-      stopActiveCloudSync();
-      clearCanonicalRuntimeData();
-      CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
-      await initSyncEngine('');
-      await logoutFromServer({ skipRemote: !getNetworkStatus() });
-      await clearAuthSessionStorage();
-      notify();
-      return { success: false, reason: 'sra_live_data_unavailable', adminOnlineRequired: true };
-    }
+    await restartCloudSyncIfReady();
     reportMobileActivity('HEARTBEAT').catch(() => {});
     notify();
     return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
@@ -804,6 +920,7 @@ export const restoreSessionFromToken = async () => {
 };
 
 export const logoutUser = async (options = {}) => {
+  const signingOutSession = CURRENT_SESSION;
   stopActiveCloudSync();
   await logoutFromServer(options);
   draftLogs.length = 0;
@@ -811,6 +928,14 @@ export const logoutUser = async (options = {}) => {
   CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
   await initSyncEngine('');
   await clearAuthSessionStorage();
+  await clearSharedAccountCache();
+  if (canonicalRole(signingOutSession?.role || signingOutSession?.roleKey) === ROLES.SRA_ADMIN) {
+    const signingOutUserId = String(signingOutSession?.employeeId || signingOutSession?.id || '').trim();
+    if (signingOutUserId) await removeItems([
+      sraOfflineSnapshotStorageKey(signingOutUserId),
+      lastScannedAuditStorageKey(signingOutUserId)
+    ]);
+  }
   notify();
   return { success: true };
 };
@@ -832,19 +957,7 @@ export const authenticateUser = async (contactOrId, password) => {
     draftLogs.length = 0;
     const scopedDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), []);
     if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(draft => draftLogs.push(draft));
-    const liveDataReady = await restartCloudSyncIfReady();
-    const accountSetupPending = CURRENT_SESSION.pendingFirstLoginVerification === true
-      || CURRENT_SESSION.phoneVerified === false
-      || CURRENT_SESSION.requiresPasswordChange === true;
-    if (roleUpper === ROLES.SRA_ADMIN && !accountSetupPending && !liveDataReady) {
-      await logoutUser({ skipRemote: !getNetworkStatus() });
-      return {
-        success: false,
-        error: 'SRA Admin requires a live HUGPONG connection and current district data. Please reconnect and sign in again.',
-        code: 'SRA_ONLINE_REQUIRED',
-        isNetworkError: true
-      };
-    }
+    await restartCloudSyncIfReady();
     reportMobileActivity('LOGIN').catch(() => {});
     notify();
     if (getNetworkStatus() && getOutboxCount() > 0) {
@@ -941,16 +1054,16 @@ export const verifyCurrentPhone = async (code) => {
   }
 };
 
-export const formatFullName = (first = '', middle = '', last = '') => {
+export const formatFullName = (first = '', middle = '', last = '', suffix = '') => {
   const f = (first || '').trim();
   const m = (middle || '').trim();
   const l = (last || '').trim();
   if (!f && !l) return '';
   if (m) {
     const mFormatted = m.length === 1 ? `${m}.` : m;
-    return `${f} ${mFormatted} ${l}`.trim();
+    return `${f} ${mFormatted} ${l} ${String(suffix || '').trim()}`.trim();
   }
-  return `${f} ${l}`.trim();
+  return `${f} ${l} ${String(suffix || '').trim()}`.trim();
 };
 
 export const splitFullName = (fullName = '') => {
@@ -972,11 +1085,17 @@ export const registerUser = async (userData) => {
   if (typeof userData.password !== 'string' || userData.password.length < 8) {
     return { success: false, error: 'A password of at least 8 characters is required.' };
   }
-  const formattedName = formatFullName(userData.firstName, userData.middleInitial || userData.middleName, userData.lastName);
-  const selectedFarm = blockFarms.find(farm => farm.id === userData.blockFarm || farm.name === userData.blockFarm);
+  const middleName = userData.middleInitial || userData.middleName || '';
+  const formattedName = formatFullName(userData.firstName, middleName, userData.lastName, userData.suffix);
+  const selectedFarm = blockFarms.find(farm => farm.id === userData.blockFarmId)
+    || blockFarms.find(farm => farm.id === userData.blockFarm || farm.name === userData.blockFarm);
   try {
     const result = await registerWithServer({
       displayName: formattedName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+      firstName: String(userData.firstName || '').trim(),
+      middleName: String(middleName).trim(),
+      lastName: String(userData.lastName || '').trim(),
+      suffix: String(userData.suffix || '').trim(),
       phone: cleaned,
       password: userData.password,
       role: 'MEMBER_FARMER',
@@ -1032,7 +1151,8 @@ const FIELD_SYNC_MUTATION_TYPES = new Set([
   'stage_update',
   'cycle_rollover',
   'custom_stages',
-  'custom_operations'
+  'custom_operations',
+  'operation_schedule'
 ]);
 
 export const getOperationSyncState = logId => {
@@ -1249,12 +1369,27 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
   if (!targetField?.currentCycleId) return { success: false, message: 'Field has no explicit currentCycleId.' };
   const previousField = { ...targetField };
   const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
+  const previousCycle = localCycle ? { ...localCycle } : null;
   const baseVersion = localCycle?.updatedAt || null;
   Object.assign(targetField, updates);
-  const locallyPersisted = await saveItem(STORAGE_KEYS.FIELDS, fields);
+  if (Number(targetField.stageNumber) < 6) targetField.isCompleted = false;
+  if (localCycle) {
+    localCycle.currentStageNumber = Number(updates.stageNumber || targetField.stageNumber || 1);
+    localCycle.elapsedMonths = Number(updates.month ?? targetField.month ?? 0);
+    if (Object.prototype.hasOwnProperty.call(updates, 'isCompleted')) {
+      localCycle.completedAt = updates.isCompleted ? (localCycle.completedAt || new Date().toISOString()) : null;
+    } else if (localCycle.currentStageNumber < 6) {
+      localCycle.completedAt = null;
+    }
+  }
+  const locallyPersisted = await multiSave([
+    [STORAGE_KEYS.FIELDS, fields],
+    [STORAGE_KEYS.CROP_CYCLES, cropCycles]
+  ]);
   if (!locallyPersisted) {
     Object.keys(targetField).forEach(key => delete targetField[key]);
     Object.assign(targetField, previousField);
+    if (localCycle && previousCycle) Object.assign(localCycle, previousCycle);
     return { success: false, message: 'The stage change could not be saved on this device.' };
   }
   notify();
@@ -1262,7 +1397,8 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
   try {
     const cycleUpdate = {
       currentStageNumber: Number(updates.stageNumber || targetField.stageNumber || 1),
-      elapsedMonths: Number(updates.month ?? targetField.month ?? 0)
+      elapsedMonths: Number(updates.month ?? targetField.month ?? 0),
+      ...(Object.prototype.hasOwnProperty.call(updates, 'isCompleted') ? { isCompleted: updates.isCompleted === true } : {})
     };
     const outcome = await commitExplicitMutation('stage_update', {
       cycleId: targetField.currentCycleId,
@@ -1273,17 +1409,26 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
       targetField.stageNumber = Number(outcome.response.data.currentStageNumber);
       targetField.stage = canonicalStageName(outcome.response.data.currentStageNumber);
       targetField.month = Number(outcome.response.data.elapsedMonths || 0);
+      targetField.isCompleted = Boolean(outcome.response.data.completedAt);
       targetField.synced = true;
       targetField.lastSync = 'Just now';
       await saveItem(STORAGE_KEYS.FIELDS, fields);
       console.info(`[FIELD] Stage refreshed: ${targetField.id}`);
       notify();
     }
+    if (outcome.queued) {
+      targetField.synced = false;
+      targetField.lastSync = 'Pending synchronization';
+      await saveItem(STORAGE_KEYS.FIELDS, fields);
+      notify();
+    }
     return { success: true, data: outcome.response?.data, queuedOffline: outcome.queued };
   } catch (e) {
     Object.keys(targetField).forEach(key => delete targetField[key]);
     Object.assign(targetField, previousField);
+    if (localCycle && previousCycle) Object.assign(localCycle, previousCycle);
     await saveItem(STORAGE_KEYS.FIELDS, fields);
+    if (localCycle) await saveItem(STORAGE_KEYS.CROP_CYCLES, cropCycles);
     notify();
     return { success: false, message: e.message || 'The stage update was rejected by the server.' };
   }
@@ -1467,7 +1612,7 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
   else if (category === 'user') catLabel = 'User Management';
   else if (category === 'sra' || category === 'price' || category === 'audit') catLabel = 'SRA Price / Audit';
 
-  const auditId = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const auditId = createClientRecordId('AUD');
   const now = new Date();
   const newEvent = {
     id: auditId,
@@ -1483,27 +1628,6 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
     actor: actor || defaultActor,
     status: status || 'Recorded'
   };
-  const operationEntityIsLog = operationLogs.some(log => log.id === String(entity || ''));
-  const blockFarmEntity = blockFarms.find(farm => farm.id === entity || farm.code === entity || farm.name === entity);
-  const entityTypes = {
-    operation: operationEntityIsLog ? 'OPERATION_LOG' : 'FIELD',
-    plot: 'FIELD',
-    block: 'BLOCK_FARM',
-    user: 'USER',
-    price: 'SRA_PRICE',
-    sra: 'AUDIT_REPORT',
-    audit: 'AUDIT_REPORT'
-  };
-  const canonicalEvent = {
-    eventType: String(eventType || 'SYSTEM_EVENT').trim().replace(/\s+/g, '_').toUpperCase(),
-    actorUserId: session?.employeeId || session?.id || '',
-    entityType: entityTypes[category] || 'AUDIT_REPORT',
-    entityId: String(blockFarmEntity?.id || entity || 'SYSTEM'),
-    details: details || '',
-    outcome: String(status || '').toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS',
-    createdAt: now.toISOString()
-  };
-
   const existingIdx = systemHistory.findIndex(a => a.id === auditId);
   if (existingIdx >= 0) {
     systemHistory[existingIdx] = newEvent;
@@ -1513,12 +1637,6 @@ export const logSystemEvent = async (category, eventType, entity, details, actor
 
   await saveItem(STORAGE_KEYS.SYSTEM_HISTORY, systemHistory);
   notify();
-
-  try {
-    await commitExplicitMutation('audit_log', { id: auditId, ...canonicalEvent });
-  } catch (e) {
-    console.warn('[dataStore] Audit event rejected:', e);
-  }
 
   return newEvent;
 };
@@ -1586,11 +1704,13 @@ export const saveLocalOperationDraft = async (input, existingId = null) => {
   if (!actorId || !field || String(field.memberUserId || '').trim() !== actorId) {
     throw new Error('Drafts can only be saved for your own currently assigned field.');
   }
-  const prior = existingId ? draftLogs.find(draft => draft.id === existingId) : null;
+  const priorIndex = existingId ? draftLogs.findIndex(draft => draft.id === existingId) : -1;
+  const prior = priorIndex >= 0 ? draftLogs[priorIndex] : null;
+  const priorSnapshot = prior ? { ...prior } : null;
   const now = new Date().toISOString();
   const draft = {
     ...input,
-    id: prior?.id || `DFT-${fieldId}-${Date.now().toString(36).toUpperCase()}`,
+    id: prior?.id || createClientRecordId('DFT', fieldId),
     fieldId,
     status: 'DRAFT',
     localOnly: true,
@@ -1598,7 +1718,7 @@ export const saveLocalOperationDraft = async (input, existingId = null) => {
     createdByUserId: actorId,
     createdAt: prior?.createdAt || now,
     updatedAt: now,
-    submittedOperationId: prior?.submittedOperationId || `OP-${fieldId}-${Date.now().toString(36).toUpperCase()}`
+    submittedOperationId: prior?.submittedOperationId || createClientRecordId('OP', fieldId)
   };
   delete draft.synced;
   delete draft.isOffline;
@@ -1608,8 +1728,15 @@ export const saveLocalOperationDraft = async (input, existingId = null) => {
   const index = draftLogs.findIndex(item => item.id === draft.id);
   if (index >= 0) draftLogs[index] = draft;
   else draftLogs.unshift(draft);
-  await persistCurrentUserDrafts();
   notify();
+  const persisted = await persistCurrentUserDrafts();
+  if (!persisted) {
+    const currentIndex = draftLogs.findIndex(item => item.id === draft.id);
+    if (priorSnapshot && priorIndex >= 0) draftLogs[priorIndex] = priorSnapshot;
+    else if (currentIndex >= 0) draftLogs.splice(currentIndex, 1);
+    notify();
+    throw new Error('The draft could not be saved on this device.');
+  }
   return draft;
 };
 
@@ -1744,7 +1871,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   includeChange(hasVarietyChanged, 'variety');
   includeChange(subItemsChanged, 'subItems');
   const editRecord = {
-    amendmentId: `AMD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+    amendmentId: createClientRecordId('AMD'),
     amendedByUserId: CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '',
     amendedByName: CURRENT_SESSION.name || '',
     amendedByRole: canonicalRole(CURRENT_SESSION.role || CURRENT_SESSION.roleKey) || CURRENT_SESSION.role || '',
@@ -1874,55 +2001,33 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
   const sugar = Number(sugarPricePerLkg);
   const molasses = Number(molassesPricePerMetricTon);
   if (!Number.isFinite(sugar) || sugar <= 0 || !Number.isFinite(molasses) || molasses <= 0) {
-    throw new Error('Both official SRA price values must be greater than zero.');
+    throw new Error('Both published price values must be greater than zero.');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(effectiveDate || '')) || !String(weekLabel || '').trim()
     || !String(circularNumber || '').trim() || !String(source || '').trim()) {
-    throw new Error('Effective date, week label, circular number, and official source are required.');
+    throw new Error('Effective date, reporting period, circular number, and source are required.');
   }
-  const sorted = getSortedPrices();
-  const prevPrice = sorted.length > 0 ? sorted[0].sugarPricePerLkg : sugar;
-  const prevMol = sorted.length > 0 ? sorted[0].molassesPricePerMetricTon : molasses;
-  const change = sugar - prevPrice;
-  const molChange = molasses - prevMol;
-
-  const pId = `PRC-${Date.now()}`;
-  const newPost = toPriceDocument({
+  const pId = createClientRecordId('PRC');
+  const publicationRequest = {
     id: pId,
     effectiveDate,
-    weekLabel,
+    weekLabel: String(weekLabel).trim(),
     sugarPricePerLkg: sugar,
-    sugarPriceChange: change,
     molassesPricePerMetricTon: molasses,
-    molassesPriceChange: molChange,
-    circularNumber,
-    source,
-    publishedAt: new Date().toISOString()
-  }, CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
-  const localRecord = { id: pId, ...newPost };
-
-  priceHistory.unshift(localRecord);
+    circularNumber: String(circularNumber).trim(),
+    source: String(source).trim()
+  };
+  const outcome = await commitExplicitMutation('price', publicationRequest);
+  if (!outcome.response?.data) {
+    throw new Error('The server did not confirm the published price record.');
+  }
+  const confirmed = fromPriceDocument(outcome.response.data.id, outcome.response.data);
+  const existingIndex = priceHistory.findIndex(priceRecord => priceRecord.id === confirmed.id);
+  if (existingIndex >= 0) priceHistory[existingIndex] = confirmed;
+  else priceHistory.unshift(confirmed);
   await saveItem(STORAGE_KEYS.PRICES, priceHistory);
   notify();
-
-  try {
-    const outcome = await commitExplicitMutation('price', { id: pId, ...newPost });
-    if (outcome.response?.data) {
-      const confirmed = fromPriceDocument(outcome.response.data.id, outcome.response.data);
-      const localIndex = priceHistory.findIndex(priceRecord => priceRecord.id === pId);
-      if (localIndex >= 0) priceHistory[localIndex] = confirmed;
-      await saveItem(STORAGE_KEYS.PRICES, priceHistory);
-      notify();
-    }
-  } catch (err) {
-    const localIndex = priceHistory.findIndex(priceRecord => priceRecord.id === pId);
-    if (localIndex >= 0) priceHistory.splice(localIndex, 1);
-    await saveItem(STORAGE_KEYS.PRICES, priceHistory);
-    notify();
-    throw err;
-  }
-
-  return localRecord;
+  return confirmed;
 };
 
 export const setSynced = (synced) => {
@@ -1972,12 +2077,58 @@ export const getFieldCustomOperations = (fieldId, stageNumber) => {
   const configuredOps = field?.customOperations?.[sNum] || [];
   const normalizedConfiguredOps = configuredOps
     .filter(op => !getOperationDefinition(op.id) || getOperationDefinition(op.id).stageNumber === sNum)
-    .map(op => ({
-      ...op,
-      isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group' || (op.subItems && op.subItems.length > 0)),
-      inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
-      subItems: (op.subItems || []).map(si => ({ ...si }))
-    }));
+    .map(op => {
+      const selectedDefinition = getOperationDefinition(op.id);
+      const definition = selectedDefinition?.parentOperationDefinitionId
+        ? getOperationDefinition(selectedDefinition.parentOperationDefinitionId)
+        : selectedDefinition;
+      if (definition?.id === 'SRA-08') {
+        const template = getDefaultStageOperations(sNum).find(operation => operation.id === definition.id);
+        return {
+          ...template,
+          stageNumber: definition.stageNumber,
+          stageName: template?.stageName || op.stageName,
+          category: definition.category,
+          parentOperationDefinitionId: null,
+          inputType: 'group',
+          isGroup: true,
+          childOperations: [],
+          subItems: (op.subItems?.length ? op.subItems : (template?.subItems || [])).map(item => ({ ...item }))
+        };
+      }
+      if (definition?.childOperations?.length) {
+        const configuredChildren = Array.isArray(op.childOperations) ? op.childOperations : [];
+        const childOperations = [
+          ...definition.childOperations.map(child => ({ ...child })),
+          ...configuredChildren
+            .filter(child => !definition.childOperations.some(canonicalChild => canonicalChild.id === child.id))
+            .map(child => ({ ...child }))
+        ];
+        return {
+          ...op,
+          id: definition.id,
+          name: definition.name,
+          stageNumber: definition.stageNumber,
+          stageName: definition.stageName,
+          category: definition.category,
+          parentOperationDefinitionId: null,
+          inputType: 'children',
+          isGroup: false,
+          perHa: 0,
+          rate: 0,
+          costPerHa: childOperations.reduce((sum, child) => sum + Number(child.costPerHa || 0), 0),
+          childOperations,
+          subItems: []
+        };
+      }
+      return {
+        ...op,
+        isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group' || (op.subItems && op.subItems.length > 0)),
+        inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
+        childOperations: (op.childOperations || []).map(child => ({ ...child })),
+        subItems: (op.subItems || []).map(si => ({ ...si }))
+      };
+    });
   const configuredById = new Map(normalizedConfiguredOps.map(operation => [operation.id, operation]));
   const baseOps = getDefaultStageOperations(sNum).map(operation => configuredById.get(operation.id) || operation);
   normalizedConfiguredOps.forEach(operation => {
@@ -1994,7 +2145,9 @@ export const getFieldCustomOperations = (fieldId, stageNumber) => {
 
     relevantLogs.forEach((log, idx) => {
       const logName = (log.operationName || log.activity || '').trim();
-      const logSraId = String(log.sraOperationId || log.operationId || '').trim();
+      const rawLogSraId = String(log.sraOperationId || log.operationDefinitionId || log.operationId || '').trim();
+      const logDefinition = getOperationDefinition(rawLogSraId);
+      const logSraId = String(logDefinition?.parentOperationDefinitionId || rawLogSraId).trim();
 
       const alreadyInBase = baseOps.some(op => {
         const opId = String(op.id || '').trim();
@@ -2044,6 +2197,7 @@ export const saveFieldCustomOperations = async (fieldId, stageNumber, operations
     ...op,
     isGroup: op.isGroup !== undefined ? op.isGroup : (op.inputType === 'group'),
     inputType: op.inputType || (op.isGroup ? 'group' : 'direct'),
+    childOperations: (op.childOperations || []).map(child => ({ ...child })),
     subItems: (op.subItems || []).map(si => ({ ...si }))
   }));
   field.updatedAt = new Date().toISOString();
@@ -2071,6 +2225,64 @@ export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
     customOperations: field.customOperations
   }, { baseVersion });
   notifyDataUpdate();
+};
+
+export const getFieldOperationSchedule = fieldId => {
+  const cleanId = String(fieldId || '').trim().toUpperCase();
+  const field = fields.find(item => String(item.id || '').trim().toUpperCase() === cleanId);
+  return Array.isArray(field?.operationSchedule)
+    ? field.operationSchedule.map(entry => ({ ...entry }))
+    : [];
+};
+
+export const saveFieldOperationSchedule = async (fieldId, operationSchedule) => {
+  const cleanId = String(fieldId || '').trim().toUpperCase();
+  const field = fields.find(item => String(item.id || '').trim().toUpperCase() === cleanId);
+  if (!field) throw new Error('Field not found. Refresh your assigned plot and try again.');
+  if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
+    throw new Error('Farm schedules can only be changed for your own assigned field.');
+  }
+  const baseVersion = field.updatedAt || null;
+  const previousSchedule = Array.isArray(field.operationSchedule)
+    ? field.operationSchedule.map(entry => ({ ...entry }))
+    : [];
+  const historicalSchedule = (field.operationSchedule || []).filter(entry => (
+    entry.cycleId && entry.cycleId !== field.currentCycleId
+  ));
+  field.operationSchedule = [
+    ...historicalSchedule,
+    ...(operationSchedule || []).map(entry => ({ ...entry }))
+  ];
+  // Keep updatedAt as the last server-confirmed version. Replacing it with a
+  // local optimistic timestamp makes a later offline edit conflict when the
+  // queued schedule is eventually sent to the API.
+  const savedLocally = await saveItem(STORAGE_KEYS.FIELDS, fields);
+  if (!savedLocally) {
+    field.operationSchedule = previousSchedule;
+    throw new Error('The farm schedule could not be saved on this device.');
+  }
+  notifyDataUpdate();
+  try {
+    const queuedItem = await enqueueOutboxItem('operation_schedule', {
+      fieldId: field.id,
+      operationSchedule: field.operationSchedule
+    }, { baseVersion });
+    console.info(`[PLANNER] Saved locally and queued: ${queuedItem.mutationId}`);
+  } catch (error) {
+    field.operationSchedule = previousSchedule;
+    await saveItem(STORAGE_KEYS.FIELDS, fields);
+    notifyDataUpdate();
+    throw error;
+  }
+
+  // Saving a plan is offline-first. Let the UI return as soon as both local
+  // records are durable, then synchronize without holding the form open.
+  setTimeout(() => {
+    performMobileSync('POST_MUTATION').catch(error => {
+      console.warn('[PLANNER] Background schedule sync deferred:', error?.message || error);
+    });
+  }, 0);
+  return field.operationSchedule;
 };
 
 export const submitSupportTicket = async (ticket) => {
@@ -2156,7 +2368,7 @@ export const addSupportTicketMessage = async (ticketId, content) => {
   const actorId = CURRENT_SESSION.employeeId || CURRENT_SESSION.id || '';
   const actorRole = canonicalSupportRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
   const message = {
-    messageId: `${ticketId}-MSG-${Date.now().toString(36).toUpperCase()}`,
+    messageId: createClientRecordId('MSG', ticketId),
     authorUserId: actorId,
     authorName: CURRENT_SESSION.name,
     authorRole: actorRole,
@@ -2256,7 +2468,9 @@ export const listenToCloudSync = () => {
 
     requestInFlight = true;
     try {
-      const isMember = activeRole === ROLES.MEMBER_FARMER;
+      const canReadUserDirectory = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
+      const canReadAuditReports = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(activeRole);
+      const canReadAuditEvents = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
       const [
         blockFarmResponse,
         fieldsResponse,
@@ -2267,6 +2481,7 @@ export const listenToCloudSync = () => {
         ticketHistoryResponse,
         usersResponse,
         reportsResponse,
+        certifiedHistoryResponse,
         auditEventsResponse
       ] = await Promise.all([
         authenticatedRequest('/api/block-farms'),
@@ -2276,15 +2491,16 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/prices'),
         authenticatedRequest('/api/tickets'),
         authenticatedRequest('/api/tickets?view=history&limit=20'),
-        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/users'),
-        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')),
-        isMember ? Promise.resolve({ data: [] }) : authenticatedRequest('/api/audit-events')
+        canReadUserDirectory ? authenticatedRequest('/api/users') : Promise.resolve({ data: [] }),
+        canReadAuditReports ? authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
+        activeRole === ROLES.SRA_ADMIN ? authenticatedRequest('/api/audit-reports?view=history&limit=50') : Promise.resolve({ data: [] }),
+        canReadAuditEvents ? authenticatedRequest('/api/audit-events') : Promise.resolve({ data: [] })
       ]);
 
       if (!active) return;
 
-      const remoteBlockFarms = responseRecords(blockFarmResponse)
-        .map(record => fromBlockFarmDocument(record.id, record));
+      const remoteBlockFarms = uniqueRecordsById(responseRecords(blockFarmResponse)
+        .map(record => fromBlockFarmDocument(record.id, record)));
       const remoteCycles = responseRecords(cyclesResponse)
         .map(record => fromCycleDocument(record.id, record));
       const cycleById = new Map(remoteCycles.map(cycle => [cycle.id, cycle]));
@@ -2330,9 +2546,9 @@ export const listenToCloudSync = () => {
         ...pendingTicketOverlays.filter(ticket => !canonicalTicketIds.has(ticket.id)),
         ...canonicalTickets
       ], ['updatedAt', 'createdAt']);
-      const remoteUsers = isMember
-        ? []
-        : responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record));
+      const remoteUsers = canReadUserDirectory
+        ? responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record))
+        : [];
       const remoteUserById = new Map(remoteUsers.flatMap(user => {
         const ids = [user.id, user.employeeId, user.userId].filter(Boolean).map(String);
         return ids.map(id => [id, user]);
@@ -2344,9 +2560,17 @@ export const listenToCloudSync = () => {
         field.memberName = memberName;
         field.member = memberName;
       });
-      const remoteReports = isMember
-        ? []
-        : sortNewestFirst(responseRecords(reportsResponse).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt']);
+      const remoteReports = canReadAuditReports
+        ? sortNewestFirst(responseRecords(reportsResponse).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt'])
+        : [];
+      const remoteCertifiedHistory = activeRole === ROLES.SRA_ADMIN
+        ? sortNewestFirst(
+          responseRecords(certifiedHistoryResponse)
+            .map(record => fromAuditReportDocument(record.id, record))
+            .filter(report => String(report.status || '').toUpperCase() === 'CERTIFIED'),
+          ['certifiedAt', 'compiledAt', 'createdAt']
+        )
+        : [];
       const pendingAuditIds = new Set(getOutboxQueue()
         .filter(item => ['audit_report', 'audit_submission', 'audit_return', 'audit_certification', 'audit_qr_import'].includes(item.type))
         .map(item => String(item.payload?.id || item.payload?.reportId || '').trim())
@@ -2380,7 +2604,9 @@ export const listenToCloudSync = () => {
         });
       }
       const reconciledReports = sortNewestFirst(Array.from(reconciledReportsById.values()), ['compiledAt', 'createdAt']);
-      const remoteHistory = isMember ? [] : sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt']);
+      const remoteHistory = canReadAuditEvents
+        ? sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt'])
+        : [];
 
       blockFarms.length = 0;
       blockFarms.push(...remoteBlockFarms);
@@ -2396,37 +2622,84 @@ export const listenToCloudSync = () => {
       priceHistory.push(...orderedRemotePrices);
       supportTickets.length = 0;
       supportTickets.push(...remoteTickets);
-      if (!isMember) {
+      if (canReadUserDirectory) {
         users.length = 0;
         users.push(...remoteUsers);
+      }
+      if (canReadAuditReports) {
         auditReports.length = 0;
         auditReports.push(...reconciledReports);
+      }
+      if (canReadAuditEvents) {
         systemHistory.length = 0;
         systemHistory.push(...remoteHistory);
+      }
+
+      const snapshotSyncedAt = new Date().toISOString();
+      if (activeRole === ROLES.SRA_ADMIN) {
+        sraCertifiedAuditHistory.length = 0;
+        sraCertifiedAuditHistory.push(...remoteCertifiedHistory);
+        sraOfflineSnapshotStatus = {
+          available: true,
+          source: 'live',
+          syncedAt: snapshotSyncedAt,
+          ownerUserId: sessionUserId,
+          districtId: sessionDistrictId(CURRENT_SESSION) || null
+        };
       }
 
       const pendingCount = getPendingSyncCount(CURRENT_SESSION);
       IS_SYNCED = pendingCount === 0;
       CURRENT_SESSION.pendingLogs = pendingCount;
 
-      const cacheEntries = [
-        [STORAGE_KEYS.BLOCK_FARMS, blockFarms],
-        [STORAGE_KEYS.CROP_CYCLES, cropCycles],
-        [STORAGE_KEYS.FIELDS, fields],
-        [STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields],
-        [STORAGE_KEYS.LOGS, operationLogs],
-        [STORAGE_KEYS.PRICES, priceHistory],
-        [STORAGE_KEYS.TICKETS, supportTickets],
-        [STORAGE_KEYS.SESSION, CURRENT_SESSION]
-      ];
-      if (!isMember) {
-        cacheEntries.push(
-          [STORAGE_KEYS.USERS, users],
-          [STORAGE_KEYS.AUDIT_REPORTS, auditReports],
-          [STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]
-        );
+      if (activeRole === ROLES.SRA_ADMIN) {
+        const sraSnapshot = JSON.parse(JSON.stringify({
+          schemaVersion: SRA_OFFLINE_SNAPSHOT_SCHEMA_VERSION,
+          ownerUserId: sessionUserId,
+          districtId: sessionDistrictId(CURRENT_SESSION) || null,
+          syncedAt: snapshotSyncedAt,
+          blockFarms,
+          cropCycles,
+          fields,
+          archivedFields,
+          operationLogs,
+          prices: priceHistory,
+          certifiedAuditReports: sraCertifiedAuditHistory
+        }));
+        const snapshotSaved = await saveItem(sraOfflineSnapshotStorageKey(sessionUserId), sraSnapshot);
+        await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+        if (snapshotSaved) {
+          await removeItems([
+            STORAGE_KEYS.USERS,
+            STORAGE_KEYS.BLOCK_FARMS,
+            STORAGE_KEYS.CROP_CYCLES,
+            STORAGE_KEYS.FIELDS,
+            STORAGE_KEYS.ARCHIVED_FIELDS,
+            STORAGE_KEYS.LOGS,
+            STORAGE_KEYS.PRICES,
+            STORAGE_KEYS.TICKETS,
+            STORAGE_KEYS.PENDING_ASSIGNMENTS,
+            STORAGE_KEYS.PENDING_USERS,
+            STORAGE_KEYS.AUDIT_REPORTS,
+            STORAGE_KEYS.SYSTEM_HISTORY
+          ]);
+        }
+      } else {
+        const cacheEntries = [
+          [STORAGE_KEYS.BLOCK_FARMS, blockFarms],
+          [STORAGE_KEYS.CROP_CYCLES, cropCycles],
+          [STORAGE_KEYS.FIELDS, fields],
+          [STORAGE_KEYS.ARCHIVED_FIELDS, archivedFields],
+          [STORAGE_KEYS.LOGS, operationLogs],
+          [STORAGE_KEYS.PRICES, priceHistory],
+          [STORAGE_KEYS.TICKETS, supportTickets],
+          [STORAGE_KEYS.SESSION, CURRENT_SESSION]
+        ];
+        if (canReadUserDirectory) cacheEntries.push([STORAGE_KEYS.USERS, users]);
+        if (canReadAuditReports) cacheEntries.push([STORAGE_KEYS.AUDIT_REPORTS, auditReports]);
+        if (canReadAuditEvents) cacheEntries.push([STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]);
+        await multiSave(cacheEntries);
       }
-      await multiSave(cacheEntries);
       if (active) notify();
       return true;
     } catch (error) {
@@ -2476,10 +2749,7 @@ export const restartCloudSyncIfReady = async () => {
   activeCloudSyncStop = listenToCloudSync();
   if (activeRole === ROLES.SRA_ADMIN) {
     const initialRefreshSucceeded = await activeCloudSyncStop.initialRefresh;
-    if (!initialRefreshSucceeded) {
-      stopActiveCloudSync();
-      return false;
-    }
+    if (!initialRefreshSucceeded) return false;
   }
   return true;
 };
@@ -2549,10 +2819,28 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
         targetField.stageNumber = Number(serverCycle.currentStageNumber);
         targetField.stage = canonicalStageName(serverCycle.currentStageNumber);
         targetField.month = Number(serverCycle.elapsedMonths || 0);
+        targetField.isCompleted = Boolean(serverCycle.completedAt);
         targetField.synced = true;
         targetField.lastSync = 'Just now';
         fieldsChanged = true;
         console.info(`[FIELD] Stage refreshed: ${targetField.id}`);
+      }
+    }
+
+    if (item.type === 'operation_schedule') {
+      const serverField = response.data;
+      const fieldId = String(serverField?.id || item.payload?.fieldId || '').trim().toUpperCase();
+      const targetField = fields.find(field => String(field.id || '').trim().toUpperCase() === fieldId);
+      const hasNewerLocalSchedule = getOutboxQueue().some(queued => (
+        queued.type === 'operation_schedule'
+        && queued.mutationId !== item.mutationId
+        && String(queued.payload?.fieldId || '').trim().toUpperCase() === fieldId
+      ));
+      if (targetField && !hasNewerLocalSchedule && Array.isArray(serverField?.operationSchedule)) {
+        targetField.operationSchedule = serverField.operationSchedule.map(entry => ({ ...entry }));
+        targetField.updatedAt = serverField.updatedAt || targetField.updatedAt;
+        fieldsChanged = true;
+        console.info(`[PLANNER] Server acknowledged schedule: ${fieldId}`);
       }
     }
 
@@ -2651,6 +2939,9 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       };
     }
 
+    if (trigger === 'MANUAL_SYNC') {
+      await retryCorrectableOutboxItems();
+    }
     const queueBefore = getOutboxQueue();
     const result = await flushOutboxToApi();
     await reconcileSuccessfulMutations(queueBefore, result.responses);
@@ -2691,6 +2982,9 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
 };
 
 export const fetchAuditHistoryPage = async ({ cursor = null, limit = 20 } = {}) => {
+  if (canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey) !== ROLES.SRA_ADMIN) {
+    return { reports: [], hasMore: false, nextCursor: null };
+  }
   const query = new URLSearchParams({ view: 'history', limit: String(limit) });
   if (cursor) query.set('cursor', cursor);
   const response = await authenticatedRequest(`/api/audit-reports?${query.toString()}`);
@@ -2722,7 +3016,8 @@ export const initializeOfflineStorage = async () => {
     await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
     if (Array.isArray(stored[STORAGE_KEYS.BLOCK_FARMS]) && stored[STORAGE_KEYS.BLOCK_FARMS].length > 0) {
       blockFarms.length = 0;
-      stored[STORAGE_KEYS.BLOCK_FARMS].forEach(farm => blockFarms.push(farm));
+      blockFarms.push(...uniqueRecordsById(stored[STORAGE_KEYS.BLOCK_FARMS]
+        .map(farm => fromBlockFarmDocument(farm.id, farm))));
     }
     if (Array.isArray(stored[STORAGE_KEYS.CROP_CYCLES]) && stored[STORAGE_KEYS.CROP_CYCLES].length > 0) {
       cropCycles.length = 0;
@@ -2772,19 +3067,25 @@ export const initializeOfflineStorage = async () => {
           createdByUserId: currentActorId(),
           status: 'DRAFT',
           localOnly: true,
-          submittedOperationId: draft.submittedOperationId || `OP-${String(draft.fieldId || '').trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+          submittedOperationId: draft.submittedOperationId || createClientRecordId('OP', draft.fieldId)
         });
       });
       if (safeLegacy.length) await persistCurrentUserDrafts();
     }
     if (Array.isArray(stored[STORAGE_KEYS.ARCHIVED_FIELDS]) && stored[STORAGE_KEYS.ARCHIVED_FIELDS].length > 0) {
       archivedFields.length = 0;
-      stored[STORAGE_KEYS.ARCHIVED_FIELDS].forEach(af => archivedFields.push(af));
+      stored[STORAGE_KEYS.ARCHIVED_FIELDS].forEach(af => {
+        const { soilType: _removedSoilType, ...field } = af;
+        archivedFields.push(field);
+      });
     }
     if (Array.isArray(stored[STORAGE_KEYS.FIELDS]) && stored[STORAGE_KEYS.FIELDS].length > 0) {
       const cleanFields = mergeActiveFields(stored[STORAGE_KEYS.FIELDS], archivedFields);
       fields.length = 0;
-      cleanFields.forEach(f => fields.push(f));
+      cleanFields.forEach(f => {
+        const { soilType: _removedSoilType, ...field } = f;
+        fields.push(field);
+      });
     }
     if (Array.isArray(stored[STORAGE_KEYS.DRAFTS]) && currentActorId()) {
       const safeLegacyAfterFieldHydration = stored[STORAGE_KEYS.DRAFTS].filter(draft => {
@@ -2798,7 +3099,7 @@ export const initializeOfflineStorage = async () => {
           createdByUserId: currentActorId(),
           status: 'DRAFT',
           localOnly: true,
-          submittedOperationId: draft.submittedOperationId || `OP-${String(draft.fieldId || '').trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+          submittedOperationId: draft.submittedOperationId || createClientRecordId('OP', draft.fieldId)
         });
       });
       if (safeLegacyAfterFieldHydration.length) await persistCurrentUserDrafts();
@@ -2845,10 +3146,16 @@ export const initializeOfflineStorage = async () => {
       systemHistory.push(...sortNewestFirst(stored[STORAGE_KEYS.SYSTEM_HISTORY], ['createdAt', 'rawTimestamp', 'timestamp']));
     }
 
-    // SRA is online-only. Never render device-cached district records while a
-    // live, authorization-scoped server snapshot is still pending.
+    // SRA sessions may remain authenticated offline. Restore only the
+    // account-scoped, read-only snapshot previously issued to this SRA user;
+    // pending workflow state and mutation authority are never restored here.
     if (canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey) === ROLES.SRA_ADMIN) {
       clearCanonicalRuntimeData();
+      const sraUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+      if (sraUserId) {
+        const snapshot = await getItem(sraOfflineSnapshotStorageKey(sraUserId), null);
+        applySraOfflineSnapshot(snapshot, CURRENT_SESSION);
+      }
     }
     
     const pendingCount = getPendingSyncCount(CURRENT_SESSION);

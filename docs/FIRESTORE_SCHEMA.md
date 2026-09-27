@@ -2,7 +2,7 @@
 
 Status: **Final for the schema phase**  
 Authority: approved HUGPONG workflows, `AGENTS.md`, and the implemented web/mobile/server features  
-Compatibility policy: existing Firestore documents are disposable development data and are not a schema constraint
+Compatibility policy: existing records must pass the Phase 4 legacy-data audit and safe identifier backfill; production records are never assumed disposable.
 
 ## 1. Invariants
 
@@ -20,12 +20,16 @@ Compatibility policy: existing Firestore documents are disposable development da
 12. Password hashes exist only in `user_credentials`, which is accessible through Firebase Admin on the server and denied to all Firestore client SDKs.
 13. User, Block Farm, Field, and Crop Year Cycle document IDs are server-issued and immutable. Relationship forms select scoped entities; they never accept a new canonical document ID as user input.
 14. Offline-capable operation, report, ticket, and mutation IDs are non-editable idempotency identifiers. A client may generate them once, but every retry must reuse the same value.
+15. Every account carries an `authVersion`. Password, phone, role, and status changes increment it so old server and Firebase credentials are rejected immediately.
+16. `account_identifiers`, `server_sessions`, and `security_rate_limits` are server-only operational collections. Web and Mobile never read or write them directly.
+17. A normalized phone number is reserved atomically in `account_identifiers` when an account is created or its phone changes. This prevents concurrent requests from creating duplicate login identifiers.
 
 ## 2. Relationship model
 
 ```text
 users/{userId}
    +---- server-only ---- user_credentials/{userId}
+   +---- server-only ---- account_identifiers/{sha256(normalizedPhone)}
    ^                    ^
    | memberUserId       | managerUserId
 fields/{fieldId} --> block_farms/{blockFarmId}
@@ -51,13 +55,22 @@ The document ID is the stable eight-digit HUGPONG user ID issued by the server. 
 
 ```js
 {
+  firstName: string,
+  middleName: string | null,
+  lastName: string,
+  suffix: string | null,
   displayName: string,
   phone: string,                    // normalized Philippine mobile number
   role: "MEMBER_FARMER" | "FARM_MANAGER" | "SRA_ADMIN" | "SUPER_ADMIN",
   status: "PENDING" | "ACTIVE" | "DISABLED",
+  requestedBlockFarmId: string | null,   // member-supplied request during registration
+  affiliatedBlockFarmId: string | null,  // SRA-confirmed farm affiliation; not a field assignment
   phoneVerifiedAt: string | null,
   requiresPasswordChange: boolean,
   passwordChangedAt: string | null,
+  authVersion: number,                // starts at 1; incremented on security changes
+  credentialsUpdatedAt: string,
+  disabledAt: string | null,
   approvedByUserId: string | null,
   approvedAt: string | null,
   createdAt: string,
@@ -65,23 +78,51 @@ The document ID is the stable eight-digit HUGPONG user ID issued by the server. 
 }
 ```
 
-Assignments are not stored on a user. A manager assignment is `block_farms.managerUserId`; a Farm Member assignment is `fields.memberUserId`.
+The server derives `displayName` from the structured name fields. Legacy documents may temporarily contain only `displayName`; clients preserve those records until an administrator updates the structured identity.
+
+`affiliatedBlockFarmId` records the Block Farm confirmed during onboarding so the responsible Farm Manager can see the member before a plot exists. It does not grant access to farm records and is not a field assignment. A manager assignment remains `block_farms.managerUserId`; a Farm Member plot assignment remains `fields.memberUserId`.
 
 `GET /api/users` resolves those canonical relationships after applying the caller's visibility scope. Its response adds a non-persisted `assignment` projection (`status`, type, Block Farm identity, Field identities, and display label). Web and Mobile consume that projection; it is never written back to `users` and does not create a role-specific copy of assignment data.
 
 ### `user_credentials/{userId}` — server only
 
-This is the one security-mandated companion collection. Its document ID matches `users/{userId}`.
+This is the credential companion collection. Its document ID matches `users/{userId}`.
 
 ```js
 {
   passwordHash: string,             // versioned scrypt hash with random salt
+  credentialsUpdatedAt: string,
   createdAt: string,
   updatedAt: string
 }
 ```
 
 Clients cannot read, list, create, update, or delete this collection. Express/Firebase Admin is the only authority for credential verification and mutation.
+
+### `account_identifiers/{identifierHash}` — server only
+
+This collection holds atomic uniqueness claims. Phone document IDs are one-way SHA-256 digests of the normalized number and never expose the phone itself.
+
+```js
+{
+  type: "PHONE",
+  userId: string,
+  createdAt: string,
+  updatedAt: string
+}
+```
+
+The claim is created in the same batch as `users`, `user_credentials`, and the account audit event. Phone changes replace the claim in the same transaction as the user update.
+
+Accounts created before this invariant are handled by the dry-run-first Phase 4 migration. It creates only missing, unambiguous claims and refuses duplicate phones, conflicting claims, malformed phones, and orphaned reservations. See `PHASE_4_LEGACY_DATA_MIGRATION.md`.
+
+### `server_sessions/{sessionId}` — server only
+
+Production browser sessions are stored here by Express. Records contain the serialized HttpOnly session, an expiry timestamp/epoch, and an update timestamp. Firestore client access is always denied; production should enable Firestore TTL cleanup on `expiresAt`.
+
+### `security_rate_limits/{limitId}` — server only
+
+Authentication, OTP, password-verification, account-creation, and SMS throttles are persisted here so multiple API instances enforce one shared limit. IDs are SHA-256 digests of the limiter namespace and normalized request key; raw passwords and OTP values are never stored.
 
 ### `block_farms/{blockFarmId}`
 
@@ -110,18 +151,43 @@ Clients cannot read, list, create, update, or delete this collection. Express/Fi
   blockFarmId: string,
   memberUserId: string | null,
   areaHa: number,
-  soilType: string,
   currentCycleId: string,
   status: "ACTIVE" | "ARCHIVED",
   customStages: Array<CustomStage>,
   customOperations: { [stageNumber: string]: Array<CustomOperation> },
+  operationSchedule: Array<{
+    id: string,
+    cycleId: string,
+    operationDefinitionId: string,
+    operationName: string,
+    childOperationDefinitionId: string | null,
+    childOperationName: string,
+    stageNumber: 1 | 2 | 3 | 4 | 5 | 6 | null,
+    plannedDate: "YYYY-MM-DD",
+    estimatedLabor: number,
+    estimatedMaterials: number,
+    estimatedOther: number,
+    estimatedTotal: number,
+    notes: string,
+    createdByUserId: string,
+    createdAt: string,
+    updatedAt: string,
+    completedOperationLogId: string | null,
+    completedAt: string | null
+  }>,
   createdAt: string,
   updatedAt: string,
   archivedAt: string | null
 }
 ```
 
+`soilType` is no longer part of the Field contract. New writes omit it, API reads exclude legacy values, and the server removes a legacy value when that Field is next updated.
+
 Custom plan objects retain their stable catalogue/custom operation IDs. They are embedded because they are field-specific configuration and have no independent workflow.
+
+`operationSchedule` stores planning records, not actual work. New Planner rows are intentionally free-form: they use `operationDefinitionId: "CUSTOM"`, a required `operationName`, and no fixed `stageNumber`. The crop stage is selected later when the user turns the plan into a Field Operations draft and records what actually happened. Every row remains linked to the Crop Year Cycle in which it was planned. The active planner displays only rows for the Field's `currentCycleId`; rows from earlier cycles remain immutable history after rollover. Older catalogue-based schedule rows remain readable for compatibility but are no longer offered by the Planner. Estimated labor, materials, and other amounts are optional planning values and never populate actual operation costs. When an ACTIVE operation log is created, the server atomically marks the nearest matching incomplete schedule row with `completedOperationLogId` and `completedAt`; custom operations must also match by activity name. Completed schedule history cannot be edited, removed, or reassigned through the planner endpoint.
+
+The Planner and its reminders are Mobile-only conveniences and do not add a second database record or mutation authority. Mobile derives today, tomorrow, and overdue reminders from the same server-validated `operationSchedule`. It schedules grouped local device alerts for 6:00 PM on the preceding day and 7:00 AM on the planned day, then replaces those alerts whenever the authoritative schedule changes. Completed and removed plans are excluded automatically. Web does not expose a Planner route or reminder interface.
 
 Legacy field documents may still contain `variety`. It is read-only compatibility data: new field writes do not create or update it, and no migration copies it into a new Crop Year Cycle.
 
@@ -150,7 +216,7 @@ Legacy field documents may still contain `variety`. It is read-only compatibilit
 }
 ```
 
-Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must point to it. The server generates `cropYear` from the server year only when creating a cycle; stored historical values are never recalculated on January 1. A rollover requires Harvest, rejects duplicate `fieldId + cropYear`, archives the old cycle and its ACTIVE operation logs, creates the next cycle at Stage 1, and atomically changes the field pointer.
+Exactly one ACTIVE cycle may exist for a field, and `fields.currentCycleId` must point to it. The server generates `cropYear` from the server year only when creating a cycle; stored historical values are never recalculated on January 1. `completedAt` is set by the authoritative stage endpoint only when Stage 6 is explicitly completed; clients may display an offline completion as pending until that mutation is accepted. A rollover requires Harvest, rejects duplicate `fieldId + cropYear`, archives the old cycle and its ACTIVE operation logs, creates the next cycle at Stage 1, and atomically changes the field pointer.
 
 Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an empty value. Its first Planting-stage operation establishes the value atomically from the system's authoritative PHIL variety catalogue; a later correction requires an operation amendment and never changes an archived or later cycle.
 
@@ -165,7 +231,10 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
   stageNumberAtRecord: number | null,
   submittedByUserId: string,
   submissionSource: "MEMBER" | "FIELD_OWNER" | "MANAGER_TAKEOVER",
-  operationDefinitionId: string,   // SRA catalogue ID or stable custom-operation ID
+  operationDefinitionId: string,   // parent SRA catalogue ID (for example SRA-08) or stable custom-operation ID
+  parentOperationDefinitionId: null, // retained only for reading legacy flattened child records
+  childOperationDefinitionId: string | null, // selected child under the parent, or CUSTOM
+  childOperationName: string,      // child label snapshot; parent title remains operationName
   operationName: string,           // historical label snapshot
   category: string,
   variety: string,                 // required only for Stage 2 Planting records
@@ -174,14 +243,23 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
   areaHa: number,
   peopleCount: number,
   quantity: { value: number, unit: string, inputName: string } | null,
+  baseCost: number,                // direct operation cost; excludes itemized expenses and labor
   totalCost: number,
   lineItems: Array<{
     lineItemId: string,
+    itemType: "MATERIAL" | "EXPENSE" | "EQUIPMENT",
     description: string,
     quantity: number,
     unit: string,
     unitCost: number,
     subtotal: number
+  }>,
+  laborEntries: Array<{
+    laborEntryId: string,
+    workerCount: number,
+    days: number,
+    rate: number,
+    subtotal: number               // workerCount * days * rate
   }>,
   isSupplemental: boolean,
   amendments: Array<{
@@ -200,7 +278,7 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
 }
 ```
 
-`cycleId` is the authoritative agricultural-year relationship. New operations also preserve the server-derived `cropYearCycle`, `stageNumberAtRecord`, `blockFarmId`, and Planting `variety` context so offline synchronization and historical analytics never reattach a record to a later cycle. The server rejects canonical operation IDs whose stage does not match `stageNumber`; custom operations must be explicitly configured for that field/stage (or use the generic `CUSTOM` ID).
+`cycleId` is the authoritative agricultural-year relationship. New operations also preserve the server-derived `cropYearCycle`, `stageNumberAtRecord`, `blockFarmId`, and Planting `variety` context so offline synchronization and historical analytics never reattach a record to a later cycle. In Itemized Costs mode, each material or expense row is submitted or drafted as a separate log under the unchanged parent operation title. The record stores the parent `operationDefinitionId`, the selected row ID in `childOperationDefinitionId`, the row description in `childOperationName`, exactly one matching `lineItems` entry, and any labor details attached to that selected row in `laborEntries`; `baseCost` is zero for that itemized record. Labor is never submitted as a separate child. Direct Input remains one whole-operation submission without child metadata. Legacy IDs such as `SRA-08-1` remain readable for existing records, but new records never rename the parent SRA title. `totalCost` must equal `baseCost + lineItems subtotals + laborEntries subtotals`; each labor subtotal is `workerCount * days * rate`, and labor is never counted again as an expense line. New inputs use the standardized units `ha`, `m²`, `bag`, `kg`, `L`, `ton`, `lac`, `pass`, `day`, `worker`, and `trip`, while legacy aliases are normalized at the API boundary.
 
 ### `audit_reports/{auditReportId}`
 
@@ -305,6 +383,8 @@ The operation and field snapshots intentionally preserve exactly what the SRA re
   publishedAt: string
 }
 ```
+
+For new publications, `sugarPriceChange` and `molassesPriceChange` are calculated by the server transaction from the preceding persisted record by `effectiveDate`. Client-supplied change values are ignored. The earliest chronological record uses `0` for both values.
 
 ### `support_tickets/{ticketId}`
 

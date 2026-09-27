@@ -1,7 +1,7 @@
 import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 // HUGPONG Mobile — SRA Admin Home View Component
-// Role: SRA Admin · Silay Sugar Regulatory Administration
+// Role: SRA Admin
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
@@ -27,13 +27,13 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       const resolvedMgr = resolveBlockFarmManager(bf);
       return {
         id: bf.id,
-        name: bf.name || (session?.farm || session?.blockFarm || 'District Central'),
+        name: bf.name || (session?.farm || session?.blockFarm || bf.id),
         manager: resolvedMgr,
         plots: bfFields.length,
         ha: totalHa,
         totalHa,
         totalFarmHa: totalHa,
-        status: resolvedMgr === 'Pending Appointment' ? 'Pending Manager' : null
+        status: resolvedMgr === 'Unassigned' ? 'Manager Unassigned' : null
       };
     });
   }, [safeFields, safeBlockFarms]);
@@ -47,7 +47,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
   }, [blockFarmsList]);
 
   const complianceRate = React.useMemo(() => {
-    if (safeAuditReports.length === 0) return 100;
+    if (safeAuditReports.length === 0) return null;
     const actionable = safeAuditReports.filter(a => canonicalAuditStatus(a.status) === AUDIT_STATUS.PENDING_REVIEW).length;
     return actionable === 0 ? 100 : Math.max(0, Math.round(((safeAuditReports.length - actionable) / safeAuditReports.length) * 100));
   }, [safeAuditReports]);
@@ -58,7 +58,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       {/* ── District Summary Card (matches Manager style) ── */}
       <View style={s.summaryCard}>
         <Text style={s.eyebrow}>SRA REGULATORY WORKSPACE</Text>
-        <Text style={s.districtName}>{t('district_name_title', 'District 3 · Silay')}</Text>
+        <Text style={s.districtName}>{session?.district || session?.location || t('district_name_title', 'Regulatory District')}</Text>
         <Text style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || 'SRA Admin'}</Text>
         <View style={s.metrics}>
           <Metric value={blockFarmsList.length} label={t('block_farms_count_lbl', 'Block Farms')} />
@@ -68,7 +68,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             onPress={() => navigation.navigate('Field Ops')}
           />
           <Metric value={`${totalDistrictHa.toFixed(2)} Ha`} label={t('district_area_lbl', 'District Area')} />
-          <Metric value={`${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
+          <Metric value={complianceRate == null ? 'No data' : `${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
         </View>
       </View>
 
@@ -86,7 +86,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       <View style={{ gap: 8, marginBottom: SPACING.md }}>
         {blockFarmsList.map(farm => (
           <TouchableOpacity
-            key={farm.name}
+            key={farm.id}
             style={s.plotItem}
             onPress={() => navigation.navigate('Field Ops', { screen: 'SchedMain', params: { farmName: farm.name } })}
             activeOpacity={0.7}

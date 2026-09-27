@@ -30,21 +30,21 @@ export function AuthProvider({ children }) {
     signOutFirebase().catch(() => {});
   }, []);
 
-  const saveSession = useCallback((sessionUser, canonicalRoleKey, token) => {
+  const saveSession = useCallback((sessionUser, canonicalRoleKey) => {
     setUser(sessionUser);
     setRoleKey(canonicalRoleKey);
     setSessionExpiredNotice('');
-    if (token) localStorage.setItem('hugpong_auth_token', token);
+    // Browser authentication is held only in the server's HttpOnly cookie.
+    // Remove any token left by an older client build.
+    localStorage.removeItem('hugpong_auth_token');
     if (sessionUser) localStorage.setItem('hugpong_user', JSON.stringify(sessionUser));
     if (canonicalRoleKey) localStorage.setItem('hugpong_role', canonicalRoleKey);
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const existingToken = localStorage.getItem('hugpong_auth_token');
     try {
       const response = await fetch('/auth/session', {
         headers: {
-          Authorization: `Bearer ${existingToken || ''}`,
           'x-client-platform': 'web'
         },
         credentials: 'include'
@@ -53,18 +53,24 @@ export function AuthProvider({ children }) {
 
       if (response.ok && data.authenticated && data.user) {
         const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
-        saveSession(data.user, resolvedRole, data.token || existingToken);
+        saveSession(data.user, resolvedRole);
         if (data.firebaseCustomToken) {
           await signInWithCustomTokenSilently(data.firebaseCustomToken).catch(() => {});
         }
         return { user: data.user, roleKey: resolvedRole, authenticated: true };
-      } else {
-        if (existingToken) {
+      } else if (response.status === 401 || response.status === 403 || response.ok) {
+        if (user) {
           clearSession('Your session expired. Please sign in again.');
         } else {
           clearSession();
         }
         return { user: null, roleKey: '', authenticated: false };
+      } else {
+        // A gateway/API outage is not an authentication decision. Keep the
+        // previously issued local session and let the connectivity UI explain
+        // that live, server-authoritative actions are temporarily unavailable.
+        console.warn(`[AuthContext] Session endpoint unavailable (${response.status}); retaining cached session.`);
+        return { user, roleKey, authenticated: Boolean(user) };
       }
     } catch (err) {
       console.warn('[AuthContext] Session resolution error:', err.message);
@@ -78,6 +84,14 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refreshSession();
   }, []);
+
+  useEffect(() => {
+    const handleRevokedSession = event => {
+      clearSession(event?.detail?.message || 'Your session ended. Please sign in again.');
+    };
+    window.addEventListener('hugpong:session-revoked', handleRevokedSession);
+    return () => window.removeEventListener('hugpong:session-revoked', handleRevokedSession);
+  }, [clearSession]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -144,7 +158,7 @@ export function AuthProvider({ children }) {
       data.user && data.user.requiresPasswordChange === true && data.user.passwordChanged !== true;
 
     if (!needsVerification && !needsPasswordChange) {
-      saveSession(data.user, resolvedRole, data.token);
+      saveSession(data.user, resolvedRole);
     }
 
     return {
@@ -157,12 +171,12 @@ export function AuthProvider({ children }) {
   };
 
   const requestPhoneVerification = async (authToken) => {
-    const token = authToken || localStorage.getItem('hugpong_auth_token');
+    const token = authToken || '';
     const res = await fetch('/auth/request-phone-verification', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       credentials: 'include'
     });
@@ -174,12 +188,12 @@ export function AuthProvider({ children }) {
   };
 
   const verifyPhone = async (code, authToken) => {
-    const token = authToken || localStorage.getItem('hugpong_auth_token');
+    const token = authToken || '';
     const res = await fetch('/auth/verify-phone', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: JSON.stringify({ code }),
       credentials: 'include'
@@ -196,12 +210,12 @@ export function AuthProvider({ children }) {
   };
 
   const changePassword = async (newPassword, authToken) => {
-    const token = authToken || localStorage.getItem('hugpong_auth_token');
+    const token = authToken || '';
     const res = await fetch('/auth/change-password', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: JSON.stringify({ newPassword }),
       credentials: 'include'

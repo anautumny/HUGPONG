@@ -80,6 +80,7 @@ test('mobile cache epochs invalidate old replicas and React web keeps no legacy 
     .join('\n');
 
   assert.match(mobileStorage, /MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1'/);
+  assert.match(mobileStorage, /expo-secure-store/);
   assert.match(mobileStorage, /key\.startsWith\('@hugpong_'\)/);
   assert.match(mobileDataStore, /await ensureCurrentCacheSchema\(\)/);
   assert.doesNotMatch(mobileDataStore, /@hugpong_clean_prod_v2/);

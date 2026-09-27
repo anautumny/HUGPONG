@@ -1,4 +1,5 @@
 import { normalizeActorId } from '../domain/operationAuthorization.js';
+import { createClientRecordId } from '../utils/secureId.js';
 
 const PREFIX = 'hugpong_operation_drafts_v1:';
 
@@ -38,7 +39,7 @@ export function saveLocalOperationDraft(user, field, form, existingId = null, st
   const now = new Date().toISOString();
   const drafts = listLocalOperationDrafts(user, storage);
   const previous = existingId ? drafts.find(draft => draft.id === existingId) : null;
-  const id = previous?.id || `DFT-${String(field.id).trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+  const id = previous?.id || createClientRecordId('DFT', field.id);
   const draft = {
     id,
     status: 'DRAFT',
@@ -47,7 +48,7 @@ export function saveLocalOperationDraft(user, field, form, existingId = null, st
     fieldId: String(field.id || '').trim().toUpperCase(),
     createdAt: previous?.createdAt || now,
     updatedAt: now,
-    submittedOperationId: previous?.submittedOperationId || `OP-${String(field.id).trim().toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
+    submittedOperationId: previous?.submittedOperationId || createClientRecordId('OP', field.id),
     form: { ...form }
   };
   persist(user, [draft, ...drafts.filter(item => item.id !== id)], storage);

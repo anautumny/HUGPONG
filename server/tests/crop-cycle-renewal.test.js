@@ -339,6 +339,115 @@ test('duplicate operation-create retry replays one canonical record', async () =
   assert.equal(db.ids(COLLECTIONS.OPERATION_LOGS).filter(id => id === 'LOG-IDEMPOTENT').length, 1);
 });
 
+test('submitting actual field work marks the matching planned operation completed', async () => {
+  const db = database();
+  const field = db.get(COLLECTIONS.FIELDS, FIELD_ID);
+  db.collections.get(COLLECTIONS.FIELDS).set(FIELD_ID, {
+    ...field,
+    operationSchedule: [{
+      id: 'PLAN-LAND-PREP',
+      cycleId: OLD_CYCLE_ID,
+      operationDefinitionId: 'SRA-02',
+      operationName: 'Land Preparation',
+      childOperationDefinitionId: null,
+      childOperationName: '',
+      stageNumber: 1,
+      plannedDate: '2026-09-16',
+      estimatedLabor: 500,
+      estimatedMaterials: 0,
+      estimatedOther: 0,
+      estimatedTotal: 500,
+      completedOperationLogId: null,
+      completedAt: null
+    }]
+  });
+
+  await createOperationRecord(db, { id: 'LOG-PLANNED', ...operation() }, USER, NOW);
+  const updated = db.get(COLLECTIONS.FIELDS, FIELD_ID);
+  assert.equal(updated.operationSchedule[0].completedOperationLogId, 'LOG-PLANNED');
+  assert.equal(updated.operationSchedule[0].completedAt, NOW);
+});
+
+test('the same itemized child cannot create a second active operation in one crop cycle', async () => {
+  const db = database();
+  const itemizedOperation = operation({
+    operationDefinitionId: 'SRA-08',
+    operationName: 'Weeding Operations (Hilamon & Herbicides)',
+    category: 'weed',
+    stageNumber: 4,
+    childOperationDefinitionId: 'SI-08-1',
+    childOperationName: 'Manual Weeding (1st Round)',
+    peopleCount: 0,
+    baseCost: 0,
+    totalCost: 2000,
+    lineItems: [{
+      lineItemId: 'SI-08-1',
+      itemType: 'EXPENSE',
+      description: 'Manual Weeding (1st Round)',
+      quantity: 1,
+      unit: 'ha',
+      unitCost: 2000,
+      subtotal: 2000
+    }]
+  });
+
+  const first = await createOperationRecord(db, { id: 'LOG-WEED-ROUND-1-A', ...itemizedOperation }, USER, '2026-09-17T07:58:00.000Z');
+  const retryWithAnotherId = await createOperationRecord(db, {
+    id: 'LOG-WEED-ROUND-1-B',
+    ...itemizedOperation,
+    childOperationDefinitionId: 'SI-SRA-08-1',
+    lineItems: [{ ...itemizedOperation.lineItems[0], lineItemId: 'SI-SRA-08-1' }]
+  }, USER, '2026-09-17T07:59:00.000Z');
+
+  assert.equal(first.replayed, false);
+  assert.equal(retryWithAnotherId.replayed, true);
+  assert.equal(retryWithAnotherId.id, 'LOG-WEED-ROUND-1-A');
+  assert.equal(db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-WEED-ROUND-1-B'), undefined);
+});
+
+test('editing an itemized child preserves its operation identity', async () => {
+  const db = database();
+  const lineItem = {
+    lineItemId: 'SI-08-1',
+    itemType: 'EXPENSE',
+    description: 'Manual Weeding (1st Round)',
+    quantity: 1,
+    unit: 'ha',
+    unitCost: 2000,
+    subtotal: 2000
+  };
+  await createOperationRecord(db, {
+    id: 'LOG-WEED-EDIT',
+    ...operation({
+      operationDefinitionId: 'SRA-08',
+      operationName: 'Weeding Operations (Hilamon & Herbicides)',
+      category: 'weed',
+      stageNumber: 4,
+      childOperationDefinitionId: lineItem.lineItemId,
+      childOperationName: lineItem.description,
+      peopleCount: 0,
+      baseCost: 0,
+      totalCost: 2000,
+      lineItems: [lineItem]
+    })
+  }, USER, '2026-09-17T07:58:00.000Z');
+
+  await amendOperationRecord(db, 'LOG-WEED-EDIT', {
+    totalCost: 2200,
+    lineItems: [{ ...lineItem, unitCost: 2200, subtotal: 2200 }]
+  }, {
+    amendmentId: 'AMD-WEED-EDIT',
+    reason: 'Correct the recorded material cost',
+    changes: { totalCost: { before: 2000, after: 2200 } }
+  }, USER, '2026-09-17T08:00:00.000Z');
+
+  const amended = db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-WEED-EDIT');
+  assert.equal(amended.operationDefinitionId, 'SRA-08');
+  assert.equal(amended.childOperationDefinitionId, 'SI-08-1');
+  assert.equal(amended.childOperationName, 'Manual Weeding (1st Round)');
+  assert.equal(amended.totalCost, 2200);
+});
+
 test('a second device replaying the same rollover does not create another cycle', async () => {
   const db = database();
   await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, NOW);
@@ -445,6 +554,21 @@ test('Manager Takeover accepts valid historical-stage pairs and rejects mismatch
     }, manager, NOW),
     error => error.data?.code === 'INVALID_STAGE_OPERATION'
   );
+});
+
+test('operations recorded against a completed stage are authoritatively supplemental', async () => {
+  const db = database();
+  const supplemental = await createOperationRecord(db, {
+    id: 'LOG-COMPLETED-STAGE-SUPPLEMENTAL',
+    ...operation({ operationDefinitionId: 'SRA-09', operationName: 'Ignored', category: 'fert', stageNumber: 5 })
+  }, USER, NOW);
+  assert.equal(supplemental.record.isSupplemental, true);
+
+  const currentStage = await createOperationRecord(db, {
+    id: 'LOG-CURRENT-STAGE-NORMAL',
+    ...operation({ operationDefinitionId: 'SRA-11', operationName: 'Ignored', category: 'harvest', stageNumber: 6 })
+  }, USER, NOW);
+  assert.equal(currentStage.record.isSupplemental, false);
 });
 
 test('Farm Manager records on their own assigned field without a takeover grant', async () => {
@@ -578,6 +702,48 @@ test('Farm Member may advance only the canonical cycle for their own field witho
   assert.equal(result.currentStageNumber, 2);
   assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).currentStageNumber, 2);
   assert.equal(USER.takeoverGrant, undefined);
+});
+
+test('final-stage completion is persisted authoritatively and replay-safe', async () => {
+  const db = database();
+  const completedAt = '2026-09-17T08:03:00.000Z';
+
+  const result = await updateCycleStage(
+    db,
+    OLD_CYCLE_ID,
+    { currentStageNumber: 6, elapsedMonths: 12, isCompleted: true },
+    USER,
+    completedAt
+  );
+
+  assert.equal(result.completedAt, completedAt);
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).completedAt, completedAt);
+
+  const replay = await updateCycleStage(
+    db,
+    OLD_CYCLE_ID,
+    { currentStageNumber: 6, elapsedMonths: 12, isCompleted: true },
+    USER,
+    '2026-09-17T09:00:00.000Z'
+  );
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.completedAt, completedAt);
+});
+
+test('a non-final stage cannot be marked as a completed Crop Year Cycle', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).currentStageNumber = 1;
+
+  await assert.rejects(
+    updateCycleStage(
+      db,
+      OLD_CYCLE_ID,
+      { currentStageNumber: 2, elapsedMonths: 1, isCompleted: true },
+      USER,
+      '2026-09-17T08:03:00.000Z'
+    ),
+    error => error.status === 400 && /final Harvest stage/.test(error.message)
+  );
 });
 
 test('calendar-year change and stage advancement do not rewrite an active stored Crop Year Cycle', async () => {

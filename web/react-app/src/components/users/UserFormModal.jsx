@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Lock, Shield, MapPin, AlertCircle, CheckCircle2, KeyRound, Send } from 'lucide-react';
+import { User, Phone, AlertCircle, ShieldCheck } from 'lucide-react';
 import Modal from '../ui/Modal';
 import FormField from '../ui/FormField';
 import Input from '../ui/Input';
 import PasswordInput from '../ui/PasswordInput';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
-import { approveOrProvisionUser, updateUser, requestPhoneVerification, verifyPhoneOtp } from '../../services/usersService';
+import { approveOrProvisionUser, updateUser } from '../../services/usersService';
 
 export default function UserFormModal({
   isOpen = false,
@@ -25,19 +25,15 @@ export default function UserFormModal({
   const isFarmManager = actorRole === 'FARM_MANAGER';
 
   // Form State
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [suffix, setSuffix] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedRole, setSelectedRole] = useState('MEMBER_FARMER');
   const [blockFarmId, setBlockFarmId] = useState('');
   const [password, setPassword] = useState('');
   
-  // Phone OTP Verification State
-  const [otpCode, setOtpCode] = useState('');
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-  const [otpSentMessage, setOtpSentMessage] = useState(null);
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 
@@ -52,97 +48,58 @@ export default function UserFormModal({
   ];
 
   const farmOptions = [
-    { value: '', label: 'Select Assigned Block Farm' },
-    ...blockFarms.map(f => ({ value: f.id, label: f.name || f.id }))
+    { value: '', label: 'Not assigned yet' },
+    ...(Array.isArray(blockFarms) ? blockFarms : [])
+      .filter(farm => farm && typeof farm === 'object' && farm.id && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .map(farm => ({ value: String(farm.id), label: String(farm.name || farm.id) }))
   ];
 
   useEffect(() => {
     if (isOpen) {
       if (initialUser) {
-        setDisplayName(initialUser.displayName || initialUser.name || '');
+        setFirstName(initialUser.firstName || (!initialUser.lastName ? (initialUser.displayName || initialUser.name || '') : ''));
+        setMiddleName(initialUser.middleName || '');
+        setLastName(initialUser.lastName || '');
+        setSuffix(initialUser.suffix || '');
         setPhone(initialUser.phone || initialUser.contact || '');
         setSelectedRole(initialUser.canonicalRole || 'MEMBER_FARMER');
         setBlockFarmId(initialUser.assignment?.blockFarmId || '');
         setPassword('');
-        setIsPhoneVerified(Boolean(initialUser.phoneVerified));
       } else {
-        setDisplayName('');
+        setFirstName('');
+        setMiddleName('');
+        setLastName('');
+        setSuffix('');
         setPhone('');
         setSelectedRole(isFarmManager ? 'MEMBER_FARMER' : 'FARM_MANAGER');
-        setBlockFarmId(currentUser?.blockFarmId || (blockFarms[0]?.id || ''));
+        setBlockFarmId(currentUser?.blockFarmId || '');
         setPassword('');
-        setIsPhoneVerified(false);
       }
-      setOtpCode('');
-      setOtpSentMessage(null);
       setFormError(null);
       setIsSubmitting(false);
     }
   }, [isOpen, initialUser, currentUser, blockFarms, isFarmManager]);
 
-  // Request SMS OTP
-  const handleRequestOtp = async () => {
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (!/^09\d{9}$/.test(cleanPhone)) {
-      setFormError('Please enter a valid 11-digit Philippine mobile number starting with 09.');
-      return;
-    }
-
-    setIsSendingOtp(true);
-    setFormError(null);
-    try {
-      const res = await requestPhoneVerification(cleanPhone, displayName);
-      if (res.success) {
-        setOtpSentMessage(`Verification challenge sent to ${cleanPhone}.`);
-      } else {
-        setFormError(res.error || 'Failed to send SMS verification challenge.');
-      }
-    } catch (err) {
-      setFormError(err.message || 'Error sending SMS OTP.');
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
-  // Verify SMS OTP
-  const handleVerifyOtp = async () => {
-    const cleanPhone = phone.replace(/\D/g, '');
-    const cleanCode = otpCode.trim();
-    if (!/^\d{6}$/.test(cleanCode)) {
-      setFormError('Verification code must be 6 digits.');
-      return;
-    }
-
-    setIsVerifyingOtp(true);
-    setFormError(null);
-    try {
-      const res = await verifyPhoneOtp(cleanPhone, cleanCode);
-      if (res.success) {
-        setIsPhoneVerified(true);
-        setOtpSentMessage('Phone successfully verified.');
-      } else {
-        setFormError(res.error || 'Invalid verification code.');
-      }
-    } catch (err) {
-      setFormError(err.message || 'Failed to verify code.');
-    } finally {
-      setIsVerifyingOtp(false);
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError(null);
 
-    const cleanName = displayName.trim();
+    const cleanFirstName = firstName.trim();
+    const cleanMiddleName = middleName.trim();
+    const cleanLastName = lastName.trim();
+    const cleanSuffix = suffix.trim();
     const cleanPhone = phone.replace(/\D/g, '');
 
-    if (!cleanName) {
-      setFormError('Full display name is required.');
+    if (!cleanFirstName || !cleanLastName) {
+      setFormError('First name and last name are required.');
       return;
     }
     if (!/^09\d{9}$/.test(cleanPhone)) {
       setFormError('A valid 11-digit mobile number starting with 09 is required.');
+      return;
+    }
+    if ((selectedRole === 'FARM_MANAGER' || isFarmManager) && !blockFarmId) {
+      setFormError('Select a Block Farm before creating this account.');
       return;
     }
 
@@ -158,7 +115,10 @@ export default function UserFormModal({
     try {
       if (isEditing) {
         const payload = {
-          displayName: cleanName,
+          firstName: cleanFirstName,
+          middleName: cleanMiddleName,
+          lastName: cleanLastName,
+          suffix: cleanSuffix,
           phone: cleanPhone,
           role: selectedRole
         };
@@ -171,12 +131,14 @@ export default function UserFormModal({
         }
       } else {
         const payload = {
-          displayName: cleanName,
+          firstName: cleanFirstName,
+          middleName: cleanMiddleName,
+          lastName: cleanLastName,
+          suffix: cleanSuffix,
           phone: cleanPhone,
           role: selectedRole,
           password,
           blockFarmId: blockFarmId || undefined,
-          phoneVerified: isPhoneVerified,
           requiresPasswordChange: true
         };
         const res = await approveOrProvisionUser(payload);
@@ -236,97 +198,81 @@ export default function UserFormModal({
           </div>
         )}
 
-        {/* Display Name */}
-        <FormField
-          id="user-form-name"
-          label="Full Display Name"
-          required
-          helperText="Official full legal name of the personnel or cooperative Farm Member"
-        >
-          <Input
-            type="text"
-            id="user-form-name"
-            placeholder="e.g. Juan dela Cruz"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            disabled={isSubmitting}
-            required
-          />
-        </FormField>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField id="user-form-first-name" label="First Name" required>
+            <Input
+              type="text"
+              id="user-form-first-name"
+              placeholder="e.g. Juan"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              disabled={isSubmitting}
+              required
+            />
+          </FormField>
+          <FormField id="user-form-middle-name" label="Middle Name" helperText="Optional">
+            <Input
+              type="text"
+              id="user-form-middle-name"
+              placeholder="e.g. Mendoza"
+              value={middleName}
+              onChange={(e) => setMiddleName(e.target.value)}
+              disabled={isSubmitting}
+            />
+          </FormField>
+          <FormField id="user-form-last-name" label="Last Name" required>
+            <Input
+              type="text"
+              id="user-form-last-name"
+              placeholder="e.g. Dela Cruz"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              disabled={isSubmitting}
+              required
+            />
+          </FormField>
+          <FormField id="user-form-suffix" label="Suffix" helperText="Optional, such as Jr. or III">
+            <Input
+              type="text"
+              id="user-form-suffix"
+              placeholder="e.g. Jr."
+              value={suffix}
+              onChange={(e) => setSuffix(e.target.value)}
+              disabled={isSubmitting}
+            />
+          </FormField>
+        </div>
 
-        {/* Mobile Phone & SMS Verification */}
+        {isEditing && !initialUser?.lastName && (
+          <div className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-800">
+            This legacy account has a combined name. Place it into the correct name fields before saving.
+          </div>
+        )}
+
+        {/* Mobile Phone */}
         <div className="space-y-2">
           <FormField
             id="user-form-phone"
             label="Philippine Mobile Number"
             required
-            helperText="11-digit mobile number used for official OTP verification and login"
+            helperText="11-digit mobile number used for login and account-owner verification"
           >
-            <div className="flex gap-2">
-              <Input
-                type="tel"
-                id="user-form-phone"
-                placeholder="0917XXXXXXX"
-                icon={Phone}
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value);
-                  setIsPhoneVerified(false);
-                }}
-                disabled={isSubmitting}
-                required
-              />
-
-              {!isEditing && !isPhoneVerified && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="md"
-                  onClick={handleRequestOtp}
-                  isLoading={isSendingOtp}
-                  disabled={isSubmitting || !/^09\d{9}$/.test(phone.replace(/\D/g, ''))}
-                  icon={Send}
-                  className="shrink-0 text-xs"
-                >
-                  Verify SIM
-                </Button>
-              )}
-            </div>
+            <Input
+              type="tel"
+              id="user-form-phone"
+              placeholder="0917XXXXXXX"
+              icon={Phone}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              disabled={isSubmitting}
+              required
+            />
           </FormField>
 
-          {/* OTP Input row when OTP sent */}
-          {otpSentMessage && !isPhoneVerified && (
-            <div className="p-3 bg-bg dark:bg-gray-800/60 rounded-xl border border-border flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <span className="text-xs text-hug-text flex-1">
-                {otpSentMessage} Enter 6-digit challenge code:
-              </span>
-              <div className="flex gap-1.5 shrink-0">
-                <input
-                  type="text"
-                  maxLength="6"
-                  placeholder="123456"
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                  className="w-24 px-2 py-1 text-center font-mono text-xs font-bold rounded-lg border border-border bg-white dark:bg-surface text-hug-text"
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={handleVerifyOtp}
-                  isLoading={isVerifyingOtp}
-                  disabled={otpCode.length !== 6}
-                >
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {isPhoneVerified && (
-            <div className="flex items-center gap-1.5 text-xs font-bold text-success">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Mobile phone verified via server OTP.</span>
+          {!isEditing && (
+            <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary-bg/50 p-3 text-xs leading-relaxed text-hug-text2">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>The account owner will receive and enter the verification code on first login. Administrators cannot verify a phone on another user&apos;s behalf.</span>
             </div>
           )}
         </div>
@@ -352,8 +298,10 @@ export default function UserFormModal({
             <FormField
               id="user-form-farm"
               label="Assigned Block Farm"
-              required={selectedRole === 'FARM_MANAGER'}
-              helperText="Affiliated cooperative sugarcane cluster"
+              required={selectedRole === 'FARM_MANAGER' || isFarmManager}
+              helperText={selectedRole === 'MEMBER_FARMER' && !isFarmManager
+                ? 'Optional. An SRA Admin can assign an unassigned member later.'
+                : 'Affiliated cooperative sugarcane cluster'}
             >
               <Select
                 id="user-form-farm"
@@ -372,7 +320,7 @@ export default function UserFormModal({
             id="user-form-password"
             label="Temporary Initial Password"
             required
-            helperText="Minimum 8 characters. User will be prompted to change password on first login."
+            helperText="Minimum 8 characters. On first login, the user verifies the registered phone and then replaces this password."
           >
             <PasswordInput
               id="user-form-password"

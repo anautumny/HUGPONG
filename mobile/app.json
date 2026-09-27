@@ -41,7 +41,9 @@
           "backgroundColor": "#F7F9F4"
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "web": {
       "favicon": "./assets/HUGPONG LOGO.png"

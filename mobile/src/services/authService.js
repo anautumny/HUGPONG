@@ -1,7 +1,8 @@
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth } from '../firebase/config';
-import { STORAGE_KEYS, getItem, saveItem } from './storageService';
+import { STORAGE_KEYS, getItem, saveItem, removeItem, removeItems } from './storageService';
 import { friendlyErrorMessage } from '../domain/presentationContract';
+import { createClientRecordId } from './secureId';
 import {
   API_BASE_URL,
   API_ENVIRONMENT,
@@ -33,7 +34,7 @@ export { API_BASE_URL };
 export async function getMobileClientInstanceId() {
   let value = await getItem(STORAGE_KEYS.CLIENT_INSTANCE_ID);
   if (!value) {
-    value = `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    value = createClientRecordId('MOBILE');
     await saveItem(STORAGE_KEYS.CLIENT_INSTANCE_ID, value);
   }
   return value;
@@ -98,7 +99,15 @@ export async function authenticatedRequest(path, options = {}) {
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
-  return parseResponse(response);
+  try {
+    return await parseResponse(response);
+  } catch (error) {
+    if (error.status === 401) {
+      await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
+      if (auth) await signOut(auth).catch(() => {});
+    }
+    throw error;
+  }
 }
 
 export async function loginWithServer(identifier, password) {
@@ -193,5 +202,5 @@ export async function logoutFromServer(options = {}) {
     }
   }
   if (auth) await signOut(auth).catch(() => {});
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, null);
+  await removeItem(STORAGE_KEYS.AUTH_TOKEN);
 }

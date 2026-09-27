@@ -11,6 +11,8 @@ export default function PendingApprovalsQueue({
 }) {
   const [processingId, setProcessingId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [farmSelections, setFarmSelections] = useState({});
+  const [actionError, setActionError] = useState(null);
   const pageSize = 8;
 
   const farmMap = new Map(blockFarms.map(f => [f.id, f.name || f.id]));
@@ -33,9 +35,18 @@ export default function PendingApprovalsQueue({
   }
 
   const handleApprove = async (user) => {
+    const selectedFarmId = farmSelections[user.id] ?? user.requestedBlockFarmId ?? '';
+    if ((user.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId) {
+      setActionError('Select a Block Farm before approving this Farm Member.');
+      return;
+    }
     setProcessingId(user.id);
+    setActionError(null);
     try {
-      await onApproveUser(user);
+      const result = await onApproveUser(user, selectedFarmId);
+      if (!result?.success) setActionError(result?.error || 'The registration could not be approved.');
+    } catch (error) {
+      setActionError(error.message || 'The registration could not be approved.');
     } finally {
       setProcessingId(null);
     }
@@ -66,17 +77,24 @@ export default function PendingApprovalsQueue({
         </div>
       </div>
 
+      {actionError && (
+        <div className="mx-4 mt-4 rounded-xl border border-danger/30 bg-danger-bg/40 p-3 text-xs font-semibold text-danger">
+          {actionError}
+        </div>
+      )}
+
       <div className="divide-y divide-border/50">
         {pagedUsers.map((p) => {
           const farmName = farmMap.get(p.requestedBlockFarmId) || p.requestedBlockFarmId || 'Unassigned Farm';
           const isProcessing = processingId === p.id;
+          const selectedFarmId = farmSelections[p.id] ?? p.requestedBlockFarmId ?? '';
 
           return (
             <div
               key={p.id}
               className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-bg/30 transition-colors"
             >
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h4 className="text-sm font-bold text-hug-text">
                     {p.displayName || p.name}
@@ -88,6 +106,31 @@ export default function PendingApprovalsQueue({
                     {p.role || p.canonicalRole || 'Farm Member'}
                   </span>
                 </div>
+
+                {(p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && (
+                  <label className="mt-3 block max-w-sm text-xs font-semibold text-hug-text">
+                    Assign Block Farm
+                    <select
+                      value={selectedFarmId}
+                      onChange={(event) => {
+                        setFarmSelections(current => ({ ...current, [p.id]: event.target.value }));
+                        setActionError(null);
+                      }}
+                      disabled={isProcessing}
+                      className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
+                    >
+                      <option value="">Select a Block Farm</option>
+                      {blockFarms.filter(farm => String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE').map(farm => (
+                        <option key={farm.id} value={farm.id}>{farm.name || farm.id}</option>
+                      ))}
+                    </select>
+                    {!p.requestedBlockFarmId && (
+                      <span className="mt-1 block font-normal text-amber-700">
+                        The member registered without a Block Farm. Confirm the correct assignment before approval.
+                      </span>
+                    )}
+                  </label>
+                )}
 
                 <div className="flex items-center gap-3 text-xs text-hug-muted mt-1.5 flex-wrap">
                   <span className="flex items-center gap-1">
@@ -123,6 +166,7 @@ export default function PendingApprovalsQueue({
                   size="sm"
                   onClick={() => handleApprove(p)}
                   isLoading={isProcessing}
+                  disabled={isProcessing || ((p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId)}
                   icon={Check}
                 >
                   Approve Application

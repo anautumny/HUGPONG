@@ -271,7 +271,7 @@ export default function AuditCenterView() {
               {isSraAdmin ? 'Audit Inbox & Certification' : 'Block Farm Monthly Audit'}
             </h1>
             <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-              {isSraAdmin ? 'Review submitted audits, import offline QR packages, and certify completed reports.' : 'Compile the assigned Block Farm, review the snapshot, then submit it to SRA.'}
+              {isSraAdmin ? 'Review submitted audits, retrieve secure QR references, and certify completed reports.' : 'Compile the assigned Block Farm, review the snapshot, then submit it to SRA.'}
             </p>
           </div>
 
@@ -375,7 +375,7 @@ export default function AuditCenterView() {
         />
       </div>
 
-      {/* Official SRA A4 Printable Document View */}
+      {/* A4 printable audit document view */}
       {printReport ? (
         <PrintableAuditReport
           report={printReport}

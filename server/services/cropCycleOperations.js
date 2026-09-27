@@ -18,9 +18,12 @@ const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { getOperationDefinition } = require('../domain/operationCatalogue');
 const { canonicalSugarcaneVariety } = require('../domain/sugarcaneVarieties');
 const { operationAuthorization } = require('../domain/operationAuthorization');
+const { completeMatchingScheduleEntry } = require('../domain/operationSchedule');
 const { assertBaseVersion } = require('./mutationContext');
+const { createSystemId } = require('../domain/systemIds');
+const { queueAuditEvent } = require('./auditWriter');
 
-const MAX_ATOMIC_ROLLOVER_LOGS = 497;
+const MAX_ATOMIC_ROLLOVER_LOGS = 496;
 
 function serviceError(message, status = 400, data) {
   const error = new Error(message);
@@ -125,7 +128,11 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
     const activeCycle = await readActiveCurrentCycle(transaction, database, access, cycleId);
     const selectedStageNumber = integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX });
     const definition = validateOperationForStage(input, access.field, selectedStageNumber);
+    const submittedComponent = definition.childOperationDefinitionId ? null : validateSubmittedComponent(input);
     const variety = plantingVariety(input, selectedStageNumber);
+    const currentStageNumber = integer(activeCycle.cycle.currentStageNumber, 'currentStageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX });
+    const stageAlreadyCompleted = selectedStageNumber < currentStageNumber
+      || (selectedStageNumber === currentStageNumber && Boolean(activeCycle.cycle.completedAt));
     const existingCycleVariety = String(activeCycle.cycle.variety || '').trim();
     if (variety && existingCycleVariety && variety !== existingCycleVariety) {
       throw serviceError('This Crop Year Cycle already has a different sugarcane variety. Use an operation amendment to correct it.', 409, {
@@ -139,10 +146,14 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       blockFarmId: access.field.blockFarmId,
       cropYearCycle: normalizeCropYear(activeCycle.cycle.cropYear),
       operationDefinitionId: definition.id,
+      parentOperationDefinitionId: null,
+      childOperationDefinitionId: definition.childOperationDefinitionId || submittedComponent?.childOperationDefinitionId || null,
+      childOperationName: definition.childOperationName || submittedComponent?.childOperationName || '',
       operationName: definition.name,
       category: definition.category,
       stageNumber: selectedStageNumber,
       stageNumberAtRecord: selectedStageNumber,
+      isSupplemental: Boolean(input.isSupplemental) || stageAlreadyCompleted,
       variety,
       status: 'ACTIVE',
       archivedAt: null,
@@ -152,10 +163,49 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       submissionSource: access.authorization.submissionSource,
       photoEvidence: null
     }, { submittedByUserId: access.actorId, now: timestamp });
+
+    if (payload.childOperationDefinitionId && payload.childOperationDefinitionId !== 'CUSTOM') {
+      const canonicalComponentId = value => String(value || '')
+        .trim()
+        .toUpperCase()
+        .replace(/^SI-SRA-(\d+)-(\d+)$/, 'SI-$1-$2');
+      const cycleOperations = await transaction.get(
+        database.collection(COLLECTIONS.OPERATION_LOGS).where('cycleId', '==', cycleId)
+      );
+      const duplicateComponent = cycleOperations.docs.find(snapshot => {
+        const operation = snapshot.data();
+        return operation.status === 'ACTIVE'
+          && operation.fieldId === fieldId
+          && operation.operationDefinitionId === payload.operationDefinitionId
+          && canonicalComponentId(operation.childOperationDefinitionId) === canonicalComponentId(payload.childOperationDefinitionId);
+      });
+      if (duplicateComponent) {
+        return {
+          replayed: true,
+          id: duplicateComponent.id,
+          record: duplicateComponent.data(),
+          replayReason: 'DUPLICATE_OPERATION_COMPONENT'
+        };
+      }
+    }
+
     if (variety && !existingCycleVariety) {
       transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
     }
+    const scheduleCompletion = completeMatchingScheduleEntry(access.field.operationSchedule, payload, logId, timestamp);
+    if (scheduleCompletion.changed) {
+      transaction.update(access.fieldRef, { operationSchedule: scheduleCompletion.schedule, updatedAt: timestamp });
+    }
     transaction.create(targetRef, payload);
+    queueAuditEvent(transaction, database, {
+      eventType: 'OPERATION_LOG_CREATED',
+      actorUserId: access.actorId,
+      entityType: 'OPERATION_LOG',
+      entityId: logId,
+      blockFarmId: access.field.blockFarmId,
+      details: `Recorded operation ${logId} for field ${fieldId}.`,
+      createdAt: timestamp
+    });
     return { replayed: false, id: logId, record: payload };
   });
 }
@@ -186,7 +236,11 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     assertBaseVersion(existing.updatedAt, mutationContext, snapshot.id, { id: snapshot.id, ...existing });
 
     const requested = changes && typeof changes === 'object' ? changes : {};
-    const immutable = ['fieldId', 'cycleId', 'blockFarmId', 'cropYearCycle', 'stageNumber', 'stageNumberAtRecord', 'submittedByUserId', 'submissionSource', 'createdAt'];
+    const immutable = [
+      'fieldId', 'cycleId', 'blockFarmId', 'cropYearCycle', 'stageNumber', 'stageNumberAtRecord',
+      'operationDefinitionId', 'parentOperationDefinitionId', 'childOperationDefinitionId',
+      'submittedByUserId', 'submissionSource', 'createdAt'
+    ];
     for (const key of immutable) {
       if (requested[key] != null && requested[key] !== existing[key]) {
         throw serviceError(`${key} is immutable for submitted operation logs.`, 409);
@@ -214,11 +268,14 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       throw serviceError('Sugarcane variety may be corrected only on Planting-stage operations.');
     }
 
-    const amendmentId = amendment.amendmentId || `AMD-${Date.now().toString(36).toUpperCase()}`;
+    const amendmentId = amendment.amendmentId || createSystemId('AMD');
     const merged = {
       ...existing,
       ...requested,
       operationDefinitionId: definition.id,
+      parentOperationDefinitionId: null,
+      childOperationDefinitionId: definition.childOperationDefinitionId || existing.childOperationDefinitionId || null,
+      childOperationName: definition.childOperationName || existing.childOperationName || '',
       operationName: definition.name,
       category: definition.category,
       stageNumber: fixedStageNumber,
@@ -273,8 +330,8 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
 
 async function archiveOperationRecords(database, logIds, user, timestamp = nowIso(), mutationContext = null) {
   const ids = Array.from(new Set((Array.isArray(logIds) ? logIds : []).map(id => String(id).trim()).filter(Boolean)));
-  if (!ids.length || ids.length > 500) {
-    throw serviceError('ids must contain between 1 and 500 operation log IDs.');
+  if (!ids.length || ids.length > 499) {
+    throw serviceError('ids must contain between 1 and 499 operation log IDs.');
   }
 
   return database.runTransaction(async transaction => {
@@ -318,6 +375,18 @@ async function archiveOperationRecords(database, logIds, user, timestamp = nowIs
         updatedAt: timestamp
       });
     }
+    if (archivedCount > 0) {
+      const first = snapshots.find(snapshot => snapshot.data().status === 'ACTIVE');
+      queueAuditEvent(transaction, database, {
+        eventType: 'OPERATION_LOGS_ARCHIVED',
+        actorUserId: identity.actorId,
+        entityType: 'OPERATION_LOG',
+        entityId: archivedCount === 1 ? first.id : (mutationContext?.mutationId || createSystemId('BATCH')),
+        blockFarmId: first?.data().blockFarmId,
+        details: `Archived ${archivedCount} operation record${archivedCount === 1 ? '' : 's'}.`,
+        createdAt: timestamp
+      });
+    }
     return { archivedCount, archivedAt: timestamp };
   });
 }
@@ -339,16 +408,44 @@ async function updateCycleStage(database, cycleId, input, user, timestamp = nowI
       max: CROP_STAGE_MAX
     });
     const requestedElapsed = finiteNumber(input.elapsedMonths == null ? cycle.elapsedMonths : input.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 });
-    if (cycle.currentStageNumber === requestedStage && cycle.elapsedMonths === requestedElapsed) {
+    const hasCompletionIntent = Object.prototype.hasOwnProperty.call(input, 'isCompleted');
+    const requestedComplete = hasCompletionIntent
+      ? input.isCompleted === true
+      : requestedStage === CROP_STAGE_MAX && Boolean(cycle.completedAt);
+    if (requestedComplete && requestedStage !== CROP_STAGE_MAX) {
+      throw serviceError('Only the final Harvest stage can complete a Crop Year Cycle.', 400);
+    }
+    const completedAt = requestedStage < CROP_STAGE_MAX
+      ? null
+      : requestedComplete
+        ? (cycle.completedAt || timestamp)
+        : hasCompletionIntent
+          ? null
+          : (cycle.completedAt || null);
+    if (
+      cycle.currentStageNumber === requestedStage &&
+      cycle.elapsedMonths === requestedElapsed &&
+      (cycle.completedAt || null) === completedAt
+    ) {
       return { id: cycleSnapshot.id, ...cycle, replayed: true };
     }
     assertBaseVersion(cycle.updatedAt, mutationContext, cycleSnapshot.id, { id: cycleSnapshot.id, ...cycle });
     const update = {
       currentStageNumber: requestedStage,
       elapsedMonths: requestedElapsed,
+      completedAt,
       updatedAt: timestamp
     };
     transaction.update(cycleRef, update);
+    queueAuditEvent(transaction, database, {
+      eventType: 'CROP_STAGE_UPDATED',
+      actorUserId: access.actorId,
+      entityType: 'CROP_CYCLE',
+      entityId: cycleSnapshot.id,
+      blockFarmId: cycle.blockFarmId,
+      details: `Updated Crop Year Cycle ${cycleSnapshot.id} to stage ${requestedStage}.`,
+      createdAt: timestamp
+    });
     return { id: cycleSnapshot.id, ...cycle, ...update };
   });
 }
@@ -481,6 +578,15 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
     }
     transaction.create(newCycleRef, newCycle);
     transaction.update(fieldRef, { currentCycleId: newCycleId, cropYear: newCycle.cropYear, updatedAt: timestamp });
+    queueAuditEvent(transaction, database, {
+      eventType: 'CROP_CYCLE_ROLLED_OVER',
+      actorUserId: actorId,
+      entityType: 'CROP_CYCLE',
+      entityId: newCycleId,
+      blockFarmId: field.blockFarmId,
+      details: `Closed ${previousCycleId} and started ${newCycleId}.`,
+      createdAt: timestamp
+    });
 
     return {
       oldCycleId: oldCycleSnapshot.id,
@@ -498,7 +604,7 @@ async function createInitialFieldCycle(database, fieldId, input, user, timestamp
   const normalizedFieldId = String(fieldId || '').trim().toUpperCase();
   return database.runTransaction(async transaction => {
     const access = await readAuthorizedField(transaction, database, normalizedFieldId, user, 'start Crop Year Cycles');
-    const { field, fieldRef } = access;
+    const { field, fieldRef, actorId } = access;
     if (field.status !== 'ACTIVE') throw serviceError('Only an ACTIVE field can start a Crop Year Cycle.', 409);
     if (field.currentCycleId) throw serviceError('The field already has an active Crop Year Cycle pointer.', 409);
     assertBaseVersion(field.updatedAt, mutationContext, normalizedFieldId, { id: normalizedFieldId, ...field });
@@ -546,6 +652,15 @@ async function createInitialFieldCycle(database, fieldId, input, user, timestamp
     const updatedField = { ...field, currentCycleId: cycleId, cropYear: annual.cropYear, updatedAt: timestamp };
     transaction.create(cycleRef, cycle);
     transaction.update(fieldRef, { currentCycleId: cycleId, cropYear: annual.cropYear, updatedAt: timestamp });
+    queueAuditEvent(transaction, database, {
+      eventType: 'CROP_CYCLE_CREATED',
+      actorUserId: actorId,
+      entityType: 'CROP_CYCLE',
+      entityId: cycleId,
+      blockFarmId: field.blockFarmId,
+      details: `Started Crop Year Cycle ${cycleId} for field ${normalizedFieldId}.`,
+      createdAt: timestamp
+    });
     return { cycleId, cycle, field: updatedField };
   });
 }
@@ -565,6 +680,35 @@ function validateOperationForStage(input, field, stageNumber) {
       code: 'INVALID_STAGE_OPERATION', operationDefinitionId: canonical.id, stageNumber
     });
   }
+  if (canonical?.parentOperationDefinitionId) {
+    const parent = getOperationDefinition(canonical.parentOperationDefinitionId);
+    return {
+      ...parent,
+      childOperationDefinitionId: canonical.id,
+      childOperationName: canonical.name
+    };
+  }
+  if (canonical?.childOperations?.length) {
+    const childId = requiredString(input.childOperationDefinitionId, 'childOperationDefinitionId', { max: 120 }).toUpperCase();
+    if (childId === 'CUSTOM') {
+      return {
+        ...canonical,
+        childOperationDefinitionId: 'CUSTOM',
+        childOperationName: requiredString(input.childOperationName, 'childOperationName', { max: 300 })
+      };
+    }
+    const child = getOperationDefinition(childId);
+    if (!child || child.parentOperationDefinitionId !== canonical.id) {
+      throw serviceError('The selected child operation does not belong under this operation title.', 400, {
+        code: 'INVALID_CHILD_OPERATION', operationDefinitionId: canonical.id, childOperationDefinitionId: childId
+      });
+    }
+    return {
+      ...canonical,
+      childOperationDefinitionId: child.id,
+      childOperationName: child.name
+    };
+  }
   if (!canonical && !customOperationForStage(field, operationDefinitionId, stageNumber)) {
     throw serviceError('The selected custom operation is not configured for this field and stage.', 400, {
       code: 'INVALID_STAGE_OPERATION', operationDefinitionId, stageNumber
@@ -575,6 +719,35 @@ function validateOperationForStage(input, field, stageNumber) {
     name: requiredString(input.operationName, 'operationName', { max: 300 }),
     category: requiredString(input.category || 'General Care', 'category', { max: 80 }),
     stageNumber
+  };
+}
+
+function validateSubmittedComponent(input) {
+  const componentId = String(input.childOperationDefinitionId || '').trim();
+  if (!componentId) return null;
+  const legacyChild = getOperationDefinition(componentId);
+  if (legacyChild?.parentOperationDefinitionId === String(input.operationDefinitionId || '').trim().toUpperCase()) {
+    return {
+      childOperationDefinitionId: legacyChild.id,
+      childOperationName: legacyChild.name
+    };
+  }
+  const submittedLineItems = Array.isArray(input.lineItems) ? input.lineItems : [];
+  const submittedLaborEntries = Array.isArray(input.laborEntries) ? input.laborEntries : [];
+  const matchingLineItem = submittedLineItems.find(item => String(item.lineItemId || '').trim() === componentId);
+  const matchingLaborEntry = submittedLaborEntries.find(item => String(item.laborEntryId || '').trim() === componentId);
+  const isItemWithAttachedLabor = Boolean(matchingLineItem) && submittedLineItems.length === 1;
+  const isLegacyLaborOnly = Boolean(matchingLaborEntry) && submittedLineItems.length === 0 && submittedLaborEntries.length === 1;
+  if ((!isItemWithAttachedLabor && !isLegacyLaborOnly) || Number(input.baseCost || 0) !== 0) {
+    throw serviceError('An itemized child submission must contain one matching material or expense row. Labor entries may be attached to that row.', 400, {
+      code: 'INVALID_ITEMIZED_COMPONENT'
+    });
+  }
+  return {
+    childOperationDefinitionId: componentId,
+    childOperationName: matchingLineItem
+      ? requiredString(matchingLineItem.description, 'lineItems.description', { max: 300 })
+      : `${Number(matchingLaborEntry.workerCount || 0)} workers for ${Number(matchingLaborEntry.days || matchingLaborEntry.quantity || 0)} days`
   };
 }
 
@@ -625,7 +798,7 @@ async function archiveFieldWithOperations(database, fieldId, user, timestamp = n
         .where('fieldId', '==', normalizedFieldId)
         .where('status', '==', 'ACTIVE')
     );
-    const extraWrites = cycleSnapshot?.exists && cycleSnapshot.data().status === 'ACTIVE' ? 2 : 1;
+    const extraWrites = cycleSnapshot?.exists && cycleSnapshot.data().status === 'ACTIVE' ? 3 : 2;
     if (logSnapshot.size + extraWrites > 500) {
       throw serviceError('Field archival exceeds the Firestore atomic write limit.', 409);
     }
@@ -648,6 +821,15 @@ async function archiveFieldWithOperations(database, fieldId, user, timestamp = n
         updatedAt: timestamp
       });
     }
+    queueAuditEvent(transaction, database, {
+      eventType: 'FIELD_ARCHIVED',
+      actorUserId: identity.actorId,
+      entityType: 'FIELD',
+      entityId: fieldSnapshot.id,
+      blockFarmId: field.blockFarmId,
+      details: `Archived field ${fieldSnapshot.id} and ${logSnapshot.size} active operation record${logSnapshot.size === 1 ? '' : 's'}.`,
+      createdAt: timestamp
+    });
     return {
       replayed: false,
       field: { id: fieldSnapshot.id, ...archivedField },

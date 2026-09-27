@@ -16,13 +16,10 @@ const LEGACY_STATUS = Object.freeze({
   VERIFIED: AUDIT_STATUS.PENDING_REVIEW
 });
 
-const QR_SCHEMA_VERSION = 3;
+const QR_SCHEMA_VERSION = 4;
 const QR_TYPE = 'HUGPONG_AUDIT_TRANSFER';
 const QR_PART_TYPE = 'HUGPONG_AUDIT_PART';
-// Keep each symbol sparse enough to scan reliably from another phone screen.
-// The multipart envelope adds roughly 200 characters around each data chunk.
-const QR_SINGLE_MAX_LENGTH = 600;
-const QR_PART_DATA_LENGTH = 350;
+const QR_REFERENCE_ENCODING = 'REPORT_REFERENCE';
 const AUDIT_DELIVERY_METHOD = Object.freeze({ CLOUD: 'cloud', QR: 'qr' });
 const AUDIT_DELIVERY_STATUS = Object.freeze({ READY: 'ready', SUBMITTED: 'submitted', RECEIVED: 'received' });
 const BUSINESS_TIME_ZONE = 'Asia/Manila';
@@ -96,6 +93,26 @@ function buildFieldSnapshots(operationSnapshots = [], activeFields = []) {
   });
 }
 
+function canonicalCropYearCycle(value) {
+  const match = String(value || '').trim().match(/(\d{4})\s*[-\u2013\u2014/]\s*(\d{4})/);
+  if (!match) return '';
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  return Number.isInteger(start) && end === start + 1 ? `${start}-${end}` : '';
+}
+
+function auditCropYearCycles(report = {}, operationSnapshots = [], fieldSnapshots = []) {
+  const candidates = [
+    report.cropYearCycle,
+    report.cropYear,
+    ...(Array.isArray(report.cropYearCycles) ? report.cropYearCycles : []),
+    ...(Array.isArray(report.cropYears) ? report.cropYears : []),
+    ...fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]),
+    ...operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
+  ];
+  return Array.from(new Set(candidates.map(canonicalCropYearCycle).filter(Boolean))).sort();
+}
+
 function canonicalAuditReport(report = {}) {
   const operationSnapshots = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
@@ -106,6 +123,7 @@ function canonicalAuditReport(report = {}) {
   const sourceLogIds = Array.isArray(report.sourceLogIds) && report.sourceLogIds.length
     ? report.sourceLogIds.map(operationId)
     : operationSnapshots.map(operationId);
+  const cropYearCycles = auditCropYearCycles(report, operationSnapshots, fieldSnapshots);
   return {
     reportId: report.id || report.reportId,
     schemaVersion: QR_SCHEMA_VERSION,
@@ -114,6 +132,8 @@ function canonicalAuditReport(report = {}) {
     blockFarmId: report.blockFarmId,
     blockFarmName: report.blockFarmName || report.blockFarm || report.blockFarmId,
     periodKey: report.periodKey || report.period,
+    cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
+    cropYearCycles,
     compiledByUserId: report.compiledByUserId,
     compiledByName: report.compiledByName || '',
     compiledAt: report.compiledAt,
@@ -244,10 +264,9 @@ function qrTransportObject(report) {
   return {
     type: QR_TYPE,
     schemaVersion: QR_SCHEMA_VERSION,
-    encoding: 'DEFLATE_RAW_BASE64_UTF8',
+    encoding: QR_REFERENCE_ENCODING,
     reportId: canonical.reportId,
-    integrityHash: canonical.integrityHash,
-    data: zlib.deflateRawSync(Buffer.from(JSON.stringify(canonical), 'utf8'), { level: 9 }).toString('base64')
+    integrityHash: canonical.integrityHash
   };
 }
 
@@ -270,7 +289,19 @@ function decodeQrPayload(rawPayload) {
   if (parsed.type === 'HUGPONG_AUDIT' && Number(parsed.schemaVersion) === 1) return { ...parsed, legacyLookupOnly: true };
   if (parsed.type !== QR_TYPE) throw new Error('This HUGPONG audit QR version is not supported.');
   if (Number(parsed.schemaVersion) === 2) return validateCanonicalAuditReport(parsed.report);
-  if (Number(parsed.schemaVersion) !== QR_SCHEMA_VERSION || parsed.encoding !== 'DEFLATE_RAW_BASE64_UTF8' || !parsed.data) {
+  if (Number(parsed.schemaVersion) === QR_SCHEMA_VERSION) {
+    if (parsed.encoding !== QR_REFERENCE_ENCODING || !String(parsed.reportId || '').trim() || !String(parsed.integrityHash || '').trim()) {
+      throw new Error('The audit QR reference is incomplete.');
+    }
+    return {
+      reportId: String(parsed.reportId).trim(),
+      integrityHash: String(parsed.integrityHash).trim(),
+      referenceOnly: true
+    };
+  }
+  // Version 3 QR codes embedded the complete compressed report. Continue
+  // accepting them so reports issued before the reference migration remain usable.
+  if (Number(parsed.schemaVersion) !== 3 || parsed.encoding !== 'DEFLATE_RAW_BASE64_UTF8' || !parsed.data) {
     throw new Error('This HUGPONG audit QR version is not supported.');
   }
   let report;
@@ -285,23 +316,7 @@ function decodeQrPayload(rawPayload) {
 }
 
 function encodeQrParts(report) {
-  const payload = encodeQrPayload(report);
-  if (Buffer.byteLength(payload, 'utf8') <= QR_SINGLE_MAX_LENGTH) return [payload];
-  const canonical = validateCanonicalAuditReport(report);
-  const chunks = [];
-  for (let index = 0; index < payload.length; index += QR_PART_DATA_LENGTH) {
-    chunks.push(payload.slice(index, index + QR_PART_DATA_LENGTH));
-  }
-  const transferId = `${canonical.reportId}:${canonical.integrityHash}`;
-  return chunks.map((data, index) => JSON.stringify({
-    type: QR_PART_TYPE,
-    schemaVersion: 2,
-    transferId,
-    partNumber: index + 1,
-    partCount: chunks.length,
-    encoding: 'RAW',
-    data
-  }));
+  return [encodeQrPayload(report)];
 }
 
 function decodeQrPart(rawPart) {
@@ -344,6 +359,7 @@ module.exports = {
   versionedAuditReportId,
   summarizeSnapshots,
   buildFieldSnapshots,
+  auditCropYearCycles,
   canonicalAuditReport,
   validateCanonicalAuditReport,
   newestAuditReport,

@@ -181,7 +181,7 @@ export default function PriceHistoryTable({
                   <FileText className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
                   <p className="font-semibold text-hug-text text-sm">No price circulars found</p>
                   <p className="text-xs text-hug-muted mt-0.5">
-                    {searchTerm ? 'Try adjusting your search terms.' : 'Official SRA pricing records will appear here once published.'}
+                    {searchTerm ? 'Try adjusting your search terms.' : 'Source-referenced price records will appear here once published.'}
                   </p>
                 </td>
               </tr>
@@ -264,7 +264,7 @@ export default function PriceHistoryTable({
 
                     <td className="px-4 py-3.5 text-xs text-hug-muted max-w-[200px] truncate" title={p.source}>
                       <span className="font-mono font-semibold text-hug-text block truncate">
-                        {p.circularNumber || 'Official Circular'}
+                        {p.circularNumber || 'Published Reference'}
                       </span>
                       <span className="text-[10px] text-hug-muted block truncate">
                         {p.source || 'Sugar Regulatory Administration'}
@@ -274,7 +274,7 @@ export default function PriceHistoryTable({
                     <td className="px-4 py-3.5 text-right whitespace-nowrap">
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-success-bg text-success border border-success/30">
                         <CheckCircle2 className="w-3 h-3" />
-                        Official SRA
+                        Published Reference
                       </span>
                     </td>
                   </tr>

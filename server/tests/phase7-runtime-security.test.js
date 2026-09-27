@@ -111,6 +111,12 @@ test('Farm Manager operation subscriptions delegate scoped aggregation to the se
   assert.match(serverSource, /where\('fieldId', 'in', fieldIds\)/);
 });
 
+test('Field Operations exposes one Manager Takeover exit action', () => {
+  const operationsView = read('../../web/react-app/src/views/operations/OperationsView.jsx');
+  assert.equal((operationsView.match(/>\s*Exit Manager Takeover\s*</g) || []).length, 1);
+  assert.match(operationsView, /Active Manager Takeover banner/);
+});
+
 test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operation UI', () => {
   const fieldOps = read('../../mobile/src/screens/FieldOpsScreen.js');
   const analyticsComponents = read('../../mobile/src/components/analytics/AnalyticsComponents.js');
@@ -121,7 +127,7 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   assert.match(fieldOps, /isFullyCompleted && activeRole === 'Farm Member'/);
   assert.doesNotMatch(fieldOps, /SRA Admin Cycle Renewal|SRA Admin, or authorized via Manager Takeover/);
   assert.doesNotMatch(analyticsComponents, /2650|9500|priceRecord\?\.sugarPrice\b|priceRecord\?\.molassesPrice\b/);
-  assert.match(analyticsComponents, /No official price circular available/);
+  assert.match(analyticsComponents, /No price reference available/);
   assert.match(analyticsScreen, /newEffectiveDate/);
   assert.match(analyticsScreen, /newWeekLabel/);
   assert.match(analyticsScreen, /newCircularNumber/);

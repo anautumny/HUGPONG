@@ -33,6 +33,16 @@ test('mobile log cleanup keeps the newest record for a duplicate id', async () =
   assert.deepEqual(cleanupDuplicateLogs(null), []);
 });
 
+test('mobile keyed records keep one newest canonical identity', async () => {
+  const { uniqueRecordsById } = await loadMobileDataHelpers();
+  const older = { id: 'DEV-BF-001', updatedAt: '2026-09-01T00:00:00.000Z', name: 'Older' };
+  const newer = { id: 'dev-bf-001', updatedAt: '2026-09-02T00:00:00.000Z', name: 'Newer' };
+  const distinct = { id: 'DEV-BF-002', updatedAt: '2026-09-01T00:00:00.000Z', name: 'Distinct' };
+
+  assert.deepEqual(uniqueRecordsById([older, null, newer, distinct]), [newer, distinct]);
+  assert.deepEqual(uniqueRecordsById(null), []);
+});
+
 test('mobile Firestore cleanup recursively removes undefined object fields', async () => {
   const { cleanDataForFirestore } = await loadMobileDataHelpers();
 

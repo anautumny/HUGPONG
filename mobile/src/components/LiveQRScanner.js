@@ -217,7 +217,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
           ) : (
             <>
               <Text style={styles.heading}>Scan Audit QR</Text>
-              <Text style={styles.help}>Keep the complete QR square inside the frame. Multi-part transfers continue scanning without closing the camera.</Text>
+              <Text style={styles.help}>Keep the complete QR square inside the frame. The report will be securely retrieved after one scan.</Text>
               <View style={styles.cameraFrame}>
                 {!systemScannerActive ? (
                   <CameraView

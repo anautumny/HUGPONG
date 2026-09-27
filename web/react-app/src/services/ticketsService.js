@@ -33,8 +33,7 @@ function saveOutbox(queue) {
 }
 
 function ticketId() {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 10).toUpperCase()
-    || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
+  const random = globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 20).toUpperCase();
   return `TCK-${new Date().getFullYear()}-${random}`;
 }
 

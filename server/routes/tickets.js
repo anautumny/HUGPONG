@@ -10,6 +10,8 @@ const {
   nullableId, nowIso, optionalString, requiredString
 } = require('../schema/firestoreSchema');
 const { readMutationContext } = require('../services/mutationContext');
+const { createTicketId, createSystemId } = require('../domain/systemIds');
+const { queueAuditEvent } = require('../services/auditWriter');
 const {
   ACTIVE_TICKET_STATUSES, canCreateSupportTicket, canManageSupportTickets,
   canonicalTicketStatus, assertTicketCategory, assertStatusTransition, ticketViewStatuses
@@ -202,7 +204,7 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Super Admin handles support requests and cannot create a normal support ticket.' });
     }
     const now = nowIso();
-    const ticketId = String(req.body.id || `TCK-${Date.now().toString(36).toUpperCase()}`).trim().toUpperCase();
+    const ticketId = String(req.body.id || createTicketId()).trim().toUpperCase();
     if (!/^[A-Z0-9_-]{8,100}$/.test(ticketId)) throw new Error('Ticket ID is invalid.');
     const fieldId = nullableId(req.body.fieldId);
     let blockFarmId = nullableId(req.session.user.blockFarmId);
@@ -234,17 +236,29 @@ router.post('/', requireAuth, async (req, res) => {
       resolvedAt: null, resolvedByUserId: null, closedAt: null, closedByUserId: null
     };
     const ref = db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(ticketId);
-    const existing = await ref.get();
-    if (existing.exists) {
-      const current = normalizedTicket(existing);
-      if (current.createdByUserId === actor.userId && current.title === payload.title) {
-        const [data] = await presentTickets([current]);
-        return res.json({ success: true, replayed: true, data });
+    const result = await db.runTransaction(async transaction => {
+      const existing = await transaction.get(ref);
+      if (existing.exists) {
+        const current = normalizedTicket(existing);
+        if (current.createdByUserId === actor.userId && current.title === payload.title) {
+          return { replayed: true, ticket: current };
+        }
+        throw Object.assign(new Error('Ticket ID already belongs to another ticket.'), { status: 409 });
       }
-      return res.status(409).json({ success: false, error: 'Ticket ID already belongs to another ticket.' });
-    }
-    await ref.create(payload);
-    return res.status(201).json({ success: true, data: { id: ticketId, ...payload } });
+      transaction.create(ref, payload);
+      queueAuditEvent(transaction, db, {
+        eventType: 'SUPPORT_TICKET_CREATED',
+        actorUserId: actor.userId,
+        entityType: 'SUPPORT_TICKET',
+        entityId: ticketId,
+        blockFarmId,
+        details: `Created support ticket ${ticketId}.`,
+        createdAt: now
+      });
+      return { replayed: false, ticket: { id: ticketId, ...payload } };
+    });
+    const [data] = await presentTickets([result.ticket]);
+    return res.status(result.replayed ? 200 : 201).json({ success: true, replayed: result.replayed, data });
   } catch (error) {
     return res.status(error.status || (/already exists/i.test(error.message) ? 409 : 400)).json({ success: false, error: error.message });
   }
@@ -256,31 +270,42 @@ router.post('/:id/messages', requireAuth, async (req, res) => {
     readMutationContext(req);
     const actor = identity(req.session.user);
     const ref = db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(req.params.id);
-    const snapshot = await ref.get();
-    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Support ticket not found.' });
-    const current = normalizedTicket(snapshot);
-    assertCanRead(current, actor);
-    if (!ACTIVE_TICKET_STATUSES.includes(current.status)) {
-      return res.status(409).json({ success: false, error: 'Follow-up messages are allowed only while a ticket is active.' });
-    }
     const content = requiredString(req.body.content || req.body.message, 'message', { max: 5000 });
     const now = nowIso();
     const requestedMessageId = String(req.body.messageId || '').trim().toUpperCase();
     if (requestedMessageId && !/^[A-Z0-9_-]{8,160}$/.test(requestedMessageId)) {
       throw new Error('messageId is invalid.');
     }
-    if (requestedMessageId && current.messages.some(message => message.messageId === requestedMessageId)) {
-      const [data] = await presentTickets([current]);
-      return res.json({ success: true, replayed: true, data });
-    }
-    const messages = [...current.messages, {
-      messageId: requestedMessageId || `${snapshot.id}-MSG-${current.messages.length + 1}-${Date.now().toString(36).toUpperCase()}`,
-      authorUserId: actor.userId, authorName: actor.name, authorRole: actor.role,
-      visibility: 'PUBLIC', content, createdAt: now
-    }];
-    await ref.update({ messages, updatedAt: now });
-    const [data] = await presentTickets([{ ...current, messages, updatedAt: now }]);
-    return res.json({ success: true, data });
+    const result = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw Object.assign(new Error('Support ticket not found.'), { status: 404 });
+      const current = normalizedTicket(snapshot);
+      assertCanRead(current, actor);
+      if (!ACTIVE_TICKET_STATUSES.includes(current.status)) {
+        throw Object.assign(new Error('Follow-up messages are allowed only while a ticket is active.'), { status: 409 });
+      }
+      if (requestedMessageId && current.messages.some(message => message.messageId === requestedMessageId)) {
+        return { replayed: true, ticket: current };
+      }
+      const messageId = requestedMessageId || createSystemId('MSG');
+      const messages = [...current.messages, {
+        messageId, authorUserId: actor.userId, authorName: actor.name, authorRole: actor.role,
+        visibility: 'PUBLIC', content, createdAt: now
+      }];
+      transaction.update(ref, { messages, updatedAt: now });
+      queueAuditEvent(transaction, db, {
+        eventType: 'SUPPORT_TICKET_MESSAGE_ADDED',
+        actorUserId: actor.userId,
+        entityType: 'SUPPORT_TICKET',
+        entityId: snapshot.id,
+        blockFarmId: current.blockFarmId,
+        details: `Added a message to support ticket ${snapshot.id}.`,
+        createdAt: now
+      });
+      return { replayed: false, ticket: { ...current, messages, updatedAt: now } };
+    });
+    const [data] = await presentTickets([result.ticket]);
+    return res.json({ success: true, replayed: result.replayed, data });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });
   }
@@ -295,35 +320,46 @@ router.patch('/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Only Super Admin may update support ticket status.' });
     }
     const ref = db.collection(COLLECTIONS.SUPPORT_TICKETS).doc(req.params.id);
-    const snapshot = await ref.get();
-    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Support ticket not found.' });
-    const current = normalizedTicket(snapshot);
-    const status = req.body.status == null ? current.status : assertStatusTransition(current.status, req.body.status);
     const now = nowIso();
     const response = optionalString(req.body.response || req.body.resolutionNotes, { max: 5000 });
-    const messages = response ? [...current.messages, {
-      messageId: `${snapshot.id}-MSG-${current.messages.length + 1}-${Date.now().toString(36).toUpperCase()}`,
-      authorUserId: actor.userId, authorName: actor.name, authorRole: actor.role,
-      visibility: 'PUBLIC', content: response, createdAt: now
-    }] : current.messages;
-    const changed = status !== current.status;
-    const update = {
-      status,
-      priority: req.body.priority == null ? (current.priority || 'NORMAL') : enumValue(req.body.priority, TICKET_PRIORITIES, 'priority'),
-      messages,
-      statusHistory: changed ? [...current.statusHistory, {
-        from: current.status, to: status, changedByUserId: actor.userId,
-        changedByRole: actor.role, changedAt: now
-      }] : current.statusHistory,
-      resolutionNotes: status === 'RESOLVED' && response ? response : (current.resolutionNotes || ''),
-      updatedAt: now,
-      resolvedAt: ['RESOLVED', 'CLOSED'].includes(status) ? (current.resolvedAt || now) : null,
-      resolvedByUserId: ['RESOLVED', 'CLOSED'].includes(status) ? (current.resolvedByUserId || actor.userId) : null,
-      closedAt: status === 'CLOSED' ? (current.closedAt || now) : null,
-      closedByUserId: status === 'CLOSED' ? (current.closedByUserId || actor.userId) : null
-    };
-    await ref.update(update);
-    const [data] = await presentTickets([{ ...current, ...update }]);
+    const ticket = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw Object.assign(new Error('Support ticket not found.'), { status: 404 });
+      const current = normalizedTicket(snapshot);
+      const status = req.body.status == null ? current.status : assertStatusTransition(current.status, req.body.status);
+      const messages = response ? [...current.messages, {
+        messageId: createSystemId('MSG'), authorUserId: actor.userId, authorName: actor.name, authorRole: actor.role,
+        visibility: 'PUBLIC', content: response, createdAt: now
+      }] : current.messages;
+      const changed = status !== current.status;
+      const update = {
+        status,
+        priority: req.body.priority == null ? (current.priority || 'NORMAL') : enumValue(req.body.priority, TICKET_PRIORITIES, 'priority'),
+        messages,
+        statusHistory: changed ? [...current.statusHistory, {
+          from: current.status, to: status, changedByUserId: actor.userId,
+          changedByRole: actor.role, changedAt: now
+        }] : current.statusHistory,
+        resolutionNotes: status === 'RESOLVED' && response ? response : (current.resolutionNotes || ''),
+        updatedAt: now,
+        resolvedAt: ['RESOLVED', 'CLOSED'].includes(status) ? (current.resolvedAt || now) : null,
+        resolvedByUserId: ['RESOLVED', 'CLOSED'].includes(status) ? (current.resolvedByUserId || actor.userId) : null,
+        closedAt: status === 'CLOSED' ? (current.closedAt || now) : null,
+        closedByUserId: status === 'CLOSED' ? (current.closedByUserId || actor.userId) : null
+      };
+      transaction.update(ref, update);
+      queueAuditEvent(transaction, db, {
+        eventType: 'SUPPORT_TICKET_UPDATED',
+        actorUserId: actor.userId,
+        entityType: 'SUPPORT_TICKET',
+        entityId: snapshot.id,
+        blockFarmId: current.blockFarmId,
+        details: `Updated support ticket ${snapshot.id} to ${status}.`,
+        createdAt: now
+      });
+      return { ...current, ...update };
+    });
+    const [data] = await presentTickets([ticket]);
     return res.json({ success: true, data });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });

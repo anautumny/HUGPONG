@@ -126,7 +126,7 @@ export default function AuditDossierCard({
               </h3>
             </div>
             <p className="text-xs font-semibold text-hug-muted uppercase tracking-wider mt-0.5">
-              Sugar Regulatory Administration · Silay Block Farm Auditor
+              Sugar Regulatory Administration · Audit Reviewer
             </p>
             <p className="text-xs text-hug-muted mt-1">
               Monthly Agronomic Compliance & Verification Dossier
@@ -268,6 +268,12 @@ export default function AuditDossierCard({
                 operationLogs.map((log, idx) => {
                   const logCost = Number(log.totalCost != null ? log.totalCost : (log.cost || 0));
                   const opName = log.operationName || `Operation ${idx + 1}`;
+                  const operationLabel = (
+                    <>
+                      <span>{opName}</span>
+                      {log.childOperationName && <span className="block text-[10px] font-semibold text-hug-muted">Child operation: {log.childOperationName}</span>}
+                    </>
+                  );
                   const itemHa = log.areaHa ? `${Number(log.areaHa).toFixed(2)} ha` : `${totalAreaHa.toFixed(2)} ha`;
                   const hasChildren = Array.isArray(log.lineItems) && log.lineItems.length > 0;
 
@@ -277,7 +283,7 @@ export default function AuditDossierCard({
                         <tr className="bg-bg font-bold border-b border-border">
                           <td className="px-3 py-2.5 text-center text-primary font-black">{idx + 1}</td>
                           <td className="px-3 py-2.5 uppercase tracking-wide">
-                            <span>{opName}</span>
+                            {operationLabel}
                             <span className="text-[10px] font-bold px-1.5 py-0.5 bg-primary/10 text-primary dark:text-primary-light rounded ml-2">
                               Group ({log.lineItems.length} items)
                             </span>
@@ -327,7 +333,7 @@ export default function AuditDossierCard({
                   return (
                     <tr key={log.operationLogId || log.id || idx} className="bg-surface border-b border-border/60 hover:bg-bg/40">
                       <td className="px-3 py-2.5 text-center font-bold text-primary">{idx + 1}</td>
-                      <td className="px-3 py-2.5 font-bold">{opName}</td>
+                      <td className="px-3 py-2.5 font-bold">{operationLabel}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-hug-muted">{itemHa}</td>
                       <td className="px-3 py-2.5 text-right font-mono font-semibold">{logQty}</td>
                       <td className="px-3 py-2.5 text-center text-hug-muted font-medium">{logUnit}</td>
@@ -430,7 +436,7 @@ export default function AuditDossierCard({
       <ConfirmDialog
         isOpen={showConfirmModal}
         title="Certify this audit report?"
-        message={`This will apply the official SRA certification and digital seal to report ${report.reportId || report.id} (${report.period}).\n\nThis authoritative action will be logged in the SRA system audit ledger.`}
+        message={`This will certify report ${report.reportId || report.id} (${report.period}) and apply its system audit seal.\n\nThis action will be recorded in the audit ledger.`}
         confirmText="Issue SRA Certification"
         cancelText="Cancel"
         type="primary"

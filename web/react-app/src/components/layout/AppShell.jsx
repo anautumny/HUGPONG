@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useSync } from '../../context/SyncContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
@@ -10,6 +11,7 @@ const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
 export default function AppShell() {
   const { user, roleKey, isAuthenticated, isLoading, logout } = useAuth();
+  const { isOnline, networkOnline } = useSync();
   const navigate = useNavigate();
   const [isReturningToLogin, setIsReturningToLogin] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -149,6 +151,17 @@ export default function AppShell() {
         <div className="print:hidden no-print">
           <Topbar onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
         </div>
+
+        {!isOnline && roleKey === ROLE_KEYS.SRA_ADMIN && (
+          <div className="print:hidden no-print flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200" role="status" aria-live="polite">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+            <span>
+              {networkOnline
+                ? 'HUGPONG server unavailable. You remain signed in; live SRA actions will resume automatically.'
+                : 'No internet connection. You remain signed in; live SRA actions will resume automatically.'}
+            </span>
+          </div>
+        )}
 
         {/* Page Content Outlet without forced card wrapping */}
         <main

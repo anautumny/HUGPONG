@@ -22,37 +22,82 @@ function validInput(overrides = {}) {
     molassesPricePerMetricTon: 4200,
     molassesPriceChange: -10,
     circularNumber: 'SRA-2026-117',
-    source: 'Official SRA circular 117',
+    source: 'Published circular 117',
     ...overrides
   };
 }
 
 function fakeFirestore() {
   const records = new Map();
+  const audits = new Map();
   let createCount = 0;
-  return {
+  const database = {
     records,
+    audits,
     get createCount() { return createCount; },
     collection(name) {
-      assert.equal(name, 'sra_prices');
-      return {
+      const target = name === 'sra_prices' ? records : audits;
+      const query = {
+        filters: [],
+        ordering: null,
+        resultLimit: null,
         doc(id) {
+          const resolvedId = id || `EVT-${audits.size + 1}`;
           return {
+            collectionName: name,
+            id: resolvedId,
             async get() {
-              return records.has(id)
-                ? { exists: true, data: () => records.get(id) }
+              return target.has(resolvedId)
+                ? { exists: true, data: () => target.get(resolvedId) }
                 : { exists: false, data: () => undefined };
             },
-            async create(payload) {
-              assert.equal(records.has(id), false);
-              createCount += 1;
-              records.set(id, payload);
-            }
+            target
+          };
+        },
+        where(field, operator, value) {
+          this.filters.push({ field, operator, value });
+          return this;
+        },
+        orderBy(field, direction) {
+          this.ordering = { field, direction };
+          return this;
+        },
+        limit(value) {
+          this.resultLimit = value;
+          return this;
+        },
+        async get() {
+          let entries = Array.from(target.entries());
+          for (const filter of this.filters) {
+            if (filter.operator === '<') entries = entries.filter(([, value]) => value[filter.field] < filter.value);
+          }
+          if (this.ordering) {
+            const { field, direction } = this.ordering;
+            entries.sort((a, b) => String(a[1][field]).localeCompare(String(b[1][field])) * (direction === 'desc' ? -1 : 1));
+          }
+          if (this.resultLimit != null) entries = entries.slice(0, this.resultLimit);
+          return {
+            docs: entries.map(([id, value]) => ({ id, data: () => value }))
           };
         }
       };
+      return query;
+    },
+    async runTransaction(handler) {
+      const writes = [];
+      const result = await handler({
+        get: ref => ref.get(),
+        create: (ref, payload) => writes.push({ ref, payload })
+      });
+      for (const { ref, payload } of writes) {
+        assert.equal(ref.target.has(ref.id), false);
+        ref.target.set(ref.id, payload);
+        if (ref.collectionName === 'sra_prices') createCount += 1;
+      }
+      return result;
     }
   };
+  return database;
 }
 
 test('buildSraPrice accepts and emits only the canonical Phase 2 fields', () => {
@@ -77,7 +122,27 @@ test('price publication creates exactly one record and an identical retry is ide
   assert.equal(replay.replayed, true);
   assert.equal(database.createCount, 1);
   assert.equal(database.records.size, 1);
+  assert.equal(database.audits.size, 1);
   assert.equal(first.data.effectiveDate, '2026-09-17');
+  assert.equal(first.data.sugarPriceChange, 0);
+  assert.equal(first.data.molassesPriceChange, 0);
+});
+
+test('price movements are derived from persisted history and ignore client-supplied changes', async () => {
+  const database = fakeFirestore();
+  await publishSraPrice(database, validInput(), { publishedByUserId: USER_ID, publishedAt: NOW });
+  const second = await publishSraPrice(database, validInput({
+    id: 'PRC-TEST-002',
+    effectiveDate: '2026-09-24',
+    circularNumber: 'SRA-2026-118',
+    sugarPricePerLkg: 2875.5,
+    sugarPriceChange: 999999,
+    molassesPricePerMetricTon: 4175,
+    molassesPriceChange: 999999
+  }), { publishedByUserId: USER_ID, publishedAt: '2026-09-24T04:00:00.000Z' });
+
+  assert.equal(second.data.sugarPriceChange, 25.5);
+  assert.equal(second.data.molassesPriceChange, -25);
 });
 
 test('human-readable, missing, and impossible effective dates remain rejected', () => {
@@ -105,10 +170,6 @@ test('missing required sugar or molasses values are rejected before persistence'
     publishSraPrice(database, validInput({ molassesPricePerMetricTon: null }), { publishedByUserId: USER_ID, publishedAt: NOW }),
     /molassesPricePerMetricTon is required/
   );
-  await assert.rejects(
-    publishSraPrice(database, validInput({ sugarPriceChange: undefined }), { publishedByUserId: USER_ID, publishedAt: NOW }),
-    /sugarPriceChange is required/
-  );
   assert.equal(database.createCount, 0);
 });
 
@@ -131,14 +192,15 @@ test('active web price mapping validates canonical records and does not recreate
   );
 });
 
-test('active React publisher derives canonical change values and payload fields', () => {
+test('active React publisher previews changes but leaves authoritative deltas to the server', () => {
   const modal = fs.readFileSync(
     path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'components', 'prices', 'PublishPriceModal.jsx'),
     'utf8'
   );
   assert.match(modal, /const sugarChange = .*curSugarNum - prevSugar : 0/);
   assert.match(modal, /const molassesChange = .*curMolassesNum - prevMolasses : 0/);
-  assert.match(modal, /effectiveDate,\s+weekLabel: weekLabel\.trim\(\),\s+sugarPricePerLkg: curSugarNum,\s+sugarPriceChange: sugarChange,\s+molassesPricePerMetricTon: curMolassesNum,\s+molassesPriceChange: molassesChange,\s+circularNumber:/);
+  assert.match(modal, /effectiveDate,\s+weekLabel: weekLabel\.trim\(\),\s+sugarPricePerLkg: curSugarNum,\s+molassesPricePerMetricTon: curMolassesNum,\s+circularNumber:/);
+  assert.doesNotMatch(modal, /sugarPriceChange:\s*sugarChange|molassesPriceChange:\s*molassesChange/);
   assert.doesNotMatch(modal, /\b(date|week|price|molasses|change|molassesChange)\s*:/);
 });
 

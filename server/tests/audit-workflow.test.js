@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const {
   AUDIT_STATUS,
   businessPeriod,
@@ -127,7 +128,7 @@ test('a returned latest report never recaptures logs covered by an older non-ret
   assert.deepEqual(batch.operations.map(operation => operation.id), ['LOG-2', 'LOG-3']);
 });
 
-test('QR transfer carries the complete canonical report in scan-friendly parts', () => {
+test('current QR is one secure report reference and legacy full transfers remain readable', () => {
   const report = {
     id: 'AUD-BF1-2026-09-V1', rootReportId: 'AUD-BF1-2026-09', blockFarmId: 'BF-1',
     blockFarmName: 'Central Farm', periodKey: '2026-09', reportVersion: 1, operationCount: 1, fieldCount: 1,
@@ -142,21 +143,28 @@ test('QR transfer carries the complete canonical report in scan-friendly parts',
   const decoded = decodeQrPayload(encoded);
   assert.equal(decoded.reportId, report.id);
   assert.equal(decoded.integrityHash, report.integrityHash);
-  assert.equal(decoded.operationSnapshots[0].operationLogId, 'LOG-IN-QR');
-  assert.equal(decoded.fieldSnapshots[0].memberName, 'Farmer One');
+  assert.equal(decoded.referenceOnly, true);
+  assert.equal(decoded.operationSnapshots, undefined);
   const qrCodes = encodeQrParts(report);
-  assert.ok(qrCodes.length > 1);
-  qrCodes.forEach(code => assert.ok(Buffer.byteLength(code, 'utf8') <= 700));
-  assert.deepEqual(assembleQrParts([...qrCodes].reverse()), decoded);
+  assert.deepEqual(qrCodes, [encoded]);
+  assert.ok(Buffer.byteLength(encoded, 'utf8') <= 300);
 
-  // Previously issued version-2 multipart codes remain readable during migration.
-  const legacyPayload = JSON.stringify({ type: 'HUGPONG_AUDIT_TRANSFER', schemaVersion: 2, report: decoded });
+  // Previously issued version-3 full and version-2 multipart codes remain readable.
+  const canonical = validateCanonicalAuditReport(report);
+  const legacyPayload = JSON.stringify({
+    type: 'HUGPONG_AUDIT_TRANSFER', schemaVersion: 3, encoding: 'DEFLATE_RAW_BASE64_UTF8',
+    reportId: canonical.reportId, integrityHash: canonical.integrityHash,
+    data: zlib.deflateRawSync(Buffer.from(JSON.stringify(canonical), 'utf8'), { level: 9 }).toString('base64')
+  });
+  const legacyDecoded = decodeQrPayload(legacyPayload);
+  assert.equal(legacyDecoded.operationSnapshots[0].operationLogId, 'LOG-IN-QR');
+  assert.equal(legacyDecoded.fieldSnapshots[0].memberName, 'Farmer One');
   const midpoint = Math.ceil(legacyPayload.length / 2);
   const legacyParts = [legacyPayload.slice(0, midpoint), legacyPayload.slice(midpoint)].map((data, index) => JSON.stringify({
     type: 'HUGPONG_AUDIT_PART', schemaVersion: 2, transferId: 'legacy-transfer',
     partNumber: index + 1, partCount: 2, data
   }));
-  assert.deepEqual(assembleQrParts([...legacyParts].reverse()), decoded);
+  assert.deepEqual(assembleQrParts([...legacyParts].reverse()), legacyDecoded);
   assert.throws(() => assembleQrParts(legacyParts.slice(1)), /incomplete/i);
 });
 
@@ -200,9 +208,25 @@ test('audit route exposes separate idempotent submit, QR import, return, and cer
   assert.match(source, /deliveryStatus: AUDIT_DELIVERY_STATUS\.RECEIVED/);
   assert.match(source, /reviewStatus: 'complete', certificationStatus: 'certified'/);
   assert.match(source, /expectedHash !== \(report\.integrityHash \|\| report\.qrHash\)/);
+  assert.match(source, /payload\.integrityHash !== authoritative\.integrityHash/);
   assert.match(source, /transaction\.create\(ref, imported\)/);
   assert.match(source, /validateCanonicalAuditReport\(payload\)/);
   assert.doesNotMatch(source, /fields:\s*\[\],\s*operations:\s*\[\]/);
+});
+
+test('Web and Mobile present one current QR and Mobile queues offline references by SRA account', () => {
+  const webCompiler = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'components', 'audit', 'AuditCompilationModal.jsx'), 'utf8');
+  const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
+  const mobileStorage = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'storageService.js'), 'utf8');
+
+  assert.match(webCompiler, /createAuditQrPayload\(compiledResult\)/);
+  assert.doesNotMatch(webCompiler, /QR Part|Multi-Part|Multipart/);
+  assert.match(mobileFieldOps, /const qrPayload = createAuditQrPayload\(report\)/);
+  assert.doesNotMatch(mobileFieldOps, /activeQrPartIndex|setActiveQrPartIndex/);
+  assert.match(mobileFieldOps, /queueAuditReferenceForRetry/);
+  assert.match(mobileFieldOps, /Saved Audit Retrieved/);
+  assert.match(mobileStorage, /PENDING_AUDIT_REFERENCE/);
+  assert.match(mobileStorage, /pendingAuditReferenceStorageKey\(userId\)/);
 });
 
 test('active SRA reads are bounded server queries and history remains one canonical collection', () => {

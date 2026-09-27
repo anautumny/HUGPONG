@@ -10,7 +10,7 @@ import { fromReport, reportPeriod } from './firestoreSchema';
 import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 import { sortNewestFirst } from '../utils/recordOrdering';
 import {
-  createAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
+  createAuditQrPayload, createLegacyAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
   decodeAuditQrPart, assembleAuditQrParts, validateCanonicalAuditReport
 } from '../domain/auditWorkflow';
 
@@ -80,7 +80,7 @@ export async function compileAuditReport({ blockFarmId, periodKey, operationLogI
 }
 
 /**
- * SRA Admin: Issue official SRA Digital Seal and certification
+ * SRA Admin: certify an audit report and issue its system audit seal
  */
 export async function certifyAuditReport(reportId, { certificationNotes = '' } = {}) {
   const cleanId = String(reportId || '').trim();
@@ -125,6 +125,6 @@ export async function verifyAuditReportIntegrity(report) {
 }
 
 export {
-  createAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
+  createAuditQrPayload, createLegacyAuditQrPayload, createAuditQrParts, decodeAuditQrPayload,
   decodeAuditQrPart, assembleAuditQrParts, validateCanonicalAuditReport
 };

@@ -1,3 +1,5 @@
+import { canonicalOperationUnit } from '../domain/operationUnits';
+
 export const COLLECTIONS = Object.freeze({
   USERS: 'users',
   BLOCK_FARMS: 'block_farms',
@@ -81,6 +83,10 @@ export function fromUserDocument(id, value = {}) {
     id,
     employeeId: id,
     displayName: value.displayName,
+    firstName: value.firstName || '',
+    middleName: value.middleName || '',
+    lastName: value.lastName || '',
+    suffix: value.suffix || '',
     name: value.displayName,
     phone: value.phone,
     contact: value.phone,
@@ -93,6 +99,8 @@ export function fromUserDocument(id, value = {}) {
     passwordChangedAt: value.passwordChangedAt,
     approvedByUserId: value.approvedByUserId,
     approvedAt: value.approvedAt,
+    requestedBlockFarmId: value.requestedBlockFarmId || null,
+    affiliatedBlockFarmId: value.affiliatedBlockFarmId || null,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     assignment: value.assignment || null
@@ -103,6 +111,10 @@ export function toUserDocument(value = {}) {
   const role = canonicalRole(value.canonicalRole || value.role);
   if (!role) throw new Error('User role must be canonical.');
   return {
+    firstName: String(value.firstName || '').trim(),
+    middleName: String(value.middleName || '').trim() || null,
+    lastName: String(value.lastName || '').trim(),
+    suffix: String(value.suffix || '').trim() || null,
     displayName: String(value.displayName || value.name || '').trim(),
     phone: String(value.phone || value.contact || '').replace(/\D/g, ''),
     role,
@@ -112,6 +124,8 @@ export function toUserDocument(value = {}) {
     passwordChangedAt: value.passwordChangedAt || null,
     approvedByUserId: value.approvedByUserId || null,
     approvedAt: value.approvedAt || null,
+    requestedBlockFarmId: value.requestedBlockFarmId || null,
+    affiliatedBlockFarmId: value.affiliatedBlockFarmId || null,
     createdAt: value.createdAt || new Date().toISOString(),
     updatedAt: value.updatedAt || new Date().toISOString()
   };
@@ -119,8 +133,8 @@ export function toUserDocument(value = {}) {
 
 export function fromBlockFarmDocument(id, value = {}) {
   return {
-    id,
     ...value,
+    id,
     declaredHa: Number(value.declaredAreaHa || 0),
     farmManagerId: value.managerUserId || ''
   };
@@ -201,6 +215,7 @@ export function fromFieldDocument(id, value = {}, cycle = null) {
     member: value.memberName || value.member || value.memberUserId || '',
     ha: Number(value.areaHa || 0),
     stageNumber: canonicalStageNumber,
+    isCompleted: Boolean(cycle?.completedAt),
     month: Number(cycle?.elapsedMonths || 0),
     batchMonth: Number(cycle?.batchNumber || 1),
     cycleNumber: Number(cycle?.sequenceNumber || 1),
@@ -225,6 +240,7 @@ export function toFieldDocument(value = {}) {
     status,
     customStages: Array.isArray(value.customStages) ? value.customStages : [],
     customOperations: value.customOperations && typeof value.customOperations === 'object' ? value.customOperations : {},
+    operationSchedule: Array.isArray(value.operationSchedule) ? value.operationSchedule : [],
     createdAt: value.createdAt || new Date().toISOString(),
     updatedAt: value.updatedAt || new Date().toISOString(),
     archivedAt: value.archivedAt || null
@@ -233,14 +249,38 @@ export function toFieldDocument(value = {}) {
 
 function canonicalLineItems(value) {
   const input = Array.isArray(value.lineItems) ? value.lineItems : (Array.isArray(value.subItems) ? value.subItems : []);
-  return input.map((item, index) => ({
-    lineItemId: item.lineItemId || item.id || `LINE-${index + 1}`,
-    description: String(item.description || '').trim(),
-    quantity: Number(item.quantity ?? item.qty ?? 0),
-    unit: String(item.unit || '').trim(),
-    unitCost: Number(item.unitCost || 0),
-    subtotal: Number(item.subtotal ?? item.subTotal ?? 0)
-  }));
+  return input.map((item, index) => {
+    const quantity = Number(item.quantity ?? item.qty ?? 0);
+    const unitCost = Number(item.unitCost || 0);
+    return {
+      lineItemId: item.lineItemId || item.id || `LINE-${index + 1}`,
+      itemType: ['MATERIAL', 'EQUIPMENT'].includes(String(item.itemType || item.category || '').trim().toUpperCase())
+        ? String(item.itemType || item.category).trim().toUpperCase()
+        : 'EXPENSE',
+      description: String(item.description || '').trim(),
+      quantity,
+      unit: canonicalOperationUnit(item.unit) || String(item.unit || '').trim(),
+      unitCost,
+      subtotal: quantity * unitCost
+    };
+  });
+}
+
+function canonicalLaborEntries(value) {
+  const input = Array.isArray(value.laborEntries) ? value.laborEntries : (Array.isArray(value.workers) ? value.workers : []);
+  return input.map((item, index) => {
+    const workerCount = Number(item.workerCount ?? item.workers ?? 1);
+    const days = Number(item.days ?? item.quantity ?? 1);
+    const rate = Number(item.rate ?? item.cost ?? 0);
+    return {
+      laborEntryId: item.laborEntryId || item.id || `WORKER-${index + 1}`,
+      workerCount,
+      days,
+      unit: 'day',
+      rate,
+      subtotal: workerCount * days * rate
+    };
+  });
 }
 
 function canonicalAmendments(value) {
@@ -289,6 +329,14 @@ export function toOperationLogDocument(value = {}, context = {}) {
   const archivedAt = status === 'ARCHIVED' ? (context.archivedAt || value.archivedAt || null) : null;
   const archivedByUserId = status === 'ARCHIVED' ? (context.archivedByUserId || value.archivedByUserId || null) : null;
   if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED operation logs require archive metadata.');
+  const normalizedLineItems = canonicalLineItems(value);
+  const normalizedLaborEntries = canonicalLaborEntries(value);
+  const totalCost = Number(value.totalCost ?? value.cost ?? 0);
+  const componentCost = [...normalizedLineItems, ...normalizedLaborEntries]
+    .reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+  const baseCost = value.baseCost == null
+    ? Math.max(0, totalCost - componentCost)
+    : Number(value.baseCost);
   return {
     fieldId,
     cycleId,
@@ -300,16 +348,23 @@ export function toOperationLogDocument(value = {}, context = {}) {
     submittedByUserId,
     submissionSource: context.submissionSource || value.submissionSource || '',
     operationDefinitionId: value.operationDefinitionId || value.sraOperationId || 'CUSTOM',
+    parentOperationDefinitionId: value.parentOperationDefinitionId || null,
+    childOperationDefinitionId: value.childOperationDefinitionId || null,
+    childOperationName: String(value.childOperationName || '').trim(),
     operationName: String(value.operationName || value.activity || '').trim(),
     category: String(value.category || '').trim(),
     variety: String(value.variety || '').trim(),
     stageNumber: Number(value.stageNumber || 1),
     performedOn: value.performedOn || value.isoDate || String(value.date || '').slice(0, 10),
     areaHa: Number(value.areaHa ?? value.hectares ?? value.ha ?? 0),
-    peopleCount: Number(value.peopleCount ?? value.people ?? 0),
+    peopleCount: normalizedLaborEntries.length
+      ? normalizedLaborEntries.reduce((sum, item) => sum + Number(item.workerCount || 0), 0)
+      : Number(value.peopleCount ?? value.people ?? 0),
     quantity: quantityValue,
-    totalCost: Number(value.totalCost ?? value.cost ?? 0),
-    lineItems: canonicalLineItems(value),
+    baseCost,
+    totalCost,
+    lineItems: normalizedLineItems,
+    laborEntries: normalizedLaborEntries,
     photoEvidence: canonicalPhotoEvidence(value.photoEvidence),
     isSupplemental: Boolean(value.isSupplemental),
     amendments: canonicalAmendments(value.amendments),
@@ -322,10 +377,14 @@ export function toOperationLogDocument(value = {}, context = {}) {
 }
 
 export function fromOperationLogDocument(id, value = {}) {
+  const quantityValue = value.quantity && typeof value.quantity === 'object' ? value.quantity : null;
   return {
     id,
     ...value,
     sraOperationId: value.operationDefinitionId,
+    parentOperationDefinitionId: value.parentOperationDefinitionId || null,
+    childOperationDefinitionId: value.childOperationDefinitionId || null,
+    childOperationName: value.childOperationName || '',
     activity: value.operationName,
     cost: Number(value.totalCost || 0),
     hectares: Number(value.areaHa || 0),
@@ -333,13 +392,24 @@ export function fromOperationLogDocument(id, value = {}) {
     date: value.performedOn,
     period: value.performedOn,
     isoDate: value.performedOn,
+    inputQty: quantityValue?.value == null ? '' : String(quantityValue.value),
+    inputUnit: quantityValue?.unit || '',
+    inputName: quantityValue?.inputName || '',
     subItems: (value.lineItems || []).map(item => ({
       id: item.lineItemId,
       description: item.description,
       qty: item.quantity,
       unit: item.unit,
       unitCost: item.unitCost,
-      subTotal: item.subtotal
+      subTotal: item.subtotal,
+      itemType: item.itemType || 'EXPENSE'
+    })),
+    workers: (value.laborEntries || []).map(item => ({
+      id: item.laborEntryId,
+      workerCount: item.workerCount || 1,
+      days: item.days ?? item.quantity ?? 1,
+      rate: item.rate,
+      subtotal: item.subtotal
     })),
     inputQty: value.quantity?.value ?? '',
     inputUnit: value.quantity?.unit || '',
@@ -359,6 +429,9 @@ export function operationSnapshot(id, value) {
     cropYearCycle: log.cropYearCycle,
     stageNumberAtRecord: log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
+    parentOperationDefinitionId: log.parentOperationDefinitionId || null,
+    childOperationDefinitionId: log.childOperationDefinitionId || null,
+    childOperationName: log.childOperationName || '',
     operationName: log.operationName,
     category: log.category,
     variety: log.variety,
@@ -367,8 +440,10 @@ export function operationSnapshot(id, value) {
     areaHa: log.areaHa,
     peopleCount: log.peopleCount,
     quantity: log.quantity,
+    baseCost: log.baseCost,
     totalCost: log.totalCost,
     lineItems: log.lineItems,
+    laborEntries: log.laborEntries,
     amendments: log.amendments,
     submittedByUserId: log.submittedByUserId || null,
     submissionSource: log.submissionSource || null,
@@ -432,10 +507,18 @@ export function toAuditReportDocument(value = {}, context = {}) {
   const certifiedByUserId = status === 'CERTIFIED' ? (context.certifiedByUserId || value.certifiedByUserId || null) : null;
   const certifiedAt = status === 'CERTIFIED' ? (context.certifiedAt || value.certifiedAt || null) : null;
   if (status === 'CERTIFIED' && (!certifiedByUserId || !certifiedAt)) throw new Error('CERTIFIED audit reports require certification metadata.');
+  const cropYearCycles = Array.from(new Set([
+    value.cropYearCycle,
+    ...(Array.isArray(value.cropYearCycles) ? value.cropYearCycles : []),
+    ...(Array.isArray(value.fieldSnapshots) ? value.fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]) : []),
+    ...operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
+  ].map(cropYear => formatCropYear(cropYear, '')).filter(Boolean))).sort();
   return {
     blockFarmId,
     period,
     periodKey: period,
+    cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
+    cropYearCycles,
     status,
     qrHash,
     compiledByUserId,

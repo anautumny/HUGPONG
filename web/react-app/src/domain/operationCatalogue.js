@@ -69,10 +69,10 @@ export const SRA_OPERATIONS_CATALOGUE = [
     unit: 'ha',
     costPerHa: 15800,
     subItems: [
-      { lineItemId: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', quantity: 2, unit: 'bags', unitCost: 1600, subtotal: 3200 },
-      { lineItemId: 'SI-05-2', description: 'Application of 18-46-00 (DAP / Complete)', quantity: 3, unit: 'bags', unitCost: 2500, subtotal: 7500 },
-      { lineItemId: 'SI-05-3', description: 'Application of 00-00-60 (MOP / Potash)', quantity: 2, unit: 'bags', unitCost: 2200, subtotal: 4400 },
-      { lineItemId: 'SI-05-4', description: 'Fertilizer Application Labor', quantity: 7, unit: 'bags', unitCost: 100, subtotal: 700 }
+      { lineItemId: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', quantity: 2, unit: 'bag', unitCost: 1600, subtotal: 3200 },
+      { lineItemId: 'SI-05-2', description: 'Application of 18-46-00 (DAP / Complete)', quantity: 3, unit: 'bag', unitCost: 2500, subtotal: 7500 },
+      { lineItemId: 'SI-05-3', description: 'Application of 00-00-60 (MOP / Potash)', quantity: 2, unit: 'bag', unitCost: 2200, subtotal: 4400 },
+      { lineItemId: 'SI-05-4', description: 'Fertilizer Application Labor', quantity: 7, unit: 'bag', unitCost: 100, subtotal: 700 }
     ]
   },
   {
@@ -82,11 +82,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'fert',
     inputType: 'direct',
     isGroup: false,
-    unit: 'tons',
+    unit: 'ton',
     rate: 2500,
     costPerHa: 5000,
     subItems: [
-      { lineItemId: 'SI-06-1', description: 'Agricultural Lime (Materials & Distribution)', quantity: 2, unit: 'tons', unitCost: 2500, subtotal: 5000 }
+      { lineItemId: 'SI-06-1', description: 'Agricultural Lime (Materials & Distribution)', quantity: 2, unit: 'ton', unitCost: 2500, subtotal: 5000 }
     ]
   },
   {
@@ -128,8 +128,8 @@ export const SRA_OPERATIONS_CATALOGUE = [
     unit: 'ha',
     costPerHa: 2500,
     subItems: [
-      { lineItemId: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', quantity: 1.5, unit: 'bags', unitCost: 1600, subtotal: 2400 },
-      { lineItemId: 'SI-09-2', description: 'Side-dressing Application Labor', quantity: 1.5, unit: 'bags', unitCost: 66.67, subtotal: 100 }
+      { lineItemId: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', quantity: 1.5, unit: 'bag', unitCost: 1600, subtotal: 2400 },
+      { lineItemId: 'SI-09-2', description: 'Side-dressing Application Labor', quantity: 1.5, unit: 'bag', unitCost: 66.67, subtotal: 100 }
     ]
   },
   {
@@ -153,11 +153,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'harvest',
     inputType: 'direct',
     isGroup: false,
-    unit: 'tons',
+    unit: 'ton',
     rate: 450,
     costPerHa: 27000,
     subItems: [
-      { lineItemId: 'SI-11-1', description: 'Cane Cutting & Truck Loading Labor', quantity: 60, unit: 'tons', unitCost: 450, subtotal: 27000 }
+      { lineItemId: 'SI-11-1', description: 'Cane Cutting & Truck Loading Labor', quantity: 60, unit: 'ton', unitCost: 450, subtotal: 27000 }
     ]
   },
   {
@@ -167,11 +167,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'harvest',
     inputType: 'direct',
     isGroup: false,
-    unit: 'tons',
+    unit: 'ton',
     rate: 250,
     costPerHa: 15000,
     subItems: [
-      { lineItemId: 'SI-12-1', description: 'Trucking freight to sugar mill', quantity: 60, unit: 'tons', unitCost: 250, subtotal: 15000 }
+      { lineItemId: 'SI-12-1', description: 'Trucking freight to sugar mill', quantity: 60, unit: 'ton', unitCost: 250, subtotal: 15000 }
     ]
   },
   {
@@ -181,11 +181,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'harvest',
     inputType: 'direct',
     isGroup: false,
-    unit: 'tons',
+    unit: 'ton',
     rate: 120,
     costPerHa: 7200,
     subItems: [
-      { lineItemId: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', quantity: 60, unit: 'tons', unitCost: 120, subtotal: 7200 }
+      { lineItemId: 'SI-13-1', description: 'Carabao / Bull cart hauling to loading ramp', quantity: 60, unit: 'ton', unitCost: 120, subtotal: 7200 }
     ]
   },
   {
@@ -208,6 +208,19 @@ export const getOperationsForStage = stageNumber => (
   SRA_OPERATIONS_CATALOGUE.filter(operation => operation.stageNumber === Number(stageNumber))
 );
 
-export const getOperationDefinition = operationDefinitionId => (
-  SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === String(operationDefinitionId || '').trim().toUpperCase()) || null
+const LEGACY_CHILD_OPERATIONS = [
+  { id: 'SRA-08-1', name: 'Manual Weeding (1st Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08' },
+  { id: 'SRA-08-2', name: 'Manual Weeding (2nd Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08' },
+  { id: 'SRA-08-3', name: 'Manual Weeding (3rd Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08' }
+];
+
+export const getOperationDefinition = operationDefinitionId => {
+  const id = String(operationDefinitionId || '').trim().toUpperCase();
+  return SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === id)
+    || LEGACY_CHILD_OPERATIONS.find(operation => operation.id === id)
+    || null;
+};
+
+export const getSelectableOperationsForStage = stageNumber => (
+  getOperationsForStage(stageNumber)
 );

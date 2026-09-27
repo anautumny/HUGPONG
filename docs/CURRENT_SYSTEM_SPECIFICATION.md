@@ -164,8 +164,8 @@ Observed implementation:
 
 - Web exposes Dashboard, SRA Audit Center, SRA Price Monitor, Block Farm Registry, User Management, and Settings.
 - Mobile exposes Dashboard, Field Ops/Audit Desk, Analytics, and Profile; Planner is hidden.
-- Mobile signs out SRA Admin when internet or the HUGPONG API becomes unavailable; district data is loaded from a fresh authorization-scoped server snapshot before the SRA workspace opens.
-- Web and mobile can scan/manual-enter report data, inspect a report, and issue an SRA seal. QR and manual-code verification are online-only and server-authoritative; mobile does not retain an offline SRA verification fallback.
+- Web and mobile retain a previously authenticated SRA Admin session when internet or the HUGPONG API becomes unavailable and show a simple offline notice. Mobile exposes the last account-scoped district analytics snapshot and certified monthly audit history as timestamped, read-only cached data. Pending reviews are excluded; official SRA mutations remain online and server-confirmed. Logout or an explicit authentication rejection removes the scoped snapshot.
+- Web and mobile generate one compact QR reference per compiled audit. An SRA Admin scans once, then the server retrieves and verifies the authoritative report by report ID and integrity hash. Mobile stores a reference scanned while offline and retries it after server connectivity returns. Previously issued full-payload and multipart QR codes remain readable during migration; import, return, and certification remain online and server-authoritative.
 - Verification, QR import, return, and certification use role-protected audit-report API endpoints and authoritative Firestore transactions.
 - SRA certification updates the audit report and its audit trail; it does not rewrite operation-log lifecycle status.
 

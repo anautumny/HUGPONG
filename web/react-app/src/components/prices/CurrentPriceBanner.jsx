@@ -27,10 +27,10 @@ export default function CurrentPriceBanner({
       <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-6 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${className}`}>
         <div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-hug-muted block mb-1">
-            Current Official SRA Price
+            Current Price Reference
           </span>
           <h3 className="text-base font-bold text-hug-text">
-            No official SRA price circular published yet.
+            No source-referenced price record has been published yet.
           </h3>
           <p className="text-xs text-hug-muted mt-0.5">
             Official benchmark rates will appear here once published by the Sugar Regulatory Administration.
@@ -78,10 +78,10 @@ export default function CurrentPriceBanner({
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-success animate-pulse shrink-0" />
             <span className="text-[11px] font-bold uppercase tracking-wider text-hug-muted">
-              Current Official SRA Price
+              Current Price Reference
             </span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-success-bg text-success border border-success/30">
-              Active Official Circular
+              Active Published Reference
             </span>
           </div>
           <h2 className="text-lg font-bold text-hug-text mt-1">

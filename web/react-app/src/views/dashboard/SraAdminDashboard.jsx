@@ -50,7 +50,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
       items.push({
         id: 'no-price',
         title: 'No Current SRA Price Published',
-        description: 'Publish the latest official millsite circular to broadcast official prices across district terminals.',
+        description: 'Publish a source-referenced millsite price record across district terminals.',
         type: 'warning',
         to: '/prices',
         actionLabel: 'Publish Price'
@@ -84,7 +84,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
   const headerActions = [
     {
-      label: 'Post Official SRA Price',
+      label: 'Publish Price Reference',
       onClick: () => setIsPublishModalOpen(true),
       icon: PlusCircle,
       variant: 'primary'
@@ -136,7 +136,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
         actions={headerActions}
       />
 
-      {/* 2. Primary Official Price Section (12-col grid) */}
+      {/* 2. Primary published-price section (12-column grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         <div className="lg:col-span-8 min-w-0 flex flex-col">
           <CurrentPriceCard
@@ -162,7 +162,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
               Regulatory Oversight
             </h3>
             <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-              Supervising block farms, official price circulars, and compliance audit certifications.
+              Supervising block farms, referenced price records, and compliance audit certifications.
             </p>
 
             <div className="mt-4 pt-3 border-t border-border/60 space-y-2">
@@ -189,7 +189,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
           <div className="pt-4 mt-4 border-t border-border/60">
             <p className="text-[11px] text-hug-muted font-medium">
-              Official prices published here sync immediately to all mobile field terminals.
+              Price records published here sync immediately to all mobile field terminals.
             </p>
           </div>
         </div>
@@ -207,7 +207,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
         items={attentionItems}
         isLoading={isLoading}
         emptyTitle="All regulatory items current"
-        emptyDescription="Official SRA prices are published and all submitted audit reports have been certified."
+        emptyDescription="Price references are current and all submitted audit reports have been certified."
       />
 
       {/* 5. Concise District Analytics Preview */}
@@ -249,7 +249,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
               <span className="text-xs text-hug-muted font-medium">per LKg</span>
             </div>
             <p className="text-[11px] text-hug-muted mt-1.5">
-              {previousPrice ? 'Tracked against preceding official price circular.' : 'Current active district baseline rate.'}
+              {previousPrice ? 'Tracked against the preceding published price record.' : 'Current active district reference rate.'}
             </p>
           </div>
 

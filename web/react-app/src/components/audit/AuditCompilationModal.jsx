@@ -6,15 +6,13 @@ import {
   CloudUpload,
   QrCode,
   Download,
-  Copy,
-  ChevronLeft,
-  ChevronRight
+  Copy
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { compileAuditReport, fetchNextAuditPeriod, submitAuditReport, createAuditQrParts } from '../../services/auditService';
+import { compileAuditReport, fetchNextAuditPeriod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
 import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, reportedOperationIds } from '../../domain/auditWorkflow';
 
 export default function AuditCompilationModal({
@@ -42,8 +40,7 @@ export default function AuditCompilationModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreparingQr, setIsPreparingQr] = useState(false);
   const [deliveryMessage, setDeliveryMessage] = useState('');
-  const [qrParts, setQrParts] = useState([]);
-  const [qrPartIndex, setQrPartIndex] = useState(0);
+  const [qrPayload, setQrPayload] = useState('');
   const [qrActionMessage, setQrActionMessage] = useState('');
   const initialReportKey = initialReport
     ? `${initialReport.id || initialReport.reportId}:${initialReport.status || ''}:${initialReport.updatedAt || ''}`
@@ -199,8 +196,7 @@ export default function AuditCompilationModal({
     setPeriodInfo(null);
     setDeliveryMessage('');
     setIsPreparingQr(false);
-    setQrParts([]);
-    setQrPartIndex(0);
+    setQrPayload('');
     setQrActionMessage('');
     onClose();
   };
@@ -227,8 +223,7 @@ export default function AuditCompilationModal({
     setCompileError(null);
     setTimeout(() => {
       try {
-        setQrParts(createAuditQrParts(compiledResult));
-        setQrPartIndex(0);
+        setQrPayload(createAuditQrPayload(compiledResult));
         setQrActionMessage('');
         setStep(3);
       } catch (error) {
@@ -240,7 +235,7 @@ export default function AuditCompilationModal({
   };
 
   const downloadCurrentQr = async () => {
-    const value = qrParts[qrPartIndex];
+    const value = qrPayload;
     if (!value) return;
     setCompileError(null);
     try {
@@ -253,12 +248,9 @@ export default function AuditCompilationModal({
       const reportId = String(compiledResult?.reportId || compiledResult?.id || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
       const link = document.createElement('a');
       link.href = dataUrl;
-      const partSuffix = qrParts.length > 1 ? `-part-${qrPartIndex + 1}-of-${qrParts.length}` : '';
-      link.download = `${reportId}-QR${partSuffix}.png`;
+      link.download = `${reportId}-QR.png`;
       link.click();
-      setQrActionMessage(qrParts.length > 1
-        ? `Saved QR part ${qrPartIndex + 1} of ${qrParts.length}.`
-        : 'Saved the complete audit QR image.');
+      setQrActionMessage('Saved the audit report QR image.');
     } catch (error) {
       setCompileError(error.message || 'Unable to save the QR image.');
     }
@@ -499,42 +491,15 @@ export default function AuditCompilationModal({
         <div className="flex flex-col items-center text-center gap-4 py-2">
           <div>
             <h4 className="text-base font-bold text-hug-text">
-              {qrParts.length > 1 ? 'Complete Multipart QR Transfer' : 'Complete QR Transfer'}
+              Audit Report QR
             </h4>
             <p className="text-xs text-hug-muted mt-1 max-w-md">
-              {qrParts.length > 1
-                ? `Scan all ${qrParts.length} parts on the SRA device. The report opens only after every part is captured.`
-                : 'Scan this code once on the SRA device. It contains the complete compressed audit report.'}
+              Scan this code once on the SRA device. The authoritative report will be securely retrieved from the server.
             </p>
           </div>
           <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-sm">
-            <QRCodeView value={qrParts[qrPartIndex] || ''} size={260} color="#000000" bgColor="#FFFFFF" className="p-2" />
-            <strong className="text-xs text-hug-text">
-              {qrParts.length > 1 ? `QR Part ${qrPartIndex + 1} of ${qrParts.length}` : 'One QR · Complete Report'}
-            </strong>
-            {qrParts.length > 1 && (
-              <div className="grid grid-cols-2 gap-2 w-full">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={ChevronLeft}
-                  disabled={qrPartIndex === 0}
-                  onClick={() => { setQrPartIndex(index => Math.max(0, index - 1)); setQrActionMessage(''); }}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={ChevronRight}
-                  iconPosition="right"
-                  disabled={qrPartIndex === qrParts.length - 1}
-                  onClick={() => { setQrPartIndex(index => Math.min(qrParts.length - 1, index + 1)); setQrActionMessage(''); }}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
+            <QRCodeView value={qrPayload} size={260} color="#000000" bgColor="#FFFFFF" className="p-2" />
+            <strong className="text-xs text-hug-text">Single secure report reference</strong>
             <div className="w-full rounded-lg border border-border bg-white dark:bg-surface p-2 text-left text-[10px] text-hug-muted">
               <p><strong className="text-hug-text">Report:</strong> {compiledResult?.reportId || compiledResult?.id}</p>
               <p><strong className="text-hug-text">Block Farm:</strong> {compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId}</p>

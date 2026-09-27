@@ -16,14 +16,28 @@ import {
   onAuthStateChanged
 } from 'firebase/auth';
 
-export const webFirebaseConfig = {
-  apiKey: "AIzaSyDYkv9afZa2ZlhxLzIEZfk2b5wP_s2XXpI",
-  authDomain: "hugpong-ff.firebaseapp.com",
-  projectId: "hugpong-ff",
-  storageBucket: "hugpong-ff.firebasestorage.app",
-  messagingSenderId: "516809927909",
-  appId: "1:516809927909:web:195ec4886bde93e811f80c"
-};
+const FIREBASE_ENV = Object.freeze({
+  apiKey: 'VITE_FIREBASE_API_KEY',
+  authDomain: 'VITE_FIREBASE_AUTH_DOMAIN',
+  projectId: 'VITE_FIREBASE_PROJECT_ID',
+  storageBucket: 'VITE_FIREBASE_STORAGE_BUCKET',
+  messagingSenderId: 'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  appId: 'VITE_FIREBASE_APP_ID'
+});
+
+function requiredFirebaseValue(name) {
+  const value = String(import.meta.env[name] || '').trim();
+  if (!value) {
+    throw new Error(`[HUGPONG Firebase] Missing required Web configuration: ${name}`);
+  }
+  return value;
+}
+
+export const webFirebaseConfig = Object.freeze(
+  Object.fromEntries(
+    Object.entries(FIREBASE_ENV).map(([key, name]) => [key, requiredFirebaseValue(name)])
+  )
+);
 
 const app = !getApps().length ? initializeApp(webFirebaseConfig) : getApp();
 export const auth = getAuth(app);

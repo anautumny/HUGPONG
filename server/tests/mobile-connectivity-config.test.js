@@ -95,6 +95,7 @@ test('public health and production errors disclose no session or infrastructure 
   assert.match(health, /success: true/);
   assert.match(health, /status: 'healthy'/);
   assert.doesNotMatch(health, /firebaseAdmin|authenticated|session|user|uptime/);
-  assert.match(server, /isProduction \? 'Internal Server Error'/);
+  assert.match(server, /isProduction[\s\S]*status === 403[\s\S]*'Internal Server Error'/);
+  assert.match(server, /res\.statusCode >= 500[\s\S]*service is temporarily unavailable/);
   assert.match(server, /app\.listen\(port, host/);
 });

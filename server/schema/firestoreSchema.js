@@ -3,10 +3,12 @@
 const crypto = require('crypto');
 const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { ROLE_DISPLAY_LABELS } = require('../domain/presentationContract');
+const { canonicalOperationUnit } = require('../domain/operationUnits');
 
 const COLLECTIONS = Object.freeze({
   USERS: 'users',
   USER_CREDENTIALS: 'user_credentials',
+  ACCOUNT_IDENTIFIERS: 'account_identifiers',
   BLOCK_FARMS: 'block_farms',
   FIELDS: 'fields',
   CROP_CYCLES: 'crop_cycles',
@@ -15,7 +17,9 @@ const COLLECTIONS = Object.freeze({
   AUDIT_LOGS: 'audit_logs',
   SRA_PRICES: 'sra_prices',
   SUPPORT_TICKETS: 'support_tickets',
-  TERMINAL_DIAGNOSTICS: 'terminal_diagnostics'
+  TERMINAL_DIAGNOSTICS: 'terminal_diagnostics',
+  SERVER_SESSIONS: 'server_sessions',
+  SECURITY_RATE_LIMITS: 'security_rate_limits'
 });
 
 const ROLES = Object.freeze({
@@ -198,20 +202,52 @@ function cleanObject(value) {
 
 function lineItems(value) {
   if (!Array.isArray(value)) return [];
-  return value.map((item, index) => ({
-    lineItemId: requiredString(item.lineItemId, `lineItems[${index}].lineItemId`, { max: 120 }),
-    description: requiredString(item.description, `lineItems[${index}].description`, { max: 300 }),
-    quantity: finiteNumber(item.quantity, `lineItems[${index}].quantity`),
-    unit: requiredString(item.unit, `lineItems[${index}].unit`, { max: 40 }),
-    unitCost: finiteNumber(item.unitCost, `lineItems[${index}].unitCost`),
-    subtotal: finiteNumber(item.subtotal, `lineItems[${index}].subtotal`)
-  }));
+  return value.map((item, index) => {
+    const quantityValue = finiteNumber(item.quantity, `lineItems[${index}].quantity`, { min: 0.01 });
+    const unitCost = finiteNumber(item.unitCost, `lineItems[${index}].unitCost`, { min: 0 });
+    const subtotal = finiteNumber(item.subtotal, `lineItems[${index}].subtotal`, { min: 0 });
+    if (Math.abs((quantityValue * unitCost) - subtotal) > 0.01) {
+      throw new Error(`lineItems[${index}].subtotal must equal quantity multiplied by unitCost.`);
+    }
+    const unit = canonicalOperationUnit(item.unit);
+    if (!unit) throw new Error(`lineItems[${index}].unit is not a supported operation unit.`);
+    return {
+      lineItemId: requiredString(item.lineItemId, `lineItems[${index}].lineItemId`, { max: 120 }),
+      itemType: enumValue(item.itemType || 'EXPENSE', ['MATERIAL', 'EXPENSE', 'EQUIPMENT'], `lineItems[${index}].itemType`),
+      description: requiredString(item.description, `lineItems[${index}].description`, { max: 300 }),
+      quantity: quantityValue,
+      unit,
+      unitCost,
+      subtotal
+    };
+  });
+}
+
+function laborEntries(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => {
+    const workerCount = integer(item.workerCount ?? item.workers ?? 1, `laborEntries[${index}].workerCount`, { min: 1, max: 10000 });
+    const days = finiteNumber(item.days ?? item.quantity ?? 1, `laborEntries[${index}].days`, { min: 0.01 });
+    const rate = finiteNumber(item.rate, `laborEntries[${index}].rate`, { min: 0 });
+    const subtotal = finiteNumber(item.subtotal == null ? workerCount * days * rate : item.subtotal, `laborEntries[${index}].subtotal`, { min: 0 });
+    if (Math.abs((workerCount * days * rate) - subtotal) > 0.01) {
+      throw new Error(`laborEntries[${index}].subtotal must equal workers multiplied by days and rate.`);
+    }
+    return {
+      laborEntryId: requiredString(item.laborEntryId, `laborEntries[${index}].laborEntryId`, { max: 120 }),
+      workerCount,
+      days,
+      unit: 'day',
+      rate,
+      subtotal
+    };
+  });
 }
 
 function quantity(value) {
   if (value == null) return null;
   return {
-    value: finiteNumber(value.value, 'quantity.value'),
+    value: finiteNumber(value.value, 'quantity.value', { min: 0.01 }),
     unit: requiredString(value.unit, 'quantity.unit', { max: 40 }),
     inputName: optionalString(value.inputName, { max: 120 })
   };
@@ -264,6 +300,13 @@ function buildOperationLog(input, context = {}) {
     throw new Error('ARCHIVED operation logs require archivedAt and archivedByUserId.');
   }
 
+  const normalizedLineItems = lineItems(input.lineItems);
+  const normalizedLaborEntries = laborEntries(input.laborEntries);
+  const requestedTotal = finiteNumber(input.totalCost, 'totalCost', { min: 0 });
+  const componentCost = [...normalizedLineItems, ...normalizedLaborEntries].reduce((sum, item) => sum + item.subtotal, 0);
+  const baseCost = input.baseCost == null
+    ? Math.max(0, requestedTotal - componentCost)
+    : finiteNumber(input.baseCost, 'baseCost', { min: 0 });
   const payload = {
     fieldId: requiredString(input.fieldId, 'fieldId', { max: 80 }).toUpperCase(),
     cycleId: requiredString(input.cycleId, 'cycleId', { max: 120 }).toUpperCase(),
@@ -275,16 +318,23 @@ function buildOperationLog(input, context = {}) {
     submittedByUserId: requiredString(context.submittedByUserId || input.submittedByUserId, 'submittedByUserId', { max: 80 }),
     submissionSource: enumValue(input.submissionSource || 'MEMBER', SUBMISSION_SOURCES, 'submissionSource'),
     operationDefinitionId: requiredString(input.operationDefinitionId, 'operationDefinitionId', { max: 120 }),
+    parentOperationDefinitionId: nullableId(input.parentOperationDefinitionId),
+    childOperationDefinitionId: nullableId(input.childOperationDefinitionId),
+    childOperationName: optionalString(input.childOperationName, { max: 300 }),
     operationName: requiredString(input.operationName, 'operationName', { max: 300 }),
     category: requiredString(input.category, 'category', { max: 80 }),
     variety: optionalString(input.variety, { max: 120 }),
     stageNumber: integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
     performedOn: calendarDate(input.performedOn, 'performedOn'),
     areaHa: finiteNumber(input.areaHa, 'areaHa', { min: 0.01, max: 500 }),
-    peopleCount: integer(input.peopleCount, 'peopleCount', { min: 0, max: 10000 }),
+    peopleCount: normalizedLaborEntries.length
+      ? normalizedLaborEntries.reduce((sum, item) => sum + item.workerCount, 0)
+      : integer(input.peopleCount, 'peopleCount', { min: 0, max: 10000 }),
     quantity: quantity(input.quantity),
-    totalCost: finiteNumber(input.totalCost, 'totalCost'),
-    lineItems: lineItems(input.lineItems),
+    baseCost,
+    totalCost: requestedTotal,
+    lineItems: normalizedLineItems,
+    laborEntries: normalizedLaborEntries,
     photoEvidence: photoEvidence(input.photoEvidence),
     isSupplemental: Boolean(input.isSupplemental),
     amendments: amendments(input.amendments),
@@ -295,9 +345,9 @@ function buildOperationLog(input, context = {}) {
     archivedByUserId: archiveActor
   };
 
-  const lineTotal = payload.lineItems.reduce((sum, item) => sum + item.subtotal, 0);
-  if (payload.lineItems.length && Math.abs(lineTotal - payload.totalCost) > 0.01) {
-    throw new Error('totalCost must equal the sum of lineItems subtotals.');
+  const calculatedTotal = payload.baseCost + componentCost;
+  if (Math.abs(calculatedTotal - payload.totalCost) > 0.01) {
+    throw new Error('totalCost must equal baseCost plus expense and worker subtotals.');
   }
   return payload;
 }
@@ -311,6 +361,9 @@ function buildOperationSnapshot(logId, log) {
     cropYearCycle: log.cropYearCycle || null,
     stageNumberAtRecord: log.stageNumberAtRecord == null ? null : log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
+    parentOperationDefinitionId: log.parentOperationDefinitionId || null,
+    childOperationDefinitionId: log.childOperationDefinitionId || null,
+    childOperationName: log.childOperationName || '',
     operationName: log.operationName,
     category: log.category,
     variety: log.variety || '',
@@ -319,8 +372,10 @@ function buildOperationSnapshot(logId, log) {
     areaHa: log.areaHa,
     peopleCount: log.peopleCount,
     quantity: log.quantity || null,
+    baseCost: Number(log.baseCost || 0),
     totalCost: log.totalCost,
     lineItems: Array.isArray(log.lineItems) ? log.lineItems : [],
+    laborEntries: Array.isArray(log.laborEntries) ? log.laborEntries : [],
     amendments: amendments(log.amendments),
     submittedByUserId: log.submittedByUserId || null,
     submissionSource: log.submissionSource || null,

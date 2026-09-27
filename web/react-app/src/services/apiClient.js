@@ -73,8 +73,7 @@ function mutationAffects(event, resources) {
 }
 
 export function createMutationContext(path, body, suppliedBaseVersion = null) {
-  const token = `${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
-  const mutationId = `MUT-WEB-${token}`;
+  const mutationId = `MUT-WEB-${globalThis.crypto.randomUUID().replace(/-/g, '').toUpperCase()}`;
   return {
     mutationId,
     idempotencyKey: mutationId,
@@ -84,7 +83,7 @@ export function createMutationContext(path, body, suppliedBaseVersion = null) {
 }
 
 export async function authenticatedRequest(path, options = {}) {
-  const token = options.token || localStorage.getItem('hugpong_auth_token');
+  const token = options.token || '';
   const method = String(options.method || 'GET').toUpperCase();
   let requestBody = options.body;
 
@@ -132,15 +131,16 @@ export async function authenticatedRequest(path, options = {}) {
 
   if (!response.ok || !result.success) {
     const errorCode = result.code || result.data?.code || '';
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hugpong:session-revoked', {
+        detail: { code: errorCode, message: result.error }
+      }));
+    }
     const error = new Error(friendlyErrorMessage(errorCode, result.error || 'Request was rejected by the server.'));
     error.status = response.status;
     error.data = result.data;
     error.code = errorCode;
     throw error;
-  }
-
-  if (result.token) {
-    localStorage.setItem('hugpong_auth_token', result.token);
   }
 
   if (result.firebaseCustomToken) {

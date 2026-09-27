@@ -3,8 +3,9 @@ import { CheckCircle2, Copy } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 
-function displayRole(account = {}) {
-  return String(account.canonicalRole || account.role || 'HUGPONG User')
+function displayRole(account) {
+  const safeAccount = account && typeof account === 'object' ? account : {};
+  return String(safeAccount.canonicalRole || safeAccount.role || 'HUGPONG User')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, character => character.toUpperCase());
 }
@@ -17,9 +18,18 @@ export default function AccountIdConfirmationModal({ account = null, onAcknowled
 
   const copyAccountId = async () => {
     if (!accountId) return;
-    await navigator.clipboard.writeText(accountId);
-    setCopied(true);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable.');
+      await navigator.clipboard.writeText(accountId);
+      setCopied(true);
+    } catch {
+      window.prompt('Copy this HUGPONG Login ID:', accountId);
+    }
   };
+
+  // Keep the closed state completely inert. The directory always mounts this
+  // component, including before an account has been created or approved.
+  if (!accountId) return null;
 
   return (
     <Modal
@@ -72,7 +82,7 @@ export default function AccountIdConfirmationModal({ account = null, onAcknowled
       </dl>
 
       <p className="text-xs leading-relaxed text-hug-muted">
-        The account owner should keep this ID in a secure place. The temporary password must be communicated separately and changed on first login when required.
+        The account owner should keep this ID in a secure place. Communicate the temporary password separately. On first login, the owner must verify the registered mobile number and then create a new password.
       </p>
     </Modal>
   );

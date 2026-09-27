@@ -264,9 +264,9 @@ export default function ProfileScreen({ navigation }) {
                 : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
               value: (() => {
                 if (session?.role === 'SRA Admin') {
-                  const districtName = session?.district || 'District 3 · Silay';
-                  const loc = session?.location || 'Silay Mill District, Negros Occidental';
-                  return `${districtName} · ${loc}`;
+                  const districtName = session?.district || '';
+                  const loc = session?.location || '';
+                  return [districtName, loc].filter(Boolean).join(' · ') || 'Not configured';
                 }
                 if (session?.role === 'Farm Manager') {
                   const managedFields = fields.filter(field => field.blockFarmId === managedFarm?.id);
@@ -325,7 +325,7 @@ export default function ProfileScreen({ navigation }) {
                     <Text style={s.telemetryLabelClean}>{t('profile_district_cert', 'District Certification')}</Text>
                     <Text style={s.telemetryValueClean}>
                       {(() => {
-                        const district = session?.district || 'District 3 · Silay';
+                        const district = session?.district || session?.location || 'Assigned regulatory scope';
                         const certCount = (auditReports || []).filter(a => String(a.status || '').toUpperCase() === 'CERTIFIED').length;
                         const totalAudits = (auditReports || []).length;
                         const totalHa = (fields || []).reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
@@ -355,14 +355,14 @@ export default function ProfileScreen({ navigation }) {
                           const item = sorted[0];
                           const circ = String(item.circularNumber || '').trim();
                           const week = String(item.weekLabel || '').trim();
-                          let name = circ || 'Official SRA Circular';
+                          let name = circ || 'Published Price Reference';
                           if (name.length > 35) {
                             const m = name.match(/(SRA Circular\s*#?\s*\d+)/i);
                             if (m) name = `${m[1]} (Official Millsite Notice)`;
                           }
                           return week ? `${name} · ${week}` : name;
                         }
-                        return 'No official circular published';
+                        return 'No price reference published';
                       })()}
                     </Text>
                   </View>

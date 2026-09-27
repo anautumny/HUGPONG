@@ -1,18 +1,40 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { enableScreens } from 'react-native-screens';
-import { NavigationContainer } from '@react-navigation/native';
+import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import RootNavigator from './src/navigation/RootNavigator';
 import { LanguageProvider } from './src/services/i18n';
 import { checkConnectivity, startNetworkMonitor, stopNetworkMonitor } from './src/services/networkService';
-import { performMobileSync } from './src/data/dataStore';
+import { fields, getCurrentSession, performMobileSync, subscribe } from './src/data/dataStore';
 import { reportMobileActivity } from './src/services/telemetryService';
+import {
+  clearLastPlannerNotificationResponse,
+  getLastPlannerNotificationResponse,
+  plannerNotificationData,
+  subscribeToPlannerNotificationResponses,
+  syncPlannerDeviceNotifications
+} from './src/services/plannerNotificationService';
 
 // Optimize native screen transitions and memory consumption on Android.
 enableScreens(true);
+const navigationRef = createNavigationContainerRef();
 
 export default function App() {
+  const pendingPlannerDate = useRef(null);
+  const openPlannerReminder = useCallback((response) => {
+    const data = plannerNotificationData(response);
+    if (!data?.plannedDate) return;
+    if (!navigationRef.isReady()) {
+      pendingPlannerDate.current = data.plannedDate;
+      return;
+    }
+    navigationRef.navigate('MainTabs', {
+      screen: 'Planner',
+      params: { screen: 'CalcMain', params: { selectedDate: data.plannedDate } }
+    });
+  }, []);
+
   useEffect(() => {
     startNetworkMonitor();
     let previousState = AppState.currentState;
@@ -32,9 +54,39 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const refreshReminders = () => syncPlannerDeviceNotifications(fields, getCurrentSession());
+    refreshReminders();
+    const unsubscribeData = subscribe(refreshReminders);
+    const responseSubscription = subscribeToPlannerNotificationResponses(response => {
+      openPlannerReminder(response);
+      clearLastPlannerNotificationResponse().catch(() => {});
+    });
+    getLastPlannerNotificationResponse().then(response => {
+      if (!plannerNotificationData(response)) return;
+      openPlannerReminder(response);
+      clearLastPlannerNotificationResponse().catch(() => {});
+    }).catch(() => {});
+    return () => {
+      unsubscribeData();
+      responseSubscription.remove();
+    };
+  }, [openPlannerReminder]);
+
   return (
     <LanguageProvider>
-      <NavigationContainer>
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          if (!pendingPlannerDate.current) return;
+          const plannedDate = pendingPlannerDate.current;
+          pendingPlannerDate.current = null;
+          navigationRef.navigate('MainTabs', {
+            screen: 'Planner',
+            params: { screen: 'CalcMain', params: { selectedDate: plannedDate } }
+          });
+        }}
+      >
         <StatusBar style="auto" />
         <RootNavigator />
       </NavigationContainer>

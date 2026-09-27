@@ -86,11 +86,24 @@ export const reportPeriod = value => {
 export const lineItems = value =>
   (Array.isArray(value?.lineItems) ? value.lineItems : (value?.subItems || [])).map((item, index) => ({
     lineItemId: item.lineItemId || item.id || `LINE-${index + 1}`,
+    itemType: ['MATERIAL', 'EQUIPMENT'].includes(String(item.itemType || item.category || '').trim().toUpperCase())
+      ? String(item.itemType || item.category).trim().toUpperCase()
+      : 'EXPENSE',
     description: String(item.description || '').trim(),
     quantity: Number(item.quantity ?? item.qty ?? 0),
     unit: String(item.unit || '').trim(),
     unitCost: Number(item.unitCost || 0),
     subtotal: Number(item.subtotal ?? item.subTotal ?? 0)
+  }));
+
+export const laborEntries = value =>
+  (Array.isArray(value?.laborEntries) ? value.laborEntries : (value?.workers || [])).map((item, index) => ({
+    laborEntryId: item.laborEntryId || item.id || `WORKER-${index + 1}`,
+    workerCount: Number(item.workerCount ?? item.workers ?? 1),
+    days: Number(item.days ?? item.quantity ?? 1),
+    unit: 'day',
+    rate: Number(item.rate ?? item.cost ?? 0),
+    subtotal: Number(item.subtotal ?? item.total ?? ((item.workerCount ?? item.workers ?? 1) * (item.days ?? item.quantity ?? 1) * (item.rate ?? item.cost ?? 0)))
   }));
 
 export const amendments = value =>
@@ -128,6 +141,10 @@ export const toUser = value => {
   const canonicalRole = role(value.canonicalRole || value.role);
   if (!canonicalRole) throw new Error('User role must be canonical.');
   return {
+    firstName: String(value.firstName || '').trim(),
+    middleName: String(value.middleName || '').trim() || null,
+    lastName: String(value.lastName || '').trim(),
+    suffix: String(value.suffix || '').trim() || null,
     displayName: String(value.displayName || value.name || '').trim(),
     phone: String(value.phone || value.contact || '').replace(/\D/g, ''),
     role: canonicalRole,
@@ -137,6 +154,8 @@ export const toUser = value => {
     passwordChangedAt: value.passwordChangedAt || null,
     approvedByUserId: value.approvedByUserId || null,
     approvedAt: value.approvedAt || null,
+    requestedBlockFarmId: value.requestedBlockFarmId || null,
+    affiliatedBlockFarmId: value.affiliatedBlockFarmId || null,
     createdAt: value.createdAt || now(),
     updatedAt: value.updatedAt || now()
   };
@@ -166,8 +185,8 @@ export const toBlockFarm = value => ({
 });
 
 export const fromBlockFarm = (id, value) => ({
-  id,
   ...value,
+  id,
   declaredHa: Number(value.declaredAreaHa || 0),
   farmManagerId: value.managerUserId || ''
 });
@@ -186,6 +205,7 @@ export const toField = value => {
     status,
     customStages: Array.isArray(value.customStages) ? value.customStages : [],
     customOperations: value.customOperations && typeof value.customOperations === 'object' ? value.customOperations : {},
+    operationSchedule: Array.isArray(value.operationSchedule) ? value.operationSchedule : [],
     createdAt: value.createdAt || now(),
     updatedAt: value.updatedAt || now(),
     archivedAt: value.archivedAt || null
@@ -252,6 +272,7 @@ export const toOperation = (value, context = {}) => {
   const archivedAt = status === 'ARCHIVED' ? (context.archivedAt || value.archivedAt || null) : null;
   const archivedByUserId = status === 'ARCHIVED' ? (context.archivedByUserId || value.archivedByUserId || null) : null;
   if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED operation logs require archive metadata.');
+  const normalizedLaborEntries = laborEntries(value);
   return {
     fieldId,
     cycleId: operationCycleId,
@@ -263,16 +284,23 @@ export const toOperation = (value, context = {}) => {
     submittedByUserId,
     submissionSource: context.submissionSource || value.submissionSource || '',
     operationDefinitionId: value.operationDefinitionId || value.sraOperationId || 'CUSTOM',
+    parentOperationDefinitionId: value.parentOperationDefinitionId || null,
+    childOperationDefinitionId: value.childOperationDefinitionId || null,
+    childOperationName: String(value.childOperationName || '').trim(),
     operationName: String(value.operationName || value.activity || value.task || '').trim(),
     category: String(value.category || '').trim(),
     variety: String(value.variety || '').trim(),
     stageNumber: Number(value.stageNumber || 1),
     performedOn: value.performedOn || value.isoDate || String(value.date || '').slice(0, 10),
     areaHa: Number(value.areaHa ?? value.hectares ?? value.ha ?? 0),
-    peopleCount: Number(value.peopleCount ?? value.people ?? 0),
+    peopleCount: normalizedLaborEntries.length
+      ? normalizedLaborEntries.reduce((sum, item) => sum + Number(item.workerCount || 0), 0)
+      : Number(value.peopleCount ?? value.people ?? 0),
     quantity,
+    baseCost: Number(value.baseCost ?? 0),
     totalCost: Number(value.totalCost ?? value.cost ?? 0),
     lineItems: lineItems(value),
+    laborEntries: normalizedLaborEntries,
     photoEvidence: photoEvidence(value.photoEvidence),
     isSupplemental: Boolean(value.isSupplemental),
     amendments: amendments(value.amendments),
@@ -288,6 +316,9 @@ export const fromOperation = (id, value) => ({
   id,
   ...value,
   sraOperationId: value.operationDefinitionId,
+  parentOperationDefinitionId: value.parentOperationDefinitionId || null,
+  childOperationDefinitionId: value.childOperationDefinitionId || null,
+  childOperationName: value.childOperationName || '',
   activity: value.operationName,
   cost: Number(value.totalCost || 0),
   hectares: Number(value.areaHa || 0),
@@ -302,8 +333,10 @@ export const fromOperation = (id, value) => ({
     qty: item.quantity,
     unit: item.unit,
     unitCost: item.unitCost,
-    subTotal: item.subtotal
-  }))
+    subTotal: item.subtotal,
+    itemType: item.itemType || 'EXPENSE'
+  })),
+  workers: (value.laborEntries || []).map(item => ({ id: item.laborEntryId, workerCount: item.workerCount || 1, days: item.days ?? item.quantity ?? 1, rate: item.rate, subtotal: item.subtotal }))
 });
 
 export const snapshot = (id, value) => {
@@ -316,6 +349,9 @@ export const snapshot = (id, value) => {
     cropYearCycle: log.cropYearCycle,
     stageNumberAtRecord: log.stageNumberAtRecord,
     operationDefinitionId: log.operationDefinitionId,
+    parentOperationDefinitionId: log.parentOperationDefinitionId || null,
+    childOperationDefinitionId: log.childOperationDefinitionId || null,
+    childOperationName: log.childOperationName || '',
     operationName: log.operationName,
     category: log.category,
     variety: log.variety,
@@ -324,8 +360,10 @@ export const snapshot = (id, value) => {
     areaHa: log.areaHa,
     peopleCount: log.peopleCount,
     quantity: log.quantity,
+    baseCost: log.baseCost,
     totalCost: log.totalCost,
     lineItems: log.lineItems,
+    laborEntries: log.laborEntries,
     amendments: log.amendments,
     submittedByUserId: log.submittedByUserId || null,
     submissionSource: log.submissionSource || null,
@@ -371,10 +409,18 @@ export const toReport = (value, context = {}) => {
   const certifiedByUserId = status === 'CERTIFIED' ? (context.certifiedByUserId || value.certifiedByUserId || null) : null;
   const certifiedAt = status === 'CERTIFIED' ? (context.certifiedAt || value.certifiedAt || null) : null;
   if (status === 'CERTIFIED' && (!certifiedByUserId || !certifiedAt)) throw new Error('CERTIFIED audit reports require certification metadata.');
+  const cropYearCycles = Array.from(new Set([
+    value.cropYearCycle,
+    ...(Array.isArray(value.cropYearCycles) ? value.cropYearCycles : []),
+    ...(Array.isArray(value.fieldSnapshots) ? value.fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]) : []),
+    ...operations.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
+  ].map(cropYear => formatCropYear(cropYear, '')).filter(Boolean))).sort();
   return {
     blockFarmId,
     period,
     periodKey: period,
+    cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
+    cropYearCycles,
     status,
     qrHash,
     compiledByUserId,

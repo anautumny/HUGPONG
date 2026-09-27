@@ -23,7 +23,14 @@ async function importSource(relativePath, transform = source => source) {
 }
 
 async function loadMobileSchema() {
-  return importSource('../../../mobile/src/data/firestoreSchema.js');
+  const operationUnits = fs.readFileSync(
+    path.resolve(testDir, '../../../mobile/src/domain/operationUnits.js'),
+    'utf8'
+  );
+  return importSource('../../../mobile/src/data/firestoreSchema.js', source => source.replace(
+    /^import \{ canonicalOperationUnit \} from '\.\.\/domain\/operationUnits';\r?\n/m,
+    `${operationUnits}\n`
+  ));
 }
 
 async function loadMobileAnalytics() {
@@ -60,7 +67,13 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 test('server, web, and Android share collection, role, and platform contracts', async () => {
   const mobileSchema = await loadMobileSchema();
-  const { USER_CREDENTIALS: _serverOnlyCredentials, ...publicCollections } = serverSchema.COLLECTIONS;
+  const {
+    USER_CREDENTIALS: _serverOnlyCredentials,
+    ACCOUNT_IDENTIFIERS: _serverOnlyAccountIdentifiers,
+    SERVER_SESSIONS: _serverOnlySessions,
+    SECURITY_RATE_LIMITS: _serverOnlyRateLimits,
+    ...publicCollections
+  } = serverSchema.COLLECTIONS;
 
   assert.deepEqual(plain(webSchema.COLLECTIONS), publicCollections);
   assert.deepEqual(plain(mobileSchema.COLLECTIONS), publicCollections);
@@ -138,7 +151,7 @@ test('web and Android mark submitted operations with their authoritative audit s
   }
 });
 
-test('server, web, and Android QR transfers reconstruct the same complete canonical report', async () => {
+test('server, web, and Android generate the same single authoritative report reference', async () => {
   const mobileAuditWorkflow = await loadMobileAuditWorkflow();
   const operation = {
     operationLogId: 'LOG-001', fieldId: 'FIELD-001', cycleId: 'CYC-FIELD-001-001',
@@ -164,16 +177,16 @@ test('server, web, and Android QR transfers reconstruct the same complete canoni
   const mobileDecoded = mobileAuditWorkflow.decodeAuditQrPayload(mobileAuditWorkflow.createAuditQrPayload(report));
   assert.deepEqual(plain(webDecoded), plain(serverDecoded));
   assert.deepEqual(plain(mobileDecoded), plain(serverDecoded));
-  assert.equal(serverDecoded.operationSnapshots.length, 1);
-  assert.equal(serverDecoded.fieldSnapshots[0].memberName, 'Farmer One');
+  assert.deepEqual(plain(serverDecoded), {
+    reportId: report.id,
+    integrityHash: report.integrityHash,
+    referenceOnly: true
+  });
   const serverParts = serverAuditWorkflow.encodeQrParts(report);
-  assert.ok(serverParts.length > 1, 'large complete reports must use a multipart QR transfer');
+  assert.equal(serverParts.length, 1, 'each compiled report must produce exactly one QR reference');
   assert.deepEqual(webAuditWorkflow.createAuditQrParts(report), serverParts);
   assert.deepEqual(mobileAuditWorkflow.createAuditQrParts(report), serverParts);
-  assert.deepEqual(plain(serverAuditWorkflow.assembleQrParts([...serverParts].reverse())), plain(serverDecoded));
-  assert.deepEqual(plain(webAuditWorkflow.assembleAuditQrParts([...serverParts].reverse())), plain(serverDecoded));
-  assert.deepEqual(plain(mobileAuditWorkflow.assembleAuditQrParts([...serverParts].reverse())), plain(serverDecoded));
-  serverParts.forEach(part => assert.ok(new TextEncoder().encode(part).length <= 700));
+  serverParts.forEach(part => assert.ok(new TextEncoder().encode(part).length <= 300));
   serverParts.forEach(part => {
     const qr = QRCode.create(part, { errorCorrectionLevel: 'M' });
     assert.ok(qr.modules.size <= 101, 'each QR part must stay sparse enough for mobile scanning');
@@ -191,6 +204,20 @@ test('Farm Manager Field Operations exposes monthly audit compilation directly',
   assert.match(dashboard, /label: 'Farm & Field Registry'[\s\S]*?variant: 'primary'/);
   assert.match(auditCenter, /searchParams\.get\('compile'\) === '1'/);
   assert.match(auditCenter, /setShowCompileModal\(true\)/);
+});
+
+test('web field operations queues stage completion offline and labels it pending', () => {
+  const operations = fs.readFileSync(path.resolve(testDir, '../src/views/operations/OperationsView.jsx'), 'utf8');
+  const outbox = fs.readFileSync(path.resolve(testDir, '../src/services/cropStageOutbox.js'), 'utf8');
+  const fields = fs.readFileSync(path.resolve(testDir, '../src/services/fieldsService.js'), 'utf8');
+
+  assert.match(operations, /updateCropStageOfflineFirst/);
+  assert.match(operations, /Complete Stage/);
+  assert.match(operations, /Pending sync/);
+  assert.match(outbox, /hugpong_crop_stage_outbox_v1/);
+  assert.match(outbox, /navigator\.onLine === false/);
+  assert.match(outbox, /_mutation: mutation/);
+  assert.match(fields, /applyPendingStageUpdate/);
 });
 
 test('server, web, and Android serialize the same canonical operation record', async () => {

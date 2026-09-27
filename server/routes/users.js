@@ -7,8 +7,6 @@ const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { hashPassword, validatePassword } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
-const { issueOtp, verifyOtp, consumeVerifiedOtp, discardOtp } = require('../security/otp');
-const { sendSms } = require('../services/smsGateway');
 const {
   COLLECTIONS,
   ROLES,
@@ -19,20 +17,13 @@ const {
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
 const { resolveDirectoryAssignmentsFromDatabase } = require('../services/userDirectoryService');
+const { createRateLimit } = require('../middleware/rateLimit');
+const { authVersionOf, nextAuthVersion, revokeFirebaseSessions, setFirebaseAccountDisabled } = require('../security/accountSecurity');
+const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
+const { queueAuditEvent } = require('../services/auditWriter');
+const { normalizeStructuredName, hasStructuredNameInput } = require('../domain/personName');
 
-function createUserId(role) {
-  const prefixes = {
-    [ROLES.SUPER_ADMIN]: '01',
-    [ROLES.SRA_ADMIN]: '02',
-    [ROLES.FARM_MANAGER]: '03',
-    [ROLES.MEMBER_FARMER]: '04'
-  };
-  return `${prefixes[role]}${Math.floor(100000 + Math.random() * 900000)}`;
-}
-
-function phoneChallengeSubject(actorUserId, phone) {
-  return `${actorUserId}:${phone}`;
-}
+const accountCreationLimit = createRateLimit({ name: 'users-account-create', max: 30, windowMs: 60 * 60 * 1000 });
 
 async function managerFarmIds(userId) {
   const farms = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', userId).get();
@@ -47,41 +38,6 @@ async function assertManagerUserScope(actorId, targetUserId, requestedBlockFarmI
     throw Object.assign(new Error('Member account is outside the Farm Manager assigned block farm.'), { status: 403 });
   }
 }
-
-router.post('/phone-verification/request', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
-  const phone = String(req.body?.phone || '').replace(/\D/g, '');
-  if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
-  const subject = phoneChallengeSubject(req.session.user.employeeId, phone);
-  try {
-    const challenge = issueOtp('personnel-phone', subject, phone);
-    const greeting = req.body?.displayName ? `Hello ${String(req.body.displayName).trim()}, ` : '';
-    try {
-      const result = await sendSms(
-        phone,
-        `[HUGPONG] ${greeting}Your personnel phone verification code is ${challenge.code}. Valid for 5 minutes.`,
-        { otpCode: challenge.code, purpose: 'personnel-phone' }
-      );
-      if (!result.success) throw new Error('SMS delivery failed.');
-    } catch (error) {
-      discardOtp('personnel-phone', subject);
-      throw error;
-    }
-    return res.json({ success: true, phone, expiresAt: challenge.expiresAt });
-  } catch (error) {
-    const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
-    return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
-  }
-});
-
-router.post('/phone-verification/verify', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), (req, res) => {
-  const phone = String(req.body?.phone || '').replace(/\D/g, '');
-  const code = String(req.body?.code || '').trim();
-  if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
-    return res.status(400).json({ success: false, error: 'A valid phone and 6-digit code are required.' });
-  }
-  const result = verifyOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone, code);
-  return res.status(result.success ? 200 : 400).json(result);
-});
 
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
   try {
@@ -108,6 +64,10 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
           .where('requestedBlockFarmId', 'in', permittedFarmIds.slice(index, index + 10))
           .get();
         pending.docs.filter(doc => doc.data().status === 'PENDING').forEach(doc => recordsById.set(doc.id, doc));
+        const affiliated = await db.collection(COLLECTIONS.USERS)
+          .where('affiliatedBlockFarmId', 'in', permittedFarmIds.slice(index, index + 10))
+          .get();
+        affiliated.docs.forEach(doc => recordsById.set(doc.id, doc));
       }
       documents = Array.from(recordsById.values());
     } else {
@@ -125,7 +85,7 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
   }
 });
 
-router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), accountCreationLimit, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const mutationContext = readMutationContext(req);
@@ -135,17 +95,17 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     if (actorRole === ROLES.FARM_MANAGER && role !== ROLES.MEMBER_FARMER) {
       return res.status(403).json({ success: false, error: 'Farm Managers may approve only Farm Member accounts.' });
     }
-    if (actorRole === ROLES.SRA_ADMIN && role !== ROLES.FARM_MANAGER) {
-      return res.status(403).json({ success: false, error: 'SRA Admins may approve only Farm Manager accounts.' });
+    if (actorRole === ROLES.SRA_ADMIN && ![ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER].includes(role)) {
+      return res.status(403).json({ success: false, error: 'SRA Admins may approve Farm Member or Farm Manager accounts.' });
     }
     const requestedUserId = req.body.id ? requiredString(req.body.id, 'id', { max: 8 }) : null;
     const developmentSeedId = readDevelopmentSeedId(req);
-    const userId = requestedUserId || createUserId(role);
-    if (!/^\d{8}$/.test(userId)) throw new Error('id must be an eight-digit HUGPONG user ID.');
-    const userRef = db.collection(COLLECTIONS.USERS).doc(userId);
-    const existingUser = await userRef.get();
+    if (requestedUserId && !/^\d{8}$/.test(requestedUserId)) throw new Error('id must be an eight-digit HUGPONG user ID.');
+    const userRef = requestedUserId ? db.collection(COLLECTIONS.USERS).doc(requestedUserId) : null;
+    const existingUser = userRef ? await userRef.get() : null;
     const now = nowIso();
-    if (existingUser.exists) {
+    if (existingUser?.exists) {
+      const userId = existingUser.id;
       const current = existingUser.data();
       const actorId = String(req.session.user.employeeId || '').trim();
       if (current.status === 'ACTIVE' && current.approvedByUserId === actorId && canonicalRole(current.role) === role) {
@@ -154,20 +114,49 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
       assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
-      if (actorRole === ROLES.FARM_MANAGER) await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), userId, current.requestedBlockFarmId);
+      let affiliatedBlockFarmId = current.affiliatedBlockFarmId || null;
+      if (role === ROLES.MEMBER_FARMER) {
+        affiliatedBlockFarmId = String(req.body.blockFarmId || current.requestedBlockFarmId || '').trim().toUpperCase();
+        if (!affiliatedBlockFarmId) {
+          return res.status(400).json({ success: false, error: 'Assign a Block Farm before approving this Farm Member.' });
+        }
+        const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(affiliatedBlockFarmId).get();
+        if (!farm.exists || String(farm.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+          return res.status(400).json({ success: false, error: 'The selected Block Farm is not available.' });
+        }
+        if (actorRole === ROLES.FARM_MANAGER) {
+          await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), userId, affiliatedBlockFarmId);
+        }
+      }
       const approved = {
         ...current,
         status: 'ACTIVE',
+        affiliatedBlockFarmId,
+        authVersion: authVersionOf(current),
+        disabledAt: null,
         approvedByUserId: String(req.session.user.employeeId || '').trim(),
         approvedAt: now,
         updatedAt: now
       };
-      await userRef.update({
+      const batch = db.batch();
+      batch.update(userRef, {
         status: approved.status,
+        affiliatedBlockFarmId: approved.affiliatedBlockFarmId,
         approvedByUserId: approved.approvedByUserId,
         approvedAt: approved.approvedAt,
+        authVersion: approved.authVersion,
+        disabledAt: approved.disabledAt,
         updatedAt: approved.updatedAt
       });
+      queueAuditEvent(batch, db, {
+        eventType: 'USER_ACCOUNT_APPROVED',
+        actorUserId: approved.approvedByUserId,
+        entityType: 'USER',
+        entityId: userId,
+        details: `Approved ${role} account ${userId}.`,
+        createdAt: now
+      });
+      await batch.commit();
       return res.json({ success: true, accountId: userId, data: publicUser(approved, userId) });
     }
     if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
@@ -176,37 +165,49 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     const existing = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
     if (!existing.empty) return res.status(409).json({ success: false, error: 'phone is already registered.' });
     validatePassword(req.body.password);
-    if (actorRole === ROLES.FARM_MANAGER) {
-      await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), userId, req.body.blockFarmId);
+    const identity = normalizeStructuredName(req.body || {});
+    const requestedBlockFarmId = String(req.body.blockFarmId || '').trim().toUpperCase();
+    let affiliatedBlockFarmId = null;
+    if (role === ROLES.MEMBER_FARMER && requestedBlockFarmId) {
+      const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(requestedBlockFarmId).get();
+      if (!farm.exists || String(farm.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+        throw new Error('The selected Block Farm is not available.');
+      }
+      affiliatedBlockFarmId = requestedBlockFarmId;
     }
-    const phoneVerifiedAt = req.body.phoneVerified === true
-      && consumeVerifiedOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone)
-      ? now
-      : null;
+    if (actorRole === ROLES.FARM_MANAGER) {
+      if (!requestedBlockFarmId) throw new Error('Farm Managers must assign a Block Farm when creating a Farm Member.');
+      await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), requestedUserId || '', requestedBlockFarmId);
+    }
     const payload = {
-      displayName: requiredString(req.body.displayName, 'displayName', { max: 200 }),
+      ...identity,
       phone,
       role,
       status: 'ACTIVE',
-      // Provisioned accounts verify their own registered phone through the
-      // authenticated server OTP flow. An administrator cannot assert this.
-      phoneVerifiedAt,
-      requiresPasswordChange: req.body.requiresPasswordChange !== false,
-      passwordChangedAt: req.body.passwordChangedAt || null,
+      affiliatedBlockFarmId,
+      // The account owner, never the provisioning administrator, verifies the
+      // registered phone and replaces the temporary password on first login.
+      phoneVerifiedAt: null,
+      requiresPasswordChange: true,
+      passwordChangedAt: null,
+      authVersion: 1,
+      credentialsUpdatedAt: now,
+      disabledAt: null,
       approvedByUserId: String(req.session.user.employeeId || req.session.user.userId || '').trim(),
       approvedAt: now,
       createdAt: now,
       updatedAt: now
     };
     const passwordHash = await hashPassword(req.body.password);
-    const batch = db.batch();
-    batch.create(db.collection(COLLECTIONS.USERS).doc(userId), payload);
-    batch.create(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), {
-      passwordHash,
-      createdAt: now,
-      updatedAt: now
+    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const userId = await createUserAccount(db, {
+      requestedUserId: developmentSeedId,
+      user: payload,
+      credential: { passwordHash, credentialsUpdatedAt: now, createdAt: now, updatedAt: now },
+      actorUserId: actorId,
+      eventType: 'USER_ACCOUNT_CREATED',
+      details: `Created ${role} account ${payload.displayName}.`
     });
-    await batch.commit();
     return res.status(201).json({ success: true, accountId: userId, data: publicUser(payload, userId) });
   } catch (error) {
     const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
@@ -229,7 +230,11 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       return res.status(403).json({ success: false, error: 'Farm Managers may update only Farm Member accounts.' });
     }
     if (actorRole === ROLES.FARM_MANAGER) {
-      await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), targetSnapshot.id, current.requestedBlockFarmId);
+      await assertManagerUserScope(
+        String(req.session.user.employeeId || '').trim(),
+        targetSnapshot.id,
+        current.affiliatedBlockFarmId || current.requestedBlockFarmId
+      );
     }
     if (actorRole === ROLES.SRA_ADMIN && targetRole === ROLES.SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: 'SRA Admins may update only Farm Manager accounts.' });
@@ -246,12 +251,15 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       }
     }
     const phoneChanged = phone !== current.phone;
-    const phoneVerifiedAt = phoneChanged && req.body.phoneVerified === true
-      && consumeVerifiedOtp('personnel-phone', phoneChallengeSubject(req.session.user.employeeId, phone), phone)
-      ? nowIso()
-      : (phoneChanged ? null : (current.phoneVerifiedAt || null));
+    const phoneVerifiedAt = phoneChanged ? null : (current.phoneVerifiedAt || null);
     const update = {
-      displayName: req.body.displayName == null ? current.displayName : requiredString(req.body.displayName, 'displayName', { max: 200 }),
+      ...(hasStructuredNameInput(req.body) ? normalizeStructuredName(req.body, current) : {
+        firstName: current.firstName || null,
+        middleName: current.middleName || null,
+        lastName: current.lastName || null,
+        suffix: current.suffix || null,
+        displayName: current.displayName
+      }),
       phone,
       role: targetRole,
       status: req.body.status == null ? current.status : String(req.body.status).trim().toUpperCase(),
@@ -259,7 +267,46 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       updatedAt: nowIso()
     };
     if (!['PENDING', 'ACTIVE', 'DISABLED'].includes(update.status)) throw new Error('status is invalid.');
-    await targetRef.update(update);
+    const authorizationChanged = phoneChanged
+      || targetRole !== canonicalRole(current.role)
+      || update.status !== current.status;
+    if (authorizationChanged) {
+      update.authVersion = nextAuthVersion(current);
+      update.credentialsUpdatedAt = update.updatedAt;
+    }
+    update.disabledAt = update.status === 'DISABLED' ? update.updatedAt : null;
+    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    await db.runTransaction(async transaction => {
+      const liveSnapshot = await transaction.get(targetRef);
+      if (!liveSnapshot.exists) throw Object.assign(new Error('User was not found.'), { status: 404 });
+      const live = liveSnapshot.data();
+      if (live.updatedAt !== current.updatedAt) {
+        throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
+      }
+      if (phoneChanged) {
+        const newPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(phone));
+        const oldPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(current.phone));
+        const [newClaim, oldClaim] = await Promise.all([transaction.get(newPhoneRef), transaction.get(oldPhoneRef)]);
+        if (newClaim.exists && newClaim.data().userId !== targetSnapshot.id) {
+          throw Object.assign(new Error('phone is already registered.'), { status: 409 });
+        }
+        if (!newClaim.exists) transaction.create(newPhoneRef, { type: 'PHONE', userId: targetSnapshot.id, createdAt: update.updatedAt, updatedAt: update.updatedAt });
+        if (oldClaim.exists && oldClaim.data().userId === targetSnapshot.id) transaction.delete(oldPhoneRef);
+      }
+      transaction.update(targetRef, update);
+      queueAuditEvent(transaction, db, {
+        eventType: authorizationChanged ? 'USER_ACCESS_UPDATED' : 'USER_PROFILE_UPDATED',
+        actorUserId: actorId,
+        entityType: 'USER',
+        entityId: targetSnapshot.id,
+        details: `Updated account ${targetSnapshot.id}.`,
+        createdAt: update.updatedAt
+      });
+    });
+    if (authorizationChanged) {
+      await revokeFirebaseSessions(targetSnapshot.id);
+      await setFirebaseAccountDisabled(targetSnapshot.id, update.status === 'DISABLED');
+    }
     return res.json({ success: true, data: publicUser({ ...current, ...update }, targetSnapshot.id) });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });

@@ -175,6 +175,51 @@ test('server routes own create identity and reject identity changes on edit', ()
   assert.match(farmsRoute, /assertNoClientIdentity\(req\.body, \['id', 'blockFarmId', 'code'\], 'Block Farm'\)/);
   assert.match(farmsRoute, /code: blockFarmId/);
   assert.match(usersRoute, /assertNoClientIdentity\(req\.body, \['id', 'userId', 'employeeId'\], 'User'\)/);
+  assert.match(usersRoute, /accountId: userId/);
+});
+
+test('Field soil type is removed across the server, Web, and Android contracts', () => {
+  const fieldsRoute = read('../routes/fields.js');
+  const webEnrollment = read('../../web/react-app/src/components/fields/FieldEnrollmentModal.jsx');
+  const webEdit = read('../../web/react-app/src/components/fields/FieldEditModal.jsx');
+  const webDetail = read('../../web/react-app/src/components/fields/FieldDetailModal.jsx');
+  const webSchema = read('../../web/react-app/src/services/firestoreSchema.js');
+  const mobileScreen = read('../../mobile/src/screens/FieldOpsScreen.js');
+  const mobileStore = read('../../mobile/src/data/dataStore.js');
+  const mobileSchema = read('../../mobile/src/data/firestoreSchema.js');
+
+  assert.doesNotMatch(webEnrollment, /Soil Type|SOIL_TYPES|soilType/);
+  assert.doesNotMatch(webEdit, /Soil Type|SOIL_TYPES|soilType/);
+  assert.doesNotMatch(webDetail, /Soil Type|soilType/);
+  assert.doesNotMatch(mobileScreen, /Soil Type|SOIL_TYPES|soilType/);
+  assert.doesNotMatch(mobileStore, /soilType:\s*String|soilType:\s*fieldData|soilType:\s*managerAssignForm/);
+  assert.match(mobileStore, /soilType: _removedSoilType/);
+  assert.doesNotMatch(webSchema, /soilType:\s*String/);
+  assert.doesNotMatch(mobileSchema, /soilType:\s*String/);
+  assert.doesNotMatch(fieldsRoute, /soilType:\s*optionalString/);
+  assert.match(fieldsRoute, /FieldValue\.delete\(\)/);
+});
+
+test('account creation responses and clients surface the permanent login ID once', () => {
+  const authRoute = read('../routes/auth.js');
+  const usersRoute = read('../routes/users.js');
+  const webUserForm = read('../../web/react-app/src/components/users/UserFormModal.jsx');
+  const webUsersView = read('../../web/react-app/src/views/users/UsersView.jsx');
+  const webAccountNotice = read('../../web/react-app/src/components/users/AccountIdConfirmationModal.jsx');
+  const mobileRegistration = read('../../mobile/src/screens/auth/RegisterScreen.js');
+  const mobileFieldOps = read('../../mobile/src/screens/FieldOpsScreen.js');
+
+  assert.match(authRoute, /pendingApproval: true, accountId: userId/);
+  assert.match(usersRoute, /accountId: userId/);
+  assert.match(webUserForm, /onCreated\(\{ \.\.\.res\.data, accountId:/);
+  assert.match(webUsersView, /AccountIdConfirmationModal/);
+  assert.match(webAccountNotice, /Permanent Login ID/);
+  assert.match(webAccountNotice, /I Have Saved the ID/);
+  assert.match(webAccountNotice, /preventBackdropClose[\s\S]*preventEscapeClose/);
+  assert.match(webAccountNotice, /account && typeof account === 'object'/);
+  assert.match(webAccountNotice, /if \(!accountId\) return null/);
+  assert.match(mobileRegistration, /res\.accountId[\s\S]*showSuccessModal/);
+  assert.match(mobileFieldOps, /Login ID: \$\{res\.accountId\}/);
 });
 
 test('Web and Android create forms never generate or submit canonical IDs', () => {

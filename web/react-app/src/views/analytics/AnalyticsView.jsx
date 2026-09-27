@@ -271,7 +271,7 @@ export default function AnalyticsView() {
             Operational & Market Analytics
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Strictly descriptive insights derived from recorded sugarcane parcel lifecycles, field operations, and official SRA market benchmarks.
+            Descriptive insights derived from recorded sugarcane parcel lifecycles, field operations, and source-referenced market prices.
           </p>
         </div>
 
@@ -342,7 +342,7 @@ export default function AnalyticsView() {
         isLoading={isOpsLoading}
       />
 
-      {/* Domain 5: Official SRA Price Trends */}
+      {/* Domain 5: published price trends */}
       <PriceTrendsSection
         trendsData={priceTrendsData}
         timeframe={priceTimeframe}

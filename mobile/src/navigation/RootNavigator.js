@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '../theme';
-import { getCurrentSession, subscribe, logoutUser } from '../data/dataStore';
+import { activateSraOfflineSnapshot, getCurrentSession, subscribe } from '../data/dataStore';
 
 import SplashScreen from '../screens/auth/SplashScreen';
 import LanguageSelectScreen from '../screens/auth/LanguageSelectScreen';
@@ -13,9 +13,6 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
-import { useTranslation } from '../services/i18n';
-
-import AdminOfflineBarrier from '../components/AdminOfflineBarrier';
 import CustomBottomTabBar from '../components/CustomBottomTabBar';
 import {
   subscribeToNetwork,
@@ -55,6 +52,7 @@ function CalcNavigator() {
   return (
     <CalcStack.Navigator screenOptions={{ headerShown: false }}>
       <CalcStack.Screen name="CalcMain" getComponent={getPlannerScreen} />
+      <CalcStack.Screen name="SyncMonitor" getComponent={getSyncMonitorScreen} options={{ animation: 'slide_from_right' }} />
     </CalcStack.Navigator>
   );
 }
@@ -145,9 +143,6 @@ function MainTabs({ navigation }) {
   const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
   const [showOfflineNotice, setShowOfflineNotice] = React.useState(false);
   const hasShownOfflineNoticeRef = React.useRef(false);
-  const adminOfflineLogoutRef = React.useRef(false);
-  const { t } = useTranslation();
-
   React.useEffect(() => {
     const unsubSession = subscribe(() => {
       setRole(getCurrentSession()?.role || 'Farm Member');
@@ -156,31 +151,20 @@ function MainTabs({ navigation }) {
       setIsOnline(online);
       setConnectivityStatus(details.status);
       if (online) {
-        adminOfflineLogoutRef.current = false;
         hasShownOfflineNoticeRef.current = false;
         setShowOfflineNotice(false);
       } else if (details.status !== CONNECTIVITY_STATUS.CHECKING) {
         const activeSession = getCurrentSession();
         if (activeSession?.role === 'SRA Admin') {
-          if (!adminOfflineLogoutRef.current) {
-            adminOfflineLogoutRef.current = true;
-            setShowOfflineNotice(false);
-            const sessionNotice = details.status === CONNECTIVITY_STATUS.NO_INTERNET
-              ? 'SRA Admin was signed out because there is no internet connection. Reconnect before signing in again.'
-              : 'SRA Admin was signed out because the HUGPONG server is unavailable. Try again when the service is reachable.';
-            logoutUser({ skipRemote: true })
-              .finally(() => navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login', params: { sessionNotice } }]
-              }));
-          }
-          return;
+          activateSraOfflineSnapshot().catch(error => {
+            console.warn('[Navigation] Unable to restore the cached SRA snapshot:', error?.message || error);
+          });
         }
         if (!hasShownOfflineNoticeRef.current) {
           setShowOfflineNotice(true);
           hasShownOfflineNoticeRef.current = true;
         }
-        if (navigation?.navigate) {
+        if (activeSession?.role !== 'SRA Admin' && navigation?.navigate) {
           navigation.navigate('MainTabs', { screen: 'Field Ops' });
         }
       }
@@ -193,21 +177,10 @@ function MainTabs({ navigation }) {
 
   const handleDismissOfflineNotice = () => {
     setShowOfflineNotice(false);
-    if (!isOnline && navigation?.navigate) {
+    if (!isOnline && role !== 'SRA Admin' && navigation?.navigate) {
       navigation.navigate('MainTabs', { screen: 'Field Ops' });
     }
   };
-
-  // Strict Offline Barrier for SRA Admin to protect audit integrity
-  if (!isOnline && role === 'SRA Admin') {
-    return (
-      <AdminOfflineBarrier
-        session={getCurrentSession()}
-        connectivityStatus={connectivityStatus}
-        onRetry={(online) => setIsOnline(online)}
-      />
-    );
-  }
 
   return (
     <>
@@ -228,7 +201,7 @@ function MainTabs({ navigation }) {
           component={HomeNavigator}
           listeners={{
             tabPress: (e) => {
-              if (!isOnline) {
+              if (!isOnline && role !== 'SRA Admin') {
                 e.preventDefault();
               }
             }
@@ -247,7 +220,7 @@ function MainTabs({ navigation }) {
           component={ProfileNavigator}
           listeners={{
             tabPress: (e) => {
-              if (!isOnline) {
+              if (!isOnline && role !== 'SRA Admin') {
                 e.preventDefault();
               }
             }
@@ -276,7 +249,11 @@ function MainTabs({ navigation }) {
 
             <Text style={modalStyles.desc}>
               {connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE
-                ? 'Your internet connection is active, but the HUGPONG server cannot be reached. Cached work remains available and queued changes will sync automatically when service returns.'
+                ? role === 'SRA Admin'
+                  ? 'You are still signed in, but the HUGPONG server cannot be reached. Live data and administrative actions will resume when the service is available.'
+                  : 'Your internet connection is active, but the HUGPONG server cannot be reached. Cached work remains available and queued changes will sync automatically when service returns.'
+                : role === 'SRA Admin'
+                ? 'You are still signed in. Live data and administrative actions require an internet connection and will become available again automatically after reconnection.'
                 : role === 'Farm Manager'
                 ? 'Navigating directly to Field Operations. In offline mode, only your own personal field plot can be accessed. Managed block farm plots and Manager Takeover are disabled until an internet connection is restored.'
                 : role === 'Farm Member'
@@ -290,7 +267,7 @@ function MainTabs({ navigation }) {
               activeOpacity={0.85}
             >
               <Text style={modalStyles.btnText}>
-                {role === 'Farm Manager' ? 'Proceed to My Field' : 'Proceed to My Plot'}
+                {role === 'SRA Admin' ? 'Continue Offline' : role === 'Farm Manager' ? 'Proceed to My Field' : 'Proceed to My Plot'}
               </Text>
               <Ionicons name="arrow-forward" size={16} color="#FFF" />
             </TouchableOpacity>

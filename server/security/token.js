@@ -23,6 +23,7 @@ function issueToken(user, roleKey) {
     pendingFirstLoginVerification: user.pendingFirstLoginVerification === true,
     requiresPasswordChange: user.requiresPasswordChange === true,
     passwordChanged: user.passwordChanged === true,
+    authVersion: Number(user.authVersion || 1),
     issuedAt: now,
     expiresAt
   };

@@ -2,6 +2,7 @@
 
 const { hashPassword, validatePassword } = require('../security/password');
 const { COLLECTIONS, ROLES, nowIso } = require('../schema/firestoreSchema');
+const { createUserAccount } = require('./accountProvisioningService');
 
 const DEVELOPMENT_SUPER_ADMIN = Object.freeze({
   userId: '01000001',
@@ -59,19 +60,27 @@ async function bootstrapInitialDevelopmentSuperAdmin({ db, password }) {
     phoneVerifiedAt: now,
     requiresPasswordChange: false,
     passwordChangedAt: now,
+    authVersion: 1,
+    credentialsUpdatedAt: now,
+    disabledAt: null,
     approvedByUserId: null,
     approvedAt: null,
     createdAt: now,
     updatedAt: now
   };
-  const batch = db.batch();
-  batch.create(db.collection(COLLECTIONS.USERS).doc(DEVELOPMENT_SUPER_ADMIN.userId), user);
-  batch.create(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(DEVELOPMENT_SUPER_ADMIN.userId), {
-    passwordHash: await hashPassword(password),
-    createdAt: now,
-    updatedAt: now
+  await createUserAccount(db, {
+    requestedUserId: DEVELOPMENT_SUPER_ADMIN.userId,
+    user,
+    credential: {
+      passwordHash: await hashPassword(password),
+      credentialsUpdatedAt: now,
+      createdAt: now,
+      updatedAt: now
+    },
+    actorUserId: DEVELOPMENT_SUPER_ADMIN.userId,
+    eventType: 'DEVELOPMENT_SUPER_ADMIN_BOOTSTRAPPED',
+    details: 'Created the explicitly requested development Super Admin account.'
   });
-  await batch.commit();
   return { created: true, userId: DEVELOPMENT_SUPER_ADMIN.userId };
 }
 

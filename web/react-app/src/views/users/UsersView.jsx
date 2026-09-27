@@ -42,10 +42,10 @@ export default function UsersView() {
     const unsubUsers = subscribeToUsersData({
       user,
       onUpdate: (data) => {
-        setUsers(data.users || []);
-        setPendingUsers(data.pendingUsers || []);
-        setIsLoading(data.isLoading);
-        setError(data.error);
+        setUsers(Array.isArray(data?.users) ? data.users : []);
+        setPendingUsers(Array.isArray(data?.pendingUsers) ? data.pendingUsers : []);
+        setIsLoading(Boolean(data?.isLoading));
+        setError(data?.error || null);
       },
       onError: (err) => {
         setError(err.message || 'Failed to load users.');
@@ -56,7 +56,7 @@ export default function UsersView() {
     const unsubFields = subscribeToFieldsData({
       user,
       onUpdate: (data) => {
-        setBlockFarms(data.blockFarms || []);
+        setBlockFarms(Array.isArray(data?.blockFarms) ? data.blockFarms : []);
       }
     });
 
@@ -97,10 +97,11 @@ export default function UsersView() {
   };
 
   // Handle Approve Pending User
-  const handleApprovePending = async (pendingUser) => {
+  const handleApprovePending = async (pendingUser, blockFarmId) => {
     const result = await approveOrProvisionUser({
       id: pendingUser.id,
-      role: pendingUser.canonicalRole || 'MEMBER_FARMER'
+      role: pendingUser.canonicalRole || 'MEMBER_FARMER',
+      blockFarmId
     });
     if (result.success) {
       setAccountIdNotice({

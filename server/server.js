@@ -1,6 +1,5 @@
 // ══════════════════════════════════════════════════════════════
 // HUGPONG — Central Backend & Security Gateway Server
-// Project: hugpong-ff
 // ══════════════════════════════════════════════════════════════
 
 const express = require('express');
@@ -9,13 +8,15 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
+const FirestoreSessionStore = require('./services/firestoreSessionStore');
+const { COLLECTIONS } = require('./schema/firestoreSchema');
 const {
   LEGACY_ROLE_DASHBOARD_REDIRECTS,
   LEGACY_LEGAL_PAGE_REDIRECTS
 } = require('./domain/legacyWebRoutes');
 
 // Initialize Firebase Admin SDK
-require('./firebase-admin');
+const { db } = require('./firebase-admin');
 
 // Import Route Handlers
 const authRoutes = require('./routes/auth');
@@ -33,6 +34,19 @@ const telemetryRoutes = require('./routes/telemetry');
 const systemDiagnosticsRoutes = require('./routes/systemDiagnostics');
 
 const app = express();
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (isProduction) {
+    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.set('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com");
+  }
+  next();
+});
 
 // Credentialed browser requests are restricted to explicitly configured origins.
 app.use(cors({
@@ -41,7 +55,9 @@ app.use(cors({
     if (!origin || corsOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Origin is not allowed by HUGPONG CORS policy.'));
+      const error = new Error('Origin is not allowed by HUGPONG CORS policy.');
+      error.status = 403;
+      callback(error);
     }
   },
   credentials: true
@@ -54,12 +70,25 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 if (isProduction) app.set('trust proxy', 1);
 
+// Cookie-authenticated writes must originate from an approved browser origin.
+// Native clients authenticate with a bearer token and do not send Origin.
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = String(req.headers.origin || '');
+  const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+  if ((origin && !corsOrigins.includes(origin)) || fetchSite === 'cross-site') {
+    return res.status(403).json({ success: false, error: 'Request origin is not authorized.', code: 'ORIGIN_FORBIDDEN' });
+  }
+  return next();
+});
+
 // Session Configuration
 app.use(session({
   name: 'hugpong.sid',
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
+  ...(isProduction ? { store: new FirestoreSessionStore(db, { collectionName: COLLECTIONS.SERVER_SESSIONS }) } : {}),
   cookie: {
     httpOnly: true,
     secure: isProduction,
@@ -67,6 +96,19 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 24 * 7 // 7 days
   }
 }));
+
+// Route handlers may include internal exception text in development. In
+// production, sanitize all 5xx payloads even when the route handled the error.
+app.use((req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = payload => {
+    if (isProduction && res.statusCode >= 500 && payload && typeof payload === 'object') {
+      return sendJson({ ...payload, error: 'The service is temporarily unavailable.' });
+    }
+    return sendJson(payload);
+  };
+  next();
+});
 
 // Request Logger. Protected routes hydrate bearer sessions in requireAuth.
 app.use((req, res, next) => {
@@ -153,9 +195,12 @@ app.use((req, res) => {
 // Error Handler
 app.use((err, req, res, next) => {
   console.error('[HUGPONG Server Error]', err);
-  res.status(500).json({
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  res.status(status).json({
     success: false,
-    error: isProduction ? 'Internal Server Error' : (err.message || 'Internal Server Error')
+    error: isProduction
+      ? (status === 403 ? 'Request origin is not authorized.' : 'Internal Server Error')
+      : (err.message || 'Internal Server Error')
   });
 });
 
@@ -165,7 +210,6 @@ const server = app.listen(port, host, () => {
 console.log(`  HUGPONG Security Gateway & Express Backend`);
 console.log(`  Server listening on ${host}:${port}`);
 console.log(`  Authentication & Role Protection: ACTIVE`);
-console.log(`  Project: hugpong-ff`);
   console.log('══════════════════════════════════════════════════════════');
 });
 

@@ -24,6 +24,9 @@ const { archiveFieldWithOperations } = require('../services/cropCycleOperations'
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { createFieldId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
 const { operationAuthorization } = require('../domain/operationAuthorization');
+const { queueAuditEvent } = require('../services/auditWriter');
+const { normalizeCustomOperationsPlan } = require('../domain/operationPlan');
+const { normalizeOperationSchedule } = require('../domain/operationSchedule');
 
 function withoutLegacySoilType(value = {}) {
   const { soilType: _removedSoilType, ...field } = value;
@@ -57,6 +60,10 @@ async function assertAssignableFieldOwner(memberUserId, blockFarmId, user) {
   const isCurrentManager = ownerRole === ROLES.FARM_MANAGER && memberUserId === actorId;
   if (!isMember && !isCurrentManager) {
     throw new Error('memberUserId must reference an ACTIVE Farm Member or the current Farm Manager.');
+  }
+  if (isMember && owner.data().affiliatedBlockFarmId
+    && owner.data().affiliatedBlockFarmId !== blockFarmId) {
+    throw new Error('memberUserId is affiliated with a different Block Farm.');
   }
   if (isCurrentManager) await assertManagerScope(blockFarmId, user);
 }
@@ -137,6 +144,7 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       status: 'ACTIVE',
       customStages: Array.isArray(req.body.customStages) ? req.body.customStages : [],
       customOperations: req.body.customOperations && typeof req.body.customOperations === 'object' ? req.body.customOperations : {},
+      operationSchedule: [],
       createdAt: now,
       updatedAt: now,
       archivedAt: null
@@ -164,6 +172,15 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const batch = db.batch();
     batch.create(db.collection(COLLECTIONS.FIELDS).doc(fieldId), field);
     batch.create(db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId), cycle);
+    queueAuditEvent(batch, db, {
+      eventType: 'FIELD_CREATED',
+      actorUserId: req.session.user.employeeId || req.session.user.userId,
+      entityType: 'FIELD',
+      entityId: fieldId,
+      blockFarmId,
+      details: `Created field ${fieldId} and its first Crop Year Cycle.`,
+      createdAt: now
+    });
     await batch.commit();
     return res.status(201).json({ success: true, data: { field: { id: fieldId, ...field }, cycle: { id: cycleId, ...cycle } } });
   } catch (error) {
@@ -215,6 +232,15 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
           ? { soilType: admin.firestore.FieldValue.delete() }
           : {})
       });
+      queueAuditEvent(transaction, db, {
+        eventType: 'FIELD_UPDATED',
+        actorUserId: req.session.user.employeeId || req.session.user.userId,
+        entityType: 'FIELD',
+        entityId: scope.fieldId,
+        blockFarmId: update.blockFarmId,
+        details: `Updated field ${scope.fieldId}.`,
+        createdAt: update.updatedAt
+      });
       return { replayed: false, record: { ...withoutLegacySoilType(latest), ...update } };
     });
     return res.json({ success: true, replayed: result.replayed, data: { id: scope.fieldId, ...result.record } });
@@ -242,10 +268,7 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
     if (!operationAuthorization(req.session.user, { id: fieldId, ...snapshot.data() }).canPlan) {
       return res.status(403).json({ success: false, error: 'Farm plans can only be changed for your own assigned field.' });
     }
-    const customOperations = req.body.customOperations;
-    if (!customOperations || typeof customOperations !== 'object' || Array.isArray(customOperations)) {
-      return res.status(400).json({ success: false, error: 'customOperations must be an object keyed by stage number.' });
-    }
+    const customOperations = normalizeCustomOperationsPlan(req.body.customOperations);
     const mutationContext = readMutationContext(req);
     const result = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
@@ -260,9 +283,61 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
       assertBaseVersion(latest.updatedAt, mutationContext, fieldId, { id: fieldId, ...latest });
       const updatedAt = nowIso();
       transaction.update(ref, { customOperations, updatedAt });
+      queueAuditEvent(transaction, db, {
+        eventType: 'FIELD_PLAN_UPDATED',
+        actorUserId: req.session.user.employeeId || req.session.user.userId,
+        entityType: 'FIELD',
+        entityId: fieldId,
+        blockFarmId: latest.blockFarmId,
+        details: `Updated the operation plan for field ${fieldId}.`,
+        createdAt: updatedAt
+      });
       return { replayed: false, updatedAt };
     });
     return res.json({ success: true, replayed: result.replayed, data: { id: fieldId, customOperations, updatedAt: result.updatedAt } });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
+  }
+});
+
+router.put('/:id/operation-schedule', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.MEMBER_FARMER]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const fieldId = String(req.params.id || '').trim().toUpperCase();
+    const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
+    const mutationContext = readMutationContext(req);
+    const actorUserId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const result = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });
+      const field = snapshot.data();
+      if (!operationAuthorization(req.session.user, { id: fieldId, ...field }).canPlan) {
+        throw Object.assign(new Error('Farm schedules can only be changed for your own assigned field.'), { status: 403 });
+      }
+      const updatedAt = nowIso();
+      const operationSchedule = normalizeOperationSchedule(req.body.operationSchedule, {
+        cycleId: field.currentCycleId,
+        actorId: actorUserId,
+        now: updatedAt,
+        existing: field.operationSchedule || []
+      });
+      if (JSON.stringify(field.operationSchedule || []) === JSON.stringify(operationSchedule)) {
+        return { replayed: true, operationSchedule: field.operationSchedule || [], updatedAt: field.updatedAt };
+      }
+      assertBaseVersion(field.updatedAt, mutationContext, fieldId, { id: fieldId, ...field });
+      transaction.update(ref, { operationSchedule, updatedAt });
+      queueAuditEvent(transaction, db, {
+        eventType: 'FIELD_SCHEDULE_UPDATED',
+        actorUserId,
+        entityType: 'FIELD',
+        entityId: fieldId,
+        blockFarmId: field.blockFarmId,
+        details: `Updated the farm work schedule for field ${fieldId}.`,
+        createdAt: updatedAt
+      });
+      return { replayed: false, operationSchedule, updatedAt };
+    });
+    return res.json({ success: true, replayed: result.replayed, data: { id: fieldId, operationSchedule: result.operationSchedule, updatedAt: result.updatedAt } });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
@@ -290,6 +365,15 @@ router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER]),
       assertBaseVersion(latest.updatedAt, mutationContext, fieldId, { id: fieldId, ...latest });
       const updatedAt = nowIso();
       transaction.update(ref, { customStages, updatedAt });
+      queueAuditEvent(transaction, db, {
+        eventType: 'FIELD_STAGES_UPDATED',
+        actorUserId: req.session.user.employeeId || req.session.user.userId,
+        entityType: 'FIELD',
+        entityId: fieldId,
+        blockFarmId: latest.blockFarmId,
+        details: `Updated the stage plan for field ${fieldId}.`,
+        createdAt: updatedAt
+      });
       return { replayed: false, updatedAt };
     });
     return res.json({ success: true, replayed: result.replayed, data: { id: fieldId, customStages, updatedAt: result.updatedAt } });

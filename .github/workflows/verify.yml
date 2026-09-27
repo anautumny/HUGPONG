@@ -1,0 +1,63 @@
+name: HUGPONG Release Verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Server, Web, and Android
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      NODE_ENV: test
+      SESSION_SECRET: phase-six-ci-session-secret-longer-than-32-characters
+      FIREBASE_PROJECT_ID: hugpong-ci
+      VITE_FIREBASE_API_KEY: ci-web-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: hugpong-ci.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: hugpong-ci
+      VITE_FIREBASE_STORAGE_BUCKET: hugpong-ci.firebasestorage.app
+      VITE_FIREBASE_MESSAGING_SENDER_ID: '100000000001'
+      VITE_FIREBASE_APP_ID: '1:100000000001:web:ci-web-app'
+      EXPO_PUBLIC_API_BASE_URL: https://api.example.invalid
+      EXPO_PUBLIC_FIREBASE_API_KEY: ci-mobile-api-key
+      EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: hugpong-ci.firebaseapp.com
+      EXPO_PUBLIC_FIREBASE_PROJECT_ID: hugpong-ci
+      EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: hugpong-ci.firebasestorage.app
+      EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '100000000001'
+      EXPO_PUBLIC_FIREBASE_APP_ID: '1:100000000001:web:ci-mobile-app'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            web/react-app/package-lock.json
+            mobile/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci --prefix server
+
+      - name: Install Web dependencies
+        run: npm ci --prefix web/react-app
+
+      - name: Install Mobile dependencies
+        run: npm ci --prefix mobile
+
+      - name: Run full release gate
+        run: npm run verify:release

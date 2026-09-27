@@ -153,6 +153,25 @@ export function cleanupDuplicateLogs(logs) {
   return Array.from(byId.values());
 }
 
+export function uniqueRecordsById(records) {
+  if (!Array.isArray(records)) return [];
+  const byId = new Map();
+  for (const record of records) {
+    const id = String(record?.id || '').trim();
+    if (!id) continue;
+    const identity = id.toUpperCase();
+    const existing = byId.get(identity);
+    if (!existing) {
+      byId.set(identity, record);
+      continue;
+    }
+    const existingTime = Date.parse(existing.updatedAt || existing.createdAt || '') || 0;
+    const recordTime = Date.parse(record.updatedAt || record.createdAt || '') || 0;
+    if (recordTime >= existingTime) byId.set(identity, record);
+  }
+  return Array.from(byId.values());
+}
+
 export const cleanDataForFirestore = (obj) => {
   if (obj === null || obj === undefined) return null;
   if (typeof obj !== 'object') return obj;

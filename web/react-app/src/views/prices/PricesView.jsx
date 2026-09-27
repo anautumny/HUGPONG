@@ -75,14 +75,14 @@ export default function PricesView() {
               Market Intelligence
             </span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
-              Official SRA Source
+              Source-Referenced Records
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
             SRA Price Monitor
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Real-time Sugar Regulatory Administration millsite benchmark rates for Raw Sugar (₱/Lkg) and Industrial Molasses (₱/MT).
+            Published millsite price references for Raw Sugar (₱/Lkg) and Industrial Molasses (₱/MT), with their source details.
           </p>
         </div>
 
@@ -104,7 +104,7 @@ export default function PricesView() {
               onClick={() => setIsPublishModalOpen(true)}
               icon={PlusCircle}
             >
-              Post Official SRA Price
+              Publish Price Reference
             </Button>
           )}
         </div>
@@ -120,7 +120,7 @@ export default function PricesView() {
         </div>
       )}
 
-      {/* Current Official Price Banner */}
+      {/* Current published price banner */}
       <CurrentPriceBanner
         price={currentPrice}
         previousPrice={previousPrice}

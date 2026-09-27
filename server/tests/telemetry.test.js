@@ -269,8 +269,9 @@ test('role routes and clients preserve agricultural/system separation and scoped
   assert.match(sidebar, /label: 'System Sync Monitor'[\s\S]{0,120}id: 'nav-system-sync'/);
   assert.match(sidebar, /label: 'System Sync Monitor'[\s\S]{0,80}icon: RefreshCw/);
   assert.match(dashboardService, /dashboardRead\('Terminal diagnostics', '\/api\/terminal-diagnostics'/);
-  assert.match(dashboardService, /Terminal diagnostics[\s\S]*?\.catch\(\(\) => \(\{ data: \{ subjects: \[\] \} \}\)\)/);
-  assert.match(dashboardService, /terminalDiagnostics: telemetryResult\.data\?\.subjects \|\| \[\]/);
+  assert.match(dashboardService, /Terminal diagnostics[\s\S]*?\.catch\(error => \(\{ result: \{ data: \{ subjects: \[\] \} \}, error: error\.message \}\)\)/);
+  assert.match(dashboardService, /terminalDiagnostics: telemetryState\.result\.data\?\.subjects \|\| \[\]/);
+  assert.match(dashboardService, /systemDiagnosticsError: diagnosticsState\.error/);
   assert.match(dashboardService, /includeActivityMonitoring = roleKey === ROLE_KEYS\.FARM_MANAGER/);
   assert.match(dashboardService, /dashboardRead\('Member activity', '\/api\/terminal-diagnostics'/);
   assert.match(dashboardService, /terminalDiagnostics: activityResult\.result\.data\?\.subjects \|\| \[\]/);

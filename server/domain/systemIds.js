@@ -24,6 +24,31 @@ function createFieldId() {
   return createSystemId('FLD');
 }
 
+const USER_ID_PREFIXES = Object.freeze({
+  SUPER_ADMIN: '01',
+  SRA_ADMIN: '02',
+  FARM_MANAGER: '03',
+  MEMBER_FARMER: '04'
+});
+
+function createUserId(role) {
+  const prefix = USER_ID_PREFIXES[String(role || '').trim().toUpperCase()];
+  if (!prefix) throw new Error('A canonical role is required to issue a User ID.');
+  return `${prefix}${crypto.randomInt(100000, 1000000)}`;
+}
+
+function createPriceId() {
+  return createSystemId('PRC');
+}
+
+function createTicketId() {
+  return createSystemId('TCK');
+}
+
+function createAuditEventId() {
+  return createSystemId('EVT');
+}
+
 function assertNoClientIdentity(body, keys, entityLabel) {
   const suppliedKey = keys.find(key => Object.prototype.hasOwnProperty.call(body || {}, key));
   if (suppliedKey) {
@@ -48,6 +73,10 @@ module.exports = {
   createSystemId,
   createBlockFarmId,
   createFieldId,
+  createUserId,
+  createPriceId,
+  createTicketId,
+  createAuditEventId,
   assertNoClientIdentity,
   readDevelopmentSeedId
 };

@@ -3,6 +3,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import QRCode from 'qrcode';
 import { formatCropYearDisplay } from '../utils/dataHelpers';
+import { auditCropYearCycles } from '../domain/auditWorkflow';
 
 const CURRENT_CYCLE_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
 const FOLLOWING_PERIOD_MONTHS = [1, 2, 3];
@@ -28,11 +29,11 @@ const safeFilePart = value => String(value || 'Report')
 const accountId = user => String(user?.employeeId || user?.userId || user?.id || '').trim();
 
 const accountName = user => String(
-  user?.displayName || user?.name || accountId(user) || 'Authenticated User'
+  user?.displayName || user?.name || accountId(user) || ''
 ).trim();
 
 const accountRole = user => String(
-  user?.role || user?.roleLabel || user?.canonicalRole || 'HUGPONG Account'
+  user?.role || user?.roleLabel || user?.canonicalRole || ''
 ).trim().replace(/_/g, ' ');
 
 const reportActorName = (storedName, storedId, currentUser, fallback) => {
@@ -60,7 +61,7 @@ function isMillingOperation(log = {}) {
 
 function createQrSvg(value) {
   try {
-    const qr = QRCode.create(String(value || 'HUG-SRA-AUDIT'), { errorCorrectionLevel: 'H' });
+    const qr = QRCode.create(String(value), { errorCorrectionLevel: 'H' });
     const count = qr.modules.size;
     const quietZone = 4;
     let path = '';
@@ -73,7 +74,7 @@ function createQrSvg(value) {
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-${quietZone} -${quietZone} ${count + quietZone * 2} ${count + quietZone * 2}" width="96" height="96" role="img" aria-label="Digital audit seal"><rect x="-${quietZone}" y="-${quietZone}" width="${count + quietZone * 2}" height="${count + quietZone * 2}" fill="#fff"/><path d="${path}" fill="#000"/></svg>`;
   } catch {
-    return '<div class="qr-fallback">QR</div>';
+    return '<div class="qr-fallback">QR unavailable</div>';
   }
 }
 
@@ -107,6 +108,9 @@ function monthCells(placement, area) {
 
 function operationRow(log, operationNumber, placement, totalAuditedHa) {
   const operationName = log.operationName || log.name || `Operation ${operationNumber}`;
+  const operationNameHtml = log.childOperationName
+    ? `${escapeHtml(operationName)}<br><span style="font-size:8px;font-weight:600">Child operation: ${escapeHtml(log.childOperationName)}</span>`
+    : escapeHtml(operationName);
   const area = Number(log.areaHa || totalAuditedHa).toFixed(2);
   const totalCost = Number(log.totalCost || log.cost || 0);
   const quantity = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
@@ -115,7 +119,7 @@ function operationRow(log, operationNumber, placement, totalAuditedHa) {
   const costPerHa = Number(log.areaHa) > 0 ? totalCost / Number(log.areaHa) : totalCost;
 
   if (Array.isArray(log.lineItems) && log.lineItems.length > 0) {
-    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td colspan="21" class="bold">${escapeHtml(operationName)}</td></tr>`;
+    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td colspan="21" class="bold">${operationNameHtml}</td></tr>`;
     const children = log.lineItems.map((item, childIndex) => {
       const childQuantity = item.quantity != null ? item.quantity : 1;
       const childUnit = item.unit || 'bag';
@@ -138,7 +142,7 @@ function operationRow(log, operationNumber, placement, totalAuditedHa) {
 
   return `<tr>
     <td class="center bold">${operationNumber}</td>
-    <td class="bold">${escapeHtml(operationName)}</td>
+    <td class="bold">${operationNameHtml}</td>
     ${monthCells(placement, area)}
     <td class="number bold">${area}</td>
     <td class="center">${escapeHtml(quantity)}</td>
@@ -152,8 +156,8 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   if (!report) throw new Error('An audit report is required to generate a PDF.');
 
   const farm = blockFarms.find(item => item.id === report.blockFarmId) || {};
-  const farmName = farm.name || report.blockFarmName || report.blockFarm || report.blockFarmId || 'District Block Farm';
-  const farmLocation = farm.location || farm.address || report.blockFarmLocation || 'HDA. SILAY DISTRICT, SILAY CITY, NEGROS OCCIDENTAL';
+  const farmName = farm.name || report.blockFarmName || report.blockFarm || report.blockFarmId || 'Block farm not provided';
+  const farmLocation = farm.location || farm.address || report.blockFarmLocation || 'Location not provided';
   const operations = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
     : (Array.isArray(report.operations) ? report.operations : (Array.isArray(report.logs) ? report.logs : []));
@@ -170,19 +174,25 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
     : 0;
   const totalAuditedHa = operationArea > 0
     ? operationArea
-    : (Number(report.hectaresAudited || report.totalHectares || snapshotArea || operations[0]?.areaHa || farm.totalAreaHa) || 1);
-  const totalFarmArea = Number(farm.totalAreaHa || farm.declaredAreaHa || farm.declaredHa || totalAuditedHa).toFixed(4);
+    : (Number(report.hectaresAudited || report.totalHectares || snapshotArea || operations[0]?.areaHa || farm.totalAreaHa) || 0);
+  const totalFarmArea = Number(farm.totalAreaHa || farm.declaredAreaHa || farm.declaredHa || totalAuditedHa || 0).toFixed(4);
   const auditedArea = totalAuditedHa.toFixed(4);
 
   const period = String(report.periodKey || report.period || report.month || '');
   const periodMatch = period.match(/^(\d{4})-(\d{2})$/);
   const operationDateMatch = String(operations.find(log => log.performedOn)?.performedOn || '').match(/^(\d{4})-(\d{2})/);
-  const reportYear = periodMatch ? Number(periodMatch[1]) : (operationDateMatch ? Number(operationDateMatch[1]) : new Date().getFullYear());
+  const reportYear = periodMatch ? Number(periodMatch[1]) : (operationDateMatch ? Number(operationDateMatch[1]) : 0);
   const reportMonth = periodMatch ? Number(periodMatch[2]) : (operationDateMatch ? Number(operationDateMatch[2]) : 1);
-  const storedCropYear = report.cropYear || operations.find(log => log.cropYear)?.cropYear || '';
-  const storedStartYear = Number(String(storedCropYear).match(/\d{4}/)?.[0]);
+  const fieldSnapshots = Array.isArray(report.fieldSnapshots) ? report.fieldSnapshots : [];
+  const cropYearCycles = auditCropYearCycles(report, operations, fieldSnapshots);
+  if (!cropYearCycles.length) {
+    throw new Error('This audit report has no recorded Crop Year Cycle. Correct or recompile the report before exporting it.');
+  }
+  const cropYearDisplay = cropYearCycles.map(formatCropYearDisplay).join(' / ');
+  const storedStartYear = Number(cropYearCycles[0].slice(0, 4));
   const cycleStartYear = Number.isInteger(storedStartYear) ? storedStartYear : reportYear;
-  const currentCycle = `Crop Year Cycle ${formatCropYearDisplay(storedCropYear)}`.replace(/[–—]/g, '-');
+  const currentCycle = `${cropYearCycles.length === 1 ? 'Crop Year Cycle' : 'Crop Year Cycles'} ${cropYearDisplay}`;
+  const continuationCycle = currentCycle;
 
   const directOperations = operations.filter(log => !isMillingOperation(log));
   const millingOperations = operations.filter(isMillingOperation);
@@ -192,7 +202,8 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const millingCostPerHa = totalAuditedHa > 0 ? millingCost / totalAuditedHa : millingCost;
   const grandTotal = directCost + millingCost;
   const grandTotalPerHa = totalAuditedHa > 0 ? grandTotal / totalAuditedHa : grandTotal;
-  const hash = report.qrHash || report.qrSignature || report.integrityHash || report.reportId || report.id || 'HUG-SRA-AUDIT';
+  const hash = String(report.qrHash || report.qrSignature || report.integrityHash || '').trim();
+  if (!hash) throw new Error('This audit report has no QR integrity code and cannot be exported.');
   const isCertified = String(report.status || '').toUpperCase() === 'CERTIFIED';
 
   const directRows = directOperations.map((log, index) => operationRow(
@@ -217,12 +228,16 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
 
   const currentMonthHeaders = CURRENT_CYCLE_MONTHS.map(month => `<th>${month}</th>`).join('');
   const nextMonthHeaders = FOLLOWING_PERIOD_MONTHS.map(month => `<th>${month}</th>`).join('');
-  const managerName = reportActorName(report.compiledByName, report.compiledByUserId, currentUser, 'Farm Manager');
+  const managerId = String(report.compiledByUserId || '').trim();
+  const managerName = reportActorName(report.compiledByName, managerId, currentUser, managerId);
+  const inspectorId = isCertified ? String(report.certifiedByUserId || '').trim() : '';
   const inspectorName = isCertified
-    ? reportActorName(report.certifiedByName || report.verifiedBy, report.certifiedByUserId, currentUser, 'SRA Admin')
+    ? reportActorName(report.certifiedByName || report.verifiedBy, inspectorId, currentUser, inspectorId)
     : 'Awaiting Review';
-  const printedByName = accountName(currentUser);
+  const printedById = accountId(currentUser);
+  const printedByName = accountName(currentUser) || printedById;
   const printedByRole = accountRole(currentUser);
+  const reportId = String(report.reportId || report.id || '').trim();
 
   return `<!doctype html>
   <html>
@@ -234,7 +249,8 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         * { box-sizing: border-box; }
         body { margin: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; line-height: 1.2; }
         .sheet { width: 100%; }
-        .meta { display: grid; grid-template-columns: 54mm 1fr; gap: 1.5px 4mm; margin-bottom: 3mm; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+        .report-header { display: grid; grid-template-columns: minmax(0, 1fr) 30mm; gap: 5mm; align-items: start; margin-bottom: 3mm; }
+        .meta { display: grid; grid-template-columns: 54mm 1fr; gap: 1.5px 4mm; font-size: 9px; font-weight: 700; text-transform: uppercase; }
         .meta .value { font-weight: 800; letter-spacing: .15px; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { border: .5px solid #000; padding: 1.25px 2px; vertical-align: middle; overflow-wrap: anywhere; }
@@ -259,23 +275,31 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12mm; margin-top: 8mm; text-align: center; page-break-inside: avoid; }
         .signature { border-top: .5px solid #000; padding-top: 2mm; min-height: 16mm; }
         .signature .name { font-size: 9px; font-weight: 800; text-transform: uppercase; }
-        .signature .role { margin-top: 6mm; color: #555; font-size: 7.5px; line-height: 1.3; }
-        .seal { border-top: .5px dashed #bbb; margin-top: 3mm; padding-top: 2mm; display: flex; align-items: center; justify-content: center; gap: 3mm; page-break-inside: avoid; }
+        .signature .account-id { margin-top: 1mm; font-family: 'Courier New', monospace; font-size: 7px; color: #333; }
+        .signature .role { margin-top: 4mm; color: #555; font-size: 7.5px; line-height: 1.3; }
+        .qr-panel { width: 30mm; text-align: center; page-break-inside: avoid; }
         .qr { border: .5px solid #000; padding: 1mm; width: 27mm; height: 27mm; display: flex; align-items: center; justify-content: center; }
         .qr svg { width: 25mm; height: 25mm; }
         .qr-fallback { font-weight: 900; font-size: 16px; }
-        .seal-copy { font-family: 'Courier New', monospace; font-size: 7.5px; line-height: 1.35; }
-        .seal-copy .hash { font-weight: 800; }
-        .muted { color: #666; }
+        .qr-code { margin-top: 1mm; font-family: 'Courier New', monospace; font-size: 6.5px; line-height: 1.15; overflow-wrap: anywhere; }
       </style>
     </head>
     <body>
       <main class="sheet">
-        <section class="meta">
-          <div>NAME OF BLOCK FARM</div><div class="value">${escapeHtml(farmName)}</div>
-          <div>LOCATION</div><div class="value">${escapeHtml(farmLocation)}</div>
-          <div>TOTAL AREA OF BLOCK FARM (HA)</div><div class="value">${totalFarmArea}</div>
-          <div>TOTAL AREA FOR NEW PLANT (HA)</div><div class="value">${auditedArea}</div>
+        <section class="report-header">
+          <div class="meta">
+            <div>REPORT ID</div><div class="value">${escapeHtml(reportId)}</div>
+            <div>REPORTING MONTH</div><div class="value">${escapeHtml(period)}</div>
+            <div>CROP YEAR CYCLE</div><div class="value">${escapeHtml(cropYearDisplay)}</div>
+            <div>NAME OF BLOCK FARM</div><div class="value">${escapeHtml(farmName)}</div>
+            <div>LOCATION</div><div class="value">${escapeHtml(farmLocation)}</div>
+            <div>TOTAL AREA OF BLOCK FARM (HA)</div><div class="value">${totalFarmArea}</div>
+            <div>TOTAL AREA FOR NEW PLANT (HA)</div><div class="value">${auditedArea}</div>
+          </div>
+          <div class="qr-panel">
+            <div class="qr">${createQrSvg(hash)}</div>
+            <div class="qr-code">${escapeHtml(hash)}</div>
+          </div>
         </section>
 
         <table>
@@ -284,7 +308,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
               <th class="no" rowspan="2">NO</th>
               <th class="operation" rowspan="2">OPERATION</th>
               <th colspan="12">${escapeHtml(currentCycle)}</th>
-              <th colspan="3">FOLLOWING PERIOD</th>
+              <th colspan="3">${escapeHtml(continuationCycle)}</th>
               <th class="total" rowspan="2">TOTAL</th>
               <th class="qty" rowspan="2">QTY</th>
               <th class="unit" rowspan="2">UNIT</th>
@@ -296,21 +320,12 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
           <tbody>${rows}</tbody>
         </table>
 
-        <p class="footnote">* Total Cumulative Farm Expenditure for ${auditedArea} Ha Audited = <strong>PHP ${formatNumber(grandTotal)}</strong> (Philippine Pesos). Certified compliant under SRA Silay Mill District standard schedule.</p>
+        <p class="footnote">* Total recorded expenditure for ${auditedArea} Ha included in this report: <strong>PHP ${formatNumber(grandTotal)}</strong> (Philippine Pesos).</p>
 
         <section class="signatures">
-          <div class="signature"><div class="name">${escapeHtml(managerName)}</div><div class="role">Farm Manager / President<br><strong>${escapeHtml(farmName)}</strong></div></div>
-          <div class="signature"><div class="name">${escapeHtml(inspectorName)}</div><div class="role">SRA Agricultural Inspector<br><strong>Field Operations Audit Division</strong></div></div>
-          <div class="signature"><div class="name">${escapeHtml(printedByName)}</div><div class="role">Printed by ${escapeHtml(printedByRole)}<br><strong>Authenticated HUGPONG Account</strong></div></div>
-        </section>
-
-        <section class="seal">
-          <div class="qr">${createQrSvg(hash)}</div>
-          <div class="seal-copy">
-            <div class="hash">DIGITAL AUDIT SEAL: [HASH: ${escapeHtml(hash)}]</div>
-            <div class="muted">VERIFIED VIA HUGPONG ENTERPRISE SUITE - SRA SILAY MILL DISTRICT</div>
-            <div class="muted">TAMPER-PROOF CRYPTOGRAPHIC AUDIT RECORD - R.A. 10659 COMPLIANT</div>
-          </div>
+          <div class="signature"><div class="name">${escapeHtml(managerName)}</div>${managerId ? `<div class="account-id">ID: ${escapeHtml(managerId)}</div>` : ''}<div class="role">Farm Manager / President<br><strong>${escapeHtml(farmName)}</strong></div></div>
+          <div class="signature"><div class="name">${escapeHtml(inspectorName)}</div>${inspectorId ? `<div class="account-id">ID: ${escapeHtml(inspectorId)}</div>` : ''}<div class="role">SRA Agricultural Inspector<br><strong>Field Operations Audit Division</strong></div></div>
+          <div class="signature"><div class="name">${escapeHtml(printedByName)}</div>${printedById ? `<div class="account-id">ID: ${escapeHtml(printedById)}</div>` : ''}<div class="role">Printed by ${escapeHtml(printedByRole)}</div></div>
         </section>
       </main>
     </body>

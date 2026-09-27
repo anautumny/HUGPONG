@@ -416,7 +416,7 @@ export function selectPriceTrends({
       sugarChange: Number(p.sugarPriceChange || 0),
       molassesPrice: Number(p.molassesPricePerMetricTon || 0),
       molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Official Circular'
+      circularNumber: p.circularNumber || p.source || 'Published Reference'
     }));
   } else {
     // Weekly points
@@ -427,7 +427,7 @@ export function selectPriceTrends({
       sugarChange: Number(p.sugarPriceChange || 0),
       molassesPrice: Number(p.molassesPricePerMetricTon || 0),
       molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Official Circular'
+      circularNumber: p.circularNumber || p.source || 'Published Reference'
     }));
   }
 

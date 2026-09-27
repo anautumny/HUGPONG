@@ -6,9 +6,11 @@ import {
   createOperation
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
-import { SRA_OPERATIONS_CATALOGUE, getOperationsForStage } from '../../domain/operationCatalogue';
+import { getOperationDefinition, getOperationsForStage } from '../../domain/operationCatalogue';
+import { OPERATION_UNITS } from '../../domain/operationUnits';
 import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
+import { createClientRecordId } from '../../utils/secureId';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import {
   FormField,
@@ -59,16 +61,22 @@ export default function TakeOverView() {
   // Manager Takeover form state
   const [selectedStageNumber, setSelectedStageNumber] = useState(null);
   const [selectedOpId, setSelectedOpId] = useState('');
+  const [selectedChildOpId, setSelectedChildOpId] = useState('');
+  const [customChildName, setCustomChildName] = useState('');
   const [inputMode, setInputMode] = useState('group'); // 'group' or 'direct'
   const [performedOn, setPerformedOn] = useState(new Date().toISOString().slice(0, 10));
   const [activityName, setActivityName] = useState('');
   const [areaHa, setAreaHa] = useState('');
   const [workersCount, setWorkersCount] = useState('');
+  const [laborEntries, setLaborEntries] = useState([]);
+  const [newWorker, setNewWorker] = useState({ workerCount: '1', days: '1', rate: '' });
   const [advanceStage] = useState(false);
   const [variety, setVariety] = useState('');
 
   // Group Mode sub-items
   const [subItems, setSubItems] = useState([]);
+  const [showNewExpense, setShowNewExpense] = useState(false);
+  const [newExpense, setNewExpense] = useState({ description: '', quantity: '1', unit: 'bag', unitCost: '' });
 
   // Direct Mode inputs
   const [directQty, setDirectQty] = useState('');
@@ -120,6 +128,8 @@ export default function TakeOverView() {
     if (currentField) {
       setSelectedStageNumber(null);
       setSelectedOpId('');
+      setSelectedChildOpId('');
+      setCustomChildName('');
       setActivityName('');
       setVariety(String(currentField.cropCycle?.variety || ''));
       setAreaHa(currentField.areaHa ? String(currentField.areaHa) : (currentField.ha ? String(currentField.ha) : ''));
@@ -130,6 +140,8 @@ export default function TakeOverView() {
   const handleStageSelect = (stageNum) => {
     setSelectedStageNumber(stageNum);
     setSelectedOpId('');
+    setSelectedChildOpId('');
+    setCustomChildName('');
     setActivityName('');
     setSubItems([]);
   };
@@ -137,6 +149,8 @@ export default function TakeOverView() {
   // Handle template selection
   const handleTemplateSelect = (opId) => {
     setSelectedOpId(opId);
+    setSelectedChildOpId('');
+    setCustomChildName('');
     if (opId === 'CUSTOM') {
       setActivityName('');
       setInputMode('direct');
@@ -146,14 +160,21 @@ export default function TakeOverView() {
       setDirectRate('0');
       return;
     }
-    const tmpl = SRA_OPERATIONS_CATALOGUE.find(o => o.id === opId);
+    const tmpl = getOperationDefinition(opId);
     if (!tmpl) return;
+    const firstChild = tmpl.childOperations?.[0] || null;
+    setSelectedChildOpId(firstChild?.id || '');
 
     setActivityName(tmpl.name);
     setSelectedStageNumber(tmpl.stageNumber);
-    setInputMode(tmpl.inputType || (tmpl.isGroup ? 'group' : 'direct'));
+    setInputMode(tmpl.childOperations?.length ? 'direct' : (tmpl.inputType || (tmpl.isGroup ? 'group' : 'direct')));
 
-    if (tmpl.isGroup && tmpl.subItems) {
+    if (tmpl.childOperations?.length) {
+      setSubItems([]);
+      setDirectQty(String(firstChild?.perHa || '1'));
+      setDirectUnit(firstChild?.unit || 'ha');
+      setDirectRate(String(firstChild?.rate || '0'));
+    } else if (tmpl.isGroup && tmpl.subItems) {
       setSubItems(tmpl.subItems.map((item, idx) => ({
         lineItemId: item.lineItemId || `SI-${idx + 1}`,
         description: item.description,
@@ -184,18 +205,26 @@ export default function TakeOverView() {
     setSubItems(updated);
   };
 
-  const handleAddSubItem = () => {
-    setSubItems(prev => [
-      ...prev,
-      {
-        lineItemId: `SI-${Date.now().toString(36)}`,
-        description: '',
-        quantity: 1,
-        unit: 'ha',
-        unitCost: 0,
-        subtotal: 0
-      }
-    ]);
+  const handleAddSubItem = () => setShowNewExpense(true);
+  const confirmAddSubItem = () => {
+    const quantity = Number(newExpense.quantity);
+    const unitCost = Number(newExpense.unitCost);
+    if (!newExpense.description.trim() || quantity <= 0 || !Number.isFinite(unitCost)) {
+      setServerError('Enter the material or expense details before confirming it.');
+      return;
+    }
+    setSubItems(prev => [...prev, { lineItemId: createClientRecordId('SI'), itemType: 'EXPENSE', description: newExpense.description.trim(), quantity, unit: newExpense.unit, unitCost, subtotal: quantity * unitCost }]);
+    setNewExpense({ description: '', quantity: '1', unit: 'bag', unitCost: '' });
+    setShowNewExpense(false);
+  };
+
+  const handleChildSelect = (childId) => {
+    setSelectedChildOpId(childId);
+    setCustomChildName('');
+    const child = childId === 'CUSTOM' ? null : getOperationDefinition(childId);
+    setDirectQty(String(child?.perHa || areaHa || '1'));
+    setDirectUnit(child?.unit || 'ha');
+    setDirectRate(String(child?.rate || '0'));
   };
 
   const handleRemoveSubItem = (index) => {
@@ -203,7 +232,7 @@ export default function TakeOverView() {
   };
 
   // Calculations
-  const totalCost = useMemo(() => {
+  const operationCost = useMemo(() => {
     if (inputMode === 'group') {
       return subItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     } else {
@@ -212,6 +241,8 @@ export default function TakeOverView() {
       return q * r;
     }
   }, [inputMode, subItems, directQty, directRate]);
+  const laborCost = Number(workersCount || 0) * Number(newWorker.days || 0) * Number(newWorker.rate || 0);
+  const totalCost = operationCost + laborCost;
 
   const costPerHa = useMemo(() => {
     const ha = Number(areaHa || 1);
@@ -219,9 +250,28 @@ export default function TakeOverView() {
   }, [totalCost, areaHa]);
 
   // Submit Manager Takeover log
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, submissionTarget = null) => {
+    e?.preventDefault?.();
     if (isSubmitting) return;
+    const singleLineItem = submissionTarget?.type === 'lineItem' ? subItems[submissionTarget.index] : null;
+    const isSingleItemSubmission = Boolean(singleLineItem);
+    const submittedLineItems = singleLineItem ? [singleLineItem] : (isSingleItemSubmission ? [] : (inputMode === 'group' ? subItems : []));
+    const laborWorkerCount = Number(workersCount || 0);
+    const laborDays = Number(newWorker.days || 0);
+    const laborRate = Number(newWorker.rate || 0);
+    if (!Number.isInteger(laborWorkerCount) || laborWorkerCount < 0
+      || (laborWorkerCount > 0 && (!Number.isFinite(laborDays) || laborDays <= 0 || !Number.isFinite(laborRate) || laborRate < 0))) {
+      setServerError('Enter a valid worker count, work days, and daily rate. These details will be attached to the selected item.');
+      return;
+    }
+    const submittedLaborEntries = laborWorkerCount > 0 ? [{
+      laborEntryId: createClientRecordId('LAB'),
+      workerCount: laborWorkerCount,
+      days: laborDays,
+      unit: 'day',
+      rate: laborRate,
+      subtotal: laborWorkerCount * laborDays * laborRate
+    }] : [];
     setServerError(null);
 
     // If supervisor is not authorized yet, prompt auth modal first!
@@ -255,28 +305,39 @@ export default function TakeOverView() {
         return;
       }
 
+      const submittedComponentCost = submittedLineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+        + submittedLaborEntries.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+      const submittedBaseCost = inputMode === 'direct' ? operationCost : 0;
       const payload = {
         fieldId: selectedFieldId,
         cycleId,
         operationDefinitionId: selectedOpId || 'CUSTOM',
+        parentOperationDefinitionId: null,
+        childOperationDefinitionId: singleLineItem?.lineItemId || null,
+        childOperationName: singleLineItem?.description || '',
         operationName: activityName.trim(),
-        category: SRA_OPERATIONS_CATALOGUE.find(o => o.id === selectedOpId)?.category || 'General Care',
+        category: getOperationDefinition(selectedOpId)?.category || 'General Care',
         stageNumber: Number(selectedStageNumber) || 1,
         variety: selectedStageNumber === 2 ? variety.trim() : '',
         performedOn,
         areaHa: numArea,
-        peopleCount: Number(workersCount) || 0,
-        totalCost,
+        peopleCount: submittedLaborEntries.length
+          ? submittedLaborEntries.reduce((sum, item) => sum + Number(item.workerCount || 0), 0)
+          : (isSingleItemSubmission ? 0 : Number(workersCount) || 0),
+        baseCost: submittedBaseCost,
+        totalCost: inputMode === 'direct' ? submittedBaseCost + submittedComponentCost : submittedComponentCost,
+        laborEntries: submittedLaborEntries,
         submissionSource: 'MANAGER_TAKEOVER',
         isSupplemental: false,
-        lineItems: inputMode === 'group' ? subItems.map(item => ({
+        lineItems: submittedLineItems.map(item => ({
           lineItemId: item.lineItemId,
+          itemType: item.itemType || 'EXPENSE',
           description: item.description,
           quantity: Number(item.quantity || 0),
           unit: item.unit || 'unit',
           unitCost: Number(item.unitCost || 0),
           subtotal: Number(item.subtotal || 0)
-        })) : [],
+        })),
         quantity: inputMode === 'direct' ? {
           value: Number(directQty || 0),
           unit: directUnit || 'unit',
@@ -287,7 +348,7 @@ export default function TakeOverView() {
       await createOperation(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
-      if (advanceStage) {
+      if (advanceStage && !isSingleItemSubmission) {
         try {
           const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
@@ -302,7 +363,13 @@ export default function TakeOverView() {
 
       setIsSubmitting(false);
       setSubmitSuccess(true);
-      navigate('/operations');
+      if (singleLineItem) setSubItems(previous => previous.filter((_, index) => index !== submissionTarget.index));
+      if (isSingleItemSubmission) {
+        setLaborEntries([]);
+        setWorkersCount('');
+        setNewWorker({ workerCount: '', days: '1', rate: '' });
+      }
+      if (!isSingleItemSubmission) navigate('/operations');
     } catch (err) {
       console.error('[TakeOver] Submit error:', err);
       setServerError(err.message || 'Unable to record Manager Takeover operation.');
@@ -581,7 +648,7 @@ export default function TakeOverView() {
                     : 'text-hug-muted hover:text-hug-text'
                 }`}
               >
-                Title with Child Items
+                Itemized Costs
               </button>
               <button
                 type="button"
@@ -609,6 +676,7 @@ export default function TakeOverView() {
                 id="takeover-act-input"
                 value={activityName}
                 onChange={(e) => setActivityName(e.target.value)}
+                readOnly={selectedOpId !== 'CUSTOM'}
               />
             </FormField>
 
@@ -645,9 +713,26 @@ export default function TakeOverView() {
                 min="0"
                 suffix="workers"
                 value={workersCount}
-                onChange={(e) => setWorkersCount(e.target.value)}
+                onChange={(event) => setWorkersCount(event.target.value)}
               />
             </FormField>
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-border p-3">
+            <div className="flex items-center justify-between text-xs font-bold"><span>Crew costs</span><span className="text-primary">{formatCurrency(laborCost)}</span></div>
+            {laborEntries.map((worker, index) => (
+              <div key={worker.laborEntryId} className="flex justify-between rounded-lg bg-bg px-3 py-2 text-xs">
+                <span>{worker.workerCount} workers · {worker.days} day × {formatCurrency(worker.rate)}</span>
+                <div className="flex items-center gap-2">
+                  <button type="button" className="text-danger" onClick={() => setLaborEntries(previous => previous.filter((_, itemIndex) => itemIndex !== index))}>Delete</button>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-hug-muted">These labor details are attached to the item you submit.</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="Days" />
+              <Input type="number" min="0" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="Rate / day" />
+            </div>
           </div>
 
           {/* Cost breakdown */}
@@ -655,7 +740,7 @@ export default function TakeOverView() {
             <div className="space-y-3 pt-2 border-t border-border/70">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-hug-text">
-                  Child Items &amp; Materials Breakdown
+                  Materials &amp; Expense Breakdown
                 </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary">
                   {subItems.length} items
@@ -668,7 +753,7 @@ export default function TakeOverView() {
                     key={item.lineItemId || idx}
                     className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 rounded-xl border border-border bg-bg/50 dark:bg-[#0C1015]/40 items-center"
                   >
-                    <div className="sm:col-span-5">
+                    <div className="sm:col-span-4">
                       <input
                         type="text"
                         placeholder="Description..."
@@ -701,12 +786,12 @@ export default function TakeOverView() {
                         {formatCurrency(item.subtotal)}
                       </span>
                     </div>
-                    <div className="sm:col-span-1 text-right">
+                    <div className="sm:col-span-2 text-right flex items-center justify-end gap-1">
+                      <Button type="button" size="sm" variant="primary" onClick={event => handleSubmit(event, { type: 'lineItem', index: idx })}>Submit</Button>
                       <button
                         type="button"
                         onClick={() => handleRemoveSubItem(idx)}
-                        disabled={subItems.length <= 1}
-                        className="p-1 rounded text-hug-muted hover:text-danger disabled:opacity-30 cursor-pointer"
+                        className="p-1 rounded text-hug-muted hover:text-danger cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -715,14 +800,30 @@ export default function TakeOverView() {
                 ))}
               </div>
 
+              {showNewExpense && (
+                <div className="space-y-2 rounded-xl border border-primary/30 bg-primary-bg/40 p-3">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                    <Input value={newExpense.description} onChange={event => setNewExpense(previous => ({ ...previous, description: event.target.value }))} placeholder="Material or expense" />
+                    <Input type="number" min="0.01" step="0.1" value={newExpense.quantity} onChange={event => setNewExpense(previous => ({ ...previous, quantity: event.target.value }))} placeholder="Quantity" />
+                    <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} />
+                    <Input type="number" min="0" value={newExpense.unitCost} onChange={event => setNewExpense(previous => ({ ...previous, unitCost: event.target.value }))} placeholder="Unit cost" />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setShowNewExpense(false)}>Cancel</Button>
+                    <Button type="button" size="sm" variant="primary" onClick={confirmAddSubItem}>Confirm item</Button>
+                  </div>
+                </div>
+              )}
+
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={handleAddSubItem}
                 icon={Plus}
                 className="w-full border-dashed"
+                disabled={showNewExpense}
               >
-                Add Child Item / Material
+                Add Material / Expense
               </Button>
             </div>
           ) : (
@@ -743,13 +844,7 @@ export default function TakeOverView() {
                   <Select
                     value={directUnit}
                     onChange={(e) => setDirectUnit(e.target.value)}
-                    options={[
-                      { value: 'ha', label: 'ha' },
-                      { value: 'tons', label: 'tons' },
-                      { value: 'bags', label: 'bags' },
-                      { value: 'pass', label: 'pass' },
-                      { value: 'lac', label: 'lac' }
-                    ]}
+                    options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))}
                   />
                 </FormField>
                 <FormField label="Rate (₱)">
@@ -773,6 +868,7 @@ export default function TakeOverView() {
               <span className="text-2xl font-black text-white block mt-0.5">
                 {formatCurrency(totalCost)}
               </span>
+              {laborCost > 0 && <span className="block text-[10px] text-[#D4EAD6]">Includes {formatCurrency(laborCost)} crew cost</span>}
             </div>
             <div className="text-right bg-white/15 px-3 py-1 rounded-xl border border-white/20">
               <span className="text-[10px] font-bold text-[#D4EAD6] block">
@@ -785,7 +881,7 @@ export default function TakeOverView() {
           </div>
 
           {/* Submit Action */}
-          <div className="pt-2">
+          {inputMode === 'direct' && <div className="pt-2">
             <Button
               type="button"
               variant="primary"
@@ -797,7 +893,7 @@ export default function TakeOverView() {
             >
               Record Supervisory Operation &amp; Save Progress
             </Button>
-          </div>
+          </div>}
           </fieldset>
         </div>
       </div>

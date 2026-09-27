@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
-import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount, restartCloudSyncIfReady } from '../data/dataStore';
 import {
   subscribeToNetwork,
   getNetworkStatus,
@@ -81,6 +81,16 @@ function AppHeader({ right }) {
     try {
       const online = await checkConnectivity({ force: true });
       if (online) {
+        if (session?.role === 'SRA Admin') {
+          const refreshed = await restartCloudSyncIfReady();
+          safeAlert(
+            refreshed ? 'Connection Restored' : 'Connection Available',
+            refreshed
+              ? 'Live SRA data has been refreshed. Official regulatory actions are available again.'
+              : 'The connection is available, but live SRA data is still refreshing. You remain signed in.'
+          );
+          return;
+        }
         setSyncStatusText(t('syncing_progress', 'Syncing...'));
         const result = await performMobileSync('MANUAL_SYNC');
         const remaining = Number(result.remainingCount || 0);
@@ -99,7 +109,11 @@ function AppHeader({ right }) {
         const serverUnavailable = getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
         safeAlert(
           serverUnavailable ? 'HUGPONG Server Unavailable' : t('offline_status', 'Still Offline'),
-          serverUnavailable
+          session?.role === 'SRA Admin'
+            ? (serverUnavailable
+              ? 'You remain signed in, but HUGPONG is temporarily unavailable. Administrative actions will resume when the server returns.'
+              : 'You remain signed in. Administrative actions will be available again when internet connectivity returns.')
+            : serverUnavailable
             ? 'Your internet connection is active, but HUGPONG is temporarily unavailable. Your records remain safe in local storage.'
             : t('offline_recheck_msg', 'Could not establish an internet connection. Your sugarcane logs remain safe and intact in local device storage.')
         );
@@ -107,7 +121,9 @@ function AppHeader({ right }) {
     } catch (err) {
       safeAlert(
         t('connection_notice', 'Connection Check'),
-        t('connection_check_err', 'Unable to reach the network. Field operations continue to work offline seamlessly.')
+        session?.role === 'SRA Admin'
+          ? 'Unable to reach HUGPONG. You remain signed in; live SRA actions will resume after reconnection.'
+          : t('connection_check_err', 'Unable to reach the network. Field operations continue to work offline seamlessly.')
       );
     } finally {
       stopSpinAnimation();
@@ -179,6 +195,7 @@ function AppHeader({ right }) {
   });
 
   const isFieldRole = session?.role === 'Farm Member' || session?.role === 'Farm Manager';
+  const isSraAdmin = session?.role === 'SRA Admin';
   const liveCount = getPendingSyncCount(session);
   const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
   const isFullySynced = isOnline && safeCount === 0;
@@ -190,14 +207,14 @@ function AppHeader({ right }) {
         <Text style={s.logoText}>HUGPONG</Text>
       </View>
       <View style={s.rightActions}>
-        {isFieldRole && (
+        {(isFieldRole || isSraAdmin) && (
           <TouchableOpacity
             style={[
               s.syncPill,
               isFullySynced ? s.syncPillGreen : s.syncPillYellow,
               isSyncing && s.syncPillSyncing
             ]}
-            onPress={handleSync}
+            onPress={isSraAdmin ? handleCheckConnection : handleSync}
             disabled={isSyncing}
             activeOpacity={0.75}
           >
@@ -212,7 +229,7 @@ function AppHeader({ right }) {
               {isSyncing
                 ? (syncStatusText || t('syncing_progress', 'Syncing...'))
                 : (isFullySynced
-                  ? t('synced', 'Synced')
+                  ? (isSraAdmin ? 'Online' : t('synced', 'Synced'))
                   : (!isOnline
                     ? (safeCount > 0 ? `Offline (${safeCount})` : 'Offline')
                     : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}

@@ -5,6 +5,7 @@ import {
   subscribeToAuthenticatedLoader
 } from './apiClient';
 import { sortCropYearsNewestFirst } from '../utils/recordOrdering';
+import { applyPendingStageUpdate } from './cropStageOutbox';
 
 function normalizedRole(user) {
   return String(user?.canonicalRole || user?.role || user?.roleKey || '')
@@ -52,16 +53,17 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
       const cycle = cycleMap.get(field.currentCycleId) || null;
       const member = memberMap.get(field.memberUserId) || null;
       const farm = farmMap.get(field.blockFarmId) || null;
-      return {
+      return applyPendingStageUpdate({
         ...field,
         stageNumber: cycle?.currentStageNumber ?? null,
+        isCompleted: Boolean(cycle?.completedAt),
         cropCycle: cycle,
         variety: String(cycle?.variety || field.variety || '').trim(),
         varietySource: cycle?.variety ? 'CROP_YEAR_CYCLE' : (field.variety ? 'LEGACY_FIELD' : ''),
         memberName: member?.displayName || member?.name || field.memberUserId || 'Unassigned',
         memberPhone: member?.phone || member?.contact || '',
         blockFarmName: farm?.name || field.blockFarmId || 'Unknown Farm'
-      };
+      }, user);
     }).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     return { fields, cropCycles, blockFarms, memberUsers };
   }, {

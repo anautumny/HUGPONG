@@ -25,6 +25,7 @@ Reconnect and manual sync call only the outbox flusher. The former broad `/api/c
 
 - Mutations for the same entity are FIFO dependencies. A dependent mutation waits for its predecessor.
 - After a predecessor succeeds, its authoritative `updatedAt` becomes the dependent mutation's `baseVersion`.
+- Stage completion may be captured offline by Web or Mobile. The client advances its local working copy so the next stage can accept offline work, marks the change pending, and replays it through the crop-cycle stage API; only the server response makes it authoritative.
 - Express compares supplied base versions inside the protected field, crop-cycle, operation-log, and audit-certification paths.
 - A stale base version returns HTTP 409 with the current server version/state.
 - Operation creation uses a stable operation ID. Amendments use stable amendment IDs. New Field enrollment is deliberately outside the outbox because no canonical Field/Cycle relationship exists until the server responds; existing Field updates and archives continue to use their permanent ID.

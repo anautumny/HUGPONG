@@ -101,13 +101,10 @@ export function operationAuditCoverage(reports = []) {
   return coverage;
 }
 
-export const AUDIT_QR_SCHEMA_VERSION = 3;
+export const AUDIT_QR_SCHEMA_VERSION = 4;
 export const AUDIT_QR_TYPE = 'HUGPONG_AUDIT_TRANSFER';
 export const AUDIT_QR_PART_TYPE = 'HUGPONG_AUDIT_PART';
-// Keep each symbol sparse enough to scan reliably from another phone screen.
-// The multipart envelope adds roughly 200 characters around each data chunk.
-export const AUDIT_QR_SINGLE_MAX_LENGTH = 600;
-export const AUDIT_QR_PART_DATA_LENGTH = 350;
+export const AUDIT_QR_REFERENCE_ENCODING = 'REPORT_REFERENCE';
 export const AUDIT_DELIVERY_METHOD = Object.freeze({ CLOUD: 'cloud', QR: 'qr' });
 export const AUDIT_DELIVERY_STATUS = Object.freeze({ READY: 'ready', SUBMITTED: 'submitted', RECEIVED: 'received' });
 
@@ -139,6 +136,26 @@ export function buildAuditFieldSnapshots(operationSnapshots = [], activeFields =
   });
 }
 
+function canonicalCropYearCycle(value) {
+  const match = String(value || '').trim().match(/(\d{4})\s*[-\u2013\u2014/]\s*(\d{4})/);
+  if (!match) return '';
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  return Number.isInteger(start) && end === start + 1 ? `${start}-${end}` : '';
+}
+
+export function auditCropYearCycles(report = {}, operationSnapshots = [], fieldSnapshots = []) {
+  const candidates = [
+    report.cropYearCycle,
+    report.cropYear,
+    ...(Array.isArray(report.cropYearCycles) ? report.cropYearCycles : []),
+    ...(Array.isArray(report.cropYears) ? report.cropYears : []),
+    ...fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]),
+    ...operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
+  ];
+  return Array.from(new Set(candidates.map(canonicalCropYearCycle).filter(Boolean))).sort();
+}
+
 export function canonicalAuditReport(report = {}) {
   const operationSnapshots = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
@@ -149,6 +166,7 @@ export function canonicalAuditReport(report = {}) {
   const sourceLogIds = Array.isArray(report.sourceLogIds) && report.sourceLogIds.length
     ? report.sourceLogIds.map(operationId)
     : operationSnapshots.map(operationId);
+  const cropYearCycles = auditCropYearCycles(report, operationSnapshots, fieldSnapshots);
   return {
     reportId: report.id || report.reportId,
     schemaVersion: AUDIT_QR_SCHEMA_VERSION,
@@ -157,6 +175,8 @@ export function canonicalAuditReport(report = {}) {
     blockFarmId: report.blockFarmId,
     blockFarmName: report.blockFarmName || report.blockFarm || report.blockFarmId,
     periodKey: report.periodKey || report.period,
+    cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
+    cropYearCycles,
     compiledByUserId: report.compiledByUserId,
     compiledByName: report.compiledByName || '',
     compiledAt: report.compiledAt,
@@ -224,10 +244,23 @@ export function validateCanonicalAuditReport(report) {
 
 export function createAuditQrPayload(report) {
   const canonical = validateCanonicalAuditReport({ ...report, deliveryMethod: AUDIT_DELIVERY_METHOD.QR, deliveryStatus: AUDIT_DELIVERY_STATUS.READY });
-  const bytes = new TextEncoder().encode(JSON.stringify(canonical));
   return JSON.stringify({
     type: AUDIT_QR_TYPE,
     schemaVersion: AUDIT_QR_SCHEMA_VERSION,
+    encoding: AUDIT_QR_REFERENCE_ENCODING,
+    reportId: canonical.reportId,
+    integrityHash: canonical.integrityHash
+  });
+}
+
+// Migration-only encoder for importing older multipart transfers. New QR
+// generation must use createAuditQrPayload so every new report has one code.
+export function createLegacyAuditQrPayload(report) {
+  const canonical = validateCanonicalAuditReport(report);
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical));
+  return JSON.stringify({
+    type: AUDIT_QR_TYPE,
+    schemaVersion: 3,
     encoding: 'DEFLATE_RAW_BASE64_UTF8',
     reportId: canonical.reportId,
     integrityHash: canonical.integrityHash,
@@ -251,7 +284,13 @@ export function decodeAuditQrPayload(raw) {
   if (value?.type === 'HUGPONG_AUDIT' && Number(value.schemaVersion) === 1) return { ...value, legacyLookupOnly: true };
   if (!value || value.type !== AUDIT_QR_TYPE) throw new Error('This is not a supported HUGPONG audit QR package.');
   if (Number(value.schemaVersion) === 2) return validateCanonicalAuditReport(value.report);
-  if (Number(value.schemaVersion) !== AUDIT_QR_SCHEMA_VERSION || value.encoding !== 'DEFLATE_RAW_BASE64_UTF8' || !value.data) throw new Error('This is not a supported HUGPONG audit QR package.');
+  if (Number(value.schemaVersion) === AUDIT_QR_SCHEMA_VERSION) {
+    if (value.encoding !== AUDIT_QR_REFERENCE_ENCODING || !String(value.reportId || '').trim() || !String(value.integrityHash || '').trim()) {
+      throw new Error('The audit QR reference is incomplete.');
+    }
+    return { reportId: String(value.reportId).trim(), integrityHash: String(value.integrityHash).trim(), referenceOnly: true };
+  }
+  if (Number(value.schemaVersion) !== 3 || value.encoding !== 'DEFLATE_RAW_BASE64_UTF8' || !value.data) throw new Error('This is not a supported HUGPONG audit QR package.');
   let report;
   try {
     report = JSON.parse(new TextDecoder().decode(inflateRaw(decodeQrPartData(String(value.data)))));
@@ -264,21 +303,7 @@ export function decodeAuditQrPayload(raw) {
 }
 
 export function createAuditQrParts(report) {
-  const payload = createAuditQrPayload(report);
-  if (new TextEncoder().encode(payload).length <= AUDIT_QR_SINGLE_MAX_LENGTH) return [payload];
-  const canonical = validateCanonicalAuditReport(report);
-  const chunks = [];
-  for (let index = 0; index < payload.length; index += AUDIT_QR_PART_DATA_LENGTH) chunks.push(payload.slice(index, index + AUDIT_QR_PART_DATA_LENGTH));
-  const transferId = `${canonical.reportId}:${canonical.integrityHash}`;
-  return chunks.map((data, index) => JSON.stringify({
-    type: AUDIT_QR_PART_TYPE,
-    schemaVersion: 2,
-    transferId,
-    partNumber: index + 1,
-    partCount: chunks.length,
-    encoding: 'RAW',
-    data
-  }));
+  return [createAuditQrPayload(report)];
 }
 
 export function decodeAuditQrPart(raw) {

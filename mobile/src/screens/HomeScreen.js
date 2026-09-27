@@ -25,6 +25,13 @@ import MemberHomeView from './member/MemberHomeView';
 import ManagerHomeView from './manager/ManagerHomeView';
 import SRAHomeView from './sra/SRAHomeView';
 import PublishPriceModal from '../components/PublishPriceModal';
+import { getOperationCapabilities } from '../domain/operationAuthorization';
+import {
+  collectPlannerEntries,
+  getPlannerReminderGroups,
+  plannerReminderId,
+  plannerReminderMessage
+} from '../domain/plannerNotifications';
 
 const { width } = Dimensions.get('window');
 const BAR_COLORS = ['#B8D4A0', '#8FBF6A', '#6BA045', '#4A7C2F', '#2D5016'];
@@ -41,6 +48,42 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   const userId = session?.employeeId || session?.id || '';
   const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
   const managerFieldIds = fields.filter(field => managedFarmIds.has(field.blockFarmId)).map(field => field.id);
+
+  const plannerFields = fields.filter(field => getOperationCapabilities(session, field).canPlan);
+  const plannerGroups = getPlannerReminderGroups(collectPlannerEntries(plannerFields));
+  const plannerNotifications = [
+    {
+      kind: 'overdue', entries: plannerGroups.overdue, dateKey: plannerGroups.todayKey,
+      title: 'Planned work needs attention', icon: 'warning-outline', color: '#B45309', time: 'Overdue'
+    },
+    {
+      kind: 'today', entries: plannerGroups.today, dateKey: plannerGroups.todayKey,
+      title: 'Farm work planned today', icon: 'calendar-outline', color: '#267326', time: 'Today'
+    },
+    {
+      kind: 'tomorrow', entries: plannerGroups.tomorrow, dateKey: plannerGroups.tomorrowKey,
+      title: 'Farm work planned tomorrow', icon: 'calendar-outline', color: '#2563EB', time: 'Tomorrow'
+    }
+  ];
+  plannerNotifications.forEach(item => {
+    if (item.entries.length === 0) return;
+    const id = plannerReminderId(item.kind, item.entries, item.dateKey);
+    if (dismissedIds.has(id)) return;
+    notifs.push({
+      id,
+      type: 'planner',
+      icon: item.icon,
+      color: item.color,
+      title: item.title,
+      msg: plannerReminderMessage(item.entries, item.kind),
+      time: item.time,
+      createdAt: `${item.dateKey}T12:00:00`,
+      badgeText: 'Open Planner',
+      unread: !readIds.has(id),
+      actionType: 'planner',
+      plannedDate: item.kind === 'overdue' ? item.entries[0]?.plannedDate : item.dateKey
+    });
+  });
 
   // 1. Offline Logs Alert (Pending Cloud Sync - Scoped by Role, strictly excluding past cycle/archived)
   let scopedLogs = allLogs.filter(l => {
@@ -88,7 +131,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'trending-up',
         color: '#267326',
         title: 'New SRA Price Circular Broadcast',
-        msg: `HPCo Silay: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
+        msg: `${latest.source || 'Published price reference'}: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
         time: latest.effectiveDate,
         createdAt: latest.effectiveDate,
         unread: !readIds.has(priceNotifId),
@@ -292,6 +335,8 @@ export default function HomeScreen({ navigation }) {
       navigation.navigate('Field Ops', { screen: 'SchedMain', params: { openDrafts: true, tab: 'drafts', initialTab: 'drafts', returnTo: 'Home' } });
     } else if (notif.actionType === 'price') {
       navigation.navigate('Analytics');
+    } else if (notif.actionType === 'planner') {
+      navigation.navigate('Planner', { screen: 'CalcMain', params: { selectedDate: notif.plannedDate } });
     }
   };
 
@@ -320,7 +365,7 @@ export default function HomeScreen({ navigation }) {
   const handleOpenPriceModal = () => {
     if (session?.role === 'SRA Admin') {
       if (!synced) {
-        Alert.alert('Offline Mode', 'You are currently offline. Please connect to the internet to broadcast official SRA weekly benchmark circulars.');
+        Alert.alert('Offline Mode', 'You are currently offline. Connect to the internet to publish a source-referenced price record.');
         return;
       }
       setShowPriceModal(true);
@@ -338,88 +383,46 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       } />
 
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      {!isOnline ? (
+        <View style={s.offlineSimpleScreen}>
+          <TouchableOpacity
+            style={s.offlineSimpleIconBtn}
+            onPress={handleCheckNetConnection}
+            disabled={isCheckingNet}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel="Retry internet connection"
+          >
+            {isCheckingNet ? (
+              <ActivityIndicator size="large" color="#111827" />
+            ) : (
+              <Ionicons name="reload" size={48} color="#111827" />
+            )}
+          </TouchableOpacity>
 
-        {!isOnline ? (
-          <View style={s.offlineGateContainer}>
-            <View style={s.offlineGateCard}>
-              <View style={s.offlineIconCircle}>
-                <Ionicons name="cloud-offline-outline" size={44} color="#B45309" />
-              </View>
-              <Text style={s.offlineGateTitle}>Dashboard Unavailable Offline</Text>
-              <Text style={s.offlineGateSubtitle}>
-                Live market analytics, price circular broadcasts, weather radar, and cluster telemetry require an active internet connection.
-              </Text>
+          <Text style={s.offlineSimpleTitle}>
+            No Internet Connection
+          </Text>
 
-              <View style={s.offlineAvailableBox}>
-                <Text style={s.offlineAvailableTitle}>AVAILABLE OFFLINE SERVICES</Text>
-
-                <TouchableOpacity
-                  style={s.offlineActionBtn}
-                  onPress={() => navigation.navigate('Field Ops')}
-                  activeOpacity={0.8}
-                >
-                  <View style={s.offlineActionIconWrap}>
-                    <Ionicons name="book" size={20} color={COLORS.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={s.offlineActionBtnText}>Field Operations</Text>
-                      <View style={s.activeOfflineBadge}>
-                        <Text style={s.activeOfflineText}>ACTIVE OFFLINE</Text>
-                      </View>
-                    </View>
-                    <Text style={s.offlineActionBtnSub}>Record field activities, stage work & manage plots locally</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
-                </TouchableOpacity>
-
-                {session?.role !== 'SRA Admin' && (
-                  <TouchableOpacity
-                    style={[s.offlineActionBtn, { marginTop: 10 }]}
-                    onPress={() => navigation.navigate('Planner')}
-                    activeOpacity={0.8}
-                  >
-                    <View style={s.offlineActionIconWrap}>
-                      <Ionicons name="construct" size={20} color={COLORS.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={s.offlineActionBtnText}>Growth Stage Planner</Text>
-                        <View style={s.activeOfflineBadge}>
-                          <Text style={s.activeOfflineText}>ACTIVE OFFLINE</Text>
-                        </View>
-                      </View>
-                      <Text style={s.offlineActionBtnSub}>Calculate split doses, crop timeline & estimated budget</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              <TouchableOpacity
-                style={[s.offlineRetryBtn, isCheckingNet && { opacity: 0.75 }]}
-                onPress={handleCheckNetConnection}
-                disabled={isCheckingNet}
-                activeOpacity={0.8}
-              >
-                {isCheckingNet ? (
-                  <>
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                    <Text style={s.offlineRetryBtnText}>Checking Connection...</Text>
-                  </>
-                ) : (
-                  <>
-                    <Ionicons name="refresh" size={16} color="#FFFFFF" />
-                    <Text style={s.offlineRetryBtnText}>Check Internet Connection</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <>
-            {/* ── 1. Top HPCo · Silay Price Card ── */}
+          <TouchableOpacity
+            style={s.offlineServicePill}
+            onPress={() => navigation.navigate('Field Ops')}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={session?.role === 'SRA Admin' ? "book-outline" : "leaf-outline"}
+              size={15}
+              color={COLORS.primary}
+            />
+            <Text style={s.offlineServicePillText}>
+              {session?.role === 'SRA Admin' ? 'Cached SRA Records' : 'Field Operations'}
+            </Text>
+            <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+            {/* ── 1. Published price card ── */}
             <TouchableOpacity
               style={[s.card, s.priceCard]}
               activeOpacity={session?.role === 'SRA Admin' ? 0.7 : 1}
@@ -428,7 +431,7 @@ export default function HomeScreen({ navigation }) {
           <View style={s.priceCardHeader}>
             <View style={s.priceSourceRow}>
               <View style={[s.sourceDot, (!isOnline && isFieldRole) && { backgroundColor: COLORS.accent }]} />
-              <Text style={s.priceSource}>{currentPrice.mill ? `${currentPrice.mill} · ${currentPrice.location}` : 'HPCo · Silay'}</Text>
+              <Text style={s.priceSource}>{currentPrice.source}</Text>
             </View>
             <Text style={[s.priceUpdated, (!isOnline && isFieldRole) && { color: COLORS.accent, fontWeight: '600' }]}>
               {liveWeek !== 'No records' && liveDate !== 'No records' 
@@ -449,7 +452,7 @@ export default function HomeScreen({ navigation }) {
                   <Ionicons name={liveChange > 0 ? "caret-up" : "caret-down"} size={11} color={liveChange > 0 ? COLORS.success : COLORS.danger} />
                 )}
                 <Text style={[s.priceChangeTxt, liveChange < 0 && { color: COLORS.danger }, liveChange === 0 && { color: COLORS.textMuted }]}>
-                  {livePrice == null ? 'No official price' : (liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : 'Steady'))}
+                  {livePrice == null ? 'No published price' : (liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : 'Steady'))}
                 </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_lkg', 'per Lkg')}</Text>
@@ -468,7 +471,7 @@ export default function HomeScreen({ navigation }) {
                   <Ionicons name={currentMarketObservation.change > 0 ? "caret-up" : "caret-down"} size={11} color={currentMarketObservation.change > 0 ? COLORS.success : COLORS.danger} />
                 )}
                 <Text style={[s.priceChangeTxt, currentMarketObservation.change < 0 && { color: COLORS.danger }, currentMarketObservation.change === 0 && { color: COLORS.textMuted }]}>
-                  {liveMol == null ? 'No official price' : (currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : 'Steady'))}
+                  {liveMol == null ? 'No published price' : (currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : 'Steady'))}
                 </Text>
               </View>
               <Text style={s.pricePairUnit}>{t('unit_per_mt', 'per MT')}</Text>
@@ -478,7 +481,7 @@ export default function HomeScreen({ navigation }) {
           {session?.role === 'SRA Admin' && (
             <View style={s.sraEditHint}>
               <Ionicons name="create-outline" size={13} color={COLORS.primary} />
-              <Text style={s.sraEditText}>Post Official SRA Price</Text>
+              <Text style={s.sraEditText}>Publish Price Reference</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -498,13 +501,13 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
           <Text style={s.syncStamp}>
-            {synced ? `Official SRA Broadcast · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Last synced: Cached') : `Official SRA Broadcast · ${liveDate}`)}
+            {synced ? `Published price record · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Last synced: Cached') : `Published price record · ${liveDate}`)}
           </Text>
 
           {/* Bar Chart with Dynamic Headroom Scaling & Overflow Protection */}
           {!priceAnalytics.hasData ? (
             <View style={{ paddingVertical: 28, alignItems: 'center' }}>
-              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>No official price circulars available.</Text>
+              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>No source-referenced price records available.</Text>
             </View>
           ) : (() => {
             const allVals = [];
@@ -704,12 +707,10 @@ export default function HomeScreen({ navigation }) {
             navigation={navigation}
           />
         )}
-          </>
-        )}
+        </ScrollView>
+      )}
 
-      </ScrollView>
-
-      {/* ── Post Official SRA Price Modal (Web Parity) ── */}
+      {/* ── Publish Price Reference Modal (web parity) ── */}
       <PublishPriceModal
         visible={showPriceModal}
         onClose={() => setShowPriceModal(false)}
@@ -734,7 +735,7 @@ export default function HomeScreen({ navigation }) {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.text }}>{t('notif_title', 'System Notifications')}</Text>
-              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>{t('notif_sub', 'District 3 & Sugar Central Updates')}</Text>
+              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>{t('notif_sub', 'Plans, drafts, synchronization, and account updates')}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {unreadCount > 0 && (
@@ -822,6 +823,44 @@ export default function HomeScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
+  offlineSimpleScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+  },
+  offlineSimpleIconBtn: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  offlineSimpleTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  offlineServicePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: RADIUS.full,
+    marginTop: 22,
+  },
+  offlineServicePillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xl * 2 },
   notifBtn: { position: 'relative', padding: 6 },
@@ -838,7 +877,7 @@ const s = StyleSheet.create({
     ...SHADOW.card
   },
 
-  // HPCo Silay unified card
+  // Published price card
   priceCard: { borderWidth: 1, borderColor: COLORS.border },
   priceCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
   priceSourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -882,7 +921,7 @@ const s = StyleSheet.create({
     marginVertical: SPACING.sm,
     paddingVertical: 6,
     paddingHorizontal: 14,
-    backgroundColor: '#F8FAF5',
+    backgroundColor: '#F9FAFB',
     borderRadius: 20,
     alignSelf: 'center',
   },
@@ -1024,20 +1063,20 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.xl,
     padding: 24,
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#FEF0D0',
-    ...SHADOW.card
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    ...SHADOW.sm
   },
   offlineIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#FFFBEB',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEF3C7',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#FEF0D0'
+    borderWidth: 0,
+    borderColor: 'transparent'
   },
   offlineGateTitle: {
     fontSize: 18,
@@ -1059,7 +1098,7 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.lg,
     padding: 14,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#F3F4F6',
     marginBottom: 20
   },
   offlineAvailableTitle: {
@@ -1076,7 +1115,7 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.md,
     padding: 12,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#E5E7EB',
     gap: 12,
     ...SHADOW.xs
   },
@@ -1117,7 +1156,7 @@ const s = StyleSheet.create({
     backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: RADIUS.md,
+    borderRadius: RADIUS.lg,
     width: '100%'
   },
   offlineRetryBtnText: {

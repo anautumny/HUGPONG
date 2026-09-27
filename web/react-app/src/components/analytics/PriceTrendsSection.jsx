@@ -96,10 +96,10 @@ export default function PriceTrendsSection({
             Price Trajectory
           </span>
           <h2 className="text-lg sm:text-xl font-black text-hug-text mt-0.5">
-            SRA Official Price Trends
+            Published Price Trends
           </h2>
           <p className="text-xs text-hug-muted mt-0.5">
-            Chronological benchmark price series published by the Sugar Regulatory Administration.
+            Chronological price series based on the source recorded with each publication.
           </p>
         </div>
 
@@ -164,7 +164,7 @@ export default function PriceTrendsSection({
           <TrendingUp className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
           <p className="font-semibold text-hug-text text-sm">No historical prices recorded</p>
           <p className="text-xs text-hug-muted mt-0.5">
-            SRA pricing trajectory will appear once official circulars are published.
+            Price trends will appear once source-referenced records are published.
           </p>
         </div>
       ) : (

@@ -6,6 +6,7 @@ const PENDING_STATUSES = new Set([
   'authentication', 'authorization', 'conflict', 'validation', 'rejected'
 ]);
 const SUCCESS_STATUSES = new Set(['synced', 'success', 'completed', 'acknowledged']);
+const OUTBOX_SCHEMA_VERSION = 2;
 
 function canonicalQueueStatus(value) {
   const status = String(value || 'queued').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -17,8 +18,18 @@ function canonicalQueueStatus(value) {
   return PENDING_STATUSES.has(status) ? status : 'queued';
 }
 
+let fallbackSequence = 0;
+
 function randomToken() {
-  return Math.random().toString(36).slice(2, 10).toUpperCase();
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid.replace(/-/g, '').slice(0, 20).toUpperCase();
+  const values = new Uint32Array(4);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(values);
+    return Array.from(values, value => value.toString(36)).join('').slice(0, 20).toUpperCase();
+  }
+  fallbackSequence = (fallbackSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return `${Date.now().toString(36)}${fallbackSequence.toString(36)}`.toUpperCase();
 }
 
 function createMutationId(now = Date.now(), random = randomToken()) {
@@ -29,12 +40,11 @@ function inferEntityKey(type, payload = {}) {
   const id = payload.id || payload.fieldId || payload.cycleId || '';
   if (type === 'operation_log' || type === 'takeover_log' || type === 'operation_amendment') return `operation_logs/${id}`;
   if (type === 'operation_archive') return `operation_logs/${(payload.operationLogIds || []).join(',')}`;
-  if (type === 'field_upsert' || type === 'field_archive' || type === 'custom_stages' || type === 'custom_operations') return `fields/${id}`;
+  if (type === 'field_upsert' || type === 'field_archive' || type === 'custom_stages' || type === 'custom_operations' || type === 'operation_schedule') return `fields/${id}`;
   if (type === 'stage_update') return `crop_cycles/${payload.cycleId || ''}`;
   if (type === 'cycle_rollover') return `fields/${payload.fieldId || ''}`;
   if (type === 'price') return `sra_prices/${id}`;
   if (type === 'ticket' || type === 'ticket_message') return `support_tickets/${id}`;
-  if (type === 'audit_log' || type === 'system_event') return `audit_logs/${id}`;
   if (['audit_report', 'audit_submission', 'audit_return', 'audit_certification'].includes(type)) return `audit_reports/${id}`;
   if (type === 'audit_qr_import') return `audit_reports/${payload.reportId || payload.id || ''}`;
   if (type === 'user_approve') return `users/${id}`;
@@ -62,7 +72,7 @@ function inferLogicalMutationKey(type, payload = {}) {
   // collapsed if a crash left the same logical mutation in the outbox twice.
   // Mutable commands (field/stage/settings updates) deliberately return null:
   // two queued updates to the same entity can represent distinct user intent.
-  if (['operation_log', 'takeover_log', 'audit_log', 'system_event', 'price', 'ticket', 'user_approve'].includes(type)) {
+  if (['operation_log', 'takeover_log', 'price', 'ticket', 'user_approve'].includes(type)) {
     return entityKey.endsWith('/') ? null : `${type}:${entityKey}`;
   }
   return null;
@@ -81,7 +91,7 @@ function createMutationEnvelope(type, payload, options = {}, existingQueue = [])
   const enqueuedAt = options.enqueuedAt || new Date(options.now || Date.now()).toISOString();
 
   return {
-    schemaVersion: 1,
+    schemaVersion: OUTBOX_SCHEMA_VERSION,
     outboxId: mutationId,
     mutationId,
     idempotencyKey: mutationId,
@@ -104,16 +114,23 @@ function createMutationEnvelope(type, payload, options = {}, existingQueue = [])
   };
 }
 
-function migrateOutbox(savedQueue = []) {
+function migrateOutbox(savedQueue = [], options = {}) {
   if (!Array.isArray(savedQueue)) return [];
   const migrated = savedQueue.map((item, index) => {
+    const sourceSchemaVersion = Number(item?.schemaVersion || 0);
     const stableId = String(item?.mutationId || item?.idempotencyKey || item?.outboxId || item?.id || `LEGACY-${index}`);
     const type = item?.type || 'mutation';
-    const payload = { ...(item?.payload || {}) };
+    const sourcePayload = { ...(item?.payload || {}) };
+    const payload = typeof options.migratePayload === 'function'
+      ? options.migratePayload(type, sourcePayload, item)
+      : sourcePayload;
     const entityKey = item?.entityKey || inferEntityKey(type, payload);
+    const migratedStatus = canonicalQueueStatus(item?.status);
+    const shouldRetryAfterUpgrade = sourceSchemaVersion < OUTBOX_SCHEMA_VERSION
+      && (migratedStatus === 'validation' || migratedStatus === 'rejected');
     return {
       ...item,
-      schemaVersion: 1,
+      schemaVersion: OUTBOX_SCHEMA_VERSION,
       outboxId: stableId,
       mutationId: stableId,
       idempotencyKey: stableId,
@@ -125,9 +142,10 @@ function migrateOutbox(savedQueue = []) {
       takeoverGrant: null,
       dependsOnMutationId: item?.dependsOnMutationId || null,
       payload,
-      status: canonicalQueueStatus(item?.status),
+      status: shouldRetryAfterUpgrade ? 'queued' : migratedStatus,
       retryCount: Number(item?.retryCount || 0),
-      nextAttemptAt: item?.nextAttemptAt || null,
+      nextAttemptAt: shouldRetryAfterUpgrade ? null : (item?.nextAttemptAt || null),
+      lastError: shouldRetryAfterUpgrade ? null : (item?.lastError || null),
       conflict: item?.conflict || null
     };
   });
@@ -148,6 +166,22 @@ function migrateOutbox(savedQueue = []) {
     if (item.dependsOnMutationId && !knownMutationIds.has(item.dependsOnMutationId)) item.dependsOnMutationId = null;
   });
   return unique;
+}
+
+function requeueCorrectableMutations(queue = []) {
+  let requeuedCount = 0;
+  const nextQueue = (Array.isArray(queue) ? queue : []).map(item => {
+    const status = canonicalQueueStatus(item?.status);
+    if (status !== 'validation' && status !== 'rejected') return item;
+    requeuedCount += 1;
+    return {
+      ...item,
+      status: 'queued',
+      nextAttemptAt: null,
+      conflict: null
+    };
+  });
+  return { queue: nextQueue, requeuedCount };
 }
 
 function appendUniqueMutation(queue, envelope) {
@@ -238,7 +272,7 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
     item.status = 'syncing';
     item.lastAttempt = new Date().toISOString();
     attemptedCount += 1;
-    await onStateChange(workingQueue);
+    await onStateChange(workingQueue, responses);
 
     try {
       const response = await remoteHandler(item);
@@ -265,7 +299,7 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
       }
       failedCount += 1;
     }
-    await onStateChange(workingQueue);
+    await onStateChange(workingQueue, responses);
   }
 
   return {
@@ -292,6 +326,7 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
 }
 
 module.exports = {
+  OUTBOX_SCHEMA_VERSION,
   RETRYABLE_STATUSES,
   PENDING_STATUSES,
   SUCCESS_STATUSES,
@@ -301,6 +336,7 @@ module.exports = {
   inferLogicalMutationKey,
   createMutationEnvelope,
   migrateOutbox,
+  requeueCorrectableMutations,
   appendUniqueMutation,
   classifyMutationError,
   isRetryableMutation,

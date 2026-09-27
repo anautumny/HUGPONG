@@ -6,6 +6,12 @@ import {
   archiveOperations
 } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
+import {
+  applyPendingStageUpdate,
+  flushCropStageOutbox,
+  subscribeToCropStageOutbox,
+  updateCropStageOfflineFirst
+} from '../../services/cropStageOutbox';
 import { subscribeToAuditReports } from '../../services/auditService';
 import {
   appendUniqueArchiveRecords,
@@ -295,6 +301,28 @@ export default function OperationsView() {
   }, [user?.id, user?.employeeId]);
 
   useEffect(() => {
+    const refreshPendingStages = () => {
+      setFieldsData(previous => ({
+        ...previous,
+        fields: (previous.fields || []).map(field => applyPendingStageUpdate(field, user))
+      }));
+    };
+    const flush = () => flushCropStageOutbox(user)
+      .then(result => {
+        if (result.failedEntry) setUpdateSuccess(result.failedEntry.lastError || 'A pending stage change needs review.');
+      })
+      .catch(error => setUpdateSuccess(error.message));
+    const unsubscribe = subscribeToCropStageOutbox(refreshPendingStages);
+    window.addEventListener('online', flush);
+    flush();
+    refreshPendingStages();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', flush);
+    };
+  }, [user?.id, user?.employeeId]);
+
+  useEffect(() => {
     if (!isManager) {
       setAuditReports([]);
       return undefined;
@@ -477,6 +505,51 @@ export default function OperationsView() {
     setAddOperationField(field);
   };
 
+  const handleCompleteStage = async field => {
+    const currentStage = Number(field.cropCycle?.currentStageNumber || field.stageNumber || 1);
+    const completesCycle = currentStage >= 6;
+    const nextStage = completesCycle ? 6 : currentStage + 1;
+    const capability = getOperationCapabilities(user, field, takeoverSession);
+    if (!capability.canCreate) return;
+    const confirmed = window.confirm(completesCycle
+      ? 'Mark Stage 6 and this Crop Year Cycle as complete?'
+      : `Mark Stage ${currentStage} as complete and make Stage ${nextStage} available?`);
+    if (!confirmed) return;
+
+    try {
+      const grant = capability.takeover ? takeoverGrant : null;
+      const result = await updateCropStageOfflineFirst({
+        user,
+        field,
+        currentStageNumber: nextStage,
+        isCompleted: completesCycle,
+        takeoverGrant: grant
+      });
+      setFieldsData(previous => ({
+        ...previous,
+        fields: (previous.fields || []).map(item => item.id === field.id
+          ? applyPendingStageUpdate({
+            ...item,
+            stageNumber: nextStage,
+            isCompleted: completesCycle,
+            cropCycle: {
+              ...(item.cropCycle || {}),
+              currentStageNumber: nextStage,
+              completedAt: completesCycle ? new Date().toISOString() : null
+            }
+          }, user)
+          : item)
+      }));
+      setUpdateSuccess(result.queued
+        ? `Stage ${currentStage} completion is saved offline and pending server validation.`
+        : completesCycle
+          ? 'Crop Year Cycle completed and synchronized.'
+          : `Stage ${currentStage} completed. Stage ${nextStage} is now active.`);
+    } catch (error) {
+      setUpdateSuccess(error.message || 'The stage could not be completed.');
+    }
+  };
+
   // Entry point: Edit Operation
   const handleEditOperationClick = (operation, field) => {
     setUpdateSuccess('');
@@ -528,15 +601,21 @@ export default function OperationsView() {
     }
   };
 
-  const handleSaveLocalDraft = (form, existingId) => {
+  const handleSaveLocalDraft = (form, existingId, options = {}) => {
     try {
       const draft = saveLocalOperationDraft(user, addOperationField, form, existingId);
       setLocalDrafts(listLocalOperationDrafts(user));
-      setActiveDraft(draft);
-      setAddOperationField(null);
-      setUpdateSuccess('Draft saved locally on this browser. It was not synchronized.');
+      if (!options.keepOpen) {
+        setActiveDraft(draft);
+        setAddOperationField(null);
+      }
+      setUpdateSuccess(options.keepOpen
+        ? `"${options.itemLabel || 'Item'}" saved as its own draft with labor details attached.`
+        : 'Draft saved locally on this browser. It was not synchronized.');
+      return draft;
     } catch (error) {
       setUpdateSuccess(error.message);
+      return null;
     }
   };
 
@@ -630,22 +709,13 @@ export default function OperationsView() {
 
   // Header Actions
   const headerActions = useMemo(() => {
-    const actions = isManager ? [{
+    return isManager ? [{
       label: 'Monthly Audit',
       to: '/audit',
       icon: FileCheck2,
       variant: 'primary'
     }] : [];
-    if (isManager && activeTakeOverFieldId) {
-      actions.push({
-        label: 'Exit Manager Takeover',
-        icon: LogOut,
-        onClick: handleExitTakeOver,
-        variant: 'secondary'
-      });
-    }
-    return actions;
-  }, [isManager, activeTakeOverFieldId]);
+  }, [isManager]);
 
   // History Table Columns
   const historyColumns = [
@@ -906,7 +976,7 @@ export default function OperationsView() {
                 const capability = getOperationCapabilities(user, field, takeoverSession);
                 const cycle = field.cropCycle;
                 const cycleSummary = cycle
-                  ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${cycle.currentStageNumber || field.stageNumber || 1}`, cycle.status]
+                  ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${field.stageNumber || cycle.currentStageNumber || 1}${field.isCompleted ? ' complete' : ''}`, field.stageSyncStatus === 'conflict' ? 'Sync conflict' : field.stageSyncStatus === 'rejected' ? 'Sync rejected' : field.stageSyncPending ? 'Pending sync' : cycle.status]
                     .filter(Boolean).join(' · ')
                   : null;
 
@@ -969,17 +1039,6 @@ export default function OperationsView() {
                             {cycleSummary}
                           </span>
                         )}
-                        {isTakeOverActiveForField && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleExitTakeOver}
-                            icon={LogOut}
-                            className="border-danger/40 text-danger hover:bg-danger-bg dark:hover:bg-danger/20"
-                          >
-                            Exit Manager Takeover
-                          </Button>
-                        )}
                       </div>
                     </div>
 
@@ -1004,6 +1063,11 @@ export default function OperationsView() {
                       </button>
 
                       <div className="flex items-center gap-2">
+                        {capability.canCreate && !field.isCompleted && (
+                          <Button variant="outline" size="sm" icon={CheckCircle2} onClick={() => handleCompleteStage(field)}>
+                            Complete Stage {Number(field.stageNumber || field.cropCycle?.currentStageNumber || 1)}
+                          </Button>
+                        )}
                         {capability.canCreate ? (
                           <Button variant="primary" size="sm" icon={Plus} onClick={() => handleAddOperationClick(field)}>
                             Add Operation
@@ -1033,6 +1097,11 @@ export default function OperationsView() {
                               <div key={draft.id} className="flex items-center justify-between gap-3 rounded-xl bg-white dark:bg-surface border border-border p-3">
                                 <div className="min-w-0">
                                   <span className="block text-sm font-bold text-hug-text truncate">{draft.form?.activityName || 'Untitled operation draft'}</span>
+                                  {(draft.form?.subItems?.[0]?.description || draft.form?.customChildName) && (
+                                    <span className="block text-xs font-semibold text-hug-text truncate">
+                                      Child: {draft.form?.subItems?.[0]?.description || draft.form?.customChildName}
+                                    </span>
+                                  )}
                                   <span className="block text-[11px] text-hug-muted">Stored only in this browser · {formatDate(draft.updatedAt)}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1104,6 +1173,12 @@ export default function OperationsView() {
                                       )}
                                       {auditCoverage && <AuditCoverageBadge coverage={auditCoverage} />}
                                     </div>
+
+                                    {operation.childOperationName && (
+                                      <div className="text-xs sm:text-sm font-bold text-hug-muted">
+                                        Child operation: <span className="text-hug-text">{operation.childOperationName}</span>
+                                      </div>
+                                    )}
 
                                     {/* Metadata Row: Spacious and clearly formatted */}
                                     <div className="flex items-center gap-4 text-xs sm:text-sm text-hug-muted flex-wrap pt-0.5">
@@ -1388,6 +1463,7 @@ export default function OperationsView() {
         takeoverGrant={addOperationField && getOperationCapabilities(user, addOperationField, takeoverSession).takeover ? takeoverGrant : null}
         canSaveDraft={Boolean(addOperationField && getOperationCapabilities(user, addOperationField, takeoverSession).canDraft)}
         initialDraft={activeDraft}
+        submittedOperations={opsData.operations}
         onSaveDraft={handleSaveLocalDraft}
         validateBeforeSubmit={() => {
           if (!activeDraft) return { valid: true };
@@ -1395,12 +1471,30 @@ export default function OperationsView() {
           return validateLocalDraftForSubmission(user, currentField, activeDraft);
         }}
         onClose={() => { setAddOperationField(null); setActiveDraft(null); }}
-        onSuccess={() => {
-          if (activeDraft?.id) completeLocalDraftSubmission(user, activeDraft.id);
+        onSuccess={(_payload, options = {}) => {
+          if (activeDraft?.id && options.remainingDraftForm) {
+            const hasRemainingItems = options.remainingDraftForm.subItems?.length > 0
+              || options.remainingDraftForm.laborEntries?.length > 0;
+            if (hasRemainingItems) {
+              const updatedDraft = saveLocalOperationDraft(
+                user,
+                addOperationField,
+                options.remainingDraftForm,
+                activeDraft.id
+              );
+              setActiveDraft(updatedDraft);
+            } else {
+              completeLocalDraftSubmission(user, activeDraft.id);
+            }
+          } else if (activeDraft?.id && !options.keepOpen) {
+            completeLocalDraftSubmission(user, activeDraft.id);
+          }
           setLocalDrafts(listLocalOperationDrafts(user));
-          setAddOperationField(null);
-          setActiveDraft(null);
-          setUpdateSuccess('Operation recorded successfully and synchronized.');
+          if (!options.keepOpen) {
+            setAddOperationField(null);
+            setActiveDraft(null);
+          }
+          setUpdateSuccess(options.keepOpen ? 'Item submitted under its operation title.' : 'Operation recorded successfully and synchronized.');
         }}
       />
 

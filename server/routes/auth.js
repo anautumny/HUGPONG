@@ -2,6 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { normalizeStructuredName } = require('../domain/personName');
 const { db, auth } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { issueToken } = require('../security/token');
@@ -14,6 +15,17 @@ const { sendSms } = require('../services/smsGateway');
 const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { recordActivity } = require('../services/telemetryService');
+const { createRateLimit, clientAddress, identifier } = require('../middleware/rateLimit');
+const { authVersionOf, nextAuthVersion, revokeFirebaseSessions } = require('../security/accountSecurity');
+const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
+const { queueAuditEvent } = require('../services/auditWriter');
+
+const loginRateLimit = createRateLimit({ name: 'auth-login', max: 10, windowMs: 15 * 60 * 1000 });
+const mobileSessionRateLimit = createRateLimit({ name: 'auth-mobile-session', max: 60, windowMs: 15 * 60 * 1000, key: clientAddress });
+const otpRequestRateLimit = createRateLimit({ name: 'auth-otp-request', max: 5, windowMs: 60 * 60 * 1000 });
+const otpVerifyRateLimit = createRateLimit({ name: 'auth-otp-verify', max: 10, windowMs: 15 * 60 * 1000 });
+const registrationRateLimit = createRateLimit({ name: 'auth-register', max: 5, windowMs: 60 * 60 * 1000 });
+const passwordRateLimit = createRateLimit({ name: 'auth-password-check', max: 10, windowMs: 15 * 60 * 1000, key: req => `${clientAddress(req)}:${identifier(req)}` });
 
 function normalizeContact(value) {
   const digits = String(value || '').replace(/\D/g, '');
@@ -38,11 +50,6 @@ function platformRestrictionMessage(role, platform) {
     return 'Super Admin access is restricted to the Web Management Console.';
   }
   return 'This account is not authorized for the requested platform.';
-}
-
-function createUserId(role) {
-  const prefixes = { [ROLES.SUPER_ADMIN]: '01', [ROLES.SRA_ADMIN]: '02', [ROLES.FARM_MANAGER]: '03', [ROLES.MEMBER_FARMER]: '04' };
-  return `${prefixes[role]}${Math.floor(100000 + Math.random() * 900000)}`;
 }
 
 async function resolveAssignments(userId, role) {
@@ -98,8 +105,18 @@ async function buildSessionUser(userId, user) {
     pendingFirstLoginVerification: !user.phoneVerifiedAt,
     requiresPasswordChange,
     passwordChanged: Boolean(user.passwordChangedAt) || !requiresPasswordChange,
+    authVersion: authVersionOf(user),
     authenticatedAt: nowIso()
   };
+}
+
+async function establishSession(req, user) {
+  if (!req.session || typeof req.session.regenerate !== 'function') {
+    req.session = { user };
+    return;
+  }
+  await new Promise((resolve, reject) => req.session.regenerate(error => error ? reject(error) : resolve()));
+  req.session.user = user;
 }
 
 async function issueCredentials(sessionUser) {
@@ -116,7 +133,7 @@ async function verifyCurrentPassword(userId, password) {
   return credential.exists && verifyPassword(password, credential.data().passwordHash);
 }
 
-router.post('/mobile-session', async (req, res) => {
+router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
   if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication services are unavailable.' });
   if (String(req.headers['x-client-platform'] || '').toLowerCase() !== 'mobile') {
     return res.status(403).json({ success: false, error: 'This session refresh endpoint is restricted to the mobile client.' });
@@ -129,6 +146,9 @@ router.post('/mobile-session', async (req, res) => {
     const snapshot = await db.collection(COLLECTIONS.USERS).doc(decoded.uid).get();
     if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
       return res.status(403).json({ success: false, error: 'The account is no longer authorized.' });
+    }
+    if (Number(decoded.authVersion || 1) !== authVersionOf(snapshot.data())) {
+      return res.status(401).json({ success: false, error: 'Your session was revoked. Please sign in again.', code: 'SESSION_REVOKED' });
     }
     const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
     if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, 'mobile')) {
@@ -155,7 +175,7 @@ async function sendVerificationCode(phone, code, displayName, purpose = 'verific
   }
 }
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginRateLimit, async (req, res) => {
   const identifier = req.body?.contactNumber || req.body?.identifier;
   const password = req.body?.password;
   if (!String(identifier || '').trim() || !password) {
@@ -177,7 +197,7 @@ router.post('/login', async (req, res) => {
         error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
       });
     }
-    req.session.user = sessionUser;
+    await establishSession(req, sessionUser);
     const credentials = await issueCredentials(sessionUser);
     recordActivity(db, {
       userId: sessionUser.employeeId,
@@ -197,7 +217,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.post('/registration-otp/request', async (req, res) => {
+router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) => {
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
   const phone = normalizeContact(req.body?.phone);
   if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
@@ -218,7 +238,7 @@ router.post('/registration-otp/request', async (req, res) => {
   }
 });
 
-router.post('/registration-otp/verify', async (req, res) => {
+router.post('/registration-otp/verify', otpVerifyRateLimit, async (req, res) => {
   const phone = normalizeContact(req.body?.phone);
   const code = String(req.body?.code || '').trim();
   if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
@@ -229,18 +249,18 @@ router.post('/registration-otp/verify', async (req, res) => {
   return res.json({ success: true, verified: true });
 });
 
-router.post('/register', async (req, res) => {
+router.post('/register', registrationRateLimit, async (req, res) => {
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
   try {
     const role = canonicalRole(req.body?.role || ROLES.MEMBER_FARMER);
     if (role !== ROLES.MEMBER_FARMER) {
       return res.status(403).json({ success: false, error: 'Self-registration is limited to Farm Member accounts.' });
     }
-    const displayName = String(req.body?.displayName || '').trim();
+    const identity = normalizeStructuredName(req.body || {});
+    const displayName = identity.displayName;
     const phone = normalizeContact(req.body?.phone);
     const password = req.body?.password;
     const blockFarmId = String(req.body?.blockFarmId || '').trim().toUpperCase();
-    if (!displayName || displayName.length > 200) throw new Error('A valid display name is required.');
     if (!/^09\d{9}$/.test(phone)) throw new Error('A valid Philippine mobile number is required.');
     validatePassword(password);
     if (blockFarmId) {
@@ -252,9 +272,9 @@ router.post('/register', async (req, res) => {
     if (!consumeVerifiedOtp('registration', phone, phone)) {
       return res.status(403).json({ success: false, error: 'Server-verified phone confirmation is required before registration.' });
     }
-    const userId = createUserId(role);
     const now = nowIso();
     const user = {
+      ...identity,
       displayName,
       phone,
       role,
@@ -263,26 +283,32 @@ router.post('/register', async (req, res) => {
       phoneVerifiedAt: now,
       requiresPasswordChange: false,
       passwordChangedAt: now,
+      authVersion: 1,
+      credentialsUpdatedAt: now,
+      disabledAt: null,
       approvedByUserId: null,
       approvedAt: null,
       createdAt: now,
       updatedAt: now
     };
-    const batch = db.batch();
-    batch.create(db.collection(COLLECTIONS.USERS).doc(userId), user);
-    batch.create(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), {
-      passwordHash: await hashPassword(password),
-      createdAt: now,
-      updatedAt: now
+    const userId = await createUserAccount(db, {
+      user,
+      credential: {
+        passwordHash: await hashPassword(password),
+        credentialsUpdatedAt: now,
+        createdAt: now,
+        updatedAt: now
+      },
+      eventType: 'USER_SELF_REGISTERED',
+      details: `Registered pending Farm Member account for ${displayName}.`
     });
-    await batch.commit();
     return res.status(201).json({ success: true, pendingApproval: true, accountId: userId, user: publicUser(user, userId) });
   } catch (error) {
-    return res.status(400).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message });
   }
 });
 
-router.post('/request-phone-verification', requireAuth, async (req, res) => {
+router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, async (req, res) => {
   const employeeId = req.session.user.employeeId;
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
   try {
@@ -305,7 +331,7 @@ router.post('/request-phone-verification', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/verify-phone', requireAuth, async (req, res) => {
+router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) => {
   const employeeId = req.session.user.employeeId;
   const code = String(req.body?.code || '').trim();
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
@@ -317,7 +343,14 @@ router.post('/verify-phone', requireAuth, async (req, res) => {
     const verification = verifyAndConsumeOtp('first-login', employeeId, phone, code);
     if (!verification.success) return res.status(403).json(verification);
     const phoneVerifiedAt = nowIso();
-    await snapshot.ref.update({ phoneVerifiedAt, updatedAt: phoneVerifiedAt });
+    const batch = db.batch();
+    batch.update(snapshot.ref, { phoneVerifiedAt, updatedAt: phoneVerifiedAt });
+    queueAuditEvent(batch, db, {
+      eventType: 'USER_PHONE_VERIFIED', actorUserId: employeeId,
+      entityType: 'USER', entityId: employeeId,
+      details: `Verified the registered phone for account ${employeeId}.`, createdAt: phoneVerifiedAt
+    });
+    await batch.commit();
     Object.assign(req.session.user, { phoneVerified: true, pendingFirstLoginVerification: false, phoneVerifiedAt });
     return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
   } catch (error) {
@@ -325,7 +358,7 @@ router.post('/verify-phone', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/verify-password', requireAuth, async (req, res) => {
+router.post('/verify-password', requireAuth, passwordRateLimit, async (req, res) => {
   const valid = await verifyCurrentPassword(req.session.user.employeeId, req.body?.password);
   if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.' });
   if (req.body?.purpose !== TAKEOVER_GRANT_PURPOSE) {
@@ -349,7 +382,7 @@ router.post('/verify-password', requireAuth, async (req, res) => {
   });
 });
 
-router.post('/change-password', requireAuth, async (req, res) => {
+router.post('/change-password', requireAuth, passwordRateLimit, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   const employeeId = req.session.user.employeeId;
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
@@ -358,20 +391,29 @@ router.post('/change-password', requireAuth, async (req, res) => {
     if (req.session.user.requiresPasswordChange !== true && !(await verifyCurrentPassword(employeeId, currentPassword))) {
       return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
     }
+    const userSnapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
+    if (!userSnapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
     const now = nowIso();
+    const authVersion = nextAuthVersion(userSnapshot.data());
     const batch = db.batch();
-    batch.set(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(employeeId), { passwordHash: await hashPassword(newPassword), updatedAt: now }, { merge: true });
-    batch.update(db.collection(COLLECTIONS.USERS).doc(employeeId), { requiresPasswordChange: false, passwordChangedAt: now, updatedAt: now });
+    batch.set(db.collection(COLLECTIONS.USER_CREDENTIALS).doc(employeeId), { passwordHash: await hashPassword(newPassword), updatedAt: now, credentialsUpdatedAt: now }, { merge: true });
+    batch.update(db.collection(COLLECTIONS.USERS).doc(employeeId), { requiresPasswordChange: false, passwordChangedAt: now, credentialsUpdatedAt: now, authVersion, updatedAt: now });
+    queueAuditEvent(batch, db, {
+      eventType: 'USER_PASSWORD_CHANGED', actorUserId: employeeId,
+      entityType: 'USER', entityId: employeeId,
+      details: `Changed the password for account ${employeeId}.`, createdAt: now
+    });
     await batch.commit();
-    Object.assign(req.session.user, { requiresPasswordChange: false, passwordChanged: true, passwordChangedAt: now });
+    await revokeFirebaseSessions(employeeId);
+    Object.assign(req.session.user, { requiresPasswordChange: false, passwordChanged: true, passwordChangedAt: now, authVersion });
     return res.json({ success: true, message: 'Password updated successfully.', user: req.session.user, ...(await issueCredentials(req.session.user)) });
   } catch (error) {
-    const status = /between 8 and 256/.test(error.message) ? 400 : 500;
+    const status = /Password must|less predictable password/.test(error.message) ? 400 : 500;
     return res.status(status).json({ success: false, error: status === 400 ? error.message : 'Password update could not be saved.' });
   }
 });
 
-router.post('/change-phone', requireAuth, async (req, res) => {
+router.post('/change-phone', requireAuth, passwordRateLimit, async (req, res) => {
   const employeeId = req.session.user.employeeId;
   const phone = normalizeContact(req.body?.phone);
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
@@ -383,9 +425,41 @@ router.post('/change-phone', requireAuth, async (req, res) => {
   if (!duplicate.empty && duplicate.docs[0].id !== employeeId) {
     return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
   }
+  const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
+  if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
+  if (phone === normalizeContact(snapshot.data().phone)) {
+    return res.status(400).json({ success: false, error: 'Enter a different mobile number.' });
+  }
   const now = nowIso();
-  await db.collection(COLLECTIONS.USERS).doc(employeeId).update({ phone, phoneVerifiedAt: null, updatedAt: now });
-  Object.assign(req.session.user, { contact: phone, mobile: phone, phoneVerified: false, pendingFirstLoginVerification: true });
+  const authVersion = nextAuthVersion(snapshot.data());
+  try {
+    await db.runTransaction(async transaction => {
+      const liveSnapshot = await transaction.get(snapshot.ref);
+      if (!liveSnapshot.exists) throw Object.assign(new Error('Authenticated account was not found.'), { status: 404 });
+      const live = liveSnapshot.data();
+      if (live.updatedAt !== snapshot.data().updatedAt) {
+        throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
+      }
+      const newPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(phone));
+      const oldPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(live.phone));
+      const [newClaim, oldClaim] = await Promise.all([transaction.get(newPhoneRef), transaction.get(oldPhoneRef)]);
+      if (newClaim.exists && newClaim.data().userId !== employeeId) {
+        throw Object.assign(new Error('This mobile number is already registered.'), { status: 409 });
+      }
+      if (!newClaim.exists) transaction.create(newPhoneRef, { type: 'PHONE', userId: employeeId, createdAt: now, updatedAt: now });
+      if (oldClaim.exists && oldClaim.data().userId === employeeId) transaction.delete(oldPhoneRef);
+      transaction.update(snapshot.ref, { phone, phoneVerifiedAt: null, credentialsUpdatedAt: now, authVersion, updatedAt: now });
+      queueAuditEvent(transaction, db, {
+        eventType: 'USER_PHONE_CHANGED', actorUserId: employeeId,
+        entityType: 'USER', entityId: employeeId,
+        details: `Changed the registered phone for account ${employeeId}.`, createdAt: now
+      });
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({ success: false, error: error.status ? error.message : 'Mobile number update could not be saved.' });
+  }
+  await revokeFirebaseSessions(employeeId);
+  Object.assign(req.session.user, { contact: phone, mobile: phone, phoneVerified: false, pendingFirstLoginVerification: true, authVersion });
   return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
 });
 

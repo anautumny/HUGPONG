@@ -214,7 +214,7 @@ export default function SystemHealthSummary({
               {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.prices ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
-              {!isDbAvailable && healthData !== null ? 'connection failed' : 'official prices'}
+              {!isDbAvailable && healthData !== null ? 'connection failed' : 'published prices'}
             </span>
           </div>
         </div>

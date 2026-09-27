@@ -7,7 +7,7 @@ let lastHeartbeatAt = 0;
 export function getWebClientInstanceId() {
   let value = localStorage.getItem(CLIENT_INSTANCE_KEY);
   if (!value) {
-    const random = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const random = globalThis.crypto.randomUUID();
     value = `web-${random}`;
     localStorage.setItem(CLIENT_INSTANCE_KEY, value);
   }

@@ -220,7 +220,7 @@ html.dark #toast {
 }
 
 /* ══════════════════════════════════════════════════════════
-   PRINT LAYOUT: OFFICIAL SRA AUDIT CERTIFICATE & REGULATORY DOSSIER
+   PRINT LAYOUT: AUDIT CERTIFICATE & REGULATORY DOSSIER
    ══════════════════════════════════════════════════════════ */
 @media print {
   @page {

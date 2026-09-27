@@ -200,7 +200,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     rate: 250,
     costPerHa: 15000,
     subItems: [
-      { id: 'SI-12-1', description: 'Flatbed Hauling to Haw-Phil Milling Terminal', qty: 60, unit: 'ton', unitCost: 250, subTotal: 15000 }
+      { id: 'SI-12-1', description: 'Flatbed hauling to the selected sugar mill', qty: 60, unit: 'ton', unitCost: 250, subTotal: 15000 }
     ]
   },
   {
@@ -258,7 +258,8 @@ export const getDefaultStageOperations = stageNumber => (
       category: operation.category || 'prep',
       unit: operation.unit || 'ha',
       costPerHa: operation.costPerHa || 0,
-      subItems: (operation.subItems || []).map(subItem => ({ ...subItem }))
+      subItems: (operation.subItems || []).map(subItem => ({ ...subItem })),
+      childOperations: (operation.childOperations || []).map(child => ({ ...child }))
     }))
 );
 
@@ -266,6 +267,19 @@ export const getOperationsForStage = stageNumber => (
   SRA_OPERATIONS_CATALOGUE.filter(operation => operation.stageNumber === Number(stageNumber))
 );
 
-export const getOperationDefinition = operationDefinitionId => (
-  SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === String(operationDefinitionId || '').trim().toUpperCase()) || null
+const LEGACY_CHILD_OPERATIONS = [
+  { id: 'SRA-08-1', name: 'Manual Weeding (1st Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08', subItems: [] },
+  { id: 'SRA-08-2', name: 'Manual Weeding (2nd Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08', subItems: [] },
+  { id: 'SRA-08-3', name: 'Manual Weeding (3rd Round)', stageNumber: 4, category: 'weed', parentOperationDefinitionId: 'SRA-08', subItems: [] }
+];
+
+export const getOperationDefinition = operationDefinitionId => {
+  const id = String(operationDefinitionId || '').trim().toUpperCase();
+  return SRA_OPERATIONS_CATALOGUE.find(operation => operation.id === id)
+    || LEGACY_CHILD_OPERATIONS.find(operation => operation.id === id)
+    || null;
+};
+
+export const getSelectableOperationsForStage = stageNumber => (
+  getDefaultStageOperations(stageNumber)
 );

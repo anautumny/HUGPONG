@@ -7,9 +7,9 @@ import { ROLE_KEYS } from '../../utils/authRouting';
 import SyncIndicator from './SyncIndicator';
 
 export default function Topbar({ onOpenMobileDrawer = () => {} }) {
-  const { pathname, search } = useLocation();
-  const { roleKey, user } = useAuth();
-  const { theme, setTheme, isDark } = useTheme();
+  const { pathname } = useLocation();
+  const { roleKey } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   // Resolve route heading & subtitle matching Stage 7
   const getRouteMeta = () => {

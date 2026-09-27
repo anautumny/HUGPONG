@@ -6,7 +6,10 @@
     "start": "node server/server.js",
     "server": "node server/server.js",
     "web": "node server/server.js",
-    "mobile": "cd mobile && npm start"
+    "mobile": "cd mobile && npm start",
+    "audit:deployment-config": "npm --prefix server run audit:deployment-config",
+    "audit:runtime-authority": "npm --prefix server run audit:runtime-authority",
+    "verify:release": "node server/scripts/verifyRelease.js"
   },
   "keywords": [],
   "author": "",

@@ -124,11 +124,11 @@ The Farm Operations screen now exposes the manager-only compile action without c
 
 ## 18. Mobile changes
 
-Mobile now shares the canonical lifecycle, full-report validator, and compressed single-QR contract. A compiled report opens the same two delivery choices as web instead of silently submitting. The QR viewer can save the code as a PNG photo. The copy action copies only the short online report ID, never raw transfer JSON. The SRA scanner reconstructs locally and displays the complete report before confirmation. Cloud delivery can use the existing durable manager outbox when connectivity is unavailable. SRA import, return, and certification require server confirmation.
+Mobile now shares the canonical lifecycle, full-report validator, and compressed single-QR contract. A compiled report opens the same two delivery choices as web instead of silently submitting. The QR viewer can save the code as a PNG photo. The copy action copies only the short online report ID, never raw transfer JSON. The SRA scanner reconstructs locally and displays the complete report before confirmation. The last successfully scanned QR report is retained in account-scoped device storage across navigation and application restarts, and changes only after another valid QR scan; opening Inbox records or entering an online lookup code does not replace it. Cloud delivery can use the existing durable manager outbox when connectivity is unavailable. SRA import, return, and certification require server confirmation.
 
 ## 19. Offline behavior changes
 
-An offline Farm Manager can retain a complete compiled package, generate its compressed single-QR transfer, or queue Cloud submission for retry. A signed-in SRA device can reconstruct and inspect that QR package without performing a report lookup, but the application intentionally does not grant SRA an offline authority mode: importing into the Inbox, returning, certifying, publishing prices, and approving users require a live authoritative server response.
+An offline Farm Manager can retain a complete compiled package, generate its compressed single-QR transfer, or queue Cloud submission for retry. A signed-in SRA device can reconstruct and inspect that QR package without performing a report lookup. Local QR validation confirms package consistency, not current server authority. The SRA may also read a timestamped account-scoped snapshot of district analytics and certified monthly audit history. Pending reviews are not cached, and the application does not grant an offline authority mode: importing into the Inbox, returning, certifying, publishing prices, and approving users require a live authoritative server response.
 
 ## 20. Performance improvements
 

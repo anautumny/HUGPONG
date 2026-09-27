@@ -64,7 +64,7 @@ export default function AdminOfflineBarrier({ onRetry, session = {}, connectivit
             <Ionicons name="trending-up" size={16} color={COLORS.primary} style={s.featIcon} />
             <View style={{ flex: 1 }}>
               <Text style={s.featTitle}>Weekly Benchmark Broadcast</Text>
-              <Text style={s.featDesc}>Official price circulars synchronize across all district block farms.</Text>
+              <Text style={s.featDesc}>Source-referenced price records synchronize across all district block farms.</Text>
             </View>
           </View>
 

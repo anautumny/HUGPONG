@@ -42,7 +42,8 @@ test('mobile operation entry exposes Custom Operation before templates and has n
   const customIndex = source.indexOf('Enter your own activity and cost');
   const templateIndex = source.indexOf('getFieldCustomOperations(safeField.id, task.stageNumber || i + 1).map', customIndex);
   assert.ok(customIndex > 0 && templateIndex > customIndex, 'Custom Operation must be visible before the template list');
-  assert.match(source, /const openCustomOperationLog = targetTask =>/);
+  assert.match(source, /const openCustomOperationLog = \(targetTask, options = \{\}\) =>/);
+  assert.match(source, /isSupplemental: options\.isSupplemental === true/);
   assert.match(source, /logForm\.sraOperationId !== 'CUSTOM' && l\.sraOperationId === logForm\.sraOperationId/);
   assert.ok(source.indexOf('const parentStageNum', source.indexOf('const handleSaveLog')) < source.indexOf('existingMatchingLog', source.indexOf('const handleSaveLog')));
 });

@@ -13,6 +13,7 @@ import {
   blockFarms as farmsStore,
   getSortedPrices,
   getCurrentSession,
+  getSraOfflineSnapshotStatus,
   subscribe,
   publishSraPrice,
   calculateSRAWeekLabel
@@ -36,6 +37,7 @@ import {
   PriceSummaryCard,
   AnalyticsEmptyState
 } from '../components/analytics/AnalyticsComponents';
+import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { ScreenHeader, Card, PrimaryButton, SecondaryButton } from '../components/ui';
 import PublishPriceModal from '../components/PublishPriceModal';
 import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
@@ -48,6 +50,8 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [allOps, setAllOps] = useState(opsStore);
   const [allFarms, setAllFarms] = useState(farmsStore);
   const [pricesList, setPricesList] = useState(getSortedPrices());
+  const [isOnline, setIsOnline] = useState(getNetworkStatus());
+  const [sraSnapshotStatus, setSraSnapshotStatus] = useState(getSraOfflineSnapshotStatus());
 
   // Navigation & Segmented Tabs: 'overview' | 'costs' | 'operations' | 'market'
   const [activeTab, setActiveTab] = useState(route?.params?.initialTab || 'overview');
@@ -91,8 +95,13 @@ export default function AnalyticsScreen({ navigation, route }) {
       setAllOps([...opsStore]);
       setAllFarms([...farmsStore]);
       setPricesList(getSortedPrices());
+      setSraSnapshotStatus(getSraOfflineSnapshotStatus());
     });
-    return unsub;
+    const unsubNetwork = subscribeToNetwork(online => setIsOnline(online));
+    return () => {
+      unsub();
+      unsubNetwork();
+    };
   }, []);
 
   // Update default farm if route params or manager loads
@@ -246,6 +255,10 @@ export default function AnalyticsScreen({ navigation, route }) {
 
   // Handler to publish SRA price
   const handlePublishPrice = async () => {
+    if (!isOnline) {
+      Alert.alert('Connection Required', 'Cached analytics remain available offline, but publishing a price reference requires a live HUGPONG connection.');
+      return;
+    }
     const s = parseFloat(newSugarPrice);
     const m = parseFloat(newMolassesPrice);
     const parsedDate = new Date(`${newEffectiveDate}T00:00:00.000Z`);
@@ -253,7 +266,7 @@ export default function AnalyticsScreen({ navigation, route }) {
       && !Number.isNaN(parsedDate.getTime())
       && parsedDate.toISOString().slice(0, 10) === newEffectiveDate;
     if (!Number.isFinite(s) || s <= 0 || !Number.isFinite(m) || m <= 0) {
-      Alert.alert('Invalid Price', 'Both official price values must be greater than zero.');
+      Alert.alert('Invalid Price', 'Both price values must be greater than zero.');
       return;
     }
     if (!canonicalDate || !newWeekLabel.trim() || !newCircularNumber.trim() || !newPriceSource.trim()) {
@@ -274,7 +287,7 @@ export default function AnalyticsScreen({ navigation, route }) {
     setNewMolassesPrice('');
     setNewCircularNumber('');
     setNewPriceSource('');
-    Alert.alert('Published', 'Official SRA benchmark published successfully to all devices.');
+    Alert.alert('Published', 'The source-referenced price record was published to all devices.');
   };
 
   return (
@@ -294,6 +307,22 @@ export default function AnalyticsScreen({ navigation, route }) {
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {isSRA && !isOnline && (
+          <View style={s.offlineSnapshotBanner}>
+            <Ionicons name="cloud-offline-outline" size={20} color="#B45309" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.offlineSnapshotTitle}>
+                {sraSnapshotStatus.available ? 'Cached analytics snapshot' : 'No cached analytics available'}
+              </Text>
+              <Text style={s.offlineSnapshotText}>
+                {sraSnapshotStatus.available
+                  ? `Read-only data last synchronized ${sraSnapshotStatus.syncedAt ? new Date(sraSnapshotStatus.syncedAt).toLocaleString() : 'at an unknown time'}. Reconnect for current district data and official actions.`
+                  : 'Reconnect once to download an account-scoped district snapshot.'}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* ── 1. Analytics Scope Card ── */}
         <AnalyticsScopeCard
           season={selectedSeason}
@@ -396,7 +425,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             {/* Quick SRA Sugar Benchmark */}
             <PriceSummaryCard
               priceRecord={pricesList[0]}
-              canPost={isSRA}
+              canPost={isSRA && isOnline}
               onPostPricePress={() => setShowPriceModal(true)}
             />
 
@@ -483,7 +512,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             <Card style={s.contentCard}>
               <Text style={s.sectionHeaderTag}>6-STAGE CROP GROWTH DISTRIBUTION</Text>
               <Text style={s.cardDescText}>
-                Active parcel location across the official SRA Sugarcane lifecycle (Month 0 to Month 12).
+                Active parcel location across the six-stage sugarcane lifecycle (Month 0 to Month 12).
               </Text>
               <StageDistributionList
                 stages={cropProgress.stagesDistribution}
@@ -510,10 +539,10 @@ export default function AnalyticsScreen({ navigation, route }) {
         {/* ═══════════════════════════════════════════════════════════ */}
         {activeTab === 'market' && (
           <View style={{ gap: SPACING.md }}>
-            {/* Latest Official SRA Benchmark */}
+            {/* Latest published price reference */}
             <PriceSummaryCard
               priceRecord={pricesList[0]}
-              canPost={isSRA}
+              canPost={isSRA && isOnline}
               onPostPricePress={() => setShowPriceModal(true)}
             />
 
@@ -540,7 +569,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               {priceTrends.trendPoints.length === 0 ? (
                 <AnalyticsEmptyState
                   title="No price records available"
-                  subtitle="Official circulars will display here once published."
+                  subtitle="Source-referenced records will display here once published."
                 />
               ) : (
                 <View style={{ gap: 8 }}>
@@ -590,7 +619,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         isManager={isManager}
       />
 
-      {/* ── Post Official SRA Price Modal (SRA Admin - Web Parity) ── */}
+      {/* ── Publish Price Reference Modal (web parity) ── */}
       <PublishPriceModal
         visible={showPriceModal}
         onClose={() => setShowPriceModal(false)}
@@ -612,6 +641,27 @@ const s = StyleSheet.create({
     padding: SPACING.md,
     gap: SPACING.md,
     paddingBottom: 40
+  },
+  offlineSnapshotBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: RADIUS.md,
+    padding: 12
+  },
+  offlineSnapshotTitle: {
+    fontSize: 12.5,
+    fontWeight: '900',
+    color: '#92400E'
+  },
+  offlineSnapshotText: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#B45309',
+    marginTop: 2
   },
   segmentedTabBar: {
     flexDirection: 'row',
