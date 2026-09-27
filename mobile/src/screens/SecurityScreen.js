@@ -26,6 +26,7 @@ export default function SecurityScreen({ navigation }) {
   const [showCurrentPw, setShowCurrentPw] = useState(false);
   const [showNewPw, setShowNewPw] = useState(false);
   const [loadingPw, setLoadingPw] = useState(false);
+  const [passwordSessionAction, setPasswordSessionAction] = useState('KEEP_CURRENT');
 
   // Change Mobile Number State
   const [showChangePhone, setShowChangePhone] = useState(false);
@@ -40,6 +41,15 @@ export default function SecurityScreen({ navigation }) {
     });
     return unsubscribe;
   }, []);
+
+  const returnToLogin = () => {
+    const rootNavigation = navigation.getParent?.()?.getParent?.();
+    if (rootNavigation?.reset) {
+      rootNavigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } else {
+      navigation.navigate('Login');
+    }
+  };
 
   const handlePasswordSubmit = async () => {
     if (!currentPw) {
@@ -56,7 +66,7 @@ export default function SecurityScreen({ navigation }) {
     }
 
     setLoadingPw(true);
-    const res = await updateUserPassword(currentPw, newPw);
+    const res = await updateUserPassword(currentPw, newPw, passwordSessionAction);
     setLoadingPw(false);
 
     if (!res.success) {
@@ -64,14 +74,25 @@ export default function SecurityScreen({ navigation }) {
       return;
     }
 
+    if (res.signOutRequired) {
+      Alert.alert(
+        'Password Updated',
+        'Your password was changed and all devices were signed out. Sign in again with your new password.',
+        [{ text: 'Go to Sign In', onPress: returnToLogin }],
+        { cancelable: false }
+      );
+      return;
+    }
+
     Alert.alert(
       'Password Updated',
-      'Your account password has been changed successfully.',
+      'Your password was changed. This device remains signed in; all other devices were signed out.',
       [{ text: 'OK', onPress: () => {
         setShowChangePw(false);
         setCurrentPw('');
         setNewPw('');
         setConfirmPw('');
+        setPasswordSessionAction('KEEP_CURRENT');
       }}]
     );
   };
@@ -331,6 +352,44 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               </View>
 
+              <View style={s.fieldGroup}>
+                <Text style={s.fieldLabel}>After changing your password</Text>
+                <TouchableOpacity
+                  style={[s.sessionChoice, passwordSessionAction === 'KEEP_CURRENT' && s.sessionChoiceSelected]}
+                  onPress={() => setPasswordSessionAction('KEEP_CURRENT')}
+                  disabled={loadingPw}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons
+                    name={passwordSessionAction === 'KEEP_CURRENT' ? 'radio-button-on' : 'radio-button-off'}
+                    size={19}
+                    color={passwordSessionAction === 'KEEP_CURRENT' ? COLORS.primary : COLORS.textMuted}
+                  />
+                  <Ionicons name="phone-portrait-outline" size={18} color={COLORS.primary} />
+                  <View style={s.sessionChoiceBody}>
+                    <Text style={s.sessionChoiceTitle}>Stay signed in on this device</Text>
+                    <Text style={s.sessionChoiceSub}>Other devices will be signed out for security.</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.sessionChoice, passwordSessionAction === 'SIGN_OUT_ALL' && s.sessionChoiceDangerSelected]}
+                  onPress={() => setPasswordSessionAction('SIGN_OUT_ALL')}
+                  disabled={loadingPw}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons
+                    name={passwordSessionAction === 'SIGN_OUT_ALL' ? 'radio-button-on' : 'radio-button-off'}
+                    size={19}
+                    color={passwordSessionAction === 'SIGN_OUT_ALL' ? COLORS.danger : COLORS.textMuted}
+                  />
+                  <Ionicons name="log-out-outline" size={18} color={COLORS.danger} />
+                  <View style={s.sessionChoiceBody}>
+                    <Text style={s.sessionChoiceTitle}>Sign out all devices</Text>
+                    <Text style={s.sessionChoiceSub}>This device will also return to the sign-in screen.</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity 
                 style={[s.submitBtn, loadingPw && s.btnDisabled]} 
                 onPress={handlePasswordSubmit}
@@ -423,6 +482,12 @@ const s = StyleSheet.create({
   pwStrength: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   strengthItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   strengthText: { fontSize: 11 },
+  sessionChoice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, backgroundColor: COLORS.background },
+  sessionChoiceSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
+  sessionChoiceDangerSelected: { borderColor: COLORS.danger, backgroundColor: '#FFF0F0' },
+  sessionChoiceBody: { flex: 1, gap: 2 },
+  sessionChoiceTitle: { fontSize: 12, fontWeight: '700', color: COLORS.text },
+  sessionChoiceSub: { fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted },
   
   submitBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   submitBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },

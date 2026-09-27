@@ -1010,7 +1010,7 @@ export const updateUserMobileNumber = async (newMobile, passwordVerification) =>
   }
 };
 
-export const updateUserPassword = async (currentPassword, newPassword) => {
+export const updateUserPassword = async (currentPassword, newPassword, sessionAction = 'KEEP_CURRENT') => {
   if (!CURRENT_SESSION) {
     return { success: false, error: 'No active user session found.' };
   }
@@ -1019,7 +1019,15 @@ export const updateUserPassword = async (currentPassword, newPassword) => {
   }
 
   try {
-    const result = await changePasswordWithServer(currentPassword, newPassword);
+    const result = await changePasswordWithServer(currentPassword, newPassword, sessionAction);
+    if (result.signOutRequired) {
+      await logoutUser({ skipRemote: true });
+      return {
+        success: true,
+        signOutRequired: true,
+        message: result.message || 'Your password has been changed and all devices were signed out.'
+      };
+    }
     CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
     const existing = users.find(user => user.employeeId === CURRENT_SESSION.employeeId);
     if (existing) Object.assign(existing, result.user);
@@ -1027,7 +1035,11 @@ export const updateUserPassword = async (currentPassword, newPassword) => {
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     await restartCloudSyncIfReady();
     notify();
-    return { success: true, message: result.message || 'Your password has been changed successfully.' };
+    return {
+      success: true,
+      signOutRequired: false,
+      message: result.message || 'Your password has been changed successfully.'
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1037,7 +1049,12 @@ export const requestCurrentPhoneVerification = async () => {
   try {
     return await requestPhoneVerificationWithServer();
   } catch (error) {
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error.message,
+      code: error.code || '',
+      ...(error.data || {})
+    };
   }
 };
 

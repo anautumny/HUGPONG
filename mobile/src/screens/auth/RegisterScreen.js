@@ -102,6 +102,7 @@ export default function RegisterScreen({ navigation }) {
   const [codeVerified, setCodeVerified] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
   const [countdown, setCountdown] = useState(0);
+  const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -142,7 +143,7 @@ export default function RegisterScreen({ navigation }) {
     { title: t('reg_step_farm', 'Block Farm'), sub: t('reg_step_farm_sub', 'Select it if known, or continue unassigned') },
     { 
       title: t('reg_step_contact', 'Contact Number'), 
-      sub: codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : 'Used for SMS verification. Permanent User ID issued upon signup' 
+      sub: codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : t('reg_contact_sub')
     },
     { title: t('reg_step_password', 'Set Password'), sub: t('reg_step_password_sub', 'Secure your HUGPONG account') },
   ];
@@ -169,18 +170,23 @@ export default function RegisterScreen({ navigation }) {
 
       if (smsResult.success) {
         setCodeSent(true);
-        setCountdown(60);
+        setCountdown(Math.max(0, Number(smsResult.resendAfterSeconds || 0)));
+        setCodeRequestsRemaining(Math.max(0, Number(smsResult.codeRequestsRemaining ?? 0)));
         Alert.alert(
-          'SMS Code Dispatched',
-          `A 6-digit one-time SMS verification code has been dispatched to ${formatted}.\n\nPlease enter your code below to verify your mobile number.`,
-          [{ text: 'Enter Code', onPress: () => {} }]
+          t('reg_sms_sent_title'),
+          t('reg_sms_sent_msg').replace('{phone}', formatted),
+          [{ text: t('reg_enter_code'), onPress: () => {} }]
         );
       } else {
-        Alert.alert('SMS Notice', smsResult.error || 'Verification code dispatched.');
+        Alert.alert(t('reg_sms_notice'), smsResult.error || t('reg_code_dispatched'));
       }
     } catch (err) {
       setLoading(false);
-      Alert.alert('SMS Unavailable', 'The verification service is unavailable. No code was issued.');
+      if (err.data?.retryAfterSeconds) {
+        setCountdown(Math.max(0, Number(err.data.retryAfterSeconds)));
+        setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));
+      }
+      Alert.alert(t('reg_sms_unavailable_title'), err.message || t('reg_sms_unavailable_msg'));
     }
   };
 
@@ -197,7 +203,7 @@ export default function RegisterScreen({ navigation }) {
       setErrors(p => ({ ...p, verificationCode: null }));
       setStep(4);
     } catch (error) {
-      setErrors(p => ({ ...p, verificationCode: error.message || 'The verification code is incorrect or expired.' }));
+      setErrors(p => ({ ...p, verificationCode: error.message || t('reg_code_invalid') }));
     } finally {
       setLoading(false);
     }
@@ -206,8 +212,8 @@ export default function RegisterScreen({ navigation }) {
   const validateStep = () => {
     const e = {};
     if (step === 1) {
-      if (!form.firstName.trim()) e.firstName = 'First name is required';
-      if (!form.lastName.trim()) e.lastName = 'Last name is required';
+      if (!form.firstName.trim()) e.firstName = t('reg_first_name_required');
+      if (!form.lastName.trim()) e.lastName = t('reg_last_name_required');
     }
     if (step === 3) {
       const cleaned = form.contactNumber.replace(/[^0-9]/g, '');
@@ -220,23 +226,23 @@ export default function RegisterScreen({ navigation }) {
     if (step === 4) {
       const pwd = form.password || '';
       if (!pwd) {
-        e.password = 'Password is required';
+        e.password = t('reg_password_required');
       } else if (pwd.length < 8) {
-        e.password = 'Password must be at least 8 characters';
+        e.password = t('reg_password_length');
       } else if (!/[0-9]/.test(pwd)) {
-        e.password = 'Password must contain at least one number (0-9)';
+        e.password = t('reg_password_number');
       } else if (!/[a-zA-Z]/.test(pwd)) {
-        e.password = 'Password must contain at least one letter (a-z)';
+        e.password = t('reg_password_letter');
       }
 
       if (!form.confirmPassword) {
-        e.confirmPassword = 'Confirm your password';
+        e.confirmPassword = t('reg_confirm_required');
       } else if (form.password !== form.confirmPassword) {
-        e.confirmPassword = 'Passwords do not match';
+        e.confirmPassword = t('reg_password_mismatch');
       }
 
       if (!consentAgreed) {
-        e.consent = 'Please acknowledge the Privacy Policy and Terms of Use to proceed.';
+        e.consent = t('reg_consent_required');
       }
     }
     setErrors(e);
@@ -252,23 +258,23 @@ export default function RegisterScreen({ navigation }) {
       const res = await registerUser(form);
       setLoading(false);
       if (!res?.success) {
-        Alert.alert('Registration Error', res?.error || 'The account could not be created.');
+        Alert.alert(t('reg_error_title'), res?.error || t('reg_account_failed'));
       } else if (res.user) {
         const accountId = res.accountId || res.user.accountId || res.user.employeeId || res.user.id;
         if (!/^\d{8}$/.test(String(accountId || ''))) {
-          Alert.alert('Registration Error', 'The server did not return the permanent login ID. Please contact support before leaving this screen.');
+          Alert.alert(t('reg_error_title'), t('reg_id_missing'));
         } else {
           setRegisteredAccount({ ...res.user, accountId });
           setShowSuccessModal(true);
         }
       } else {
-        Alert.alert('Registration Successful', `Welcome to HUGPONG, ${form.firstName}! Your Farm Member account is now active.`, [
-          { text: 'Go to Dashboard', onPress: () => navigation.replace('MainTabs') }
+        Alert.alert(t('reg_success_title'), t('reg_success_welcome'), [
+          { text: t('reg_go_dashboard'), onPress: () => navigation.replace('MainTabs') }
         ]);
       }
     } catch (err) {
       setLoading(false);
-      Alert.alert('Registration Error', 'An error occurred while creating your account. Please try again.');
+      Alert.alert(t('reg_error_title'), t('reg_unexpected_error'));
     }
   };
 
@@ -363,8 +369,8 @@ export default function RegisterScreen({ navigation }) {
                     <View style={rc.chipHeader}>
                       <Ionicons name={!form.blockFarmId ? 'radio-button-on' : 'radio-button-off'} size={18} color={!form.blockFarmId ? COLORS.primary : COLORS.border} />
                       <View style={{ flex: 1 }}>
-                        <Text style={[rc.text, !form.blockFarmId && rc.textSelected]}>Not assigned yet / Farm not listed</Text>
-                        <Text style={{ marginTop: 3, fontSize: 11, color: COLORS.textMuted }}>An SRA Admin will assign your Block Farm before approval.</Text>
+                        <Text style={[rc.text, !form.blockFarmId && rc.textSelected]}>{t('reg_not_assigned')}</Text>
+                        <Text style={{ marginTop: 3, fontSize: 11, color: COLORS.textMuted }}>{t('reg_not_assigned_sub')}</Text>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -392,7 +398,7 @@ export default function RegisterScreen({ navigation }) {
                   {getAvailableBlockFarms().length === 0 && (
                     <View style={s.infoNoticeBox}>
                       <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
-                      <Text style={s.infoNoticeText}>No Block Farms are available yet. You can continue and an SRA Admin will assign one later.</Text>
+                      <Text style={s.infoNoticeText}>{t('reg_no_farms')}</Text>
                     </View>
                   )}
                 </View>
@@ -463,7 +469,9 @@ export default function RegisterScreen({ navigation }) {
                       style={{ paddingVertical: 4 }}
                     >
                       <Text style={[s.resendBtnText, countdown > 0 && { color: COLORS.textMuted }]}>
-                        {countdown > 0 ? `${t('reg_resend_countdown', 'Resend code in')} ${countdown}s` : t('reg_resend_btn', 'Resend Code')}
+                        {countdown > 0
+                          ? `${codeRequestsRemaining === 0 ? t('recovery_limit_reached') : t('reg_resend_countdown', 'Resend code in')} ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`
+                          : `${t('reg_resend_btn', 'Resend Code')} (${codeRequestsRemaining} ${t('recovery_remaining')})`}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -498,7 +506,7 @@ export default function RegisterScreen({ navigation }) {
                         style={[inp.input, { flex: 1 }]} 
                         value={form.password} 
                         onChangeText={v => set('password', v)} 
-                        placeholder="Min. 8 chars (letters & numbers)" 
+                        placeholder={t('first_password_placeholder')} 
                         placeholderTextColor={COLORS.textMuted} 
                         secureTextEntry={!showPw} 
                       />
@@ -512,7 +520,7 @@ export default function RegisterScreen({ navigation }) {
                   {form.password.length > 0 && (
                     <View style={s.pwStrengthContainer}>
                       <View style={s.pwStrengthHeader}>
-                        <Text style={s.pwStrengthLabel}>Password Security:</Text>
+                        <Text style={s.pwStrengthLabel}>{t('reg_password_security')}</Text>
                         <View style={[s.pwStrengthBadge, { backgroundColor: str.color + '20' }]}>
                           <Text style={[s.pwStrengthBadgeText, { color: str.color }]}>{str.level}</Text>
                         </View>
@@ -525,14 +533,14 @@ export default function RegisterScreen({ navigation }) {
 
                   {/* Security Requirement Checklist */}
                   <View style={s.pwRulesBox}>
-                    <Text style={s.pwRulesTitle}>Security Requirements:</Text>
+                    <Text style={s.pwRulesTitle}>{t('reg_security_requirements')}</Text>
                     <View style={s.pwRuleItem}>
                       <Ionicons 
                         name={str.hasMin ? 'checkmark-circle' : 'ellipse-outline'} 
                         size={15} 
                         color={str.hasMin ? COLORS.success : COLORS.textMuted} 
                       />
-                      <Text style={[s.pwRuleText, str.hasMin && s.pwRuleTextMet]}>At least 8 characters</Text>
+                      <Text style={[s.pwRuleText, str.hasMin && s.pwRuleTextMet]}>{t('reg_rule_length')}</Text>
                     </View>
                     <View style={s.pwRuleItem}>
                       <Ionicons 
@@ -540,7 +548,7 @@ export default function RegisterScreen({ navigation }) {
                         size={15} 
                         color={str.hasLetter && str.hasNum ? COLORS.success : COLORS.textMuted} 
                       />
-                      <Text style={[s.pwRuleText, str.hasLetter && str.hasNum && s.pwRuleTextMet]}>Contains both letters & numbers (0-9)</Text>
+                      <Text style={[s.pwRuleText, str.hasLetter && str.hasNum && s.pwRuleTextMet]}>{t('reg_rule_letters_numbers')}</Text>
                     </View>
                     <View style={s.pwRuleItem}>
                       <Ionicons 
@@ -548,7 +556,7 @@ export default function RegisterScreen({ navigation }) {
                         size={15} 
                         color={str.hasUpper || str.hasSpecial ? COLORS.success : COLORS.textMuted} 
                       />
-                      <Text style={[s.pwRuleText, (str.hasUpper || str.hasSpecial) && s.pwRuleTextMet]}>Uppercase or symbol (recommended)</Text>
+                      <Text style={[s.pwRuleText, (str.hasUpper || str.hasSpecial) && s.pwRuleTextMet]}>{t('reg_rule_symbol')}</Text>
                     </View>
                   </View>
 
@@ -559,7 +567,7 @@ export default function RegisterScreen({ navigation }) {
                         style={[inp.input, { flex: 1 }]} 
                         value={form.confirmPassword} 
                         onChangeText={v => set('confirmPassword', v)} 
-                        placeholder="Repeat your password" 
+                        placeholder={t('first_confirm_placeholder')} 
                         placeholderTextColor={COLORS.textMuted} 
                         secureTextEntry={!showCPw} 
                       />
@@ -582,7 +590,7 @@ export default function RegisterScreen({ navigation }) {
                     activeOpacity={0.8}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: consentAgreed }}
-                    accessibilityLabel="Acknowledge the Privacy Policy and Terms of Use"
+                    accessibilityLabel={t('reg_ack_accessibility')}
                   >
                     <Ionicons
                       name={consentAgreed ? 'checkbox' : 'square-outline'}
@@ -590,16 +598,16 @@ export default function RegisterScreen({ navigation }) {
                       color={consentAgreed ? COLORS.primary : COLORS.textMuted}
                     />
                     <Text style={s.consentText}>
-                      I acknowledge the <Text style={{ color: COLORS.primary, fontWeight: '700' }}>HUGPONG Privacy Policy and Terms of Use</Text>, including the processing of account and farm-operation data described there.
+                      {t('reg_ack_prefix')} <Text style={{ color: COLORS.primary, fontWeight: '700' }}>{t('reg_ack_policy')}</Text>, {t('reg_ack_suffix')}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => setShowLegalModal(true)}
                     accessibilityRole="button"
-                    accessibilityLabel="Read privacy, terms, and compliance information"
+                    accessibilityLabel={t('reg_read_legal_accessibility')}
                     style={s.legalPolicyLink}
                   >
-                    <Text style={s.legalPolicyLinkText}>Read Privacy, Terms &amp; Compliance</Text>
+                    <Text style={s.legalPolicyLinkText}>{t('reg_read_legal')}</Text>
                   </TouchableOpacity>
                   {errors.consent ? <Text style={s.consentErr}>{errors.consent}</Text> : null}
                 </>
@@ -635,27 +643,25 @@ export default function RegisterScreen({ navigation }) {
               <Ionicons name="checkmark-circle" size={46} color={COLORS.primary} />
             </View>
 
-            <Text style={s.successTitle}>Registration Submitted</Text>
-            <Text style={s.successSub}>
-              Your Farm Member account is pending approval. You can sign in after an authorized Farm Manager or SRA Admin activates it.
-            </Text>
+            <Text style={s.successTitle}>{t('reg_submitted_title')}</Text>
+            <Text style={s.successSub}>{t('reg_submitted_msg')}</Text>
 
             {/* Permanent User ID Display */}
             <View style={s.credIdBox}>
-              <Text style={s.credIdLabel}>OFFICIAL PERMANENT USER ID</Text>
+              <Text style={s.credIdLabel}>{t('reg_official_id')}</Text>
               <Text selectable style={s.credIdVal}>{registeredAccount?.accountId || registeredAccount?.employeeId}</Text>
-              <Text style={s.credIdSub}>Immutable 8-digit Login Credential</Text>
+              <Text style={s.credIdSub}>{t('reg_immutable_id')}</Text>
             </View>
 
             {/* Credential Metadata */}
             <View style={s.metaRow}>
               <View style={s.metaCol}>
-                <Text style={s.metaLabel}>Registered Mobile</Text>
+                <Text style={s.metaLabel}>{t('reg_registered_mobile')}</Text>
                 <Text style={s.metaVal}>{registeredAccount?.contact || form.contactNumber}</Text>
               </View>
               <View style={s.metaCol}>
-                <Text style={s.metaLabel}>Block Farm</Text>
-                <Text style={s.metaVal} numberOfLines={1}>{registeredAccount?.blockFarm || form.blockFarm || 'Awaiting assignment'}</Text>
+                <Text style={s.metaLabel}>{t('reg_block_farm')}</Text>
+                <Text style={s.metaVal} numberOfLines={2}>{registeredAccount?.blockFarm || form.blockFarm || t('reg_awaiting_assignment')}</Text>
               </View>
             </View>
 
@@ -663,7 +669,7 @@ export default function RegisterScreen({ navigation }) {
             <View style={s.lostSimCard}>
               <Ionicons name="shield-checkmark" size={18} color={COLORS.primary} style={{ marginTop: 1 }} />
               <Text style={s.lostSimText}>
-                <Text style={{ fontWeight: '700' }}>Important Notice:</Text> Write down or screenshot your 8-digit User ID. Even if you lose or replace your SIM card in the future, this User ID is permanently linked to your plot and will always work to sign in.
+                <Text style={{ fontWeight: '700' }}>{t('reg_important_notice')}</Text> {t('reg_important_notice_msg')}
               </Text>
             </View>
 
@@ -679,13 +685,13 @@ export default function RegisterScreen({ navigation }) {
                       title: 'HUGPONG Farm Member Credentials'
                     });
                   } catch (e) {
-                    Alert.alert('Farm Member User ID', id);
+                    Alert.alert(t('reg_user_id_title'), id);
                   }
                 }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="share-social-outline" size={16} color={COLORS.primary} />
-                <Text style={s.shareCredBtnText}>Share / Save Credentials</Text>
+                <Text style={s.shareCredBtnText}>{t('reg_share_credentials')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -696,7 +702,7 @@ export default function RegisterScreen({ navigation }) {
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={s.proceedBtnText}>Return to Sign In</Text>
+                <Text style={s.proceedBtnText}>{t('reg_return_signin')}</Text>
                 <Ionicons name="arrow-forward" size={16} color="#fff" />
               </TouchableOpacity>
             </View>
@@ -752,7 +758,7 @@ const s = StyleSheet.create({
   pwRulesBox: { backgroundColor: COLORS.background, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, gap: 6 },
   pwRulesTitle: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 2 },
   pwRuleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pwRuleText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  pwRuleText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, color: COLORS.textMuted, fontWeight: '500' },
   pwRuleTextMet: { color: COLORS.text, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: SPACING.lg },
   successCard: { width: '100%', backgroundColor: '#fff', borderRadius: RADIUS.xl, padding: 22, alignItems: 'center', ...SHADOW.lg },
@@ -764,16 +770,16 @@ const s = StyleSheet.create({
   credIdVal: { fontSize: 28, fontWeight: '900', color: COLORS.primary, letterSpacing: 3, fontFamily: 'monospace' },
   credIdSub: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
   metaRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', backgroundColor: COLORS.background, padding: 10, borderRadius: RADIUS.md, marginBottom: 12, gap: 10 },
-  metaCol: { flex: 1 },
+  metaCol: { flex: 1, minWidth: 0 },
   metaLabel: { fontSize: 10, color: COLORS.textMuted, fontWeight: '600' },
   metaVal: { fontSize: 12.5, fontWeight: '700', color: COLORS.text, marginTop: 2 },
   lostSimCard: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', padding: 12, borderRadius: RADIUS.md, marginBottom: 16 },
   lostSimText: { flex: 1, fontSize: 11.5, color: '#1E40AF', lineHeight: 17 },
   modalActionCol: { width: '100%', gap: 8 },
   shareCredBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primary + '40', paddingVertical: 12, borderRadius: RADIUS.md },
-  shareCredBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+  shareCredBtnText: { flexShrink: 1, textAlign: 'center', fontSize: 13, lineHeight: 18, fontWeight: '700', color: COLORS.primary },
   proceedBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md },
-  proceedBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  proceedBtnText: { flexShrink: 1, textAlign: 'center', fontSize: 14, lineHeight: 19, fontWeight: '700', color: '#fff' },
   consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4, marginTop: 2 },
   consentText: { flex: 1, fontSize: 11.5, color: COLORS.textSecondary, lineHeight: 16 },
   legalPolicyLink: { alignSelf: 'flex-start', minHeight: 36, justifyContent: 'center', paddingHorizontal: 30, marginTop: -6 },

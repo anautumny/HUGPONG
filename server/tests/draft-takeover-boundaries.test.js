@@ -68,7 +68,7 @@ test('the Mobile-only Planner is free-form and carries the activity into local d
   assert.match(mobileSchedule, /operationDefinitionId: 'CUSTOM'/);
   assert.match(mobileSchedule, /operationName: 'Custom Operation'/);
   assert.doesNotMatch(mobileSchedule, /SRA_OPERATIONS_CATALOGUE/);
-  assert.match(mobilePlanner, /Planned Activity/);
+  assert.match(mobilePlanner, /t\('planner_planned_activity'\)/);
   assert.match(mobilePlanner, /stageNumber: null/);
   assert.match(mobilePlanner, /operationDefinitionId === 'CUSTOM'/);
   assert.match(mobilePlanner, /plannedOperationId/);

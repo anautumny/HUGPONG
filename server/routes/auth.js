@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const { normalizeStructuredName } = require('../domain/personName');
@@ -15,17 +16,68 @@ const { sendSms } = require('../services/smsGateway');
 const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { recordActivity } = require('../services/telemetryService');
-const { createRateLimit, clientAddress, identifier } = require('../middleware/rateLimit');
-const { authVersionOf, nextAuthVersion, revokeFirebaseSessions } = require('../security/accountSecurity');
+const { createRateLimit, clientAddress, identifier, rateLimitState } = require('../middleware/rateLimit');
+const {
+  PASSWORD_SESSION_ACTIONS,
+  authVersionOf,
+  nextAuthVersion,
+  normalizePasswordSessionAction,
+  revokeFirebaseSessions
+} = require('../security/accountSecurity');
 const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
 const { queueAuditEvent } = require('../services/auditWriter');
+const {
+  RECOVERY_CODE_TTL_MS,
+  dispatchPasswordRecoveryChallenge,
+  verifyPasswordRecoveryCode,
+  completePasswordRecovery
+} = require('../services/passwordRecoveryService');
+
+const VERIFICATION_CODE_SEND_LIMIT = 3;
+const VERIFICATION_CODE_WINDOW_MS = 60 * 60 * 1000;
+const VERIFICATION_CODE_RESEND_DELAY_MS = 60 * 1000;
+const OTP_REQUEST_LIMITER = 'auth-otp-request';
+const PASSWORD_RECOVERY_ACCOUNT_LIMITER = 'auth-password-recovery-account';
 
 const loginRateLimit = createRateLimit({ name: 'auth-login', max: 10, windowMs: 15 * 60 * 1000 });
 const mobileSessionRateLimit = createRateLimit({ name: 'auth-mobile-session', max: 60, windowMs: 15 * 60 * 1000, key: clientAddress });
-const otpRequestRateLimit = createRateLimit({ name: 'auth-otp-request', max: 5, windowMs: 60 * 60 * 1000 });
+const otpRequestRateLimit = createRateLimit({
+  name: OTP_REQUEST_LIMITER,
+  max: VERIFICATION_CODE_SEND_LIMIT,
+  windowMs: VERIFICATION_CODE_WINDOW_MS,
+  minIntervalMs: VERIFICATION_CODE_RESEND_DELAY_MS,
+  key: identifier
+});
 const otpVerifyRateLimit = createRateLimit({ name: 'auth-otp-verify', max: 10, windowMs: 15 * 60 * 1000 });
 const registrationRateLimit = createRateLimit({ name: 'auth-register', max: 5, windowMs: 60 * 60 * 1000 });
 const passwordRateLimit = createRateLimit({ name: 'auth-password-check', max: 10, windowMs: 15 * 60 * 1000, key: req => `${clientAddress(req)}:${identifier(req)}` });
+const passwordRecoveryIpRateLimit = createRateLimit({
+  name: 'auth-password-recovery-ip',
+  max: 20,
+  windowMs: 60 * 60 * 1000,
+  key: clientAddress
+});
+const passwordRecoveryAccountRateLimit = createRateLimit({
+  name: PASSWORD_RECOVERY_ACCOUNT_LIMITER,
+  max: VERIFICATION_CODE_SEND_LIMIT,
+  windowMs: VERIFICATION_CODE_WINDOW_MS,
+  minIntervalMs: VERIFICATION_CODE_RESEND_DELAY_MS,
+  key: req => req.passwordRecoveryUser?.id
+    ? `user:${req.passwordRecoveryUser.id}`
+    : `unknown:${String(req.body?.identifier || '').trim().toLowerCase().replace(/\D/g, '') || 'missing'}`
+});
+const passwordRecoveryVerifyRateLimit = createRateLimit({
+  name: 'auth-password-recovery-verify',
+  max: 10,
+  windowMs: 15 * 60 * 1000,
+  key: req => `${clientAddress(req)}:${String(req.body?.recoveryId || '').slice(0, 100)}`
+});
+const passwordRecoveryCompleteRateLimit = createRateLimit({
+  name: 'auth-password-recovery-complete',
+  max: 5,
+  windowMs: 15 * 60 * 1000,
+  key: req => `${clientAddress(req)}:${String(req.body?.recoveryId || '').slice(0, 100)}`
+});
 
 function normalizeContact(value) {
   const digits = String(value || '').replace(/\D/g, '');
@@ -110,6 +162,17 @@ async function buildSessionUser(userId, user) {
   };
 }
 
+function verificationSendPolicy(req, limiterName) {
+  const state = rateLimitState(req, limiterName);
+  return state ? {
+    codeRequestLimit: state.limit,
+    codeRequestsRemaining: state.remaining,
+    resendAfterSeconds: state.retryAfterSeconds,
+    resendAvailableAt: state.resendAvailableAt,
+    codeLimitResetsAt: state.windowResetsAt
+  } : {};
+}
+
 async function establishSession(req, user) {
   if (!req.session || typeof req.session.regenerate !== 'function') {
     req.session = { user };
@@ -175,6 +238,117 @@ async function sendVerificationCode(phone, code, displayName, purpose = 'verific
   }
 }
 
+async function resolvePasswordRecoveryAccount(req, res, next) {
+  try {
+    req.passwordRecoveryUser = await findUser(req.body?.identifier);
+  } catch (error) {
+    console.warn('[HUGPONG Auth] Password recovery account lookup notice:', error.message);
+    req.passwordRecoveryUser = null;
+  }
+  return next();
+}
+
+router.post('/password-recovery/request', passwordRecoveryIpRateLimit, resolvePasswordRecoveryAccount, passwordRecoveryAccountRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  const requestedIdentifier = String(req.body?.identifier || '').trim().slice(0, 160);
+  if (!requestedIdentifier) {
+    return res.status(400).json({ success: false, error: 'User ID or registered mobile number is required.' });
+  }
+
+  let recoveryId = crypto.randomBytes(32).toString('base64url');
+  let expiresAt = new Date(Date.now() + RECOVERY_CODE_TTL_MS).toISOString();
+  try {
+    const matchedUser = req.passwordRecoveryUser;
+    const phone = normalizeContact(matchedUser?.phone);
+    const createdChallenge = await dispatchPasswordRecoveryChallenge(db, {
+      user: matchedUser,
+      phone,
+      sendCode: async code => {
+        const delivery = await sendSms(
+          phone,
+          `[HUGPONG] Your password reset code is ${code}. Valid for 10 minutes. Do not share this code.`,
+          { otpCode: code, purpose: 'password-recovery' }
+        );
+        if (!delivery?.success) throw new Error(delivery?.error || 'SMS delivery failed.');
+      }
+    });
+    if (createdChallenge) {
+      recoveryId = createdChallenge.recoveryId;
+      expiresAt = createdChallenge.expiresAt;
+    }
+  } catch (error) {
+    console.warn('[HUGPONG Auth] Password recovery request notice:', error.message);
+  }
+
+  return res.status(202).json({
+    success: true,
+    recoveryId,
+    expiresAt,
+    ...verificationSendPolicy(req, PASSWORD_RECOVERY_ACCOUNT_LIMITER),
+    message: 'If an active account matches that information, a password reset code has been sent to its registered mobile number.'
+  });
+});
+
+router.post('/password-recovery/verify', passwordRecoveryVerifyRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  try {
+    const result = await verifyPasswordRecoveryCode(db, {
+      recoveryId: req.body?.recoveryId,
+      code: req.body?.code
+    });
+    return res.json({
+      success: true,
+      resetToken: result.resetToken,
+      expiresAt: result.expiresAt,
+      message: 'Verification complete. Create your new password.'
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      success: false,
+      error: status === 400 ? error.message : 'The recovery code could not be verified.'
+    });
+  }
+});
+
+router.post('/password-recovery/complete', passwordRecoveryCompleteRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  try {
+    validatePassword(req.body?.newPassword);
+    const result = await completePasswordRecovery(db, {
+      recoveryId: req.body?.recoveryId,
+      resetToken: req.body?.resetToken,
+      passwordHash: await hashPassword(req.body.newPassword)
+    });
+    await revokeFirebaseSessions(result.userId);
+    if (req.session && typeof req.session.destroy === 'function') {
+      await new Promise(resolve => req.session.destroy(error => {
+        if (error) console.warn('[HUGPONG Auth] Password recovery session cleanup notice:', error.message);
+        resolve();
+      }));
+    }
+    res.clearCookie('hugpong.sid');
+    if (result.phone) {
+      sendSms(
+        result.phone,
+        '[HUGPONG] Your account password was reset successfully. All devices were signed out. If this was not you, contact your administrator immediately.',
+        { purpose: 'password-recovery-confirmation' }
+      ).catch(error => console.warn('[HUGPONG Auth] Password reset confirmation notice:', error.message));
+    }
+    return res.json({
+      success: true,
+      signOutRequired: true,
+      message: 'Password reset complete. All devices were signed out; sign in with your new password.'
+    });
+  } catch (error) {
+    const status = error.status || (/Password must|less predictable password/.test(error.message) ? 400 : 500);
+    return res.status(status).json({
+      success: false,
+      error: status === 400 ? error.message : 'The password reset could not be completed.'
+    });
+  }
+});
+
 router.post('/login', loginRateLimit, async (req, res) => {
   const identifier = req.body?.contactNumber || req.body?.identifier;
   const password = req.body?.password;
@@ -231,7 +405,12 @@ router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) =
       discardOtp('registration', phone);
       throw error;
     }
-    return res.json({ success: true, expiresAt: challenge.expiresAt, message: 'Verification code sent.' });
+    return res.json({
+      success: true,
+      expiresAt: challenge.expiresAt,
+      ...verificationSendPolicy(req, OTP_REQUEST_LIMITER),
+      message: 'Verification code sent.'
+    });
   } catch (error) {
     const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
     return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
@@ -324,7 +503,12 @@ router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, asy
       discardOtp('first-login', employeeId);
       throw error;
     }
-    return res.json({ success: true, expiresAt: challenge.expiresAt, message: 'Verification code sent.' });
+    return res.json({
+      success: true,
+      expiresAt: challenge.expiresAt,
+      ...verificationSendPolicy(req, OTP_REQUEST_LIMITER),
+      message: 'Verification code sent.'
+    });
   } catch (error) {
     const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
     return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
@@ -387,6 +571,7 @@ router.post('/change-password', requireAuth, passwordRateLimit, async (req, res)
   const employeeId = req.session.user.employeeId;
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
   try {
+    const sessionAction = normalizePasswordSessionAction(req.body?.sessionAction);
     validatePassword(newPassword);
     if (req.session.user.requiresPasswordChange !== true && !(await verifyCurrentPassword(employeeId, currentPassword))) {
       return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
@@ -401,14 +586,42 @@ router.post('/change-password', requireAuth, passwordRateLimit, async (req, res)
     queueAuditEvent(batch, db, {
       eventType: 'USER_PASSWORD_CHANGED', actorUserId: employeeId,
       entityType: 'USER', entityId: employeeId,
-      details: `Changed the password for account ${employeeId}.`, createdAt: now
+      details: sessionAction === PASSWORD_SESSION_ACTIONS.SIGN_OUT_ALL
+        ? `Changed the password for account ${employeeId} and signed out all devices.`
+        : `Changed the password for account ${employeeId}, signed out other devices, and kept the current device signed in.`,
+      createdAt: now
     });
     await batch.commit();
     await revokeFirebaseSessions(employeeId);
+
+    if (sessionAction === PASSWORD_SESSION_ACTIONS.SIGN_OUT_ALL) {
+      if (req.session) req.session.user = null;
+      if (req.session && typeof req.session.destroy === 'function') {
+        await new Promise(resolve => req.session.destroy(error => {
+          if (error) console.warn(`[HUGPONG Auth] Current-session destruction notice for ${employeeId}:`, error.message);
+          resolve();
+        }));
+      }
+      res.clearCookie('hugpong.sid');
+      return res.json({
+        success: true,
+        message: 'Password updated successfully. All devices have been signed out.',
+        sessionAction,
+        signOutRequired: true
+      });
+    }
+
     Object.assign(req.session.user, { requiresPasswordChange: false, passwordChanged: true, passwordChangedAt: now, authVersion });
-    return res.json({ success: true, message: 'Password updated successfully.', user: req.session.user, ...(await issueCredentials(req.session.user)) });
+    return res.json({
+      success: true,
+      message: 'Password updated successfully. This device remains signed in; other devices have been signed out.',
+      sessionAction,
+      signOutRequired: false,
+      user: req.session.user,
+      ...(await issueCredentials(req.session.user))
+    });
   } catch (error) {
-    const status = /Password must|less predictable password/.test(error.message) ? 400 : 500;
+    const status = error.status || (/Password must|less predictable password/.test(error.message) ? 400 : 500);
     return res.status(status).json({ success: false, error: status === 400 ? error.message : 'Password update could not be saved.' });
   }
 });

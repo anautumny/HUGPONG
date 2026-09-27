@@ -57,6 +57,8 @@ export default function LoginScreen({ navigation, route }) {
   const [phoneVerificationError, setPhoneVerificationError] = useState('');
   const [phoneVerificationSaving, setPhoneVerificationSaving] = useState(false);
   const [phoneVerificationResending, setPhoneVerificationResending] = useState(false);
+  const [phoneVerificationResendSeconds, setPhoneVerificationResendSeconds] = useState(0);
+  const [phoneVerificationRequestsRemaining, setPhoneVerificationRequestsRemaining] = useState(3);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
   const [setupSigningOut, setSetupSigningOut] = useState(false);
   const [isRetryingOffline, setIsRetryingOffline] = useState(false);
@@ -139,6 +141,14 @@ export default function LoginScreen({ navigation, route }) {
     return () => clearTimeout(timerRef.current);
   }, [lockoutSeconds, failedAttempts]);
 
+  useEffect(() => {
+    if (phoneVerificationResendSeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setPhoneVerificationResendSeconds(value => Math.max(0, value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [phoneVerificationResendSeconds > 0]);
+
   const validate = () => {
     const e = {};
     const raw = String(contactNumber || '').trim();
@@ -160,8 +170,8 @@ export default function LoginScreen({ navigation, route }) {
     if (loading) return;
     if (lockoutSeconds > 0) {
       Alert.alert(
-        'Account Temporarily Locked',
-        `Too many failed attempts. Please wait ${lockoutSeconds} seconds before trying again.`
+        t('auth_lockout_title'),
+        t('auth_lockout_wait').replace('{seconds}', String(lockoutSeconds))
       );
       return;
     }
@@ -196,7 +206,7 @@ export default function LoginScreen({ navigation, route }) {
 
         if (nextAttempts >= 5) {
           setLockoutSeconds(60);
-          setAuthError('Too many failed attempts. Login locked for 60 seconds to protect your account.');
+          setAuthError(t('auth_lockout_60'));
         } else {
           setAuthError(res.error || t('auth_invalid_credentials', 'Invalid User ID, mobile number, or password.'));
         }
@@ -214,9 +224,18 @@ export default function LoginScreen({ navigation, route }) {
         setPhoneVerificationError('');
         const request = await requestCurrentPhoneVerification();
         if (!request.success) {
-          setAuthError(request.error || 'A phone verification code could not be sent.');
+          setPhoneVerificationResendSeconds(Math.max(0, Number(request.retryAfterSeconds || 0)));
+          setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.remaining ?? 0)));
+          if (request.code === 'RESEND_COOLDOWN' || request.code === 'HOURLY_CODE_LIMIT') {
+            setPhoneVerificationError(request.error || t('auth_latest_code'));
+            setShowPhoneVerificationModal(true);
+            return;
+          }
+          setAuthError(request.error || t('auth_code_send_failed'));
           return;
         }
+        setPhoneVerificationResendSeconds(Math.max(0, Number(request.resendAfterSeconds || 0)));
+        setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.codeRequestsRemaining ?? 0)));
         setShowPhoneVerificationModal(true);
         return;
       }
@@ -239,7 +258,7 @@ export default function LoginScreen({ navigation, route }) {
 
   const handleVerifyPhone = async () => {
     if (!/^\d{6}$/.test(phoneVerificationCode.trim())) {
-      setPhoneVerificationError('Enter the complete 6-digit verification code.');
+      setPhoneVerificationError(t('auth_code_complete'));
       return;
     }
     setPhoneVerificationSaving(true);
@@ -247,7 +266,7 @@ export default function LoginScreen({ navigation, route }) {
     const result = await verifyCurrentPhone(phoneVerificationCode.trim());
     setPhoneVerificationSaving(false);
     if (!result.success) {
-      setPhoneVerificationError(result.error || 'The verification code is incorrect or expired.');
+      setPhoneVerificationError(result.error || t('auth_code_invalid'));
       return;
     }
     setAuthenticatedUser(result.user);
@@ -263,14 +282,21 @@ export default function LoginScreen({ navigation, route }) {
   };
 
   const handleResendPhoneVerification = async () => {
-    if (phoneVerificationResending || setupSigningOut) return;
+    if (phoneVerificationResending || setupSigningOut || phoneVerificationResendSeconds > 0) return;
     setPhoneVerificationResending(true);
     setPhoneVerificationError('');
     try {
       const result = await requestCurrentPhoneVerification();
-      if (!result.success) setPhoneVerificationError(result.error || 'A new code could not be sent.');
+      if (!result.success) {
+        setPhoneVerificationResendSeconds(Math.max(0, Number(result.retryAfterSeconds || 0)));
+        setPhoneVerificationRequestsRemaining(Math.max(0, Number(result.remaining ?? 0)));
+        setPhoneVerificationError(result.error || t('auth_new_code_failed'));
+      } else {
+        setPhoneVerificationResendSeconds(Math.max(0, Number(result.resendAfterSeconds || 0)));
+        setPhoneVerificationRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      }
     } catch (error) {
-      setPhoneVerificationError(error.message || 'A new code could not be sent.');
+      setPhoneVerificationError(error.message || t('auth_new_code_failed'));
     } finally {
       setPhoneVerificationResending(false);
     }
@@ -289,7 +315,7 @@ export default function LoginScreen({ navigation, route }) {
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      Alert.alert('Sign Out Failed', error.message || 'Unable to end the setup session. Please try again.');
+      Alert.alert(t('auth_signout_failed_title'), error.message || t('auth_signout_failed_msg'));
     } finally {
       setSetupSigningOut(false);
     }
@@ -298,11 +324,11 @@ export default function LoginScreen({ navigation, route }) {
   const confirmSetupSignOut = () => {
     if (setupSigningOut || phoneVerificationSaving || phoneVerificationResending || firstLoginSaving) return;
     Alert.alert(
-      'Sign Out and Stop Account Setup?',
-      'Your current setup session will end. You can sign in again later to complete verification or update your password.',
+      t('auth_signout_setup_title'),
+      t('auth_signout_setup_msg'),
       [
-        { text: 'Continue Setup', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: completeSetupSignOut }
+        { text: t('auth_continue_setup'), style: 'cancel' },
+        { text: t('first_sign_out'), style: 'destructive', onPress: completeSetupSignOut }
       ]
     );
   };
@@ -314,23 +340,23 @@ export default function LoginScreen({ navigation, route }) {
     const isNotDefault = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase());
 
     if (!isLen) {
-      setFirstLoginError('Password must be at least 8 characters long.');
+      setFirstLoginError(t('auth_password_min_full'));
       return;
     }
     if (!isCase) {
-      setFirstLoginError('Password must contain both UPPERCASE (A-Z) and lowercase (a-z) letters.');
+      setFirstLoginError(t('auth_password_case'));
       return;
     }
     if (!isNum) {
-      setFirstLoginError('Password must contain at least one number (0-9).');
+      setFirstLoginError(t('auth_password_number'));
       return;
     }
     if (!isNotDefault) {
-      setFirstLoginError('Cannot use temporary default password ("hugpong" / "hugpong2026").');
+      setFirstLoginError(t('auth_password_default'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setFirstLoginError('Passwords do not match. Please re-enter.');
+      setFirstLoginError(t('auth_password_mismatch'));
       return;
     }
 
@@ -341,19 +367,19 @@ export default function LoginScreen({ navigation, route }) {
       setFirstLoginSaving(false);
 
       if (!res.success) {
-        setFirstLoginError(res.error || 'Failed to set password. Please try again.');
+        setFirstLoginError(res.error || t('auth_password_save_failed'));
         return;
       }
 
       setShowFirstLoginModal(false);
       Alert.alert(
-        'Password Configured',
-        'Your new secure password has been set successfully. Welcome to HUGPONG!'
+        t('auth_password_configured_title'),
+        t('auth_password_configured_msg')
       );
       navigation.replace('MainTabs');
     } catch (err) {
       setFirstLoginSaving(false);
-      setFirstLoginError('An unexpected error occurred. Please try again.');
+      setFirstLoginError(t('auth_unexpected_error'));
     }
   };
 
@@ -387,7 +413,7 @@ export default function LoginScreen({ navigation, route }) {
               activeOpacity={0.65}
               style={s.offlineIconWrap}
               accessibilityRole="button"
-              accessibilityLabel="Retry internet connection"
+              accessibilityLabel={t('a11y_retry_connection')}
             >
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
                 <Ionicons
@@ -399,7 +425,7 @@ export default function LoginScreen({ navigation, route }) {
             </TouchableOpacity>
 
             <Text style={s.offlineTitle}>
-              {isServerDown ? 'Server Unavailable' : 'No Internet Connection'}
+              {isServerDown ? t('offline_server_unavailable_title') : t('auth_no_internet_title')}
             </Text>
 
             {offlineRetryFeedback ? (
@@ -413,11 +439,11 @@ export default function LoginScreen({ navigation, route }) {
               style={s.legalNoticeRow}
               onPress={() => setShowLegalModal(true)}
               accessibilityRole="button"
-              accessibilityLabel="Open privacy, terms, and compliance information"
+              accessibilityLabel={t('a11y_open_legal')}
             >
               <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
               <Text style={s.legalNoticeText}>
-                Privacy, Terms &amp; Compliance
+                {t('profile_legal')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -480,7 +506,7 @@ export default function LoginScreen({ navigation, route }) {
             <View style={s.fieldGroup}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <Text style={s.label}>{t('auth_identifier_label', 'User ID or Mobile Number')}</Text>
-                <Text style={{ fontSize: 11, color: COLORS.primary, fontWeight: '600' }}>Lost SIM? Use User ID</Text>
+                <Text style={{ fontSize: 11, color: COLORS.primary, fontWeight: '600' }}>{t('auth_lost_sim_user_id')}</Text>
               </View>
               <View style={[s.inputWrap, errors.contactNumber && s.inputError]}>
                 <Ionicons name="person-circle-outline" size={18} color={COLORS.textMuted} style={s.inputIcon} />
@@ -560,7 +586,7 @@ export default function LoginScreen({ navigation, route }) {
 
             <View style={s.securityNotice}>
               <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.primary} />
-              <Text style={s.securityNoticeText}>Authenticated HUGPONG session</Text>
+              <Text style={s.securityNoticeText}>{t('auth_authenticated_session')}</Text>
             </View>
 
           </View>
@@ -578,11 +604,11 @@ export default function LoginScreen({ navigation, route }) {
             style={s.legalNoticeRow}
             onPress={() => setShowLegalModal(true)}
             accessibilityRole="button"
-            accessibilityLabel="Open privacy, terms, and compliance information"
+            accessibilityLabel={t('a11y_open_legal')}
           >
             <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
             <Text style={s.legalNoticeText}>
-              Privacy, Terms &amp; Compliance
+              {t('profile_legal')}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -602,8 +628,8 @@ export default function LoginScreen({ navigation, route }) {
                   <Ionicons name="phone-portrait-outline" size={22} color="#D97706" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.modalTitle}>Verify Your Registered Phone</Text>
-                  <Text style={s.modalSub}>Enter the 6-digit code sent by the HUGPONG server before opening farm records.</Text>
+                  <Text style={s.modalTitle}>{t('first_verify_title')}</Text>
+                  <Text style={s.modalSub}>{t('first_verify_sub')}</Text>
                 </View>
               </View>
               {phoneVerificationError ? (
@@ -613,7 +639,7 @@ export default function LoginScreen({ navigation, route }) {
                 </View>
               ) : null}
               <View style={s.fieldGroup}>
-                <Text style={s.label}>Verification Code</Text>
+                <Text style={s.label}>{t('first_verification_code')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
                   <TextInput
@@ -635,17 +661,21 @@ export default function LoginScreen({ navigation, route }) {
                 {setupSigningOut
                   ? <ActivityIndicator size="small" color="#DC2626" />
                   : <Ionicons name="log-out-outline" size={16} color="#DC2626" />}
-                <Text style={s.setupSignOutText}>{setupSigningOut ? 'Signing Out...' : 'Sign Out'}</Text>
+                <Text style={s.setupSignOutText}>{setupSigningOut ? t('profile_signing_out') : t('first_sign_out')}</Text>
               </TouchableOpacity>
               <View style={s.modalBtnRow}>
                 <TouchableOpacity
                   style={s.modalCancelBtn}
                   onPress={handleResendPhoneVerification}
-                  disabled={phoneVerificationResending || phoneVerificationSaving || setupSigningOut}
+                  disabled={phoneVerificationResending || phoneVerificationSaving || setupSigningOut || phoneVerificationResendSeconds > 0}
                 >
                   {phoneVerificationResending
                     ? <ActivityIndicator size="small" color={COLORS.primary} />
-                    : <Text style={s.modalCancelText}>Resend Code</Text>}
+                    : <Text style={s.modalCancelText}>
+                        {phoneVerificationResendSeconds > 0
+                          ? `${phoneVerificationRequestsRemaining === 0 ? t('recovery_limit_reached') : t('reg_resend_btn')} ${Math.floor(phoneVerificationResendSeconds / 60)}:${String(phoneVerificationResendSeconds % 60).padStart(2, '0')}`
+                          : `${t('reg_resend_btn')} (${phoneVerificationRequestsRemaining} ${t('recovery_remaining')})`}
+                      </Text>}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={s.modalSaveBtn}
@@ -654,7 +684,7 @@ export default function LoginScreen({ navigation, route }) {
                 >
                   {phoneVerificationSaving
                     ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={s.modalSaveText}>Verify Phone</Text>}
+                    : <Text style={s.modalSaveText}>{t('first_verify_phone')}</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -678,21 +708,19 @@ export default function LoginScreen({ navigation, route }) {
                   <Ionicons name="shield-half" size={22} color="#D97706" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.modalTitle}>Set Your New Secure Password</Text>
-                  <Text style={s.modalSub}>
-                    Welcome to HUGPONG! Since this is your first time logging in, please create a new secure password to protect your account and farm records.
-                  </Text>
+                  <Text style={s.modalTitle}>{t('first_password_title')}</Text>
+                  <Text style={s.modalSub}>{t('first_password_sub')}</Text>
                 </View>
               </View>
 
               {/* Account Context Badge */}
               <View style={s.modalAccountBox}>
                 <View style={s.modalAccountRow}>
-                  <Text style={s.modalAccountLbl}>Account Holder</Text>
+                  <Text style={s.modalAccountLbl}>{t('first_account_holder')}</Text>
                   <Text style={s.modalAccountVal}>{authenticatedUser?.name || 'Authorized Personnel'}</Text>
                 </View>
                 <View style={[s.modalAccountRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 4 }]}>
-                  <Text style={s.modalAccountLbl}>User ID / Role</Text>
+                  <Text style={s.modalAccountLbl}>{t('first_user_role')}</Text>
                   <Text style={[s.modalAccountVal, { color: COLORS.primary, fontWeight: '800' }]}>
                     {authenticatedUser?.employeeId || contactNumber} ({authenticatedUser?.role || 'Farm Member'})
                   </Text>
@@ -709,7 +737,7 @@ export default function LoginScreen({ navigation, route }) {
 
               {/* New Password Input */}
               <View style={s.fieldGroup}>
-                <Text style={s.label}>New Password *</Text>
+                <Text style={s.label}>{t('first_new_password')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} style={s.inputIcon} />
                   <TextInput
@@ -719,7 +747,7 @@ export default function LoginScreen({ navigation, route }) {
                       setNewPassword(v);
                       setFirstLoginError('');
                     }}
-                    placeholder="Minimum 8 characters"
+                    placeholder={t('first_password_placeholder')}
                     placeholderTextColor={COLORS.textMuted}
                     secureTextEntry={!showNewPw}
                     autoComplete="password"
@@ -732,7 +760,7 @@ export default function LoginScreen({ navigation, route }) {
 
               {/* Confirm Password Input */}
               <View style={s.fieldGroup}>
-                <Text style={s.label}>Confirm New Password *</Text>
+                <Text style={s.label}>{t('first_confirm_password')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} style={s.inputIcon} />
                   <TextInput
@@ -742,7 +770,7 @@ export default function LoginScreen({ navigation, route }) {
                       setConfirmPassword(v);
                       setFirstLoginError('');
                     }}
-                    placeholder="Re-enter new password"
+                    placeholder={t('first_confirm_placeholder')}
                     placeholderTextColor={COLORS.textMuted}
                     secureTextEntry={!showConfirmPw}
                     autoComplete="password"
@@ -755,22 +783,22 @@ export default function LoginScreen({ navigation, route }) {
 
               {/* Interactive Security Checklist */}
               <View style={s.checklistCard}>
-                <Text style={s.checklistTitle}>Security Requirements:</Text>
+                <Text style={s.checklistTitle}>{t('first_security_requirements')}</Text>
                 <View style={s.checklistItem}>
                   <Ionicons name={reqLen ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqLen ? "#16A34A" : COLORS.textMuted} />
-                  <Text style={[s.checklistText, reqLen && s.checklistTextPassed]}>At least 8 characters long</Text>
+                  <Text style={[s.checklistText, reqLen && s.checklistTextPassed]}>{t('first_rule_length')}</Text>
                 </View>
                 <View style={s.checklistItem}>
                   <Ionicons name={reqCase ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqCase ? "#16A34A" : COLORS.textMuted} />
-                  <Text style={[s.checklistText, reqCase && s.checklistTextPassed]}>Contains UPPERCASE &amp; lowercase letters (A-Z, a-z)</Text>
+                  <Text style={[s.checklistText, reqCase && s.checklistTextPassed]}>{t('first_rule_case')}</Text>
                 </View>
                 <View style={s.checklistItem}>
                   <Ionicons name={reqNum ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqNum ? "#16A34A" : COLORS.textMuted} />
-                  <Text style={[s.checklistText, reqNum && s.checklistTextPassed]}>Contains at least one number (0-9)</Text>
+                  <Text style={[s.checklistText, reqNum && s.checklistTextPassed]}>{t('first_rule_number')}</Text>
                 </View>
                 <View style={s.checklistItem}>
                   <Ionicons name={reqDiff ? "checkmark-circle" : "ellipse-outline"} size={14} color={reqDiff ? "#16A34A" : COLORS.textMuted} />
-                  <Text style={[s.checklistText, reqDiff && s.checklistTextPassed]}>Cannot be temporary default password</Text>
+                  <Text style={[s.checklistText, reqDiff && s.checklistTextPassed]}>{t('first_rule_not_temporary')}</Text>
                 </View>
               </View>
 
@@ -784,7 +812,7 @@ export default function LoginScreen({ navigation, route }) {
                 >
                   {setupSigningOut
                     ? <ActivityIndicator size="small" color="#DC2626" />
-                    : <Text style={s.modalCancelText}>Sign Out</Text>}
+                    : <Text style={s.modalCancelText}>{t('first_sign_out')}</Text>}
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -797,7 +825,7 @@ export default function LoginScreen({ navigation, route }) {
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
-                      <Text style={s.modalSaveText}>Save Password &amp; Open</Text>
+                      <Text style={s.modalSaveText}>{t('first_save_open')}</Text>
                       <Ionicons name="arrow-forward" size={16} color="#fff" />
                     </>
                   )}
@@ -832,11 +860,11 @@ export default function LoginScreen({ navigation, route }) {
             </View>
 
             <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text, textAlign: 'center', marginBottom: 8 }}>
-              No Internet Connection
+              {t('auth_no_internet_title')}
             </Text>
 
             <Text style={{ fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 19, marginBottom: 20 }}>
-              Internet connection is needed when logging in. Offline mode is only available if you are already logged in.
+              {t('auth_no_internet_desc')}
             </Text>
 
             <CirclingRetryButton
@@ -861,7 +889,7 @@ export default function LoginScreen({ navigation, route }) {
               activeOpacity={0.7}
             >
               <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted }}>
-                Dismiss
+                {t('btn_dismiss')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1147,7 +1175,7 @@ const s = StyleSheet.create({
   modalBtnRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    alignItems: 'center',
+    alignItems: 'stretch',
     gap: 10,
     marginTop: 6,
     paddingTop: 10,
@@ -1155,6 +1183,8 @@ const s = StyleSheet.create({
     borderTopColor: '#F3F4F6',
   },
   modalCancelBtn: {
+    flex: 1,
+    minWidth: 0,
     paddingVertical: 11,
     paddingHorizontal: 16,
     borderRadius: RADIUS.md,
@@ -1164,6 +1194,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   modalCancelText: {
+    flexShrink: 1,
+    textAlign: 'center',
+    lineHeight: 17,
     fontSize: 12.5,
     fontWeight: '700',
     color: COLORS.textSecondary,
@@ -1183,6 +1216,7 @@ const s = StyleSheet.create({
   },
   modalSaveBtn: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1194,6 +1228,9 @@ const s = StyleSheet.create({
     ...SHADOW.xs,
   },
   modalSaveText: {
+    flexShrink: 1,
+    textAlign: 'center',
+    lineHeight: 17,
     fontSize: 12.5,
     fontWeight: '800',
     color: '#fff',

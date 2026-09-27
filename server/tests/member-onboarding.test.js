@@ -39,7 +39,7 @@ test('member registration is optional-farm while approval requires an SRA-confir
 
   assert.match(authRoute, /requestedBlockFarmId: blockFarmId \|\| null/);
   assert.doesNotMatch(registerScreen, /if \(!form\.blockFarmId\) e\.blockFarm/);
-  assert.match(registerScreen, /Not assigned yet \/ Farm not listed/);
+  assert.match(registerScreen, /t\('reg_not_assigned'\)/);
   assert.match(usersRoute, /Assign a Block Farm before approving this Farm Member/);
   assert.match(usersRoute, /affiliatedBlockFarmId/);
   assert.match(pendingQueue, /Assign Block Farm/);

@@ -50,7 +50,7 @@ Submitted operation logs are now retained as historical records. Active-cycle ar
    - Normal password changes require the current password. The first-login exception is limited to a session already marked as requiring a password change.
    - Web first-login and settings flows persist through the server before updating client state; direct Firestore password writes were removed from those flows.
    - Removed mobile password reset by arbitrary identifier. Mobile first-login password setup now uses the authenticated user's current password.
-   - Mobile self-service forgot-password mutation is fail-closed pending a properly designed recovery-token workflow.
+   - Mobile and Web forgot-password recovery now use server-generated, rate-limited, expiring, single-use SMS challenges and reset-only grants. Clients never mutate password data directly.
 
 8. **Unauthenticated phone verification**
    - `/auth/verify-phone` requires an authenticated session, derives the account and registered phone server-side, and accepts only a matching server-generated, unexpired OTP.
@@ -84,7 +84,7 @@ All existing sessions and old bearer tokens should be treated as invalid after `
 ## Containment consequences
 
 - Accounts that contain only legacy plaintext passwords or invalid/missing password hashes can no longer authenticate. They require an authorized credential reset/provisioning action.
-- Unauthenticated mobile registration and forgot-password SMS requests now fail closed. Restoring those workflows requires a later authentication redesign using server-generated, rate-limited, expiring verification challenges or recovery tokens.
+- Unauthenticated registration remains server-verified. Forgot-password recovery has since been restored through persisted server-generated challenges, generic account-discovery responses, attempt limits, short expiry, atomic credential replacement, audit logging, and global session revocation.
 - Historical operation-log documents that were already physically deleted before this pass cannot be reconstructed by code changes. Existing tombstone documents are retained as archived records.
 
 ## Verification performed

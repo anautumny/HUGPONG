@@ -16,6 +16,7 @@ export default function FirstLoginVerifyModal({
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(60);
+  const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [error, setError] = useState('');
   const inputRef = useRef(null);
 
@@ -26,13 +27,23 @@ export default function FirstLoginVerifyModal({
       setError('');
       setTimeLeft(300);
       setResendCooldown(60);
+      setCodeRequestsRemaining(3);
 
       // Request server to send OTP code to registered phone
       if (pendingToken) {
-        requestPhoneVerification(pendingToken).catch((err) => {
-          console.warn('[FirstLoginVerify] SMS dispatch note:', err.message);
-          setError(err.message || 'Unable to dispatch verification SMS.');
-        });
+        requestPhoneVerification(pendingToken)
+          .then(result => {
+            setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
+            setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+          })
+          .catch((err) => {
+            console.warn('[FirstLoginVerify] SMS dispatch note:', err.message);
+            if (err.data?.retryAfterSeconds) {
+              setResendCooldown(Math.max(0, Number(err.data.retryAfterSeconds)));
+              setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));
+            }
+            setError(err.message || 'Unable to dispatch verification SMS.');
+          });
       }
 
       setTimeout(() => {
@@ -74,10 +85,15 @@ export default function FirstLoginVerifyModal({
     setError('');
     setIsResending(true);
     try {
-      await requestPhoneVerification(pendingToken);
+      const result = await requestPhoneVerification(pendingToken);
       setTimeLeft(300);
-      setResendCooldown(60);
+      setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
+      setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
     } catch (err) {
+      if (err.data?.retryAfterSeconds) {
+        setResendCooldown(Math.max(0, Number(err.data.retryAfterSeconds)));
+        setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));
+      }
       setError(err.message || 'Failed to resend verification code. Please try again later.');
     } finally {
       setIsResending(false);
@@ -180,8 +196,8 @@ export default function FirstLoginVerifyModal({
               {isResending
                 ? 'Resending...'
                 : resendCooldown > 0
-                ? `Resend in ${resendCooldown}s`
-                : 'Resend SMS Code'}
+                ? `${codeRequestsRemaining === 0 ? 'Hourly limit reached' : 'Resend in'} ${formatTimer(resendCooldown)}`
+                : `Resend SMS Code (${codeRequestsRemaining} remaining)`}
             </button>
           </div>
 

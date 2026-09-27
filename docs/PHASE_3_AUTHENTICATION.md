@@ -23,8 +23,8 @@ Date: 2026-09-16
    Registration stores first, optional middle, last, and optional suffix separately; the server derives the display name. Selecting a Block Farm is optional at registration. An unassigned request stays pending until an SRA Admin selects an active Block Farm during approval.
 4. Password confirmation, password change, and phone change use authenticated Express endpoints.
 5. Every administrator-provisioned account must verify its registered phone on first login and then replace the temporary password. The server ignores client attempts to pre-verify the phone or bypass the password change.
-6. The nonfunctional client-side forgot-password simulation was disabled. Password recovery still requires an authorized administrator; no unauthenticated password-reset mutation exists.
-7. Login, registration, OTP, password-verification, account-creation, and administrative SMS paths use shared Firestore-backed throttles. General client-created audit events and arbitrary SMS bodies are rejected.
+6. Forgot-password recovery uses a three-step server flow shared by Web and Mobile: a generic SMS-code request to the registered number, code verification that issues a short-lived reset-only grant, and an atomic password reset. Recovery codes and grants are HMAC-protected, persisted in a client-denied Firestore collection, attempt-limited, expiring, single-use, and bound to the account's issuance-time `authVersion`. A successful reset verifies possession of the registered number, increments `authVersion`, revokes Firebase refresh tokens and all HUGPONG sessions, and requires a normal login with the new password. If a SIM is lost, an authorized scoped administrator can first update the registered number after in-person identity verification; the owner then completes this same SMS recovery flow.
+7. Login, registration, OTP, password recovery, password-verification, account-creation, and administrative SMS paths use shared Firestore-backed throttles. Every verification-code send flow enforces a 60-second resend cooldown and a maximum of three accepted sends per canonical phone/account. Web and Mobile render the server-provided countdown and remaining-send count; the third accepted send starts a full one-hour lock. General client-created audit events and arbitrary SMS bodies are rejected.
 
 ## Firebase authorization
 
@@ -51,5 +51,5 @@ Rules are configured by `firebase.json` but are not deployed automatically by th
 ## Deployment follow-up
 
 - Deploy `firestore.rules` with the Firebase CLI and run the rules suite against the Firestore emulator or a disposable project.
-- The OTP challenge store is process-local. Move it to a TTL-capable shared store before running multiple Express instances.
+- Registration and first-login OTP challenges remain process-local. Password-recovery challenges are already Firestore-backed; enable a Firestore TTL policy on `password_recovery_challenges.deleteAfter`.
 - Live custom-token creation, Semaphore delivery, and end-to-end role reads require configured Firebase/Semaphore services and were not exercised by offline local validation.

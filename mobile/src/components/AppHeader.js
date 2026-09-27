@@ -204,7 +204,7 @@ function AppHeader({ right }) {
     <View style={s.header}>
       <View style={s.brand}>
         <Image source={LOGO} style={s.logoImg} resizeMode="contain" />
-        <Text style={s.logoText}>HUGPONG</Text>
+        <Text style={s.logoText} numberOfLines={1}>HUGPONG</Text>
       </View>
       <View style={s.rightActions}>
         {(isFieldRole || isSraAdmin) && (
@@ -225,7 +225,11 @@ function AppHeader({ right }) {
                 color={isSyncing ? '#1A6B9A' : (isFullySynced ? '#267326' : '#C97A00')}
               />
             </Animated.View>
-            <Text style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}>
+            <Text
+              style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {isSyncing
                 ? (syncStatusText || t('syncing_progress', 'Syncing...'))
                 : (isFullySynced
@@ -257,6 +261,8 @@ const s = StyleSheet.create({
     borderBottomColor: '#DCE8CC',
   },
   brand: {
+    flexShrink: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -266,12 +272,15 @@ const s = StyleSheet.create({
     height: 32,
   },
   logoText: {
+    flexShrink: 1,
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.primary,
     letterSpacing: 1.5,
   },
   rightActions: {
+    flexShrink: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -285,6 +294,8 @@ const s = StyleSheet.create({
     width: 0,
   },
   syncPill: {
+    flexShrink: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -306,6 +317,7 @@ const s = StyleSheet.create({
     borderColor: '#DFF0FB',
   },
   syncText: {
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: '700',
   },

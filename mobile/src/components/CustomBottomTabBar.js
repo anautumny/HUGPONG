@@ -193,7 +193,7 @@ export default function CustomBottomTabBar({
                   fontWeight: isFocused && !isTabDisabled ? '800' : '600'
                 }
               ]}
-              numberOfLines={1}
+              numberOfLines={2}
               ellipsizeMode="tail"
             >
               {label}
@@ -221,8 +221,9 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
+    minHeight: 66,
     paddingVertical: 2,
+    paddingHorizontal: 2,
   },
   tabButtonDisabled: {
     opacity: 0.5,
@@ -281,9 +282,12 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 11,
+    lineHeight: 13,
     letterSpacing: -0.2,
     marginTop: 2,
     textAlign: 'center',
-    maxWidth: 88,
+    minHeight: 26,
+    width: '100%',
+    flexShrink: 1,
   },
 });

@@ -315,8 +315,8 @@ test('role routes and clients preserve agricultural/system separation and scoped
   assert.doesNotMatch(route, /req\.query.*blockFarmId|req\.body.*userId/);
   assert.match(mobileMonitor, /setInterval\(refresh, 30000\)/);
   assert.match(mobileMonitor, /navigation\.addListener\('blur', stop\)/);
-  assert.match(mobileMonitor, /Member Activity Status/);
-  assert.match(mobileMonitor, /activityStatusLabel\(member\.activity\)/);
+  assert.match(mobileMonitor, /t\('sync_member_activity'\)/);
+  assert.match(mobileMonitor, /activityStatusLabel\(member\.activity, t\)/);
   assert.match(mobileManagerDashboard, /fetchAgriculturalSyncMonitor/);
   assert.match(mobileManagerDashboard, /criticalAccounts[\s\S]*attentionAccounts[\s\S]*issueNames/);
   assert.match(mobileManagerDashboard, /CROP YEAR CYCLES[\s\S]*activeCropCycles\.length[\s\S]*managedFields\.length/);

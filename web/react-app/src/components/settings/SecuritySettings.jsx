@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { Lock, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
+import { CheckCircle2, AlertCircle, KeyRound, LogOut, MonitorCheck } from 'lucide-react';
 import FormField from '../ui/FormField';
 import PasswordInput from '../ui/PasswordInput';
 import Button from '../ui/Button';
 import { authenticatedRequest } from '../../services/apiClient';
+import { useAuth } from '../../context/AuthContext';
 
 export default function SecuritySettings({
   className = ''
 }) {
+  const { clearSession, roleKey, saveSession } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [sessionAction, setSessionAction] = useState('KEEP_CURRENT');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -39,11 +42,16 @@ export default function SecuritySettings({
     try {
       const res = await authenticatedRequest('/auth/change-password', {
         method: 'POST',
-        body: { currentPassword, newPassword }
+        body: { currentPassword, newPassword, sessionAction }
       });
 
       if (res.success) {
-        setSuccessMsg('Account password updated successfully. Your new credentials are active.');
+        if (res.signOutRequired) {
+          clearSession('Your password was changed and all devices were signed out. Sign in with your new password.');
+          return;
+        }
+        if (res.user) saveSession(res.user, roleKey);
+        setSuccessMsg('Password updated. This device remains signed in; all other devices were signed out.');
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -131,6 +139,40 @@ export default function SecuritySettings({
             />
           </FormField>
         </div>
+
+        <fieldset className="space-y-2" disabled={isSubmitting}>
+          <legend className="text-xs font-semibold text-hug-text2 mb-2">After changing your password</legend>
+          <label className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${sessionAction === 'KEEP_CURRENT' ? 'border-primary bg-primary-bg/40 dark:bg-primary/10' : 'border-border hover:bg-bg dark:hover:bg-[#0C1015]'}`}>
+            <input
+              type="radio"
+              name="password-session-action"
+              value="KEEP_CURRENT"
+              checked={sessionAction === 'KEEP_CURRENT'}
+              onChange={(event) => setSessionAction(event.target.value)}
+              className="mt-0.5 accent-primary"
+            />
+            <MonitorCheck className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-hug-text">Stay signed in on this device</span>
+              <span className="block text-[11px] text-hug-muted mt-0.5">Other devices will be signed out for security.</span>
+            </span>
+          </label>
+          <label className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${sessionAction === 'SIGN_OUT_ALL' ? 'border-danger bg-danger-bg/40' : 'border-border hover:bg-bg dark:hover:bg-[#0C1015]'}`}>
+            <input
+              type="radio"
+              name="password-session-action"
+              value="SIGN_OUT_ALL"
+              checked={sessionAction === 'SIGN_OUT_ALL'}
+              onChange={(event) => setSessionAction(event.target.value)}
+              className="mt-0.5 accent-danger"
+            />
+            <LogOut className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-hug-text">Sign out all devices</span>
+              <span className="block text-[11px] text-hug-muted mt-0.5">This device will also return to the sign-in screen.</span>
+            </span>
+          </label>
+        </fieldset>
 
         <div className="pt-2">
           <Button

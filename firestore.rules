@@ -146,6 +146,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Password recovery codes and grants are server-only credential material.
+    match /password_recovery_challenges/{challengeId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

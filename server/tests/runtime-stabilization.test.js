@@ -109,7 +109,7 @@ test('mobile Planner removes schedules and marks drafts optimistically with roll
   assert.match(planner, /setAllFields\(current => current\.map/);
   assert.match(planner, /previousSchedule/);
   assert.match(planner, /draftedPlanIds/);
-  assert.match(planner, /inDraft \? 'In Drafts' : 'Add to Draft'/);
+  assert.match(planner, /inDraft \? t\('planner_in_drafts'\) : t\('planner_add_draft'\)/);
   assert.match(draftSave, /draftLogs\.unshift\(draft\);\s*notify\(\);\s*const persisted = await persistCurrentUserDrafts\(\)/);
   assert.match(draftSave, /draftLogs\.splice\(currentIndex, 1\)/);
 });
@@ -210,8 +210,8 @@ test('SRA mobile sessions remain authenticated offline without gaining mutation 
   assert.doesNotMatch(dataStore, /reason: 'sra_online_required'/);
   assert.doesNotMatch(rootNavigator, /logoutUser\(\{ skipRemote: true \}\)/);
   assert.doesNotMatch(rootNavigator, /AdminOfflineBarrier/);
-  assert.match(rootNavigator, /You are still signed in/);
-  assert.match(rootNavigator, /Continue Offline/);
+  assert.match(rootNavigator, /t\('offline_sra_nointernet_desc'\)/);
+  assert.match(rootNavigator, /t\('offline_continue_sra'\)/);
   assert.match(dataStore, /SRA Admin actions require a live HUGPONG connection\. You remain signed in/);
 });
 
@@ -572,7 +572,7 @@ test('web and mobile sign-out entry points require confirmation and expose guard
   assert.match(webLogin, /handleConfirmSetupSignOut/);
   assert.match(mobileProfile, /const \[isSigningOut, setIsSigningOut\]/);
   assert.match(mobileProfile, /disabled=\{isSigningOut\}/);
-  assert.match(mobileLogin, /Sign Out and Stop Account Setup\?/);
+  assert.match(mobileLogin, /t\('auth_signout_setup_title'\)/);
   assert.match(mobileLogin, /await logoutUser\(\)/);
-  assert.match(mobileLogin, /setupSigningOut \? 'Signing Out\.\.\.' : 'Sign Out'/);
+  assert.match(mobileLogin, /setupSigningOut \? t\('profile_signing_out'\) : t\('first_sign_out'\)/);
 });

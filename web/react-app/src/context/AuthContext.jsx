@@ -182,7 +182,10 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to dispatch verification code.');
+      const error = new Error(data.error || 'Failed to dispatch verification code.');
+      error.code = data.code || '';
+      error.data = data.data || {};
+      throw error;
     }
     return data;
   };
@@ -209,7 +212,7 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const changePassword = async (newPassword, authToken) => {
+  const changePassword = async (newPassword, authToken, sessionAction = 'KEEP_CURRENT') => {
     const token = authToken || '';
     const res = await fetch('/auth/change-password', {
       method: 'POST',
@@ -217,7 +220,7 @@ export function AuthProvider({ children }) {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
-      body: JSON.stringify({ newPassword }),
+      body: JSON.stringify({ newPassword, sessionAction }),
       credentials: 'include'
     });
     const data = await res.json().catch(() => ({}));
@@ -225,7 +228,9 @@ export function AuthProvider({ children }) {
       throw new Error(data.error || 'Password update failed.');
     }
 
-    if (data.user) {
+    if (data.signOutRequired === true) {
+      clearSession('Your password was changed and all devices were signed out. Sign in with your new password.');
+    } else if (data.user) {
       setUser(prev => ({ ...prev, ...data.user, requiresPasswordChange: false, passwordChanged: true }));
     }
     return data;

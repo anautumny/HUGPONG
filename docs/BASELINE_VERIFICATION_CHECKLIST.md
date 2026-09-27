@@ -44,7 +44,7 @@
 - [ ] B-11 Invalid mobile credentials show an error; five failures trigger a 60-second UI lockout.
 - [ ] B-12 Mobile first-login password change meets the same password rules.
 - [ ] B-13 Mobile session restores after process restart and logout clears it.
-- [ ] B-14 Forgot-password displays the administrator-assisted recovery path and performs no client-side OTP or password mutation.
+- [ ] B-14 Forgot-password uses the server recovery request, SMS verification, and reset-grant endpoints; clients perform no direct password mutation, and successful recovery signs out every device.
 - [ ] B-15 Profile mobile-number change verifies password, validates PH format, and updates linked plot contact display.
 - [ ] B-16 Profile password change verifies the current password on the server and persists only a server-side scrypt hash.
 - [ ] B-17 PIN, biometric, auto-lock, session-alert, language, and other profile/security preferences render and persist as implemented.
@@ -225,6 +225,7 @@
 - [ ] N-06 SMS failure fallback is safe and cannot be abused to bypass verification. **Expected current concern.**
 - [ ] N-07 Alert sending requires authenticated authorized callers. **Required; expected current FAIL.**
 - [ ] N-08 Mobile notification read/dismiss state persists where surfaced.
+- [ ] N-09 Registration, first-login, and password-recovery SMS sends enforce the server-provided 60-second countdown, three-code hourly maximum, and one-hour reset across Web and Mobile.
 
 ## O. Super Admin maintenance and governance
 

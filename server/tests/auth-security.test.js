@@ -15,8 +15,13 @@ const { issueToken, verifyToken } = require('../security/token');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
+const { _test: rateLimitTestHelpers } = require('../middleware/rateLimit');
 const { ROLES, publicRoleLabel, ROLE_ALLOWED_PLATFORMS, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
+const {
+  PASSWORD_SESSION_ACTIONS,
+  normalizePasswordSessionAction
+} = require('../security/accountSecurity');
 
 function responseRecorder() {
   return {
@@ -36,6 +41,29 @@ test('passwords use salted scrypt and reject plaintext, wrong, and legacy SHA va
   assert.equal(await verifyPassword('wrong-password', first), false);
   assert.equal(await verifyPassword('StrongPassword123!', '03f175a75a2f4b91'), false);
   assert.equal(await verifyPassword('StrongPassword123!', 'StrongPassword123!'), false);
+});
+
+test('password changes accept only the server-defined session disposition choices', () => {
+  assert.equal(normalizePasswordSessionAction(), PASSWORD_SESSION_ACTIONS.KEEP_CURRENT);
+  assert.equal(normalizePasswordSessionAction('keep_current'), PASSWORD_SESSION_ACTIONS.KEEP_CURRENT);
+  assert.equal(normalizePasswordSessionAction('sign_out_all'), PASSWORD_SESSION_ACTIONS.SIGN_OUT_ALL);
+  assert.throws(() => normalizePasswordSessionAction('keep_every_device'), /Choose whether to stay signed in/i);
+});
+
+test('password change session choice is implemented across the server, web, and mobile clients', () => {
+  const serverRoute = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
+  const webSettings = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/settings/SecuritySettings.jsx'), 'utf8');
+  const mobileSettings = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/SecurityScreen.js'), 'utf8');
+  const mobileAuth = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/services/authService.js'), 'utf8');
+
+  assert.match(serverRoute, /sessionAction === PASSWORD_SESSION_ACTIONS\.SIGN_OUT_ALL/);
+  assert.match(serverRoute, /signOutRequired: true/);
+  assert.match(serverRoute, /signOutRequired: false/);
+  assert.match(webSettings, /Stay signed in on this device/);
+  assert.match(webSettings, /Sign out all devices/);
+  assert.match(mobileSettings, /Stay signed in on this device/);
+  assert.match(mobileSettings, /Sign out all devices/);
+  assert.match(mobileAuth, /removeItems\(\[STORAGE_KEYS\.AUTH_TOKEN, STORAGE_KEYS\.SESSION\]\)/);
 });
 
 test('public user projection never returns credential material', () => {
@@ -204,6 +232,65 @@ test('OTP resend cooldown, expiry, and attempt cap remain enforced independently
   assert.equal(first.code.length, 6);
 });
 
+test('verification-code send budgets allow three codes per hour with a persistent resend cooldown', () => {
+  const now = Date.parse('2026-09-28T00:00:00.000Z');
+  const policy = { max: 3, windowMs: 60 * 60 * 1000, minIntervalMs: 60 * 1000 };
+  const first = rateLimitTestHelpers.evaluateRateLimitState({}, { now, ...policy });
+  assert.equal(first.accepted, true);
+  assert.equal(first.count, 1);
+  assert.equal(first.remaining, 2);
+  assert.equal(first.retryAfterSeconds, 60);
+
+  const storedFirst = {
+    count: first.count,
+    windowEndsAtMs: first.windowEndsAtMs,
+    lastAcceptedAtMs: first.lastAcceptedAtMs
+  };
+  const earlyRetry = rateLimitTestHelpers.evaluateRateLimitState(storedFirst, { now: now + 1000, ...policy });
+  assert.equal(earlyRetry.accepted, false);
+  assert.equal(earlyRetry.reason, 'COOLDOWN');
+  assert.equal(earlyRetry.count, 1);
+
+  const second = rateLimitTestHelpers.evaluateRateLimitState(storedFirst, { now: now + 60 * 1000, ...policy });
+  assert.equal(second.accepted, true);
+  assert.equal(second.remaining, 1);
+  const third = rateLimitTestHelpers.evaluateRateLimitState({
+    count: second.count,
+    windowEndsAtMs: second.windowEndsAtMs,
+    lastAcceptedAtMs: second.lastAcceptedAtMs
+  }, { now: now + 120 * 1000, ...policy });
+  assert.equal(third.accepted, true);
+  assert.equal(third.count, 3);
+  assert.equal(third.remaining, 0);
+  assert.equal(third.retryAfterSeconds, 60 * 60);
+
+  const hourlyBlock = rateLimitTestHelpers.evaluateRateLimitState({
+    count: third.count,
+    windowEndsAtMs: third.windowEndsAtMs,
+    lastAcceptedAtMs: third.lastAcceptedAtMs
+  }, { now: now + 180 * 1000, ...policy });
+  assert.equal(hourlyBlock.accepted, false);
+  assert.equal(hourlyBlock.reason, 'WINDOW_LIMIT');
+  assert.equal(hourlyBlock.retryAfterSeconds, 59 * 60);
+
+  const nextHour = rateLimitTestHelpers.evaluateRateLimitState({
+    count: third.count,
+    windowEndsAtMs: third.windowEndsAtMs,
+    lastAcceptedAtMs: third.lastAcceptedAtMs
+  }, { now: now + (2 * 60 * 1000) + policy.windowMs, ...policy });
+  assert.equal(nextHour.accepted, true);
+  assert.equal(nextHour.count, 1);
+  assert.equal(nextHour.remaining, 2);
+});
+
+test('mobile first-login keeps the code-entry modal available during a resend lock', () => {
+  const mobileLogin = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/auth/LoginScreen.js'), 'utf8');
+  assert.match(mobileLogin, /request\.code === 'RESEND_COOLDOWN'/);
+  assert.match(mobileLogin, /request\.code === 'HOURLY_CODE_LIMIT'/);
+  assert.match(mobileLogin, /setShowPhoneVerificationModal\(true\)/);
+  assert.match(mobileLogin, /phoneVerificationResendSeconds > 0/);
+});
+
 test('development test-account bootstrap is explicit and cannot run in production', () => {
   const safeEnv = {
     NODE_ENV: 'development',
@@ -248,6 +335,7 @@ test('web and mobile runtime source contain no Semaphore credential or provider 
 test('Firestore rules deny all client access to credentials and deny unmatched collections', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
   assert.match(rules, /match \/user_credentials\/\{userId\}[\s\S]*?allow read, write: if false;/);
+  assert.match(rules, /match \/password_recovery_challenges\/\{challengeId\}[\s\S]*?allow read, write: if false;/);
   assert.match(rules, /request\.auth\.token\.accountReady == true/);
   assert.match(rules, /request\.auth\.uid == userId/);
   assert.match(rules, /fieldData\.memberUserId == request\.auth\.uid/);

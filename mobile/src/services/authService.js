@@ -150,13 +150,18 @@ export async function refreshMobileSessionFromFirebase() {
   return result;
 }
 
-export async function changePasswordWithServer(currentPassword, newPassword) {
+export async function changePasswordWithServer(currentPassword, newPassword, sessionAction = 'KEEP_CURRENT') {
   const result = await authenticatedRequest('/auth/change-password', {
     method: 'POST',
-    body: { currentPassword, newPassword }
+    body: { currentPassword, newPassword, sessionAction }
   });
-  await signInToFirebase(result.firebaseCustomToken);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  if (result.signOutRequired) {
+    if (auth) await signOut(auth).catch(() => {});
+    await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
+  } else {
+    await signInToFirebase(result.firebaseCustomToken);
+    await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  }
   return result;
 }
 
@@ -191,6 +196,18 @@ export async function requestRegistrationOtp(phone, displayName) {
 
 export async function verifyRegistrationOtp(phone, code) {
   return publicAuthRequest('/auth/registration-otp/verify', { phone, code });
+}
+
+export async function requestPasswordRecovery(identifier) {
+  return publicAuthRequest('/auth/password-recovery/request', { identifier });
+}
+
+export async function verifyPasswordRecovery(recoveryId, code) {
+  return publicAuthRequest('/auth/password-recovery/verify', { recoveryId, code });
+}
+
+export async function completePasswordRecovery(recoveryId, resetToken, newPassword) {
+  return publicAuthRequest('/auth/password-recovery/complete', { recoveryId, resetToken, newPassword });
 }
 
 export async function logoutFromServer(options = {}) {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator
@@ -7,6 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
+import {
+  requestPasswordRecovery,
+  verifyPasswordRecovery,
+  completePasswordRecovery
+} from '../../services/authService';
 
 export default function ForgotPasswordScreen({ navigation }) {
   const { t } = useTranslation();
@@ -14,65 +19,125 @@ export default function ForgotPasswordScreen({ navigation }) {
   // Step 1: Identifier Entry; Step 2: SMS OTP Verification; Step 3: Set New Password; Step 4: Success
   const [step, setStep] = useState(1);
   const [identifier, setIdentifier] = useState('');
-  const [matchedUser, setMatchedUser] = useState(null);
+  const [recoveryId, setRecoveryId] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setResendSeconds(value => Math.max(0, value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendSeconds > 0]);
+
+  const handleBack = () => {
+    if (step === 2) {
+      setRecoveryId('');
+      setOtpCode('');
+      setStep(1);
+      return;
+    }
+    if (step === 3) {
+      setRecoveryId('');
+      setResetToken('');
+      setOtpCode('');
+      setStep(1);
+      return;
+    }
+    navigation.goBack();
+  };
 
   // ── Step 1: Send SMS OTP ─────────────────────────────────────
   const handleSendOtp = async () => {
+    if (step === 2 && resendSeconds > 0) return;
     const raw = identifier.trim();
     if (!raw) {
-      Alert.alert('Required', 'Please enter your 8-digit User ID or registered mobile number.');
-      return;
-    }
-
-    Alert.alert(
-      'SRA Admin Assistance Required',
-      'Self-service password reset is not enabled. Contact your Farm Manager or SRA Admin for identity verification and a temporary password.'
-    );
-  };
-
-  // ── Step 2: Verify SMS OTP ───────────────────────────────────
-  const handleVerifyOtp = () => {
-    const cleanOtp = otpCode.trim();
-    if (!cleanOtp) {
-      Alert.alert('Required', 'Please enter the 6-digit SMS code.');
-      return;
-    }
-    Alert.alert('Reset Unavailable', 'Password-reset verification must be completed by an authorized SRA Admin.');
-  };
-
-  // ── Step 3: Save New Password ────────────────────────────────
-  const handleResetPassword = async () => {
-    if (!newPassword || newPassword.length < 8) {
-      Alert.alert('Too Short', 'New password must be at least 8 characters long.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      Alert.alert('Mismatch', 'New password and confirmation do not match.');
+      Alert.alert(t('recovery_required_title'), t('recovery_identifier_required'));
       return;
     }
 
     setLoading(true);
-    const res = { success: false, error: 'Self-service password reset is temporarily unavailable. Contact an authorized SRA Admin.' };
-    setLoading(false);
+    try {
+      const result = await requestPasswordRecovery(raw);
+      setRecoveryId(result.recoveryId);
+      setOtpCode('');
+      setResendSeconds(Math.max(0, Number(result.resendAfterSeconds || 0)));
+      setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      setStep(2);
+      Alert.alert(t('recovery_request_received'), t('link_sent_msg'));
+    } catch (error) {
+      if (error.data?.retryAfterSeconds) {
+        setResendSeconds(Math.max(0, Number(error.data.retryAfterSeconds)));
+        setCodeRequestsRemaining(Math.max(0, Number(error.data.remaining ?? 0)));
+      }
+      Alert.alert(t('recovery_unavailable'), t('recovery_request_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    if (!res.success) {
-      Alert.alert('Reset Failed', res.error || 'Could not reset password.');
+  const formatCountdown = value => {
+    const minutes = Math.floor(value / 60);
+    const seconds = value % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
+
+  // ── Step 2: Verify SMS OTP ───────────────────────────────────
+  const handleVerifyOtp = async () => {
+    const cleanOtp = otpCode.trim();
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      Alert.alert(t('recovery_required_title'), t('recovery_code_required'));
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await verifyPasswordRecovery(recoveryId, cleanOtp);
+      setResetToken(result.resetToken);
+      setStep(3);
+    } catch (error) {
+      Alert.alert(t('recovery_verification_failed'), t('recovery_code_invalid'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Step 3: Save New Password ────────────────────────────────
+  const handleResetPassword = async () => {
+    if (!newPassword || newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      Alert.alert(t('recovery_password_requirements'), t('recovery_password_rule'));
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert(t('recovery_mismatch'), t('recovery_mismatch_msg'));
       return;
     }
 
-    setStep(4);
+    setLoading(true);
+    try {
+      await completePasswordRecovery(recoveryId, resetToken, newPassword);
+      setNewPassword('');
+      setConfirmPassword('');
+      setResetToken('');
+      setStep(4);
+    } catch (error) {
+      Alert.alert(t('recovery_reset_failed'), t('recovery_reset_failed_msg'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       {/* Navigation Header */}
       <View style={s.topNav}>
-        <TouchableOpacity style={s.backBtn} onPress={() => step > 1 && step < 4 ? setStep(s => s - 1) : navigation.goBack()}>
+        <TouchableOpacity style={s.backBtn} onPress={handleBack}>
           <Ionicons name="arrow-back" size={20} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={s.navTitle}>{t('forgot_pw_title', 'Forgot Password')}</Text>
@@ -91,13 +156,11 @@ export default function ForgotPasswordScreen({ navigation }) {
 
               <View style={s.textBlock}>
                 <Text style={s.title}>{t('reset_pw_heading', 'Reset your password')}</Text>
-                <Text style={s.sub}>
-                  Enter your User ID or registered mobile number, then contact an authorized SRA Admin for identity verification.
-                </Text>
+                <Text style={s.sub}>{t('reset_pw_sub')}</Text>
               </View>
 
               <View style={s.card}>
-                <Text style={s.label}>User ID or Mobile Number</Text>
+                <Text style={s.label}>{t('recovery_identifier_label')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="person-circle-outline" size={18} color={COLORS.textMuted} />
                   <TextInput
@@ -112,7 +175,7 @@ export default function ForgotPasswordScreen({ navigation }) {
               </View>
 
               <TouchableOpacity 
-                style={[s.btn, loading && { opacity: 0.6 }]} 
+                style={[s.btn, loading && { opacity: 0.6 }]}
                 onPress={handleSendOtp} 
                 disabled={loading}
                 activeOpacity={0.8}
@@ -120,7 +183,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 {loading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={s.btnText}>View Reset Instructions</Text>
+                  <Text style={s.btnText}>{t('recovery_send_code')}</Text>
                 )}
               </TouchableOpacity>
 
@@ -128,10 +191,8 @@ export default function ForgotPasswordScreen({ navigation }) {
               <View style={s.lostSimHelpBox}>
                 <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} style={{ marginTop: 2 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={s.lostSimHelpTitle}>Lost your SIM card?</Text>
-                  <Text style={s.lostSimHelpText}>
-                    If you lost your phone or cannot receive SMS verification codes, please visit your Farm Manager or SRA Admin. They can verify your identity and update your registered mobile number or reset your password directly from the cooperative portal.
-                  </Text>
+                  <Text style={s.lostSimHelpTitle}>{t('recovery_lost_sim_title')}</Text>
+                  <Text style={s.lostSimHelpText}>{t('recovery_lost_sim_help')}</Text>
                 </View>
               </View>
             </>
@@ -145,14 +206,16 @@ export default function ForgotPasswordScreen({ navigation }) {
               </View>
 
               <View style={s.textBlock}>
-                <Text style={s.title}>Enter SMS Code</Text>
+                <Text style={s.title}>{t('recovery_enter_code_title')}</Text>
                 <Text style={s.sub}>
-                  We sent a 6-digit verification code to the registered mobile number for <Text style={{ fontWeight: '700', color: COLORS.text }}>{matchedUser?.name || identifier}</Text>.
+                  {t('recovery_enter_code_prefix')}{' '}
+                  <Text style={{ fontWeight: '700', color: COLORS.text }}>{identifier}</Text>,{' '}
+                  {t('recovery_enter_code_suffix')}
                 </Text>
               </View>
 
               <View style={s.card}>
-                <Text style={s.label}>6-Digit Verification Code</Text>
+                <Text style={s.label}>{t('recovery_code_label')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
                   <TextInput
@@ -165,27 +228,34 @@ export default function ForgotPasswordScreen({ navigation }) {
                     maxLength={6}
                   />
                 </View>
-                <TouchableOpacity onPress={handleSendOtp} style={{ alignSelf: 'flex-end', marginTop: 4 }}>
-                  <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>Resend SMS Code</Text>
+                <TouchableOpacity
+                  onPress={handleSendOtp}
+                  disabled={loading || resendSeconds > 0}
+                  style={{ alignSelf: 'flex-end', marginTop: 4, opacity: loading || resendSeconds > 0 ? 0.55 : 1 }}
+                >
+                  <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>
+                    {resendSeconds > 0
+                      ? `${codeRequestsRemaining === 0 ? t('recovery_limit_reached') : t('recovery_resend_available')} ${t('time_in', 'in')} ${formatCountdown(resendSeconds)}`
+                      : `${t('recovery_request_new_code')} (${codeRequestsRemaining} ${t('recovery_remaining')})`}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity 
-                style={s.btn} 
+              <TouchableOpacity
+                style={[s.btn, loading && { opacity: 0.6 }]}
                 onPress={handleVerifyOtp}
+                disabled={loading}
                 activeOpacity={0.8}
               >
-                <Text style={s.btnText}>Verify Code &amp; Continue</Text>
+                {loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.btnText}>{t('recovery_verify_continue')}</Text>}
               </TouchableOpacity>
 
               {/* SMS Troubleshooting Note */}
               <View style={[s.lostSimHelpBox, { marginTop: 8 }]}>
                 <Ionicons name="shield-outline" size={18} color={COLORS.textMuted} style={{ marginTop: 2 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={s.lostSimHelpTitle}>Didn't receive the SMS?</Text>
-                  <Text style={s.lostSimHelpText}>
-                    Check your cellular signal. If you no longer have access to this SIM card, please visit your Farm Manager for in-person identity verification.
-                  </Text>
+                  <Text style={s.lostSimHelpTitle}>{t('recovery_sms_missing_title')}</Text>
+                  <Text style={s.lostSimHelpText}>{t('recovery_sms_missing_help')}</Text>
                 </View>
               </View>
             </>
@@ -199,15 +269,13 @@ export default function ForgotPasswordScreen({ navigation }) {
               </View>
 
               <View style={s.textBlock}>
-                <Text style={s.title}>Create New Password</Text>
-                <Text style={s.sub}>
-                  Choose a secure password with at least 8 characters.
-                </Text>
+                <Text style={s.title}>{t('recovery_create_password')}</Text>
+                <Text style={s.sub}>{t('recovery_create_password_sub')}</Text>
               </View>
 
               <View style={s.card}>
                 <View style={{ gap: 6 }}>
-                  <Text style={s.label}>New Password (8+ characters)</Text>
+                  <Text style={s.label}>{t('recovery_new_password_label')}</Text>
                   <View style={s.inputWrap}>
                     <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} />
                     <TextInput
@@ -225,7 +293,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 </View>
 
                 <View style={{ gap: 6 }}>
-                  <Text style={s.label}>Confirm New Password</Text>
+                  <Text style={s.label}>{t('recovery_confirm_password_label')}</Text>
                   <View style={s.inputWrap}>
                     <Ionicons name="checkmark-done-outline" size={18} color={COLORS.textMuted} />
                     <TextInput
@@ -240,8 +308,8 @@ export default function ForgotPasswordScreen({ navigation }) {
                 </View>
               </View>
 
-              <TouchableOpacity 
-                style={[s.btn, loading && { opacity: 0.6 }]} 
+              <TouchableOpacity
+                style={[s.btn, loading && { opacity: 0.6 }]}
                 onPress={handleResetPassword} 
                 disabled={loading}
                 activeOpacity={0.8}
@@ -249,7 +317,7 @@ export default function ForgotPasswordScreen({ navigation }) {
                 {loading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={s.btnText}>Save New Password</Text>
+                  <Text style={s.btnText}>{t('recovery_save_password')}</Text>
                 )}
               </TouchableOpacity>
             </>
@@ -261,13 +329,11 @@ export default function ForgotPasswordScreen({ navigation }) {
               <View style={s.successIcon}>
                 <Ionicons name="checkmark-circle" size={64} color={COLORS.success} />
               </View>
-              <Text style={s.successTitle}>Password Reset Complete!</Text>
-              <Text style={s.successSub}>
-                Your password has been successfully updated. You can now sign in using your new credentials.
-              </Text>
+              <Text style={s.successTitle}>{t('recovery_complete_title')}</Text>
+              <Text style={s.successSub}>{t('recovery_complete_msg')}</Text>
               <TouchableOpacity 
                 style={s.btn} 
-                onPress={() => navigation.navigate('Login')}
+                onPress={() => navigation.replace('Login')}
                 activeOpacity={0.8}
               >
                 <Text style={s.btnText}>{t('back_to_signin', 'Sign In Now')}</Text>

@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '../theme';
 import { activateSraOfflineSnapshot, getCurrentSession, subscribe } from '../data/dataStore';
+import { useTranslation } from '../services/i18n';
 
 import SplashScreen from '../screens/auth/SplashScreen';
 import LanguageSelectScreen from '../screens/auth/LanguageSelectScreen';
@@ -131,13 +132,16 @@ const modalStyles = StyleSheet.create({
     borderRadius: 12,
   },
   btnText: {
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: '800',
     color: '#FFF',
+    textAlign: 'center',
   },
 });
 
 function MainTabs({ navigation }) {
+  const { t } = useTranslation();
   const [role, setRole] = React.useState(getCurrentSession()?.role || 'Farm Member');
   const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
   const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
@@ -243,22 +247,22 @@ function MainTabs({ navigation }) {
 
             <Text style={modalStyles.title}>
               {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
-                ? 'No internet connection'
-                : 'HUGPONG server unavailable'}
+                ? t('offline_no_internet_title', 'No internet connection')
+                : t('offline_server_unavailable_title', 'HUGPONG server unavailable')}
             </Text>
 
             <Text style={modalStyles.desc}>
               {connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE
                 ? role === 'SRA Admin'
-                  ? 'You are still signed in, but the HUGPONG server cannot be reached. Live data and administrative actions will resume when the service is available.'
-                  : 'Your internet connection is active, but the HUGPONG server cannot be reached. Cached work remains available and queued changes will sync automatically when service returns.'
+                  ? t('offline_sra_server_desc')
+                  : t('offline_field_server_desc')
                 : role === 'SRA Admin'
-                ? 'You are still signed in. Live data and administrative actions require an internet connection and will become available again automatically after reconnection.'
+                ? t('offline_sra_nointernet_desc')
                 : role === 'Farm Manager'
-                ? 'Navigating directly to Field Operations. In offline mode, only your own personal field plot can be accessed. Managed block farm plots and Manager Takeover are disabled until an internet connection is restored.'
+                ? t('offline_manager_nointernet_desc')
                 : role === 'Farm Member'
-                ? 'You have offline access to your Planner and assigned field plot. Any recorded operations will be saved locally and synced once connection is restored.'
-                : 'You are currently in offline mode. Cached records and operations are accessible.'}
+                ? t('offline_member_nointernet_desc')
+                : t('offline_generic_desc')}
             </Text>
 
             <TouchableOpacity
@@ -267,7 +271,11 @@ function MainTabs({ navigation }) {
               activeOpacity={0.85}
             >
               <Text style={modalStyles.btnText}>
-                {role === 'SRA Admin' ? 'Continue Offline' : role === 'Farm Manager' ? 'Proceed to My Field' : 'Proceed to My Plot'}
+                {role === 'SRA Admin'
+                  ? t('offline_continue_sra')
+                  : role === 'Farm Manager'
+                  ? t('offline_proceed_field')
+                  : t('offline_proceed_plot')}
               </Text>
               <Ionicons name="arrow-forward" size={16} color="#FFF" />
             </TouchableOpacity>

@@ -400,14 +400,14 @@ export default function ProfileScreen({ navigation }) {
 
         {/* ── 3. Sync & Data Management ── */}
         <View style={s.sectionHeaderWrap}>
-          <Text style={s.sectionHeaderTitle}>Sync & Offline Data</Text>
+          <Text style={s.sectionHeaderTitle}>{t('profile_section_sync')}</Text>
         </View>
         <View style={s.card}>
           {(session?.role === 'Farm Member' || session?.role === 'Farm Manager') && (
             <View style={s.settingRow}>
               <View style={{ flex: 1 }}>
                 <Text style={s.settingLabel}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
-                <Text style={s.settingSubLabel}>Sync records automatically when connection is active</Text>
+                <Text style={s.settingSubLabel}>{t('profile_auto_sync_sub')}</Text>
               </View>
               <Switch
                 value={autoSync}
@@ -427,7 +427,7 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={s.settingLabel}>
                   {session?.role === 'Farm Manager' ? t('profile_sync_monitor', 'Farm Member Sync Telemetry Monitor') : t('action_sync_hub', 'Sync Status & Diagnostics')}
                 </Text>
-                <Text style={s.settingSubLabel}>View queue, conflict logs, and connectivity</Text>
+                <Text style={s.settingSubLabel}>{t('profile_sync_monitor_sub')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
             </TouchableOpacity>
@@ -436,7 +436,7 @@ export default function ProfileScreen({ navigation }) {
           <TouchableOpacity style={s.settingRow} onPress={clearCache}>
             <View style={{ flex: 1 }}>
               <Text style={[s.settingLabel, { color: '#DC2626' }]}>{t('profile_cache', 'Clear Local Cache')}</Text>
-              <Text style={s.settingSubLabel}>Reset offline draft buffer and local cache</Text>
+              <Text style={s.settingSubLabel}>{t('profile_cache_sub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -444,13 +444,13 @@ export default function ProfileScreen({ navigation }) {
 
         {/* ── 4. Preferences & Security ── */}
         <View style={s.sectionHeaderWrap}>
-          <Text style={s.sectionHeaderTitle}>Preferences & Security</Text>
+          <Text style={s.sectionHeaderTitle}>{t('profile_section_preferences')}</Text>
         </View>
         <View style={s.card}>
           <TouchableOpacity style={s.settingRow} onPress={() => setLangExpanded(e => !e)}>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_language', 'Language / Wika')}</Text>
-              <Text style={s.settingSubLabel}>{(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.native} ({(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.label})</Text>
+              <Text style={s.settingSubLabel}>{(LANGUAGES.find(l => l.key === language) || LANGUAGES[0])?.native}</Text>
             </View>
             <Ionicons name={langExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -458,10 +458,10 @@ export default function ProfileScreen({ navigation }) {
           {langExpanded && (
             <View style={s.langDropdown}>
               {LANGUAGES.map(lang => (
-                <TouchableOpacity key={lang.key} style={s.langRow} onPress={() => { setLanguage(lang.key); setLangExpanded(false); }}>
+                <TouchableOpacity key={lang.key} style={s.langRow} onPress={() => { setLanguage(lang.key).catch(() => {}); setLangExpanded(false); }}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.langLabel}>{lang.native}</Text>
-                    <Text style={s.langSub}>{lang.label}</Text>
+                    <Text style={s.langSub}>{t(`language_${lang.key}_region`, lang.label)}</Text>
                   </View>
                   {language === lang.key && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
                 </TouchableOpacity>
@@ -472,7 +472,7 @@ export default function ProfileScreen({ navigation }) {
           <TouchableOpacity style={s.settingRow} onPress={() => navigation.navigate('Security')}>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_security', 'Security & Password')}</Text>
-              <Text style={s.settingSubLabel}>Update account password and authentication</Text>
+              <Text style={s.settingSubLabel}>{t('profile_security_sub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -480,13 +480,13 @@ export default function ProfileScreen({ navigation }) {
 
         {/* ── 5. Support & Feedback ── */}
         <View style={s.sectionHeaderWrap}>
-          <Text style={s.sectionHeaderTitle}>Support</Text>
+          <Text style={s.sectionHeaderTitle}>{t('profile_section_support')}</Text>
         </View>
         <View style={s.card}>
           <TouchableOpacity style={s.settingRow} onPress={() => setShowTicketsModal(true)}>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_support', 'Help & Support Desk')}</Text>
-              <Text style={s.settingSubLabel}>Create a ticket or check Super Admin responses</Text>
+              <Text style={s.settingSubLabel}>{t('profile_support_sub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -494,13 +494,13 @@ export default function ProfileScreen({ navigation }) {
 
         {/* ── 6. Legal & Compliance ── */}
         <View style={s.sectionHeaderWrap}>
-          <Text style={s.sectionHeaderTitle}>Legal</Text>
+          <Text style={s.sectionHeaderTitle}>{t('profile_section_legal')}</Text>
         </View>
         <View style={s.card}>
           <TouchableOpacity style={s.settingRow} onPress={() => setShowLegalModal(true)}>
             <View style={{ flex: 1 }}>
               <Text style={s.settingLabel}>{t('profile_legal', 'Privacy, Terms & Compliance')}</Text>
-              <Text style={s.settingSubLabel}>Current policies, data rights, and regulatory limits</Text>
+              <Text style={s.settingSubLabel}>{t('profile_legal_sub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -881,14 +881,14 @@ const s = StyleSheet.create({
   // Settings & Rows
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 48 },
   settingIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  settingLabel: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
-  settingSubLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
+  settingLabel: { fontSize: 14, color: COLORS.text, fontWeight: '600', flexShrink: 1 },
+  settingSubLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 1, lineHeight: 17, flexShrink: 1 },
 
   // Language Dropdown
   langDropdown: { marginTop: 4 },
-  langRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 46 },
-  langLabel: { fontSize: 14, fontWeight: '700', color: COLORS.text },
-  langSub: { fontSize: 12, color: COLORS.textMuted },
+  langRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, minHeight: 46 },
+  langLabel: { fontSize: 14, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
+  langSub: { fontSize: 12, lineHeight: 17, color: COLORS.textMuted, flexShrink: 1 },
 
   // Sign Out
   signOutBtn: {

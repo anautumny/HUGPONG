@@ -21,7 +21,7 @@ Compatibility policy: existing records must pass the Phase 4 legacy-data audit a
 13. User, Block Farm, Field, and Crop Year Cycle document IDs are server-issued and immutable. Relationship forms select scoped entities; they never accept a new canonical document ID as user input.
 14. Offline-capable operation, report, ticket, and mutation IDs are non-editable idempotency identifiers. A client may generate them once, but every retry must reuse the same value.
 15. Every account carries an `authVersion`. Password, phone, role, and status changes increment it so old server and Firebase credentials are rejected immediately.
-16. `account_identifiers`, `server_sessions`, and `security_rate_limits` are server-only operational collections. Web and Mobile never read or write them directly.
+16. `account_identifiers`, `server_sessions`, `security_rate_limits`, and `password_recovery_challenges` are server-only operational collections. Web and Mobile never read or write them directly.
 17. A normalized phone number is reserved atomically in `account_identifiers` when an account is created or its phone changes. This prevents concurrent requests from creating duplicate login identifiers.
 
 ## 2. Relationship model
@@ -122,7 +122,11 @@ Production browser sessions are stored here by Express. Records contain the seri
 
 ### `security_rate_limits/{limitId}` — server only
 
-Authentication, OTP, password-verification, account-creation, and SMS throttles are persisted here so multiple API instances enforce one shared limit. IDs are SHA-256 digests of the limiter namespace and normalized request key; raw passwords and OTP values are never stored.
+Authentication, OTP, password-verification, account-creation, and SMS throttles are persisted here so multiple API instances enforce one shared limit. Verification-code send records include `count`, `windowEndsAtMs`, and `lastAcceptedAtMs`; registration, first-login verification, and password recovery allow at most three accepted code requests with at least 60 seconds between sends. The third accepted send starts a full one-hour lock. IDs are SHA-256 digests of the limiter namespace and normalized request key; raw passwords and OTP values are never stored.
+
+### `password_recovery_challenges/{challengeId}` — server only
+
+Forgot-password codes and reset grants are persisted here so recovery remains authoritative across API instances and restarts. Raw SMS codes and reset tokens are never stored; the server stores HMAC digests, expiry/attempt state, the account's issuance-time `authVersion`, and one-time-use status. Successful recovery atomically updates `user_credentials`, increments the user's `authVersion`, consumes the challenge, and writes an audit event. Firestore client access is always denied. Production should enable Firestore TTL cleanup on `deleteAfter`.
 
 ### `block_farms/{blockFarmId}`
 
