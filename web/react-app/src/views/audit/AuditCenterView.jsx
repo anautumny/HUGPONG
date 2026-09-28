@@ -11,12 +11,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import Button from '../../components/ui/Button';
-import QRVerifierPanel from '../../components/audit/QRVerifierPanel';
 import AuditQueue from '../../components/audit/AuditQueue';
 import AuditDossierCard from '../../components/audit/AuditDossierCard';
-import AuditCompilationModal from '../../components/audit/AuditCompilationModal';
-import AuditHistoryModal from '../../components/audit/AuditHistoryModal';
-import PrintableAuditReport from '../../components/audit/PrintableAuditReport';
 import {
   subscribeToAuditReports,
   certifyAuditReport,
@@ -27,6 +23,29 @@ import {
 import { subscribeToOperationsData } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
+
+const QRVerifierPanel = React.lazy(() => import('../../components/audit/QRVerifierPanel'));
+const AuditCompilationModal = React.lazy(() => import('../../components/audit/AuditCompilationModal'));
+const AuditHistoryModal = React.lazy(() => import('../../components/audit/AuditHistoryModal'));
+const PrintableAuditReport = React.lazy(() => import('../../components/audit/PrintableAuditReport'));
+
+function DeferredAuditPanel({ label }) {
+  return (
+    <div className="min-h-28 rounded-2xl border border-border bg-surface flex items-center justify-center text-xs font-semibold text-hug-muted">
+      {label}
+    </div>
+  );
+}
+
+function DeferredAuditModal({ label }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4" role="status">
+      <div className="rounded-2xl border border-border bg-surface px-6 py-5 text-sm font-semibold text-hug-text shadow-xl">
+        {label}
+      </div>
+    </div>
+  );
+}
 
 export default function AuditCenterView() {
   const { user, roleKey } = useAuth();
@@ -324,10 +343,14 @@ export default function AuditCenterView() {
         <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-start">
           {/* Left Column: QR Verifier & Cloud Audit Queue */}
           <div className="flex flex-col gap-6 w-full">
-            {isSraAdmin && <QRVerifierPanel
-              reports={reports}
-              onSelectReport={(report) => setSelectedReport(report)}
-            />}
+            {isSraAdmin && (
+              <React.Suspense fallback={<DeferredAuditPanel label="Loading QR tools..." />}>
+                <QRVerifierPanel
+                  reports={reports}
+                  onSelectReport={(report) => setSelectedReport(report)}
+                />
+              </React.Suspense>
+            )}
 
             <AuditQueue
               reports={activeReports}
@@ -363,54 +386,62 @@ export default function AuditCenterView() {
       </div>
 
       {/* Farm Manager Compilation Modal (Hidden during print) */}
-      {isFarmManager && (
+      {isFarmManager && showCompileModal && (
         <div className="print:hidden no-print">
-          <AuditCompilationModal
-            isOpen={showCompileModal}
-            onClose={closeCompileModal}
-            blockFarm={assignedBlockFarm}
-            fields={fields}
-            operations={operations}
-            existingReports={reports}
-            initialReport={pendingDeliveryReport}
-            onSuccess={handleCompileSuccess}
-          />
+          <React.Suspense fallback={<DeferredAuditModal label="Loading audit compiler..." />}>
+            <AuditCompilationModal
+              isOpen={showCompileModal}
+              onClose={closeCompileModal}
+              blockFarm={assignedBlockFarm}
+              fields={fields}
+              operations={operations}
+              existingReports={reports}
+              initialReport={pendingDeliveryReport}
+              onSuccess={handleCompileSuccess}
+            />
+          </React.Suspense>
         </div>
       )}
 
       {/* Audit History Modal (Hidden during print) */}
-      <div className="print:hidden no-print">
-        <AuditHistoryModal
-          isOpen={showHistoryModal}
-          onClose={() => setShowHistoryModal(false)}
-          reports={allAuditHistoryReports}
-          blockFarms={blockFarms}
-          onSelectReport={(report) => setSelectedReport(report)}
-          onLoadMore={() => loadHistory({ append: true })}
-          hasMore={isSraAdmin && historyHasMore}
-          isLoading={isLoadingHistory}
-        />
-      </div>
+      {showHistoryModal && (
+        <div className="print:hidden no-print">
+          <React.Suspense fallback={<DeferredAuditModal label="Loading audit history..." />}>
+            <AuditHistoryModal
+              isOpen={showHistoryModal}
+              onClose={() => setShowHistoryModal(false)}
+              reports={allAuditHistoryReports}
+              blockFarms={blockFarms}
+              onSelectReport={(report) => setSelectedReport(report)}
+              onLoadMore={() => loadHistory({ append: true })}
+              hasMore={isSraAdmin && historyHasMore}
+              isLoading={isLoadingHistory}
+            />
+          </React.Suspense>
+        </div>
+      )}
 
       {/* A4 printable audit document view */}
-      {printReport ? (
-        <PrintableAuditReport
-          report={printReport}
-          blockFarms={blockFarms}
-          currentUser={user}
-          isOpenModal={true}
-          onClose={() => setPrintReport(null)}
-        />
-      ) : selectedReport ? (
-        <div className="hidden print:block">
+      <React.Suspense fallback={printReport ? <DeferredAuditModal label="Preparing audit report..." /> : null}>
+        {printReport ? (
           <PrintableAuditReport
-            report={selectedReport}
+            report={printReport}
             blockFarms={blockFarms}
             currentUser={user}
-            isOpenModal={false}
+            isOpenModal={true}
+            onClose={() => setPrintReport(null)}
           />
-        </div>
-      ) : null}
+        ) : selectedReport ? (
+          <div className="hidden print:block">
+            <PrintableAuditReport
+              report={selectedReport}
+              blockFarms={blockFarms}
+              currentUser={user}
+              isOpenModal={false}
+            />
+          </div>
+        ) : null}
+      </React.Suspense>
     </div>
   );
 }

@@ -9,6 +9,20 @@ const { COLLECTIONS, canonicalRole, publicRoleLabel, isRoleAllowedOnPlatform } =
 const { authVersionOf } = require('../security/accountSecurity');
 const { resolveAccountAssignments } = require('../services/accountAuthorization');
 
+// Dashboard/mobile refreshes intentionally fan out across scoped endpoints.
+// Coalesce only overlapping reads of the same authorization document; the
+// entry is removed as soon as Firestore settles, so this is not a stale auth
+// cache and the next request burst revalidates the account.
+const inFlightAccountReads = new Map();
+
+function readAccount(userId) {
+  if (inFlightAccountReads.has(userId)) return inFlightAccountReads.get(userId);
+  const request = db.collection(COLLECTIONS.USERS).doc(userId).get()
+    .finally(() => inFlightAccountReads.delete(userId));
+  inFlightAccountReads.set(userId, request);
+  return request;
+}
+
 function bearerToken(req) {
   const header = String(req.headers?.authorization || '');
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -37,7 +51,7 @@ async function requireAuth(req, res, next) {
 
   const userId = String(presented.employeeId || presented.uid || '').trim();
   try {
-    const snapshot = await db.collection(COLLECTIONS.USERS).doc(userId).get();
+    const snapshot = await readAccount(userId);
     if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
       return rejectAuthentication(req, res, 'The account is no longer authorized.', 'ACCOUNT_INACTIVE');
     }

@@ -102,6 +102,16 @@ app.use((req, res, next) => {
   return next();
 });
 
+// Health probes must remain outside session middleware. Browser and mobile
+// connectivity checks do not need to hydrate a Firestore-backed session.
+app.get('/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    success: true,
+    status: 'healthy'
+  });
+});
+
 // Session Configuration
 app.use(session({
   name: 'hugpong.sid',
@@ -178,14 +188,6 @@ if (fs.existsSync(reactDistPath)) {
 }
 
 // ── Health Check & System Status ────────────────────────────
-app.get('/health', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({
-    success: true,
-    status: 'healthy'
-  });
-});
-
 // Legacy client status route.
 // Compatibility health endpoint retained for deployed clients.
 app.get('/api/data', (req, res) => {

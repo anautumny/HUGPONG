@@ -89,9 +89,9 @@ router.get('/', requireAuth, async (req, res) => {
     const snapshot = await query.get();
     const fields = snapshot.docs.map(doc => ({ id: doc.id, ...withoutLegacySoilType(doc.data()) }));
     const memberIds = Array.from(new Set(fields.map(field => field.memberUserId).filter(Boolean)));
-    const memberDocuments = await Promise.all(memberIds.map(memberId => (
-      db.collection(COLLECTIONS.USERS).doc(memberId).get()
-    )));
+    const memberDocuments = memberIds.length
+      ? await db.getAll(...memberIds.map(memberId => db.collection(COLLECTIONS.USERS).doc(memberId)))
+      : [];
     const memberNames = new Map(memberDocuments
       .filter(document => document.exists)
       .map(document => [

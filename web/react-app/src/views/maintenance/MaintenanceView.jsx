@@ -65,7 +65,7 @@ export default function MaintenanceView() {
     loadSystemInventory();
     const inventoryTimer = setInterval(() => {
       if (document.visibilityState !== 'hidden' && navigator.onLine !== false) {
-        loadSystemInventory({ force: true });
+        loadSystemInventory();
       }
     }, 5 * 60 * 1000);
 

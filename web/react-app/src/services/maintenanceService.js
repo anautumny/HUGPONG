@@ -6,7 +6,7 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
+import { authenticatedRead, authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 import { sortNewestFirst } from '../utils/recordOrdering';
 
 /**
@@ -67,6 +67,6 @@ export async function checkSystemHealth() {
 }
 
 export async function fetchSystemDiagnostics({ force = false } = {}) {
-  const response = await authenticatedRequest('/api/system-diagnostics');
+  const response = await authenticatedRead('/api/system-diagnostics', { force });
   return response.data || {};
 }

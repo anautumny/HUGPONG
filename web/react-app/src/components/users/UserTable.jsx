@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, User, CheckCircle2, AlertCircle, Edit2, ShieldAlert, ShieldCheck, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
@@ -15,6 +15,7 @@ export default function UserTable({
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const pageSize = 10;
 
   const actorRole = String(currentUser?.role || currentUser?.roleKey || '').toUpperCase().replace(/ /g, '_');
@@ -34,8 +35,8 @@ export default function UserTable({
       result = result.filter(u => u.status === statusFilter);
     }
 
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
+    if (deferredSearchTerm.trim()) {
+      const q = deferredSearchTerm.toLowerCase();
       result = result.filter(u =>
         String(u.id || '').toLowerCase().includes(q) ||
         String(u.displayName || '').toLowerCase().includes(q) ||
@@ -45,7 +46,7 @@ export default function UserTable({
     }
 
     return result;
-  }, [users, roleFilter, statusFilter, searchTerm]);
+  }, [users, roleFilter, statusFilter, deferredSearchTerm]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));

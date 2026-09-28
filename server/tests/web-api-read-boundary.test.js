@@ -51,7 +51,8 @@ test('high-cost monitoring and mobile hydration use bounded refresh cadences', (
   assert.match(webTelemetry, /intervalMs: 2 \* 60 \* 1000/);
   assert.doesNotMatch(diagnosticsView, /setInterval/);
   assert.match(maintenanceView, /5 \* 60 \* 1000/);
-  assert.match(mobileStore, /setInterval\(refresh, 5 \* 60 \* 1000\)/);
+  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(mobileStore, /setInterval\(refresh, CLOUD_REFRESH_INTERVAL_MS\)/);
   assert.match(mobileMonitor, /setInterval\(refresh, 2 \* 60 \* 1000\)/);
 });
 

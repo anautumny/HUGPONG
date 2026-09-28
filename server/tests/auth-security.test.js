@@ -467,7 +467,7 @@ test('governance and support reads use server-scoped APIs instead of client coll
   assert.match(apiClient, /subscribeToAuthenticatedResource/);
   assert.match(ticketsService, /subscribeToAuthenticatedResource\('\/api\/tickets'/);
   assert.match(maintenanceService, /subscribeToAuthenticatedResource\('\/api\/audit-events'/);
-  assert.match(maintenanceService, /authenticatedRequest\('\/api\/system-diagnostics'/);
+  assert.match(maintenanceService, /authenticatedRead\('\/api\/system-diagnostics'/);
   assert.match(telemetryService, /subscribeToAuthenticatedResource\('\/api\/terminal-diagnostics'/);
   assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users'/);
   assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /onSnapshot|collection\(db/);

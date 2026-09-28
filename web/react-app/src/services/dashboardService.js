@@ -99,7 +99,7 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
     const includeActivityMonitoring = roleKey === ROLE_KEYS.FARM_MANAGER;
     const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult] = await Promise.all([
-      dashboardRead('Published prices', '/api/prices', force),
+      dashboardRead('Published prices', '/api/prices?limit=2', force),
       dashboardRead('Fields', '/api/fields', force),
       dashboardRead('Block farms', '/api/block-farms', force),
       dashboardRead('Crop Year Cycles', '/api/crop-cycles', force),

@@ -2,7 +2,10 @@ import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiCli
 
 const CLIENT_INSTANCE_KEY = 'hugpong_web_client_instance_id';
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
 let lastHeartbeatAt = 0;
+let lastSyncReportAt = 0;
+let lastSyncSignature = '';
 
 export function getWebClientInstanceId() {
   let value = localStorage.getItem(CLIENT_INSTANCE_KEY);
@@ -34,6 +37,7 @@ export async function reportWebActivity({ force = false, event = 'HEARTBEAT' } =
 }
 
 export async function reportWebSync({ pendingMutationCount = 0, failedMutationCount = 0, syncState = 'UNKNOWN', syncSucceeded = false } = {}) {
+  let signature = '';
   try {
     let session = null;
     try {
@@ -43,6 +47,14 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
     if (roleUpper && roleUpper !== 'MEMBER_FARMER' && roleUpper !== 'FARM_MANAGER') {
       return null;
     }
+    const connectionState = navigator.onLine === false ? 'OFFLINE' : 'ONLINE';
+    signature = JSON.stringify({ pendingMutationCount, failedMutationCount, syncState, connectionState });
+    const now = Date.now();
+    if (!syncSucceeded && signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
+      return { throttled: true };
+    }
+    lastSyncSignature = signature;
+    lastSyncReportAt = now;
     return await authenticatedRequest('/api/terminal-diagnostics/sync', {
       method: 'POST',
       headers: {
@@ -54,11 +66,15 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
         pendingMutationCount,
         failedMutationCount,
         syncState,
-        connectionState: navigator.onLine === false ? 'OFFLINE' : 'ONLINE',
+        connectionState,
         syncSucceeded
       }
     });
   } catch (error) {
+    if (signature && lastSyncSignature === signature) {
+      lastSyncSignature = '';
+      lastSyncReportAt = 0;
+    }
     if (!error.message?.includes('Access Denied')) { console.warn('[TelemetryService] Web sync report was deferred.'); }
     return null;
   }

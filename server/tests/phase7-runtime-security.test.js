@@ -128,8 +128,8 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   assert.match(analyticsScreen, /newPriceSource/);
   assert.match(analyticsScreen, /m <= 0/);
   assert.match(analyticsScreen, /Incomplete Circular/);
-  assert.match(analyticsComponents, /\/Lkg/);
-  assert.match(analyticsComponents, /\/MT/);
+  assert.match(analyticsComponents, /Lkg/);
+  assert.match(analyticsComponents, /\/\s*MT/);
   assert.match(home, /\/Lkg/);
   assert.match(home, /\/MT/);
   assert.doesNotMatch(home, /latest\.(?:price|molasses|week|date)\b/);

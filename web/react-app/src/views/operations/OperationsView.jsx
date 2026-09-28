@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import {
@@ -233,6 +233,7 @@ export default function OperationsView() {
 
   // History search and filters
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [statusFilter, setStatusFilter] = useState('ARCHIVED');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -647,8 +648,8 @@ export default function OperationsView() {
         return false;
       }
 
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
+      if (deferredSearchQuery.trim()) {
+        const q = deferredSearchQuery.toLowerCase();
         const idMatch = (op.id || '').toLowerCase().includes(q);
         const nameMatch = (op.operationName || op.activity || '').toLowerCase().includes(q);
         const fieldMatch = (op.fieldId || '').toLowerCase().includes(q);
@@ -657,7 +658,7 @@ export default function OperationsView() {
 
       return true;
     });
-  }, [scopedOperations, statusFilter, searchQuery]);
+  }, [scopedOperations, statusFilter, deferredSearchQuery]);
 
   const paginatedOperations = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
