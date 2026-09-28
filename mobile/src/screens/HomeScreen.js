@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Platform, ActivityIndicator, Alert,
+  Dimensions, TextInput, Platform, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, cropCycles, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
+import { ScreenHeader } from '../components/ui';
 import OfflineBanner from '../components/OfflineBanner';
 import {
   subscribeToNetwork,
@@ -183,9 +184,10 @@ export default function HomeScreen({ navigation }) {
     liveMol: currentMarketObservation.value,
     liveDate: currentPrice.lastUpdated || 'No records',
     liveChange: currentPrice.change || 0,
+    liveMolChange: currentMarketObservation.change || 0,
     liveWeek: currentPrice.weekLabel || 'No circular',
   });
-  const { livePrice, liveMol, liveDate, liveChange, liveWeek } = priceData;
+  const { livePrice, liveMol, liveDate, liveChange, liveMolChange, liveWeek } = priceData;
 
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -261,6 +263,7 @@ export default function HomeScreen({ navigation }) {
         liveMol: currentMarketObservation.value,
         liveDate: currentPrice.lastUpdated || 'No records',
         liveChange: currentPrice.change || 0,
+        liveMolChange: currentMarketObservation.change || 0,
         liveWeek: currentPrice.weekLabel || 'No circular',
       });
     });
@@ -374,6 +377,120 @@ export default function HomeScreen({ navigation }) {
 
   const isFieldRole = session?.role === 'Farm Member' || session?.role === 'Farm Manager';
 
+  // ── In-App Sub-Screen: Publish Price Reference ──
+  if (showPriceModal) {
+    return (
+      <PublishPriceModal
+        visible={true}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={{
+          sugarPricePerLkg: livePrice || currentPrice?.value,
+          molassesPricePerMetricTon: liveMol || currentMarketObservation?.value
+        }}
+        onPublished={(newPost) => {
+          setShowPriceModal(false);
+          setPriceData({
+            livePrice: newPost.sugarPricePerLkg,
+            liveMol: newPost.molassesPricePerMetricTon,
+            liveWeek: newPost.weekLabel,
+            liveDate: newPost.effectiveDate,
+            liveChange: newPost.sugarPriceChange || (newPost.sugarPricePerLkg - (livePrice || currentPrice?.value || newPost.sugarPricePerLkg))
+          });
+        }}
+      />
+    );
+  }
+
+  // ── In-App Sub-Screen: System Notifications ──
+  if (showNotifs) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <ScreenHeader
+          title={t('notif_title', 'System Notifications')}
+          subtitle={t('notif_sub', 'Plans, drafts, synchronization, and account updates')}
+          onBackPress={closeNotifs}
+          rightAction={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {unreadCount > 0 && (
+                <TouchableOpacity
+                  onPress={handleMarkAllRead}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#E0F2FE', borderRadius: RADIUS.sm }}
+                >
+                  <Ionicons name="checkmark-done" size={14} color="#0284C7" />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284C7' }}>{t('btn_mark_read', 'Read All')}</Text>
+                </TouchableOpacity>
+              )}
+              {notifs.length > 0 && (
+                <TouchableOpacity
+                  onPress={handleClearAllNotifs}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#FEE2E2', borderRadius: RADIUS.sm }}
+                >
+                  <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.danger }}>{t('btn_clear_all', 'Clear')}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+        />
+
+        {notifs.length === 0 ? (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: 12 }}>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="notifications-off-outline" size={32} color={COLORS.textMuted} />
+            </View>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text }}>{t('notif_empty', 'No Notifications')}</Text>
+            <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', maxWidth: 260 }}>
+              {t('notif_caught_up', "You're all caught up on all district advisories and central updates.")}
+            </Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={{ padding: SPACING.md, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+            {notifs.map(n => (
+              <TouchableOpacity
+                key={n.id}
+                style={[s.notifItem, { backgroundColor: n.unread ? '#FAFAF9' : '#fff', padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: n.unread ? n.color + '40' : COLORS.border, marginBottom: 10, ...SHADOW.card }]}
+                onPress={() => handleNotifPress(n)}
+                activeOpacity={0.8}
+              >
+                <View style={[s.notifIconBox, { backgroundColor: n.color + '18' }]}>
+                  <Ionicons name={n.icon} size={20} color={n.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <Text style={s.notifTitle}>{n.title}</Text>
+                      {n.unread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: n.color }} />}
+                    </View>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDismissNotif(n.id);
+                      }}
+                      style={{ padding: 4, marginRight: -4, marginTop: -4 }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="close" size={16} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[s.notifMsg, { marginTop: 4, lineHeight: 18 }]}>{n.msg}</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                    <Text style={s.notifTime}>{n.time}</Text>
+                    {n.badgeText && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: n.color + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.sm }}>
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: n.color }}>{n.badgeText}</Text>
+                        <Ionicons name="chevron-forward" size={12} color={n.color} />
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       <AppHeader right={
@@ -431,50 +548,76 @@ export default function HomeScreen({ navigation }) {
           <View style={s.priceCardHeader}>
             <View style={s.priceSourceRow}>
               <View style={[s.sourceDot, (!isOnline && isFieldRole) && { backgroundColor: COLORS.accent }]} />
-              <Text style={s.priceSource}>{currentPrice.source}</Text>
+              <Text style={s.priceSource} numberOfLines={1}>{currentPrice.source}</Text>
             </View>
-            <Text style={[s.priceUpdated, (!isOnline && isFieldRole) && { color: COLORS.accent, fontWeight: '600' }]}>
+            <View style={s.priceDateBadge}>
+              <Ionicons name="calendar-outline" size={11} color={COLORS.textMuted} />
+              <Text style={s.priceDateBadgeText} numberOfLines={1}>
               {liveWeek !== 'No records' && liveDate !== 'No records' 
-                ? (isOnline ? `Official: ${liveWeek} · ${liveDate}` : (isFieldRole ? 'Offline: Cached' : `Official: ${liveWeek} · ${liveDate}`))
-                : 'No official broadcast records'}
-            </Text>
+                ? (isOnline ? `${liveWeek} · ${liveDate}` : (isFieldRole ? 'Offline: Cached' : `${liveWeek} · ${liveDate}`))
+                : 'No records'}
+              </Text>
+            </View>
           </View>
 
-          <View style={s.pricePairRow}>
-            {/* B — Sugarcane/Lkg */}
-            <View style={s.pricePairItem}>
-              <Text style={s.pricePairTag}>Sugar (B)</Text>
-              <Text style={s.pricePairValue} numberOfLines={1} adjustsFontSizeToFit>
-                {livePrice == null ? '—' : `₱${livePrice.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-              </Text>
-              <View style={s.priceChangeRow}>
-                {livePrice != null && liveChange != null && liveChange !== 0 && (
-                  <Ionicons name={liveChange > 0 ? "caret-up" : "caret-down"} size={11} color={liveChange > 0 ? COLORS.success : COLORS.danger} />
-                )}
-                <Text style={[s.priceChangeTxt, liveChange < 0 && { color: COLORS.danger }, liveChange === 0 && { color: COLORS.textMuted }]}>
-                  {livePrice == null ? 'No published price' : (liveChange > 0 ? `+${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? Number(liveChange).toFixed(2) : 'Steady'))}
+          {/* ── Top: Dominant Sugar (B) per 50kg bag (Lkg) ── */}
+          <View style={s.sugarSection}>
+            {/* Dominant Sugar (B) */}
+            <View style={s.sugarTagRow}>
+              <Text style={s.sugarTag}>Sugar (B) · Raw Sugar</Text>
+              <View style={[
+                s.trendPill,
+                liveChange > 0 ? s.trendPillUp : (liveChange < 0 ? s.trendPillDown : s.trendPillSteady)
+              ]}>
+                <Ionicons
+                  name={liveChange > 0 ? "arrow-up" : (liveChange < 0 ? "arrow-down" : "remove-outline")}
+                  size={11}
+                  color={liveChange > 0 ? COLORS.success : (liveChange < 0 ? COLORS.danger : COLORS.textMuted)}
+                />
+                <Text style={[
+                  s.trendPillText,
+                  liveChange > 0 ? s.trendTextUp : (liveChange < 0 ? s.trendTextDown : s.trendTextSteady)
+                ]}>
+                  {livePrice == null ? 'No price' : (liveChange > 0 ? `+₱${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? `-₱${Math.abs(Number(liveChange)).toFixed(2)}` : 'Steady'))}
                 </Text>
               </View>
-              <Text style={s.pricePairUnit}>{t('unit_per_lkg', 'per Lkg')}</Text>
             </View>
-
-            <View style={s.pricePairDivider} />
-
-            {/* Mol — Molasses/MT */}
-            <View style={s.pricePairItem}>
-              <Text style={s.pricePairTag}>{t('molasses_short', 'Molasses')}</Text>
-              <Text style={s.pricePairValue} numberOfLines={1} adjustsFontSizeToFit>
-                {liveMol == null ? '—' : `₱${liveMol.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            <View style={s.sugarPriceRow}>
+              <Text style={s.sugarPriceValue} numberOfLines={1} adjustsFontSizeToFit>
+                {livePrice == null ? '—' : `₱${Number(livePrice).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </Text>
-              <View style={s.priceChangeRow}>
-                {liveMol != null && currentMarketObservation.change != null && currentMarketObservation.change !== 0 && (
-                  <Ionicons name={currentMarketObservation.change > 0 ? "caret-up" : "caret-down"} size={11} color={currentMarketObservation.change > 0 ? COLORS.success : COLORS.danger} />
-                )}
-                <Text style={[s.priceChangeTxt, currentMarketObservation.change < 0 && { color: COLORS.danger }, currentMarketObservation.change === 0 && { color: COLORS.textMuted }]}>
-                  {liveMol == null ? 'No published price' : (currentMarketObservation.change > 0 ? `+${Number(currentMarketObservation.change).toFixed(2)}` : (currentMarketObservation.change < 0 ? Number(currentMarketObservation.change).toFixed(2) : 'Steady'))}
+              <Text style={s.sugarUnitText}>{t('unit_per_bag', 'per 50kg bag (Lkg)')}</Text>
+            </View>
+          </View>
+
+          <View style={s.priceSectionDivider} />
+
+          {/* ── Bottom: Supporting Molasses per MT ── */}
+          <View style={s.molassesSection}>
+            <View style={s.molassesInfoCol}>
+              <Text style={s.molassesTag}>{t('industrial_molasses', 'Industrial Molasses')}</Text>
+              <View style={s.molassesPriceRow}>
+                <Text style={s.molassesPriceValue} numberOfLines={1}>
+                  {liveMol == null ? '—' : `₱${Number(liveMol).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </Text>
+                <Text style={s.molassesUnitText}>{t('unit_per_mt', '/ MT')}</Text>
               </View>
-              <Text style={s.pricePairUnit}>{t('unit_per_mt', 'per MT')}</Text>
+            </View>
+            <View style={[
+              s.trendPill,
+              (liveMolChange || 0) > 0 ? s.trendPillUp : ((liveMolChange || 0) < 0 ? s.trendPillDown : s.trendPillSteady)
+            ]}>
+              <Ionicons
+                name={(liveMolChange || 0) > 0 ? "arrow-up" : ((liveMolChange || 0) < 0 ? "arrow-down" : "remove-outline")}
+                size={11}
+                color={(liveMolChange || 0) > 0 ? COLORS.success : ((liveMolChange || 0) < 0 ? COLORS.danger : COLORS.textMuted)}
+              />
+              <Text style={[
+                s.trendPillText,
+                (liveMolChange || 0) > 0 ? s.trendTextUp : ((liveMolChange || 0) < 0 ? s.trendTextDown : s.trendTextSteady)
+              ]}>
+                {liveMol == null ? 'No price' : ((liveMolChange || 0) > 0 ? `+₱${Number(liveMolChange).toFixed(2)}` : ((liveMolChange || 0) < 0 ? `-₱${Math.abs(Number(liveMolChange)).toFixed(2)}` : 'Steady'))}
+              </Text>
             </View>
           </View>
 
@@ -710,114 +853,7 @@ export default function HomeScreen({ navigation }) {
         </ScrollView>
       )}
 
-      {/* ── Publish Price Reference Modal (web parity) ── */}
-      <PublishPriceModal
-        visible={showPriceModal}
-        onClose={() => setShowPriceModal(false)}
-        latestPrice={{
-          sugarPricePerLkg: livePrice || currentPrice?.value,
-          molassesPricePerMetricTon: liveMol || currentMarketObservation?.value
-        }}
-        onPublished={(newPost) => {
-          setPriceData({
-            livePrice: newPost.sugarPricePerLkg,
-            liveMol: newPost.molassesPricePerMetricTon,
-            liveWeek: newPost.weekLabel,
-            liveDate: newPost.effectiveDate,
-            liveChange: newPost.sugarPriceChange || (newPost.sugarPricePerLkg - (livePrice || currentPrice?.value || newPost.sugarPricePerLkg))
-          });
-        }}
-      />
 
-      {/* ── Notifications Modal (Full Screen) ── */}
-      <Modal visible={showNotifs} animationType="slide" onRequestClose={closeNotifs}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.text }}>{t('notif_title', 'System Notifications')}</Text>
-              <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>{t('notif_sub', 'Plans, drafts, synchronization, and account updates')}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {unreadCount > 0 && (
-                <TouchableOpacity
-                  onPress={handleMarkAllRead}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#E0F2FE', borderRadius: RADIUS.sm }}
-                >
-                  <Ionicons name="checkmark-done" size={14} color="#0284C7" />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284C7' }}>{t('btn_mark_read', 'Read All')}</Text>
-                </TouchableOpacity>
-              )}
-              {notifs.length > 0 && (
-                <TouchableOpacity
-                  onPress={handleClearAllNotifs}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#FEE2E2', borderRadius: RADIUS.sm }}
-                >
-                  <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.danger }}>{t('btn_clear_all', 'Clear')}</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity onPress={closeNotifs} style={{ padding: 4 }}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {notifs.length === 0 ? (
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: 12 }}>
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="notifications-off-outline" size={32} color={COLORS.textMuted} />
-              </View>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text }}>{t('notif_empty', 'No Notifications')}</Text>
-              <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', maxWidth: 260 }}>
-                {t('notif_caught_up', "You're all caught up on all district advisories and central updates.")}
-              </Text>
-            </View>
-          ) : (
-            <ScrollView contentContainerStyle={{ padding: SPACING.md, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-              {notifs.map(n => (
-                <TouchableOpacity
-                  key={n.id}
-                  style={[s.notifItem, { backgroundColor: n.unread ? '#FAFAF9' : '#fff', padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: n.unread ? n.color + '40' : COLORS.border, marginBottom: 8 }]}
-                  onPress={() => handleNotifPress(n)}
-                  activeOpacity={0.8}
-                >
-                  <View style={[s.notifIconBox, { backgroundColor: n.color + '18' }]}>
-                    <Ionicons name={n.icon} size={20} color={n.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                        <Text style={s.notifTitle}>{n.title}</Text>
-                        {n.unread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: n.color }} />}
-                      </View>
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleDismissNotif(n.id);
-                        }}
-                        style={{ padding: 4, marginRight: -4, marginTop: -4 }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="close" size={16} color={COLORS.textMuted} />
-                      </TouchableOpacity>
-                    </View>
-                    <Text style={[s.notifMsg, { marginTop: 4, lineHeight: 17 }]}>{n.msg}</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                      <Text style={s.notifTime}>{n.time}</Text>
-                      {n.badgeText && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: n.color + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.sm }}>
-                          <Text style={{ fontSize: 11, fontWeight: '800', color: n.color }}>{n.badgeText}</Text>
-                          <Ionicons name="chevron-forward" size={12} color={n.color} />
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -878,22 +914,183 @@ const s = StyleSheet.create({
   },
 
   // Published price card
-  priceCard: { borderWidth: 1, borderColor: COLORS.border },
-  priceCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
-  priceSourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  sourceDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
-  priceSource: { fontSize: 13, fontWeight: '700', color: COLORS.text },
-  priceUpdated: { fontSize: 10, color: COLORS.textMuted, flexShrink: 1, textAlign: 'right' },
-  pricePairRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  pricePairItem: { flex: 1, gap: 2 },
-  pricePairTag: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  pricePairValue: { fontSize: 26, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
-  priceChangeRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  priceChangeTxt: { fontSize: 12, fontWeight: '700', color: COLORS.success },
-  pricePairUnit: { fontSize: 11, color: COLORS.textMuted },
-  pricePairDivider: { width: 1, backgroundColor: COLORS.border, marginHorizontal: SPACING.md, alignSelf: 'stretch' },
-  sraEditHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
-  sraEditText: { fontSize: 11, color: COLORS.primary, fontWeight: '600', flex: 1 },
+  priceCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.lg,
+    backgroundColor: '#FFFFFF',
+  },
+  priceCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  priceSourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  sourceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+  },
+  priceSource: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.text,
+    flexShrink: 1,
+  },
+  priceDateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  priceDateBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+
+  // Sugar section (dominant)
+  sugarSection: {
+    marginBottom: 4,
+  },
+  sugarTagRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  sugarTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  sugarPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  sugarPriceValue: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: COLORS.primary,
+    letterSpacing: -1,
+  },
+  sugarUnitText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+
+  // Subtle Divider
+  priceSectionDivider: {
+    height: 1,
+    backgroundColor: COLORS.divider,
+    marginVertical: 12,
+  },
+
+  // Molasses section (supporting sub-row underneath)
+  molassesSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.primaryBg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
+  },
+  molassesInfoCol: {
+    gap: 2,
+  },
+  molassesTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  molassesPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  molassesPriceValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+    letterSpacing: -0.3,
+  },
+  molassesUnitText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+
+  // Trend pills (matching Web badges)
+  trendPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADIUS.full,
+  },
+  trendPillUp: {
+    backgroundColor: COLORS.successLight,
+  },
+  trendPillDown: {
+    backgroundColor: COLORS.dangerBg,
+  },
+  trendPillSteady: {
+    backgroundColor: '#F3F4F6',
+  },
+  trendPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  trendTextUp: {
+    color: COLORS.success,
+  },
+  trendTextDown: {
+    color: COLORS.danger,
+  },
+  trendTextSteady: {
+    color: COLORS.textMuted,
+  },
+
+  sraEditHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  sraEditText: {
+    fontSize: 11,
+    color: COLORS.primary,
+    fontWeight: '600',
+    flex: 1,
+  },
 
   // Chart
   chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.xs },

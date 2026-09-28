@@ -6,6 +6,7 @@ export default function SystemHealthSummary({
   healthData = null,
   collectionCounts = {},
   isCheckingHealth = false,
+  isLoadingInventory = false,
   onRefreshHealth,
   className = ''
 }) {
@@ -133,6 +134,11 @@ export default function SystemHealthSummary({
           <h4 className="text-xs font-bold uppercase tracking-wider text-hug-muted">
             Authoritative Database Collection Ledger
           </h4>
+          {isLoadingInventory && (
+            <span role="status" className="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary dark:text-primary-light">
+              <Activity className="h-3.5 w-3.5 animate-spin" /> Refreshing inventory...
+            </span>
+          )}
           {!isDbAvailable && healthData !== null && (
             <span className="text-[11px] font-bold text-danger bg-danger-bg px-2.5 py-0.5 rounded-full">
               Database Unreachable
@@ -145,7 +151,7 @@ export default function SystemHealthSummary({
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
             <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Users</span>
             <span className="text-xl font-black text-hug-text block">
-              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.users ?? 0)}
+              {isLoadingInventory ? 'Loading…' : !isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.users ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {!isDbAvailable && healthData !== null ? 'connection failed' : 'accounts'}
@@ -156,7 +162,7 @@ export default function SystemHealthSummary({
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
             <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Block Farms</span>
             <span className="text-xl font-black text-hug-text block">
-              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.blockFarms ?? 0)}
+              {isLoadingInventory ? 'Loading…' : !isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.blockFarms ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {!isDbAvailable && healthData !== null ? 'connection failed' : 'clusters'}
@@ -167,7 +173,7 @@ export default function SystemHealthSummary({
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
             <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Fields / Plots</span>
             <span className="text-xl font-black text-hug-text block">
-              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.fields ?? 0)}
+              {isLoadingInventory ? 'Loading…' : !isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.fields ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {!isDbAvailable && healthData !== null ? 'connection failed' : 'registries'}
@@ -178,7 +184,7 @@ export default function SystemHealthSummary({
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
             <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">Operation Logs</span>
             <span className="text-xl font-black text-primary dark:text-primary-light block">
-              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.operations ?? 0)}
+              {isLoadingInventory ? 'Loading…' : !isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.operations ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {!isDbAvailable && healthData !== null ? 'connection failed' : 'logged activities'}
@@ -192,7 +198,9 @@ export default function SystemHealthSummary({
               className={`${activeCropYears.length > 1 ? 'text-sm' : 'text-xl'} font-black text-hug-text block truncate`}
               title={activeCropYears.join(', ')}
             >
-              {(!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
+              {isLoadingInventory
+                ? 'Loading…'
+                : (!isDbAvailable && healthData !== null) || collectionCounts.cropCycles === 'UNAVAILABLE'
                 ? 'Unavailable'
                 : collectionCounts.cropCycles == null
                   ? 'Loading...'
@@ -211,7 +219,7 @@ export default function SystemHealthSummary({
           <div className="p-3.5 bg-surface-subtle rounded-xl border border-border">
             <span className="text-[10px] text-hug-muted uppercase font-bold block mb-1">SRA Circulars</span>
             <span className="text-xl font-black text-hug-text block">
-              {!isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.prices ?? 0)}
+              {isLoadingInventory ? 'Loading…' : !isDbAvailable && healthData !== null ? 'Unavailable' : (collectionCounts.prices ?? 0)}
             </span>
             <span className="text-[10px] text-hug-muted block">
               {!isDbAvailable && healthData !== null ? 'connection failed' : 'published prices'}

@@ -257,6 +257,7 @@ test('role routes and clients preserve agricultural/system separation and scoped
   const syncTable = fs.readFileSync(path.join(root, 'web/react-app/src/components/sync/SyncTelemetryTable.jsx'), 'utf8');
   const syncSummary = fs.readFileSync(path.join(root, 'web/react-app/src/components/sync/SyncDiagnosticsSummary.jsx'), 'utf8');
   const webTelemetry = fs.readFileSync(path.join(root, 'web/react-app/src/services/telemetryService.js'), 'utf8');
+  const webAuth = fs.readFileSync(path.join(root, 'web/react-app/src/context/AuthContext.jsx'), 'utf8');
   const mobileMonitor = fs.readFileSync(path.join(root, 'mobile/src/screens/SyncMonitorScreen.js'), 'utf8');
   const mobileManagerDashboard = fs.readFileSync(path.join(root, 'mobile/src/screens/manager/ManagerHomeView.js'), 'utf8');
   const mobileHome = fs.readFileSync(path.join(root, 'mobile/src/screens/HomeScreen.js'), 'utf8');
@@ -307,13 +308,15 @@ test('role routes and clients preserve agricultural/system separation and scoped
   assert.match(syncTable, /showIcons && <Users/);
   assert.match(syncTable, /activityAttentionPresentation\(subject\.activity\)/);
   assert.match(webTelemetry, /activity\.attentionStatus === 'CRITICAL'/);
+  assert.match(webAuth, /if \(isLoading \|\| !user\) return undefined/);
+  assert.match(webAuth, /\[isLoading, user\?\.employeeId\]/);
   assert.match(service, /ATTENTION_INACTIVITY_MS = 3 \* DAY_MS/);
   assert.match(service, /CRITICAL_INACTIVITY_MS = 5 \* DAY_MS/);
   assert.match(service, /where\('blockFarmId', ids\.length === 1 \? '==' : 'in'/);
   assert.doesNotMatch(service, /collection\(COLLECTIONS\.FIELDS\)\.get\(\)/);
   assert.match(service, /filter\(user => user\.status === 'ACTIVE'\)/);
   assert.doesNotMatch(route, /req\.query.*blockFarmId|req\.body.*userId/);
-  assert.match(mobileMonitor, /setInterval\(refresh, 30000\)/);
+  assert.match(mobileMonitor, /setInterval\(refresh, 2 \* 60 \* 1000\)/);
   assert.match(mobileMonitor, /navigation\.addListener\('blur', stop\)/);
   assert.match(mobileMonitor, /t\('sync_member_activity'\)/);
   assert.match(mobileMonitor, /activityStatusLabel\(member\.activity, t\)/);

@@ -73,9 +73,11 @@ test('mobile operation ordering keeps an offline record in its chronological pos
 });
 
 test('mobile Crop Year Cycle preview is deterministic and display-only formatting preserves storage', async () => {
-  const { cropYearCycleForDate, formatCropYearDisplay } = await loadMobileDataHelpers();
+  const { cropYearCycleForDate, formatCropYearDisplay, nextCropYearCycle } = await loadMobileDataHelpers();
   assert.equal(cropYearCycleForDate(new Date('2027-06-01T00:00:00.000Z')), '2027-2028');
   assert.equal(formatCropYearDisplay('2027-2028'), '2027–2028');
+  assert.equal(nextCropYearCycle('2026-2027'), '2027-2028');
+  assert.equal(nextCropYearCycle('invalid'), '');
 });
 
 test('mobile Crop Year Cycle options exclude invalid years and deduplicate across fields', async () => {

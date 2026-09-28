@@ -70,10 +70,6 @@ export default function DiagnosticsConsoleView() {
 
   useEffect(() => {
     load();
-    const timer = setInterval(() => {
-      if (document.visibilityState !== 'hidden' && navigator.onLine !== false) load();
-    }, 30000);
-    return () => clearInterval(timer);
   }, [load]);
 
   const counts = useMemo(() => ({

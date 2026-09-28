@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sortNewestFirst, sortOperationsNewestFirst, timestampMillis } from '../src/utils/recordOrdering.js';
-import { canonicalStoredCropYear, formatCropYear, formatCropYearDisplay, uniqueCropYears } from '../src/utils/formatters.js';
+import { canonicalStoredCropYear, formatCropYear, formatCropYearDisplay, nextCropYearCycle, uniqueCropYears } from '../src/utils/formatters.js';
 
 test('web chronological selectors are newest-first, stable, and non-mutating', () => {
   const input = [
@@ -29,6 +29,7 @@ test('web timestamp normalization handles Firestore Timestamp values', () => {
 test('Crop Year Cycle storage remains canonical while display uses an en dash', () => {
   assert.equal(formatCropYear('2026–2027'), '2026-2027');
   assert.equal(formatCropYearDisplay('2026-2027'), '2026–2027');
+  assert.equal(nextCropYearCycle('2026-2027'), '2027-2028');
 });
 
 test('Crop Year Cycle filter years are strict, unique, newest-first, and non-mutating', () => {

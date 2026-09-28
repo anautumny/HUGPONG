@@ -12,7 +12,8 @@ const {
   finiteNumber,
   nowIso,
   normalizeCropYear,
-  cropYearParts
+  cropYearParts,
+  nextCropYearParts
 } = require('../schema/firestoreSchema');
 const { CROP_STAGE_MAX, CROP_STAGE_MIN } = require('../domain/cropStages');
 const { getOperationDefinition } = require('../domain/operationCatalogue');
@@ -543,10 +544,10 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       archivedByUserId: actorId,
       updatedAt: timestamp
     };
-    const nextCropYear = cropYearParts(null, timestamp);
+    const nextCropYear = nextCropYearParts(oldCycle.cropYear);
     const duplicateAnnualCycle = fieldCycles.docs.find(doc => normalizeCropYear(doc.data().cropYear) === nextCropYear.cropYear);
     if (duplicateAnnualCycle) {
-      throw serviceError('This field already has a Crop Year Cycle for the server-generated annual range.', 409, {
+      throw serviceError('This field already has a Crop Year Cycle for the next annual range.', 409, {
         code: 'DUPLICATE_CROP_YEAR_CYCLE',
         cropYearCycle: nextCropYear.cropYear,
         cycleId: duplicateAnnualCycle.id

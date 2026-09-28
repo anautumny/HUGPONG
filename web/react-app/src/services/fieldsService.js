@@ -98,9 +98,10 @@ export async function startCropYearCycle(fieldId, payload = {}, takeoverGrant = 
 }
 
 export async function rolloverCropYearCycle(fieldId, payload, takeoverGrant = null) {
+  const { cropYear: _clientCropYear, ...serverOwnedPayload } = payload || {};
   return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, {
     method: 'POST',
     headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {},
-    body: payload
+    body: serverOwnedPayload
   });
 }

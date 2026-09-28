@@ -4,6 +4,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Badge from '../ui/Badge';
+import { canonicalAuditStatus, auditStatusLabel, AUDIT_STATUS } from '../../domain/auditWorkflow';
 
 export default function AuditHistoryModal({
   isOpen = false,
@@ -17,16 +18,24 @@ export default function AuditHistoryModal({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
 
   // Extract unique periods
   const periods = useMemo(() => {
-    const set = new Set(reports.map(r => r.period || r.month).filter(Boolean));
+    const set = new Set(reports.map(r => r.periodKey || r.period || r.month).filter(Boolean));
     return Array.from(set).sort().reverse();
   }, [reports]);
 
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
-      if (r.status !== 'CERTIFIED') return false;
+      const statusCanonical = canonicalAuditStatus(r.status);
+      if (selectedStatus === 'AWAITING_REVIEW' && statusCanonical !== AUDIT_STATUS.PENDING_REVIEW) {
+        return false;
+      }
+      if (selectedStatus === 'CERTIFIED' && statusCanonical !== AUDIT_STATUS.CERTIFIED) {
+        return false;
+      }
+
       const p = r.periodKey || r.period || r.month || '';
       if (selectedPeriod !== 'ALL' && p !== selectedPeriod) return false;
 
@@ -34,9 +43,36 @@ export default function AuditHistoryModal({
       const term = searchTerm.toLowerCase();
       const hash = (r.qrHash || r.id || '').toLowerCase();
       const farm = (blockFarms.find(f => f.id === r.blockFarmId)?.name || r.blockFarmId || '').toLowerCase();
-      return hash.includes(term) || farm.includes(term) || p.toLowerCase().includes(term);
+      const statusStr = (auditStatusLabel(r.status) || '').toLowerCase();
+      return hash.includes(term) || farm.includes(term) || p.toLowerCase().includes(term) || statusStr.includes(term);
     });
-  }, [reports, selectedPeriod, searchTerm, blockFarms]);
+  }, [reports, selectedPeriod, selectedStatus, searchTerm, blockFarms]);
+
+  const summaryMetrics = useMemo(() => {
+    let totalLogs = 0;
+    let totalAreaHa = 0;
+    let totalCost = 0;
+
+    for (const report of filteredReports) {
+      const logs = Array.isArray(report.operationSnapshots)
+        ? report.operationSnapshots.length
+        : (report.totalLogs || report.operationCount || 0);
+      totalLogs += Number(logs || 0);
+
+      const ha = Number(
+        report.hectaresAudited != null
+          ? report.hectaresAudited
+          : (report.totalHectares != null
+            ? report.totalHectares
+            : report.areaHa || 0)
+      );
+      totalAreaHa += ha;
+
+      totalCost += Number(report.totalCost || report.cost || 0);
+    }
+
+    return { totalLogs, totalAreaHa, totalCost };
+  }, [filteredReports]);
 
   const getFarmName = (id) => {
     const f = blockFarms.find(farm => farm.id === id);
@@ -53,7 +89,7 @@ export default function AuditHistoryModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Audit History"
-      subtitle="Certified monthly audits. The newest 20 load first, load more only when needed."
+      subtitle="Monthly audit records and review statuses. The newest load first, load more only when needed."
       size="xl"
       footer={
         <Button variant="secondary" size="md" onClick={onClose}>
@@ -64,45 +100,99 @@ export default function AuditHistoryModal({
       <div className="flex flex-col gap-4 text-xs">
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Period Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-            <button
-              type="button"
-              onClick={() => setSelectedPeriod('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                selectedPeriod === 'ALL'
-                  ? 'bg-primary text-white shadow-2xs'
-                  : 'bg-bg dark:bg-[#0C1015] text-hug-muted hover:text-hug-text border border-border'
-              }`}
-            >
-              All Periods
-            </button>
-            {periods.map(p => (
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 flex-wrap">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status Filter Pills */}
+            <div className="flex items-center gap-1 bg-surface border border-border p-1 rounded-xl shrink-0">
+              {[
+                { id: 'ALL', label: 'All Status' },
+                { id: 'AWAITING_REVIEW', label: 'Awaiting Review' },
+                { id: 'CERTIFIED', label: 'Certified' }
+              ].map(st => (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => setSelectedStatus(st.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    selectedStatus === st.id
+                      ? 'bg-primary text-white shadow-2xs'
+                      : 'text-hug-muted hover:text-hug-text'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Period Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
               <button
-                key={p}
                 type="button"
-                onClick={() => setSelectedPeriod(p)}
+                onClick={() => setSelectedPeriod('ALL')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                  selectedPeriod === p
+                  selectedPeriod === 'ALL'
                     ? 'bg-primary text-white shadow-2xs'
-                    : 'bg-bg dark:bg-[#0C1015] text-hug-muted hover:text-hug-text border border-border'
+                    : 'bg-bg dark:bg-surface-subtle text-hug-muted hover:text-hug-text border border-border'
                 }`}
               >
-                {p}
+                All Periods
               </button>
-            ))}
+              {periods.map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setSelectedPeriod(p)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    selectedPeriod === p
+                      ? 'bg-primary text-white shadow-2xs'
+                      : 'bg-bg dark:bg-surface-subtle text-hug-muted hover:text-hug-text border border-border'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Search box */}
           <div className="w-full sm:w-64">
             <Input
               type="search"
-              placeholder="Search farm or hash..."
+              placeholder="Search farm, hash, status..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="text-xs"
             />
+          </div>
+        </div>
+
+        {/* Summary Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-hug-muted truncate block">
+              Compiled Logs
+            </span>
+            <span className="text-lg sm:text-xl font-black text-hug-text font-mono mt-1 truncate block">
+              {summaryMetrics.totalLogs.toLocaleString()} {summaryMetrics.totalLogs === 1 ? 'log' : 'logs'}
+            </span>
+          </div>
+
+          <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-hug-muted truncate block">
+              Active Area
+            </span>
+            <span className="text-lg sm:text-xl font-black text-hug-text font-mono mt-1 truncate block">
+              {summaryMetrics.totalAreaHa > 0 ? `${summaryMetrics.totalAreaHa.toFixed(2)} Ha` : '0.00 Ha'}
+            </span>
+          </div>
+
+          <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-hug-muted truncate block">
+              Total Cost
+            </span>
+            <span className="text-lg sm:text-xl font-black text-primary dark:text-primary-light font-mono mt-1 truncate block">
+              ₱{summaryMetrics.totalCost.toLocaleString()}
+            </span>
           </div>
         </div>
 
@@ -116,7 +206,7 @@ export default function AuditHistoryModal({
             </div>
           ) : (
             <table className="w-full min-w-[700px] text-left text-xs border-collapse">
-              <thead className="bg-bg dark:bg-[#0C1015] text-hug-muted uppercase text-[10px] font-bold border-b border-border sticky top-0 z-10 whitespace-nowrap">
+              <thead className="bg-bg dark:bg-surface-subtle text-hug-muted uppercase text-[10px] font-bold border-b border-border sticky top-0 z-10 whitespace-nowrap">
                 <tr>
                   <th className="px-3.5 py-2.5">Period</th>
                   <th className="px-3.5 py-2.5">Block Farm</th>
@@ -129,7 +219,15 @@ export default function AuditHistoryModal({
               </thead>
               <tbody className="divide-y divide-border/60 text-hug-text">
                 {filteredReports.map(report => {
-                  const isCert = report.status === 'CERTIFIED';
+                  const statusCanonical = canonicalAuditStatus(report.status);
+                  const isCert = statusCanonical === AUDIT_STATUS.CERTIFIED;
+                  const isAwaiting = statusCanonical === AUDIT_STATUS.PENDING_REVIEW;
+                  const statusLabel = isCert
+                    ? 'Certified'
+                    : isAwaiting
+                    ? 'Awaiting Review'
+                    : auditStatusLabel(report.status) || 'Compiled';
+                  const badgeVariant = isCert ? 'success' : isAwaiting ? 'warning' : 'neutral';
                   const logs = Array.isArray(report.operationSnapshots) ? report.operationSnapshots : [];
                   const cost = Number(report.totalCost || 0);
 
@@ -151,8 +249,8 @@ export default function AuditHistoryModal({
                         ₱{cost.toLocaleString()}
                       </td>
                       <td className="px-3.5 py-2.5 text-center whitespace-nowrap">
-                        <Badge variant={isCert ? 'success' : 'warning'} size="sm">
-                          {isCert ? 'Certified' : 'Pending'}
+                        <Badge variant={badgeVariant} size="sm">
+                          {statusLabel}
                         </Badge>
                       </td>
                       <td className="px-3.5 py-2.5 text-right whitespace-nowrap">

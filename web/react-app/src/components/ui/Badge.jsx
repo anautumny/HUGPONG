@@ -31,7 +31,7 @@ export default function Badge({
   return (
     <span
       className={`
-        inline-flex items-center font-bold rounded-full border tracking-wide select-none
+        inline-flex items-center font-bold rounded-full border tracking-wide select-none whitespace-nowrap shrink-0
         ${variantStyles[variant] || variantStyles.neutral}
         ${sizeStyles[size] || sizeStyles.sm}
         ${className}
@@ -42,7 +42,7 @@ export default function Badge({
           className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotStyles[variant] || dotStyles.neutral}`}
         />
       )}
-      <span>{children}</span>
+      <span className="whitespace-nowrap">{children}</span>
     </span>
   );
 }

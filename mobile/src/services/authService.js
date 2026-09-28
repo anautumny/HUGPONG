@@ -191,9 +191,16 @@ export async function changePasswordWithServer(currentPassword, newPassword, ses
 }
 
 export async function changePhoneWithServer(phone, currentPassword) {
-  const result = await authenticatedRequest('/auth/change-phone', {
+  return authenticatedRequest('/auth/change-phone', {
     method: 'POST',
     body: { phone, currentPassword }
+  });
+}
+
+export async function verifyPhoneChangeWithServer(phone, code) {
+  const result = await authenticatedRequest('/auth/change-phone/verify', {
+    method: 'POST',
+    body: { phone, code }
   });
   await signInToFirebase(result.firebaseCustomToken);
   await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);

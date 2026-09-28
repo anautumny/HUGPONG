@@ -6,6 +6,7 @@ import {
   DatabaseBackup,
   Download,
   FileKey2,
+  Loader2,
   RefreshCw,
   ShieldCheck,
   Upload
@@ -195,7 +196,7 @@ export default function BackupManagementView() {
               <input type="password" value={exportForm.confirmPassphrase} onChange={event => setExportForm(prev => ({ ...prev, confirmPassphrase: event.target.value }))} autoComplete="new-password" required minLength={16} maxLength={128} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
             </label>
             <button type="submit" disabled={creating} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white hover:bg-primary-dark disabled:opacity-50">
-              <Download className="h-4 w-4" /> {creating ? 'Creating encrypted backup…' : 'Create and download backup'}
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {creating ? 'Creating encrypted backup…' : 'Create and download backup'}
             </button>
           </form>
         </section>
@@ -216,7 +217,7 @@ export default function BackupManagementView() {
               <input type="password" value={restoreForm.backupPassphrase} onChange={event => { setRestoreForm(prev => ({ ...prev, backupPassphrase: event.target.value })); setValidation(null); }} autoComplete="off" required minLength={16} maxLength={128} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
             </label>
             <button type="submit" disabled={validating || !file} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary-bg px-4 py-3 text-sm font-bold text-primary hover:bg-primary/15 disabled:opacity-50">
-              <ShieldCheck className="h-4 w-4" /> {validating ? 'Validating backup…' : 'Run safe validation'}
+              {validating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} {validating ? 'Validating backup…' : 'Run safe validation'}
             </button>
           </form>
 
@@ -234,7 +235,7 @@ export default function BackupManagementView() {
                 <input type="text" value={restoreForm.confirmation} onChange={event => setRestoreForm(prev => ({ ...prev, confirmation: event.target.value }))} autoComplete="off" className="mt-1.5 w-full rounded-xl border border-warning/40 bg-white px-3.5 py-2.5 font-mono text-sm text-hug-text outline-none focus:border-warning dark:bg-[#121820]" />
               </label>
               <button type="button" onClick={recoverMissing} disabled={restoring || validation.plan.missingCount === 0 || restoreForm.confirmation !== RESTORE_CONFIRMATION} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-warning px-4 py-3 text-sm font-black text-white disabled:opacity-50">
-                <Upload className="h-4 w-4" /> {restoring ? 'Recovering missing records…' : 'Recover missing records'}
+                {restoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} {restoring ? 'Recovering missing records…' : 'Recover missing records'}
               </button>
             </div>
           )}

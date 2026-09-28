@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
+import { ScreenHeader, SearchableSelect } from '../components/ui';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { draftLogs, fieldsStore, getCurrentSession, saveFieldOperationSchedule, saveLocalOperationDraft, subscribe } from '../data/dataStore';
 import { SRA_OPERATIONS_CATALOGUE } from '../domain/operationCatalogue';
@@ -75,6 +76,14 @@ export default function PlannerScreen({ navigation, route }) {
   }, [navigation, route?.params?.selectedDate]);
 
   const fields = useMemo(() => allFields.filter(field => getOperationCapabilities(session, field).canPlan), [allFields, session]);
+  const fieldOptions = useMemo(() => {
+    return fields.map(item => ({
+      id: item.id,
+      label: item.id,
+      sublabel: `${item.ha || item.areaHa || 0} Ha · Stage ${item.stageNumber || 1} · Crop Year ${item.cropYear || 'Current'}`,
+      icon: 'leaf-outline',
+    }));
+  }, [fields]);
   useEffect(() => {
     if (!fields.some(field => field.id === selectedFieldId)) setSelectedFieldId(fields[0]?.id || '');
   }, [fields, selectedFieldId]);
@@ -220,14 +229,71 @@ export default function PlannerScreen({ navigation, route }) {
   const formEstimate = Number(form.estimatedLabor || 0) + Number(form.estimatedMaterials || 0) + Number(form.estimatedOther || 0);
   const headerLabel = viewMode === 'MONTH' ? anchorDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' }) : `${displayDate(startOfWeek(anchorDate), false, locale)} – ${displayDate(addDays(startOfWeek(anchorDate), 6), false, locale)}`;
 
+  if (showEditor) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <ScreenHeader
+          title={form.id ? t('planner_edit_work') : t('planner_schedule_farm_work')}
+          subtitle={t('planner_free_form_note')}
+          onBackPress={() => {
+            if (!isSaving) setShowEditor(false);
+          }}
+        />
+        <ScrollView
+          contentContainerStyle={s.editorContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.editorCard}>
+            <Text style={s.inputLabel}>{t('planner_planned_date')}</Text>
+            <TextInput style={s.input} value={form.plannedDate} onChangeText={value => setForm(current => ({ ...current, plannedDate: value }))} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+            <Text style={s.inputLabel}>{t('planner_planned_activity')}</Text>
+            <TextInput style={s.input} value={form.customName} onChangeText={value => setForm(current => ({ ...current, customName: value }))} placeholder={t('planner_activity_placeholder')} maxLength={300} />
+            <Text style={s.inputHelp}>{t('planner_stage_later_help')}</Text>
+          </View>
+
+          <View style={s.estimateBox}>
+            <Text style={s.estimateTitle}>{t('planner_estimated_cost_optional')}</Text>
+            <Text style={s.estimateHint}>{t('planner_estimates_disclaimer')}</Text>
+            <EstimateInput label={t('planner_estimated_labor')} value={form.estimatedLabor} onChange={value => setForm(current => ({ ...current, estimatedLabor: value }))} />
+            <EstimateInput label={t('planner_estimated_materials')} value={form.estimatedMaterials} onChange={value => setForm(current => ({ ...current, estimatedMaterials: value }))} />
+            <EstimateInput label={t('planner_estimated_other')} value={form.estimatedOther} onChange={value => setForm(current => ({ ...current, estimatedOther: value }))} />
+            <View style={s.estimateTotal}><Text style={s.estimateTotalLabel}>{t('planner_estimated_total')}</Text><Text style={s.estimateTotalValue}>{money(formEstimate)}</Text></View>
+          </View>
+
+          <View style={s.editorCard}>
+            <Text style={s.inputLabel}>{t('planner_notes_optional')}</Text>
+            <TextInput style={[s.input, s.notes]} value={form.notes} onChangeText={value => setForm(current => ({ ...current, notes: value }))} multiline placeholder={t('planner_notes_placeholder')} />
+          </View>
+
+          <TouchableOpacity style={[s.saveButton, isSaving && s.disabled]} onPress={saveEntry} disabled={isSaving}>
+            {isSaving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveButtonText}>{t('planner_save_schedule')}</Text>}
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return <SafeAreaView style={s.safe} edges={['top']}>
     <AppHeader />
     <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
       <View><Text style={s.title}>{t('planner_screen_title')}</Text><Text style={s.subtitle}>{t('planner_screen_sub')}</Text></View>
+      {isSaving && !showEditor && (
+        <View style={s.savingBanner} accessibilityRole="progressbar" accessibilityLabel="Saving schedule changes">
+          <ActivityIndicator size="small" color={COLORS.primary} />
+          <Text style={s.savingBannerText}>{t('planner_saving_schedule', 'Saving schedule changes...')}</Text>
+        </View>
+      )}
       {fields.length === 0 ? <EmptyState t={t} /> : <>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.fieldRow}>
-          {fields.map(item => <TouchableOpacity key={item.id} style={[s.fieldChip, selectedFieldId === item.id && s.fieldChipActive]} onPress={() => setSelectedFieldId(item.id)}><Text style={[s.fieldChipText, selectedFieldId === item.id && s.fieldChipTextActive]}>{item.id} · {item.ha || item.areaHa} Ha</Text></TouchableOpacity>)}
-        </ScrollView>
+        <SearchableSelect
+          label={t('field_plot', 'Active Sugarcane Field Plot')}
+          options={fieldOptions}
+          selectedValue={selectedFieldId}
+          onSelect={(opt) => setSelectedFieldId(opt.id)}
+          modalTitle={t('select_field_plot', 'Select Sugarcane Field Plot')}
+          searchPlaceholder={t('search_fields', 'Search by plot ID or size...')}
+          leftIcon="leaf"
+        />
         <View style={s.contextCard}><Text style={s.eyebrow}>{t('planner_current_stage')}</Text><Text style={s.contextTitle}>{stage?.name || `${t('stage')} ${field?.stageNumber || 1}`}</Text><Text style={s.contextText}>{t('planner_field_context')} {field?.id} · {t('planner_crop_year_context')} {field?.cropYear || t('planner_current_cycle')}</Text></View>
         <View style={s.statusRow}><StatusBox label={t('planner_upcoming')} value={counts.UPCOMING} /><StatusBox label={t('status_completed')} value={counts.COMPLETED} blue /><StatusBox label={t('planner_overdue')} value={counts.OVERDUE} red /></View>
         <View style={s.calendarCard}>
@@ -248,16 +314,6 @@ export default function PlannerScreen({ navigation, route }) {
         <View style={s.upcomingCard}><Text style={s.sectionTitle}>{t('planner_upcoming_title')}</Text><Text style={s.sectionHint}>{t('planner_upcoming_sub')}</Text>{upcoming.length ? upcoming.map(entry => <TouchableOpacity key={entry.id} style={s.upcomingRow} onPress={() => { setSelectedDate(entry.plannedDate); setAnchorDate(localDate(entry.plannedDate)); }}><View style={s.upcomingDate}><Text style={s.upcomingMonth}>{localDate(entry.plannedDate).toLocaleDateString(locale, { month: 'short' }).toUpperCase()}</Text><Text style={s.upcomingDay}>{localDate(entry.plannedDate).getDate()}</Text></View><View style={s.upcomingCopy}><Text style={s.upcomingTitle}>{entry.childOperationName || entry.operationName}</Text><Text style={s.upcomingMeta}>{t('planner_flexible_plan')}</Text></View></TouchableOpacity>) : <Text style={s.emptyText}>{t('planner_no_upcoming')}</Text>}</View>
       </>}
     </ScrollView>
-    <Modal visible={showEditor} animationType="slide" transparent onRequestClose={() => !isSaving && setShowEditor(false)}><View style={s.modalOverlay}><View style={s.modalSheet}>
-      <View style={s.modalHeader}><View style={s.modalHeading}><Text style={s.modalTitle}>{form.id ? t('planner_edit_work') : t('planner_schedule_farm_work')}</Text><Text style={s.modalSubtitle}>{t('planner_free_form_note')}</Text></View><TouchableOpacity style={s.closeButton} onPress={() => setShowEditor(false)} disabled={isSaving}><Ionicons name="close" size={26} color={COLORS.text} /></TouchableOpacity></View>
-      <ScrollView contentContainerStyle={s.modalContent} keyboardShouldPersistTaps="handled">
-        <Text style={s.inputLabel}>{t('planner_planned_date')}</Text><TextInput style={s.input} value={form.plannedDate} onChangeText={value => setForm(current => ({ ...current, plannedDate: value }))} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
-        <Text style={s.inputLabel}>{t('planner_planned_activity')}</Text><TextInput style={s.input} value={form.customName} onChangeText={value => setForm(current => ({ ...current, customName: value }))} placeholder={t('planner_activity_placeholder')} maxLength={300} /><Text style={s.inputHelp}>{t('planner_stage_later_help')}</Text>
-        <View style={s.estimateBox}><Text style={s.estimateTitle}>{t('planner_estimated_cost_optional')}</Text><Text style={s.estimateHint}>{t('planner_estimates_disclaimer')}</Text><EstimateInput label={t('planner_estimated_labor')} value={form.estimatedLabor} onChange={value => setForm(current => ({ ...current, estimatedLabor: value }))} /><EstimateInput label={t('planner_estimated_materials')} value={form.estimatedMaterials} onChange={value => setForm(current => ({ ...current, estimatedMaterials: value }))} /><EstimateInput label={t('planner_estimated_other')} value={form.estimatedOther} onChange={value => setForm(current => ({ ...current, estimatedOther: value }))} /><View style={s.estimateTotal}><Text style={s.estimateTotalLabel}>{t('planner_estimated_total')}</Text><Text style={s.estimateTotalValue}>{money(formEstimate)}</Text></View></View>
-        <Text style={s.inputLabel}>{t('planner_notes_optional')}</Text><TextInput style={[s.input, s.notes]} value={form.notes} onChangeText={value => setForm(current => ({ ...current, notes: value }))} multiline placeholder={t('planner_notes_placeholder')} />
-        <TouchableOpacity style={[s.saveButton, isSaving && s.disabled]} onPress={saveEntry} disabled={isSaving}>{isSaving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveButtonText}>{t('planner_save_schedule')}</Text>}</TouchableOpacity>
-      </ScrollView>
-    </View></View></Modal>
   </SafeAreaView>;
 }
 
@@ -273,9 +329,12 @@ function ScheduleCard({ entry, today, drafting, inDraft, onDraft, onEdit, onRemo
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background }, page: { padding: SPACING.lg, paddingBottom: 120, gap: SPACING.lg },
+  editorContent: { padding: SPACING.lg, paddingBottom: 48, gap: SPACING.md },
+  editorCard: { padding: SPACING.lg, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, ...SHADOW.card },
   title: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: COLORS.text }, subtitle: { marginTop: 4, fontSize: 15, lineHeight: 22, color: COLORS.textSecondary },
   fieldRow: { gap: 8, paddingVertical: 2 }, fieldChip: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 16, borderRadius: RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.surface }, fieldChipActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }, fieldChipText: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary }, fieldChipTextActive: { color: COLORS.primary },
   contextCard: { padding: 16, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, eyebrow: { fontSize: 12, fontWeight: '800', letterSpacing: 0.8, color: COLORS.primary }, contextTitle: { marginTop: 6, fontSize: 18, lineHeight: 24, fontWeight: '800', color: COLORS.text }, contextText: { marginTop: 5, fontSize: 14, color: COLORS.textSecondary },
+  savingBanner: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 14, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, savingBannerText: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
   statusRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 }, statusBox: { flex: 1, minWidth: 0, padding: 12, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, statusRed: { backgroundColor: COLORS.dangerBg, borderColor: '#F2C5C2' }, statusBlue: { backgroundColor: COLORS.blueBg, borderColor: '#B8DAEE' }, statusValue: { fontSize: 22, fontWeight: '900', color: COLORS.text }, statusLabel: { marginTop: 2, fontSize: 12, lineHeight: 16, fontWeight: '700', color: COLORS.textSecondary, flexShrink: 1 },
   calendarCard: { padding: 12, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.card }, calendarTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, segment: { flexDirection: 'row', padding: 3, borderRadius: RADIUS.md, backgroundColor: COLORS.background }, segmentButton: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 16, borderRadius: RADIUS.sm }, segmentActive: { backgroundColor: COLORS.surface, ...SHADOW.card }, segmentText: { fontSize: 14, fontWeight: '700', color: COLORS.textMuted }, segmentTextActive: { color: COLORS.primary },
   todayButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 15, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primary }, todayButtonText: { fontSize: 14, fontWeight: '800', color: COLORS.primary }, navRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, navButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.full, backgroundColor: COLORS.background }, periodTitle: { flex: 1, paddingHorizontal: 6, textAlign: 'center', fontSize: 17, fontWeight: '800', color: COLORS.text },

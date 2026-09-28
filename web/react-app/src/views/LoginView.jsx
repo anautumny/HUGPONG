@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { LogIn, Eye, EyeOff, Lock, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft, Sun, Moon, Monitor } from 'lucide-react';
+import { LogIn, Eye, EyeOff, Lock, User, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft, Github, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ROLE_KEYS } from '../utils/authRouting';
@@ -194,34 +194,83 @@ export default function LoginView() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between items-center p-4 sm:p-6 bg-bg text-hug-text selection:bg-primary selection:text-white">
-      {/* Top Brand Link */}
-      <div className="w-full max-w-md pt-4 flex justify-between items-center">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-hug-muted hover:text-hug-text transition-colors"
-          aria-label="Back to landing page"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back</span>
-        </Link>
-        <span className="text-[11px] font-bold text-hug-muted uppercase tracking-wider">
-          SRA Gateway
-        </span>
-      </div>
+    <div className="min-h-screen relative flex flex-col justify-between overflow-x-hidden bg-bg text-hug-text selection:bg-primary selection:text-white transition-colors duration-200">
+      {/* Subtle Ambient Lighting & Dot Texture Backdrops */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-80 bg-gradient-to-b from-primary/10 via-primary/3 to-transparent blur-3xl pointer-events-none -z-10" />
+      <div 
+        className="absolute inset-0 bg-[radial-gradient(var(--color-primary,#2d5016)_1px,transparent_1px)] opacity-[0.035] dark:opacity-[0.06] [background-size:24px_24px] pointer-events-none -z-10" 
+        aria-hidden="true" 
+      />
 
-      {/* Main Login Card */}
-      <div className="max-w-md w-full my-auto bg-surface border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
+      {/* Top Header (100% Consistent with Landing Page) */}
+      <header className="w-full px-6 sm:px-10 lg:px-16 py-4 flex items-center justify-between border-b border-border relative z-30 bg-surface/90 backdrop-blur-md">
+        {/* Brand Logo */}
+        <Link to="/" className="flex items-center gap-3 group">
+          <div className="brand-logo-box w-10 h-10 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center shadow-xs overflow-hidden group-hover:border-primary/40 transition-colors">
+            <img src="/logo.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
+          </div>
+          <div className="flex flex-col">
+            <span className="font-display font-black text-xl tracking-tight text-hug-text leading-none">
+              HUGPONG
+            </span>
+            <span className="text-[10px] font-bold text-hug-muted tracking-wider uppercase mt-0.5">
+              Sugarcane Digital Governance
+            </span>
+          </div>
+        </Link>
+
+        {/* Navigation Links */}
+        <nav className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm font-semibold text-hug-text2">
+          <a
+            href="https://github.com/Mattaeeee/HUGPONG/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-primary transition-colors hidden sm:flex items-center gap-1.5"
+          >
+            <Github className="w-4 h-4 text-hug-muted shrink-0" />
+            <span>GitHub Releases (APK)</span>
+          </a>
+
+          <Link
+            to="/"
+            className="px-5 py-2.5 rounded-xl bg-surface hover:bg-surface-subtle text-hug-text border border-border font-bold transition-all shadow-xs hover:shadow flex items-center gap-1.5"
+          >
+            <ArrowLeft className="w-4 h-4 text-hug-muted" />
+            <span>Home</span>
+          </Link>
+
+          {/* Theme Switcher: Light / Dark / System (Very Right) */}
+          <button
+            type="button"
+            onClick={cycleTheme}
+            className="p-2 sm:p-2.5 rounded-xl border border-border bg-surface text-hug-text2 hover:text-primary hover:bg-surface-subtle transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
+            title={'Current theme: ' + theme + '. Click to switch (Light, Dark, System).'}
+            aria-label={'Current theme: ' + theme + '. Click to switch.'}
+          >
+            {theme === 'dark' ? (
+              <Moon className="w-4 h-4 text-primary-light" />
+            ) : theme === 'light' ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : (
+              <Monitor className="w-4 h-4 text-hug-muted" />
+            )}
+          </button>
+        </nav>
+      </header>
+
+      {/* Main Login Card Container */}
+      <main className="flex-1 w-full flex items-center justify-center p-4 sm:p-6 z-20 my-auto">
+        <div className="max-w-md w-full bg-surface/95 dark:bg-surface/90 border border-border/90 rounded-3xl p-6 sm:p-8 shadow-xl shadow-black/[0.03] dark:shadow-black/25 backdrop-blur-md transition-all">
         {/* Header */}
         <div className="flex flex-col items-center text-center gap-3 mb-6">
-          <div className="brand-logo-box w-12 h-12 rounded-xl bg-white border border-border/80 p-1.5 flex items-center justify-center shadow-xs">
+          <div className="brand-logo-box w-14 h-14 rounded-2xl bg-white border border-border/80 p-2 flex items-center justify-center shadow-xs">
             <img src="/logo.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
           </div>
           <div>
-            <h1 className="font-display text-xl sm:text-2xl font-black text-hug-text tracking-tight">
+            <h1 className="font-display text-2xl font-black text-hug-text tracking-tight">
               Sign In to HUGPONG
             </h1>
-            <p className="text-xs font-semibold text-hug-muted mt-0.5">
+            <p className="text-xs font-semibold text-hug-muted mt-1">
               Sugar Regulatory Administration &amp; Farm Console
             </p>
           </div>
@@ -229,7 +278,7 @@ export default function LoginView() {
 
         {/* Session Expired / Status Notice */}
         {sessionExpiredNotice && (
-          <div className="mb-4 p-3 rounded-xl bg-warning-bg text-warning text-xs font-medium flex items-center gap-2 border border-warning/30">
+          <div className="mb-4 p-3 rounded-xl bg-warning-bg text-warning text-xs font-semibold flex items-center gap-2 border border-warning/30 animate-in fade-in duration-200">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{sessionExpiredNotice}</span>
           </div>
@@ -237,7 +286,7 @@ export default function LoginView() {
 
         {/* Error Notice */}
         {errorMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-danger-bg text-danger text-xs font-medium flex items-center gap-2 border border-danger/30">
+          <div className="mb-4 p-3 rounded-xl bg-danger-bg text-danger text-xs font-semibold flex items-center gap-2 border border-danger/30 animate-in fade-in duration-200">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{errorMessage}</span>
           </div>
@@ -247,44 +296,52 @@ export default function LoginView() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* User ID / Contact Number */}
           <div>
-            <label className="block text-xs font-semibold text-hug-text2 mb-1.5" htmlFor="contact-input">
+            <label className="block text-xs font-bold text-hug-text2 uppercase tracking-wider mb-1.5" htmlFor="contact-input">
               User ID or Mobile Number
             </label>
-            <input
-              id="contact-input"
-              type="text"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="e.g. 03000001 or 09170000003"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-subtle text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-mono"
-              autoComplete="username"
-              disabled={isSubmitting || lockoutRemaining > 0}
-              required
-            />
+            <div className="relative flex items-center">
+              <div className="absolute left-3.5 pointer-events-none text-hug-muted">
+                <User className="w-4 h-4" />
+              </div>
+              <input
+                id="contact-input"
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="e.g. 03000001 or 09170000003"
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-border bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all font-medium placeholder:text-hug-muted/70"
+                autoComplete="username"
+                disabled={isSubmitting || lockoutRemaining > 0}
+                required
+              />
+            </div>
           </div>
 
           {/* Password Input */}
           <div>
             <div className="flex justify-between items-center mb-1.5">
-              <label className="block text-xs font-semibold text-hug-text2" htmlFor="password-input">
+              <label className="block text-xs font-bold text-hug-text2 uppercase tracking-wider" htmlFor="password-input">
                 Password
               </label>
               <button
                 type="button"
                 onClick={() => setIsRecoveryModalOpen(true)}
-                className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                className="text-[11px] font-bold text-primary hover:underline cursor-pointer transition-colors"
               >
                 Lost SIM or Password?
               </button>
             </div>
-            <div className="relative">
+            <div className="relative flex items-center">
+              <div className="absolute left-3.5 pointer-events-none text-hug-muted">
+                <Lock className="w-4 h-4" />
+              </div>
               <input
                 id="password-input"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-border bg-surface-subtle text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-border bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all font-medium placeholder:text-hug-muted/70"
                 autoComplete="current-password"
                 disabled={isSubmitting || lockoutRemaining > 0}
                 required
@@ -292,7 +349,7 @@ export default function LoginView() {
               <button
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-hug-muted hover:text-hug-text cursor-pointer p-1"
+                className="absolute right-2.5 text-hug-muted hover:text-hug-text cursor-pointer p-1 rounded-md hover:bg-surface transition-colors"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -301,16 +358,16 @@ export default function LoginView() {
           </div>
 
           {/* RA 10173 Consent Checkbox */}
-          <div className="pt-1">
-            <label className="flex items-start gap-2.5 cursor-pointer select-none text-[11px] text-hug-text2">
+          <div className="pt-0.5">
+            <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-surface-subtle/60 border border-border/60 hover:border-border cursor-pointer select-none text-[11px] text-hug-text2 transition-colors">
               <input
                 type="checkbox"
                 id="login-consent-checkbox"
                 checked={consentChecked}
                 onChange={(e) => setConsentChecked(e.target.checked)}
-                className="mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 focus:outline-none h-3.5 w-3.5 shrink-0"
+                className="mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 focus:outline-none h-4 w-4 shrink-0 accent-primary cursor-pointer"
               />
-              <span className="leading-tight">
+              <span className="leading-snug">
                 I acknowledge that my session and records are processed under the{' '}
                 <Link to="/privacy" target="_blank" className="text-primary font-bold hover:underline">
                   Privacy Policy (RA 10173)
@@ -328,7 +385,7 @@ export default function LoginView() {
             id="submit-btn"
             type="submit"
             disabled={isSubmitting || lockoutRemaining > 0}
-            className="w-full bg-primary hover:bg-primary-hover text-white font-bold text-sm rounded-xl py-3 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-xs hover:shadow"
+            className="w-full bg-primary hover:bg-primary-hover text-white font-bold text-sm rounded-xl py-3 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-sm hover:shadow active:scale-[0.99]"
           >
             {isSubmitting ? (
               <>
@@ -345,28 +402,23 @@ export default function LoginView() {
         </form>
 
         {/* Security Gateway Badge */}
-        <div className="flex items-center justify-center gap-2 pt-4 text-[11px] text-hug-muted border-t border-border mt-4">
+        <div className="flex items-center justify-center gap-2 pt-4 text-[11px] font-semibold text-hug-muted border-t border-border mt-5">
           <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
           <span>Authenticated HUGPONG session</span>
         </div>
+        </div>
+      </main>
 
-      </div>
-
-      {/* Footer Legal Links */}
-      <div className="flex flex-col items-center gap-2 py-4 text-xs text-hug-muted text-center">
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <Link to="/privacy" className="hover:text-primary transition-colors">Privacy Policy</Link>
-          <span>&middot;</span>
+      {/* Footer */}
+      <footer className="w-full px-6 sm:px-10 lg:px-16 py-4 sm:py-5 border-t border-border flex flex-col md:flex-row items-center justify-between gap-3 text-xs font-semibold text-hug-muted relative z-30 bg-surface/90 backdrop-blur-md">
+        <p>&copy; 2026 HUGPONG Agricultural Platform.</p>
+        <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+          <Link to="/privacy" className="hover:text-primary transition-colors">Privacy Policy (RA 10173)</Link>
           <Link to="/terms" className="hover:text-primary transition-colors">Terms of Use</Link>
-          <span>&middot;</span>
           <Link to="/compliance" className="hover:text-primary transition-colors">Compliance</Link>
-          <span>&middot;</span>
           <Link to="/cookies" className="hover:text-primary transition-colors">Cookie Policy</Link>
         </div>
-        <p className="text-[11px]">
-          HUGPONG Agricultural Platform &middot; Cloud-Synchronized Network
-        </p>
-      </div>
+      </footer>
 
       {/* Account Recovery Advisory Modal */}
       <AccountRecoveryModal

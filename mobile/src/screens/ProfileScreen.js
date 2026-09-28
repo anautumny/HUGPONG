@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, Alert, Switch, TextInput, Platform, ActivityIndicator,
+  Alert, Switch, TextInput, Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
+import { ScreenHeader } from '../components/ui';
 import LegalPolicyModal from '../components/LegalPolicyModal';
 import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
 import {
@@ -21,8 +22,6 @@ import { useTranslation, LANGUAGES } from '../services/i18n';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { canCreateSupportTicket, SUPPORT_TICKET_CATEGORIES, supportStatusLabel } from '../domain/supportTickets';
 
-const { height } = Dimensions.get('window');
-
 export default function ProfileScreen({ navigation }) {
   const { t, language, setLanguage, formatSyncTime } = useTranslation();
   const [session, setSessionState] = useState(getCurrentSession());
@@ -31,6 +30,7 @@ export default function ProfileScreen({ navigation }) {
   const [dataVersion, setDataVersion] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const [lastSync, setLastSync] = useState('Today, 8:05 AM');
   const [langExpanded, setLangExpanded] = useState(false);
   const [autoSync, setAutoSync] = useState(true);
@@ -144,6 +144,7 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const clearCache = () => {
+    if (isClearingCache) return;
     Alert.alert(
       t('cache_clear_confirm_title', 'Clear Cache?'),
       t('cache_clear_confirm_msg', 'This will remove all locally cached drafts and reset offline buffers. Unsynced local drafts will be wiped.\n\nAre you sure you want to proceed?'),
@@ -153,8 +154,15 @@ export default function ProfileScreen({ navigation }) {
           text: t('profile_cache', 'Clear Local Cache'), 
           style: 'destructive', 
           onPress: async () => {
-            await resetLocalCache();
-            Alert.alert(t('cache_cleared', 'Cache Cleared'), t('cache_cleared_msg', 'Local offline buffer and cached drafts have been reset.'));
+            setIsClearingCache(true);
+            try {
+              await resetLocalCache();
+              Alert.alert(t('cache_cleared', 'Cache Cleared'), t('cache_cleared_msg', 'Local offline buffer and cached drafts have been reset.'));
+            } catch (error) {
+              Alert.alert(t('error_title', 'Cache Clear Failed'), error.message || 'The local cache could not be cleared.');
+            } finally {
+              setIsClearingCache(false);
+            }
           } 
         },
       ]
@@ -205,6 +213,272 @@ export default function ProfileScreen({ navigation }) {
       );
     }
   };
+
+  // ── In-App Sub-Screen: Legal Information ──
+  if (showLegalModal) {
+    return (
+      <LegalPolicyModal
+        visible={true}
+        onClose={() => setShowLegalModal(false)}
+      />
+    );
+  }
+
+  // ── In-App Sub-Screen: Help & Support Desk ──
+  if (showTicketsModal) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <ScreenHeader
+          title={t('support_desk_title', 'Help & Support Desk')}
+          subtitle={t('support_desk_sub', 'Create a support ticket and check Super Admin responses')}
+          onBackPress={() => setShowTicketsModal(false)}
+        />
+
+        {/* Segment Switcher */}
+        <View style={s.ticketTabWrap}>
+          <View style={s.ticketSegmentTrack}>
+            {ticketCreationAllowed && (
+              <TouchableOpacity
+                style={[s.ticketTabBtn, ticketTab === 'submit' && s.ticketTabBtnActive]}
+                onPress={() => setTicketTab('submit')}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="create-outline" size={14} color={ticketTab === 'submit' ? COLORS.primary : COLORS.textMuted} />
+                <Text style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]} numberOfLines={1}>
+                  {t('ticket_tab_send', 'New Ticket')}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[s.ticketTabBtn, ticketTab === 'active' && s.ticketTabBtnActive]}
+              onPress={() => setTicketTab('active')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="file-tray-full-outline" size={14} color={ticketTab === 'active' ? COLORS.primary : COLORS.textMuted} />
+              <Text style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]} numberOfLines={1}>
+                {t('ticket_tab_my', 'My Tickets')} ({activeTickets.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.ticketTabBtn, ticketTab === 'history' && s.ticketTabBtnActive]}
+              onPress={() => setTicketTab('history')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="time-outline" size={14} color={ticketTab === 'history' ? COLORS.primary : COLORS.textMuted} />
+              <Text style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]} numberOfLines={1}>
+                History
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Body */}
+        <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+              {ticketTab === 'submit' ? (
+                <>
+                  <View style={s.ticketNoticeBox}>
+                    <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
+                    <Text style={s.ticketNoticeText}>
+                      {t('ticket_intro', 'Need assistance with offline sync, plot boundaries, or app errors? Your ticket will be queued directly to the cooperative dispatch team.')}
+                    </Text>
+                  </View>
+
+                  {/* Category Picker */}
+                  <View style={{ gap: 6 }}>
+                    <Text style={s.formLabel}>{t('ticket_issue_category', 'Issue Category')}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {SUPPORT_TICKET_CATEGORIES.map(category => {
+                        const active = ticketForm.category === category;
+                        return (
+                          <TouchableOpacity
+                            key={category}
+                            style={[s.categoryChip, active && s.categoryChipActive]}
+                            onPress={() => setTicketForm(p => ({ ...p, category }))}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[s.categoryChipText, active && s.categoryChipTextActive]}>{category}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* Subject */}
+                  <View style={{ gap: 6 }}>
+                    <Text style={s.formLabel}>{t('ticket_subject', 'Subject / Short Summary')}</Text>
+                    <TextInput
+                      style={s.ticketInput}
+                      placeholder="e.g. Cannot sync field operation logs"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={ticketForm.title}
+                      onChangeText={val => setTicketForm(p => ({ ...p, title: val }))}
+                    />
+                  </View>
+
+                  {/* Details */}
+                  <View style={{ gap: 6 }}>
+                    <Text style={s.formLabel}>{t('ticket_description', 'Detailed Description')}</Text>
+                    <TextInput
+                      style={[s.ticketInput, s.ticketInputArea]}
+                      placeholder="Describe what happened, any error messages, or what you need help with..."
+                      placeholderTextColor={COLORS.textMuted}
+                      multiline
+                      value={ticketForm.details}
+                      onChangeText={val => setTicketForm(p => ({ ...p, details: val }))}
+                    />
+                  </View>
+
+                  {/* Submit Button */}
+                  <TouchableOpacity
+                    style={[s.ticketSubmitBtn, (!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket) && { opacity: 0.5 }]}
+                    disabled={!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket}
+                    onPress={async () => {
+                      if (ticketSubmitLock.current) return;
+                      ticketSubmitLock.current = true;
+                      setIsSubmittingTicket(true);
+                      try {
+                        const created = await submitSupportTicket({
+                          title: ticketForm.title.trim(),
+                          category: ticketForm.category,
+                          details: ticketForm.details.trim()
+                        });
+                        setTicketsList([...supportTickets]);
+                        setTicketForm({ title: '', category: 'Synchronization', details: '' });
+                        setTicketTab('active');
+                        Alert.alert(
+                          created?.queued ? 'Ticket Queued' : 'Ticket Submitted',
+                          created?.queued
+                            ? 'Ticket queued for submission. It will be sent automatically when the connection returns.'
+                            : `Support received ticket #${created?.id || 'TICK-NEW'}. Status: Open.`
+                        );
+                      } catch (error) {
+                        Alert.alert('Unable to Save Ticket', error.message || 'Please try again.');
+                      } finally {
+                        ticketSubmitLock.current = false;
+                        setIsSubmittingTicket(false);
+                      }
+                    }}
+                  >
+                    {isSubmittingTicket ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="paper-plane-outline" size={17} color="#fff" />}
+                    <Text style={s.ticketSubmitBtnText}>{isSubmittingTicket ? 'Submitting...' : t('ticket_btn_send', 'Submit Ticket')}</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  {(ticketTab === 'history' ? ticketHistory : activeTickets).length === 0 ? (
+                    <View style={s.emptyTicketBox}>
+                      <Ionicons name="chatbubbles-outline" size={42} color={COLORS.textMuted} />
+                      <Text style={s.emptyTicketTitle}>{ticketTab === 'history' ? 'No Ticket History Yet' : 'No Active Support Tickets'}</Text>
+                      <Text style={s.emptyTicketSub}>{ticketTab === 'history' ? 'Resolved tickets will appear here.' : 'Create a ticket whenever you need help from Super Admin.'}</Text>
+                      {ticketCreationAllowed && ticketTab !== 'history' && <TouchableOpacity style={s.createFirstTicketBtn} onPress={() => setTicketTab('submit')}><Text style={s.createFirstTicketText}>Create Ticket</Text></TouchableOpacity>}
+                    </View>
+                  ) : (
+                    (ticketTab === 'history' ? ticketHistory : activeTickets).map(t => {
+                      const canonicalStatus = String(t.status || 'OPEN').replace(/[\s-]+/g, '_').toUpperCase();
+                      const isResolved = canonicalStatus === 'RESOLVED' || canonicalStatus === 'CLOSED';
+                      const isInProgress = canonicalStatus === 'IN_PROGRESS';
+                      const isPending = canonicalStatus === 'PENDING_SUBMISSION';
+                      const statusBg = isResolved ? '#E8F5E9' : (isInProgress ? '#E8F5E4' : '#FFF8E1');
+                      const statusBorder = isResolved ? '#C8E6C9' : (isInProgress ? '#A3D9A5' : '#FDE68A');
+                      const statusColor = isResolved ? COLORS.success : (isInProgress ? COLORS.primary : '#A16207');
+                      const statusIcon = isResolved ? 'checkmark-circle' : (isInProgress ? 'time-outline' : (isPending ? 'cloud-upload-outline' : 'ellipse-outline'));
+                      const statusText = supportStatusLabel(canonicalStatus);
+
+                      const ticketTitle = t.title || t.subject || 'Support Ticket';
+                      const ticketDetails = t.details || t.messages?.[0]?.text || 'No description provided';
+                      const ticketDate = t.date || (t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent');
+
+                      return (
+                        <View key={t.id} style={s.ticketCard}>
+                          <View style={s.ticketTopRow}>
+                            <View style={s.ticketIdBadge}>
+                              <Ionicons name="ticket-outline" size={12} color={COLORS.primary} />
+                              <Text style={s.ticketIdText}>{t.id}</Text>
+                            </View>
+                            <View style={[s.ticketStatusBadge, { backgroundColor: statusBg, borderColor: statusBorder }]}>
+                              <Ionicons name={statusIcon} size={12} color={statusColor} />
+                              <Text style={[s.ticketStatusText, { color: statusColor }]}>{statusText}</Text>
+                            </View>
+                          </View>
+
+                          <Text style={s.ticketCardTitle}>{ticketTitle}</Text>
+                          <Text style={s.ticketCardDetails}>{ticketDetails}</Text>
+
+                          <View style={s.ticketMetaRow}>
+                            <View style={s.ticketPill}>
+                              <Text style={s.ticketPillText}>{t.category || 'Other'}</Text>
+                            </View>
+                            <View style={[s.priorityPill, t.priority === 'Critical' ? { backgroundColor: '#FEE2E2' } : (t.priority === 'High' ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#F0F8EC' })]}>
+                              <Text style={[s.priorityPillText, t.priority === 'Critical' ? { color: '#DC2626' } : (t.priority === 'High' ? { color: '#D97706' } : { color: COLORS.primary })]}>
+                                {t.priority || 'Normal'}
+                              </Text>
+                            </View>
+                            <Text style={s.ticketDateText}>{ticketDate}</Text>
+                          </View>
+
+                          {(t.messages || []).slice(1).map((message, index) => (
+                            <View key={message.messageId || index} style={s.adminResponseBox}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="chatbubble-ellipses-outline" size={13} color={COLORS.primary} />
+                                <Text style={[s.adminResponseLabel, { color: COLORS.primary }]}>{message.authorName || 'Super Admin'}:</Text>
+                              </View>
+                              <Text style={s.adminResponseBody}>{message.content || message.text}</Text>
+                            </View>
+                          ))}
+
+                          {t.resolutionNotes && !(t.messages || []).some(message => message.content === t.resolutionNotes) ? (
+                            <View style={s.adminResponseBox}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="checkmark-done" size={13} color={COLORS.success} />
+                                <Text style={s.adminResponseLabel}>Admin Resolution Response:</Text>
+                              </View>
+                              <Text style={s.adminResponseBody}>{t.resolutionNotes}</Text>
+                            </View>
+                          ) : null}
+
+                          {['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(canonicalStatus) && (
+                            <View style={{ gap: 8, marginTop: 4 }}>
+                              <TextInput
+                                style={s.ticketInput}
+                                placeholder="Add a follow-up message..."
+                                placeholderTextColor={COLORS.textMuted}
+                                value={ticketReplies[t.id] || ''}
+                                onChangeText={value => setTicketReplies(current => ({ ...current, [t.id]: value }))}
+                                editable={sendingTicketReplyId !== t.id}
+                              />
+                              <TouchableOpacity
+                                style={[s.ticketSubmitBtn, { marginTop: 0, minHeight: 42, paddingVertical: 10 }, (!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id) && { opacity: 0.5 }]}
+                                disabled={!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id}
+                                onPress={async () => {
+                                  setSendingTicketReplyId(t.id);
+                                  try {
+                                    const result = await addSupportTicketMessage(t.id, ticketReplies[t.id]);
+                                    setTicketsList([...supportTickets]);
+                                    setTicketReplies(current => ({ ...current, [t.id]: '' }));
+                                    Alert.alert(result.queued ? 'Follow-up Queued' : 'Follow-up Sent', result.queued ? 'Your message is saved and will be retried when connected.' : 'Your follow-up is now visible to support.');
+                                  } catch (error) {
+                                    Alert.alert('Unable to Send', error.message || 'Please try again.');
+                                  } finally {
+                                    setSendingTicketReplyId(null);
+                                  }
+                                }}
+                              >
+                                {sendingTicketReplyId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send-outline" size={15} color="#fff" />}
+                                <Text style={s.ticketSubmitBtnText}>{sendingTicketReplyId === t.id ? 'Sending...' : 'Send Follow-up'}</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })
+                  )}
+                </>
+              )}
+            </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -433,12 +707,12 @@ export default function ProfileScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={s.settingRow} onPress={clearCache}>
+          <TouchableOpacity style={[s.settingRow, isClearingCache && { opacity: 0.6 }]} onPress={clearCache} disabled={isClearingCache}>
             <View style={{ flex: 1 }}>
-              <Text style={[s.settingLabel, { color: '#DC2626' }]}>{t('profile_cache', 'Clear Local Cache')}</Text>
+              <Text style={[s.settingLabel, { color: '#DC2626' }]}>{isClearingCache ? 'Clearing Local Cache...' : t('profile_cache', 'Clear Local Cache')}</Text>
               <Text style={s.settingSubLabel}>{t('profile_cache_sub')}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+            {isClearingCache ? <ActivityIndicator size="small" color="#DC2626" /> : <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />}
           </TouchableOpacity>
         </View>
 
@@ -525,271 +799,7 @@ export default function ProfileScreen({ navigation }) {
         </Text>
       </ScrollView>
 
-      {/* ── Support & Tickets Modal ── */}
-      <Modal visible={showTicketsModal} animationType="slide" onRequestClose={() => setShowTicketsModal(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
-            {/* Header */}
-            <View style={s.ticketHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                <View style={s.ticketIconWrap}>
-                  <Ionicons name="help-buoy-outline" size={22} color={COLORS.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.ticketTitle}>{t('support_desk_title', 'Help & Support Desk')}</Text>
-                  <Text style={s.ticketSub}>{t('support_desk_sub', 'Create a support ticket and check Super Admin responses')}</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => setShowTicketsModal(false)} style={s.ticketCloseBtn}>
-                <Ionicons name="close" size={20} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Segment Switcher */}
-            <View style={s.ticketTabWrap}>
-              <View style={s.ticketSegmentTrack}>
-                {ticketCreationAllowed && (
-                  <TouchableOpacity
-                    style={[s.ticketTabBtn, ticketTab === 'submit' && s.ticketTabBtnActive]}
-                    onPress={() => setTicketTab('submit')}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="create-outline" size={14} color={ticketTab === 'submit' ? COLORS.primary : COLORS.textMuted} />
-                    <Text style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]} numberOfLines={1}>
-                      {t('ticket_tab_send', 'New Ticket')}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  style={[s.ticketTabBtn, ticketTab === 'active' && s.ticketTabBtnActive]}
-                  onPress={() => setTicketTab('active')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="file-tray-full-outline" size={14} color={ticketTab === 'active' ? COLORS.primary : COLORS.textMuted} />
-                  <Text style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]} numberOfLines={1}>
-                    {t('ticket_tab_my', 'My Tickets')} ({activeTickets.length})
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.ticketTabBtn, ticketTab === 'history' && s.ticketTabBtnActive]}
-                  onPress={() => setTicketTab('history')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="time-outline" size={14} color={ticketTab === 'history' ? COLORS.primary : COLORS.textMuted} />
-                  <Text style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]} numberOfLines={1}>
-                    History
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Body */}
-            <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-              {ticketTab === 'submit' ? (
-                <>
-                  <View style={s.ticketNoticeBox}>
-                    <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
-                    <Text style={s.ticketNoticeText}>
-                      {t('ticket_intro', 'Need assistance with offline sync, plot boundaries, or app errors? Your ticket will be queued directly to the cooperative dispatch team.')}
-                    </Text>
-                  </View>
-
-                  {/* Category Picker */}
-                  <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_issue_category', 'Issue Category')}</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {SUPPORT_TICKET_CATEGORIES.map(category => {
-                        const active = ticketForm.category === category;
-                        return (
-                          <TouchableOpacity
-                            key={category}
-                            style={[s.categoryChip, active && s.categoryChipActive]}
-                            onPress={() => setTicketForm(p => ({ ...p, category }))}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={[s.categoryChipText, active && s.categoryChipTextActive]}>{category}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  {/* Subject */}
-                  <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_subject', 'Subject / Short Summary')}</Text>
-                    <TextInput
-                      style={s.ticketInput}
-                      placeholder="e.g. Cannot sync field operation logs"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={ticketForm.title}
-                      onChangeText={val => setTicketForm(p => ({ ...p, title: val }))}
-                    />
-                  </View>
-
-                  {/* Details */}
-                  <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_description', 'Detailed Description')}</Text>
-                    <TextInput
-                      style={[s.ticketInput, s.ticketInputArea]}
-                      placeholder="Describe what happened, any error messages, or what you need help with..."
-                      placeholderTextColor={COLORS.textMuted}
-                      multiline
-                      value={ticketForm.details}
-                      onChangeText={val => setTicketForm(p => ({ ...p, details: val }))}
-                    />
-                  </View>
-
-                  {/* Submit Button */}
-                  <TouchableOpacity
-                    style={[s.ticketSubmitBtn, (!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket) && { opacity: 0.5 }]}
-                    disabled={!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket}
-                    onPress={async () => {
-                      if (ticketSubmitLock.current) return;
-                      ticketSubmitLock.current = true;
-                      setIsSubmittingTicket(true);
-                      try {
-                        const created = await submitSupportTicket({
-                          title: ticketForm.title.trim(),
-                          category: ticketForm.category,
-                          details: ticketForm.details.trim()
-                        });
-                        setTicketsList([...supportTickets]);
-                        setTicketForm({ title: '', category: 'Synchronization', details: '' });
-                        setTicketTab('active');
-                        Alert.alert(
-                          created?.queued ? 'Ticket Queued' : 'Ticket Submitted',
-                          created?.queued
-                            ? 'Ticket queued for submission. It will be sent automatically when the connection returns.'
-                            : `Support received ticket #${created?.id || 'TICK-NEW'}. Status: Open.`
-                        );
-                      } catch (error) {
-                        Alert.alert('Unable to Save Ticket', error.message || 'Please try again.');
-                      } finally {
-                        ticketSubmitLock.current = false;
-                        setIsSubmittingTicket(false);
-                      }
-                    }}
-                  >
-                    {isSubmittingTicket ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="paper-plane-outline" size={17} color="#fff" />}
-                    <Text style={s.ticketSubmitBtnText}>{isSubmittingTicket ? 'Submitting...' : t('ticket_btn_send', 'Submit Ticket')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  {(ticketTab === 'history' ? ticketHistory : activeTickets).length === 0 ? (
-                    <View style={s.emptyTicketBox}>
-                      <Ionicons name="chatbubbles-outline" size={42} color={COLORS.textMuted} />
-                      <Text style={s.emptyTicketTitle}>{ticketTab === 'history' ? 'No Ticket History Yet' : 'No Active Support Tickets'}</Text>
-                      <Text style={s.emptyTicketSub}>{ticketTab === 'history' ? 'Resolved tickets will appear here.' : 'Create a ticket whenever you need help from Super Admin.'}</Text>
-                      {ticketCreationAllowed && ticketTab !== 'history' && <TouchableOpacity style={s.createFirstTicketBtn} onPress={() => setTicketTab('submit')}><Text style={s.createFirstTicketText}>Create Ticket</Text></TouchableOpacity>}
-                    </View>
-                  ) : (
-                    (ticketTab === 'history' ? ticketHistory : activeTickets).map(t => {
-                      const canonicalStatus = String(t.status || 'OPEN').replace(/[\s-]+/g, '_').toUpperCase();
-                      const isResolved = canonicalStatus === 'RESOLVED' || canonicalStatus === 'CLOSED';
-                      const isInProgress = canonicalStatus === 'IN_PROGRESS';
-                      const isPending = canonicalStatus === 'PENDING_SUBMISSION';
-                      const statusBg = isResolved ? '#E8F5E9' : (isInProgress ? '#E8F5E4' : '#FFF8E1');
-                      const statusBorder = isResolved ? '#C8E6C9' : (isInProgress ? '#A3D9A5' : '#FDE68A');
-                      const statusColor = isResolved ? COLORS.success : (isInProgress ? COLORS.primary : '#A16207');
-                      const statusIcon = isResolved ? 'checkmark-circle' : (isInProgress ? 'time-outline' : (isPending ? 'cloud-upload-outline' : 'ellipse-outline'));
-                      const statusText = supportStatusLabel(canonicalStatus);
-
-                      const ticketTitle = t.title || t.subject || 'Support Ticket';
-                      const ticketDetails = t.details || t.messages?.[0]?.text || 'No description provided';
-                      const ticketDate = t.date || (t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent');
-
-                      return (
-                        <View key={t.id} style={s.ticketCard}>
-                          <View style={s.ticketTopRow}>
-                            <View style={s.ticketIdBadge}>
-                              <Ionicons name="ticket-outline" size={12} color={COLORS.primary} />
-                              <Text style={s.ticketIdText}>{t.id}</Text>
-                            </View>
-                            <View style={[s.ticketStatusBadge, { backgroundColor: statusBg, borderColor: statusBorder }]}>
-                              <Ionicons name={statusIcon} size={12} color={statusColor} />
-                              <Text style={[s.ticketStatusText, { color: statusColor }]}>{statusText}</Text>
-                            </View>
-                          </View>
-
-                          <Text style={s.ticketCardTitle}>{ticketTitle}</Text>
-                          <Text style={s.ticketCardDetails}>{ticketDetails}</Text>
-
-                          <View style={s.ticketMetaRow}>
-                            <View style={s.ticketPill}>
-                              <Text style={s.ticketPillText}>{t.category || 'Other'}</Text>
-                            </View>
-                            <View style={[s.priorityPill, t.priority === 'Critical' ? { backgroundColor: '#FEE2E2' } : (t.priority === 'High' ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#F0F8EC' })]}>
-                              <Text style={[s.priorityPillText, t.priority === 'Critical' ? { color: '#DC2626' } : (t.priority === 'High' ? { color: '#D97706' } : { color: COLORS.primary })]}>
-                                {t.priority || 'Normal'}
-                              </Text>
-                            </View>
-                            <Text style={s.ticketDateText}>{ticketDate}</Text>
-                          </View>
-
-                          {(t.messages || []).slice(1).map((message, index) => (
-                            <View key={message.messageId || index} style={s.adminResponseBox}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Ionicons name="chatbubble-ellipses-outline" size={13} color={COLORS.primary} />
-                                <Text style={[s.adminResponseLabel, { color: COLORS.primary }]}>{message.authorName || 'Super Admin'}:</Text>
-                              </View>
-                              <Text style={s.adminResponseBody}>{message.content || message.text}</Text>
-                            </View>
-                          ))}
-
-                          {t.resolutionNotes && !(t.messages || []).some(message => message.content === t.resolutionNotes) ? (
-                            <View style={s.adminResponseBox}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Ionicons name="checkmark-done" size={13} color={COLORS.success} />
-                                <Text style={s.adminResponseLabel}>Admin Resolution Response:</Text>
-                              </View>
-                              <Text style={s.adminResponseBody}>{t.resolutionNotes}</Text>
-                            </View>
-                          ) : null}
-
-                          {['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(canonicalStatus) && (
-                            <View style={{ gap: 8, marginTop: 4 }}>
-                              <TextInput
-                                style={s.ticketInput}
-                                placeholder="Add a follow-up message..."
-                                placeholderTextColor={COLORS.textMuted}
-                                value={ticketReplies[t.id] || ''}
-                                onChangeText={value => setTicketReplies(current => ({ ...current, [t.id]: value }))}
-                                editable={sendingTicketReplyId !== t.id}
-                              />
-                              <TouchableOpacity
-                                style={[s.ticketSubmitBtn, { marginTop: 0, minHeight: 42, paddingVertical: 10 }, (!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id) && { opacity: 0.5 }]}
-                                disabled={!String(ticketReplies[t.id] || '').trim() || sendingTicketReplyId === t.id}
-                                onPress={async () => {
-                                  setSendingTicketReplyId(t.id);
-                                  try {
-                                    const result = await addSupportTicketMessage(t.id, ticketReplies[t.id]);
-                                    setTicketsList([...supportTickets]);
-                                    setTicketReplies(current => ({ ...current, [t.id]: '' }));
-                                    Alert.alert(result.queued ? 'Follow-up Queued' : 'Follow-up Sent', result.queued ? 'Your message is saved and will be retried when connected.' : 'Your follow-up is now visible to support.');
-                                  } catch (error) {
-                                    Alert.alert('Unable to Send', error.message || 'Please try again.');
-                                  } finally {
-                                    setSendingTicketReplyId(null);
-                                  }
-                                }}
-                              >
-                                {sendingTicketReplyId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send-outline" size={15} color="#fff" />}
-                                <Text style={s.ticketSubmitBtnText}>{sendingTicketReplyId === t.id ? 'Sending...' : 'Send Follow-up'}</Text>
-                              </TouchableOpacity>
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })
-                  )}
-                </>
-              )}
-            </ScrollView>
-          </SafeAreaView>
-      </Modal>
-
-      <LegalPolicyModal visible={showLegalModal} onClose={() => setShowLegalModal(false)} />
+      
     </SafeAreaView>
   );
 }

@@ -75,6 +75,23 @@ export default function AuditCenterView() {
     [activeReports]
   );
 
+  const allAuditHistoryReports = useMemo(() => {
+    const map = new Map();
+    (reports || []).forEach(r => {
+      const id = r.id || r.reportId;
+      if (id) map.set(id, r);
+    });
+    if (isSraAdmin && Array.isArray(historyReports)) {
+      historyReports.forEach(r => {
+        const id = r.id || r.reportId;
+        if (id && !map.has(id)) {
+          map.set(id, r);
+        }
+      });
+    }
+    return Array.from(map.values());
+  }, [isSraAdmin, reports, historyReports]);
+
   useEffect(() => {
     if (isFarmManager && searchParams.get('compile') === '1') {
       setShowCompileModal(true);
@@ -366,7 +383,7 @@ export default function AuditCenterView() {
         <AuditHistoryModal
           isOpen={showHistoryModal}
           onClose={() => setShowHistoryModal(false)}
-          reports={isSraAdmin ? historyReports : reports.filter(report => report.status === 'CERTIFIED')}
+          reports={allAuditHistoryReports}
           blockFarms={blockFarms}
           onSelectReport={(report) => setSelectedReport(report)}
           onLoadMore={() => loadHistory({ append: true })}

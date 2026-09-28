@@ -11,35 +11,44 @@ export default function ThemePreferences({
     {
       id: 'light',
       label: 'Light Mode',
-      description: 'Clean high-contrast daytime interface',
+      description: 'Daytime interface',
       icon: Sun
     },
     {
       id: 'dark',
       label: 'Dark Mode',
-      description: 'Sleek low-light night interface',
+      description: 'Low-light night',
       icon: Moon
     },
     {
       id: 'system',
       label: 'System Preference',
-      description: 'Automatically follows your operating system theme',
+      description: 'Follow OS theme',
       icon: Monitor
     }
   ];
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div>
-        <h3 className="text-base font-bold text-hug-text">
-          Appearance & Display Theme
-        </h3>
-        <p className="text-xs text-hug-muted mt-0.5">
-          Select your visual theme preference. Stored locally on this client device.
-        </p>
+    <div className={`space-y-3.5 ${className}`}>
+      {/* Section Header */}
+      <div className="flex items-center justify-between pb-1 border-b border-border/60">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <Sun className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-hug-text leading-tight">
+              Appearance &amp; Display Theme
+            </h3>
+            <p className="text-[11px] text-hug-muted leading-tight">
+              Interface style stored on this device
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl pt-1">
+      {/* 3 Theme Options */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-0.5">
         {themes.map((t) => {
           const Icon = t.icon;
           const isSelected = theme === t.id;
@@ -49,33 +58,33 @@ export default function ThemePreferences({
               key={t.id}
               type="button"
               onClick={() => setTheme(t.id)}
-              className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+              className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                 isSelected
-                  ? 'border-primary bg-primary-bg/20 dark:bg-primary/10 ring-2 ring-primary/20 shadow-xs'
-                  : 'border-border bg-bg/40 dark:bg-gray-800/40 hover:border-primary/40 hover:bg-bg'
+                  ? 'border-primary/80 bg-primary-bg/50 dark:bg-primary/20 ring-1 ring-primary/40 shadow-2xs'
+                  : 'border-border bg-surface-subtle/40 dark:bg-surface-elevated/20 hover:border-border-strong hover:bg-surface-subtle/80'
               }`}
             >
-              <div className="flex items-center justify-between mb-3">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+              <div className="flex items-center justify-between mb-2">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
                   isSelected
-                    ? 'bg-primary text-white'
-                    : 'bg-bg dark:bg-gray-700 text-hug-muted'
+                    ? 'bg-primary text-white shadow-2xs'
+                    : 'bg-surface dark:bg-surface-elevated text-hug-muted border border-border/60'
                 }`}>
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5" />
                 </div>
 
                 {isSelected && (
-                  <span className="w-4 h-4 rounded-full bg-primary text-white flex items-center justify-center">
-                    <Check className="w-3 h-3 stroke-[3]" />
+                  <span className="w-3.5 h-3.5 rounded-full bg-primary text-white flex items-center justify-center shrink-0 shadow-2xs">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
                   </span>
                 )}
               </div>
 
               <div>
-                <h4 className="text-xs font-bold text-hug-text">
+                <h4 className="text-xs font-bold text-hug-text leading-tight">
                   {t.label}
                 </h4>
-                <p className="text-[11px] text-hug-muted mt-0.5 leading-snug">
+                <p className="text-[10px] text-hug-muted mt-0.5 leading-tight truncate">
                   {t.description}
                 </p>
               </div>

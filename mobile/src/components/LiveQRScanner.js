@@ -187,8 +187,8 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close scanner" style={styles.closeButton} onPress={onClose}>
-            <Ionicons name="close" size={25} color="#FFFFFF" />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.closeButton} onPress={onClose}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.title}>Scan QR</Text>
           <View style={styles.headerSpacer} />

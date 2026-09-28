@@ -66,6 +66,26 @@ test('password change session choice is implemented across the server, web, and 
   assert.match(mobileAuth, /removeItems\(\[STORAGE_KEYS\.AUTH_TOKEN, STORAGE_KEYS\.SESSION\]\)/);
 });
 
+test('phone changes verify the proposed number before replacing the registered number on every client', () => {
+  const serverRoute = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
+  const webSettings = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/settings/ProfileSettings.jsx'), 'utf8');
+  const mobileSettings = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/SecurityScreen.js'), 'utf8');
+  const mobileStore = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/data/dataStore.js'), 'utf8');
+  const mobileAuth = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/services/authService.js'), 'utf8');
+
+  assert.match(serverRoute, /issueOtp\('change-phone', employeeId, phone\)/);
+  assert.match(serverRoute, /verifyAndConsumeOtp\('change-phone', employeeId, phone, code\)/);
+  assert.match(serverRoute, /router\.post\('\/change-phone\/verify'/);
+  assert.match(serverRoute, /phoneVerifiedAt: now/);
+  assert.match(serverRoute, /pendingFirstLoginVerification: false/);
+  assert.match(webSettings, /Your current number remains registered until the SMS code sent to the new number is verified/);
+  assert.match(webSettings, /\/auth\/change-phone\/verify/);
+  assert.match(mobileSettings, /current number stays registered until a code sent to the new number is successfully verified/);
+  assert.match(mobileSettings, /Verify &amp; Update Number/);
+  assert.match(mobileStore, /confirmUserMobileNumberChange/);
+  assert.match(mobileAuth, /verifyPhoneChangeWithServer/);
+});
+
 test('public user projection never returns credential material', () => {
   const projected = publicUser({
     displayName: 'Safe User',

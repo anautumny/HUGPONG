@@ -66,7 +66,7 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
 
 export function subscribeToTerminalDiagnostics({ onUpdate, onError }) {
   return subscribeToAuthenticatedResource('/api/terminal-diagnostics', {
-    intervalMs: 30000,
+    intervalMs: 2 * 60 * 1000,
     onData: response => onUpdate({
       subjects: response.data?.subjects || [],
       scope: response.data?.scope || {},

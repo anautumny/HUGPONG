@@ -25,6 +25,8 @@ export function ScreenHeader({
             style={styles.backButton}
             onPress={onBackPress}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="arrow-back" size={22} color={COLORS.text} />
@@ -42,7 +44,9 @@ export function ScreenHeader({
         </View>
       </View>
 
-      {rightAction && (
+      {React.isValidElement(rightAction) ? (
+        rightAction
+      ) : rightAction ? (
         <TouchableOpacity
           style={styles.rightActionBtn}
           onPress={rightAction.onPress}
@@ -55,7 +59,7 @@ export function ScreenHeader({
             <Text style={styles.rightActionLabel}>{rightAction.label}</Text>
           ) : null}
         </TouchableOpacity>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -227,23 +231,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: SPACING.lg,
     paddingVertical: 10,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    minHeight: 52
+    minHeight: 64
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     flex: 1,
     marginRight: 8
   },
   backButton: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: RADIUS.sm,
     backgroundColor: '#F8FAF5',
     borderWidth: 1,
@@ -255,15 +259,15 @@ const styles = StyleSheet.create({
     flex: 1
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
     color: COLORS.text,
     letterSpacing: -0.2
   },
   headerSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
-    marginTop: 1
+    marginTop: 2
   },
   rightActionBtn: {
     flexDirection: 'row',
@@ -364,3 +368,5 @@ const styles = StyleSheet.create({
     height: '100%'
   }
 });
+
+export { SearchableSelect, SearchableSelectModal } from './SearchableSelect';

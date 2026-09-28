@@ -73,19 +73,19 @@ export default function TakeOverAuthModal({
     >
       <form onSubmit={handleVerify} className="space-y-4">
         {/* Field Summary Card */}
-        <div className="bg-bg dark:bg-[#0C1015] p-3.5 rounded-xl border border-border flex items-center justify-between">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-hug-muted block">
+        <div className="bg-surface dark:bg-surface-subtle p-3.5 rounded-xl border border-border flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] uppercase font-bold text-hug-muted block tracking-wider">
               Target Plot
             </span>
-            <span className="text-sm font-mono font-black text-primary">
+            <span className="text-sm font-mono font-black text-primary dark:text-primary-light select-all">
               {field.id}
             </span>
-            <p className="text-xs text-hug-muted mt-0.5">
-              Assigned to: <strong>{field.memberName || 'Farm Member'}</strong>
+            <p className="text-xs text-hug-muted mt-0.5 truncate">
+              Assigned to: <strong className="text-hug-text dark:text-foreground font-semibold">{field.memberName || 'Unassigned'}</strong>
             </p>
           </div>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 shrink-0 whitespace-nowrap select-none">
             Manager Intervention
           </span>
         </div>
@@ -115,6 +115,7 @@ export default function TakeOverAuthModal({
             }}
             placeholder="Enter your password"
             disabled={isVerifying}
+            autoFocus
           />
         </FormField>
       </form>

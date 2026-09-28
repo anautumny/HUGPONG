@@ -6,7 +6,7 @@ export async function fetchDiagnostics(filters = {}) {
     const value = String(filters[key] || '').trim();
     if (value) params.set(key, value);
   }
-  params.set('limit', String(filters.limit || 150));
+  params.set('limit', String(filters.limit || 50));
   const response = await authenticatedRequest(`/api/diagnostics?${params.toString()}`);
   return {
     entries: Array.isArray(response.data) ? response.data : [],

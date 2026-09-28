@@ -3,7 +3,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import QRCode from 'qrcode';
 import { formatCropYearDisplay } from '../utils/dataHelpers';
-import { auditCropYearCycles } from '../domain/auditWorkflow';
+import { auditCropYearCycles, nextCropYearCycle } from '../domain/auditWorkflow';
 
 const CURRENT_CYCLE_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
 const FOLLOWING_PERIOD_MONTHS = [1, 2, 3];
@@ -192,7 +192,8 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const storedStartYear = Number(cropYearCycles[0].slice(0, 4));
   const cycleStartYear = Number.isInteger(storedStartYear) ? storedStartYear : reportYear;
   const currentCycle = `${cropYearCycles.length === 1 ? 'Crop Year Cycle' : 'Crop Year Cycles'} ${cropYearDisplay}`;
-  const continuationCycle = currentCycle;
+  const continuationCropYear = nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]);
+  const continuationCycle = `Crop Year Cycle ${formatCropYearDisplay(continuationCropYear)}`;
 
   const directOperations = operations.filter(log => !isMillingOperation(log));
   const millingOperations = operations.filter(isMillingOperation);

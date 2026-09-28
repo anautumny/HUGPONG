@@ -160,33 +160,40 @@ export default function PublishPriceModal({
     }
   };
 
-  return (
-    <>
-      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-        <SafeAreaView style={s.modalScreen}>
-          <KeyboardAvoidingView
-            style={s.keyboardView}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+  if (!visible) return null;
+
+  const mainContent = (
+    <SafeAreaView style={s.modalScreen} edges={['top']}>
+      <KeyboardAvoidingView
+        style={s.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={s.modalCard}>
+        {/* Standard Header matching My Sync Status */}
+        <View style={s.modalHeader}>
+          <TouchableOpacity
+            onPress={onClose}
+            style={s.backBtn}
+            disabled={isSubmitting}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <View style={s.modalCard}>
-            {/* Header with Regulatory Badge & Icon */}
-            <View style={s.modalHeader}>
-              <View style={{ flex: 1, paddingRight: 8 }}>
-                <View style={s.modalBadge}>
-                  <Text style={s.modalBadgeText}>SRA ADMIN</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                  <Ionicons name="trending-up" size={20} color={COLORS.primary} />
-                  <Text style={s.modalTitle}>Publish Price Reference</Text>
-                </View>
-                <Text style={s.modalSub}>
-                  Publish a traceable domestic millsite sugar and molasses price record.
-                </Text>
+            <Ionicons name="arrow-back" size={22} color={COLORS.text} />
+          </TouchableOpacity>
+          <View style={s.headerCopy}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={s.modalBadge}>
+                <Text style={s.modalBadgeText}>SRA ADMIN</Text>
               </View>
-              <TouchableOpacity onPress={onClose} style={s.closeBtn} disabled={isSubmitting}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
+              <Text style={s.modalTitle}>Publish Price Reference</Text>
             </View>
+            <Text style={s.modalSub} numberOfLines={1}>
+              Traceable domestic millsite sugar & molasses price reference
+            </Text>
+          </View>
+          <View style={{ width: 38 }} />
+        </View>
 
             <ScrollView
               style={s.formScroll}
@@ -387,7 +394,11 @@ export default function PublishPriceModal({
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
-      </Modal>
+  );
+
+  return (
+    <>
+      {mainContent}
 
       {/* ── Interactive Calendar Date Picker Modal ── */}
       <Modal visible={showCalendar} transparent animationType="fade" onRequestClose={() => setShowCalendar(false)}>
@@ -510,47 +521,55 @@ const s = StyleSheet.create({
     width: '100%'
   },
   modalHeader: {
+    minHeight: 64,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
     paddingHorizontal: SPACING.lg,
-    paddingTop: 10,
-    paddingBottom: 14
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: RADIUS.sm,
+    backgroundColor: '#F8FAF5',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    paddingHorizontal: 8
   },
   modalBadge: {
     backgroundColor: COLORS.primaryBg,
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: RADIUS.full,
-    alignSelf: 'flex-start'
+    alignSelf: 'center'
   },
   modalBadgeText: {
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: '900',
     color: COLORS.primary,
-    letterSpacing: 0.6
+    letterSpacing: 0.5
   },
   modalTitle: {
-    fontSize: 16.5,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '800',
     color: COLORS.text,
     letterSpacing: -0.2
   },
   modalSub: {
-    fontSize: 11.5,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
-    lineHeight: 16
-  },
-  closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F1',
-    alignItems: 'center',
-    justifyContent: 'center'
+    textAlign: 'center'
   },
   formScroll: {
     flex: 1

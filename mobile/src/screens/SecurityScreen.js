@@ -8,7 +8,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import { 
   getCurrentSession, 
-  updateUserMobileNumber, 
+  requestUserMobileNumberChange,
+  confirmUserMobileNumberChange,
   updateUserPassword, 
   subscribe 
 } from '../data/dataStore';
@@ -35,6 +36,15 @@ export default function SecurityScreen({ navigation }) {
   const [phoneVerifyPw, setPhoneVerifyPw] = useState('');
   const [showPhoneVerifyPw, setShowPhoneVerifyPw] = useState(false);
   const [loadingPhone, setLoadingPhone] = useState(false);
+  const [pendingPhone, setPendingPhone] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [phoneResendSeconds, setPhoneResendSeconds] = useState(0);
+
+  useEffect(() => {
+    if (phoneResendSeconds <= 0) return undefined;
+    const timer = setInterval(() => setPhoneResendSeconds(current => Math.max(0, current - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [phoneResendSeconds]);
 
   useEffect(() => {
     const unsubscribe = subscribe(() => {
@@ -103,7 +113,16 @@ export default function SecurityScreen({ navigation }) {
     );
   };
 
-  const handlePhoneSubmit = async () => {
+  const resetPhoneChange = () => {
+    setShowChangePhone(false);
+    setNewPhone('');
+    setPhoneVerifyPw('');
+    setPendingPhone('');
+    setPhoneOtp('');
+    setPhoneResendSeconds(0);
+  };
+
+  const handlePhoneVerificationRequest = async () => {
     const clean = newPhone.replace(/\D/g, '');
     if (!clean.startsWith('09') || clean.length !== 11) {
       if (!(clean.startsWith('639') && clean.length === 12)) {
@@ -124,22 +143,39 @@ export default function SecurityScreen({ navigation }) {
     }
 
     setLoadingPhone(true);
-    const res = await updateUserMobileNumber(newPhone, phoneVerifyPw);
+    const res = await requestUserMobileNumberChange(newPhone, phoneVerifyPw);
     setLoadingPhone(false);
 
     if (!res.success) {
-      Alert.alert('Update Failed', res.error || 'Could not update mobile number.');
+      Alert.alert('Code Not Sent', res.error || 'Could not send a verification code to the new mobile number.');
+      return;
+    }
+
+    const formatted = clean.startsWith('639') ? `0${clean.slice(2)}` : clean;
+    setPendingPhone(formatted);
+    setPhoneOtp('');
+    setPhoneResendSeconds(Math.max(0, Number(res.resendAfterSeconds || 60)));
+  };
+
+  const handlePhoneVerificationConfirm = async () => {
+    if (!/^\d{6}$/.test(phoneOtp.trim())) {
+      Alert.alert('Verification Code Required', 'Enter the 6-digit code sent to your new mobile number.');
+      return;
+    }
+
+    setLoadingPhone(true);
+    const res = await confirmUserMobileNumberChange(pendingPhone, phoneOtp);
+    setLoadingPhone(false);
+
+    if (!res.success) {
+      Alert.alert('Verification Failed', res.error || 'The new mobile number could not be verified.');
       return;
     }
 
     Alert.alert(
       'Mobile Number Updated',
-      'Your registered mobile number has been updated successfully. You can use your new number or your User ID to log in.',
-      [{ text: 'OK', onPress: () => {
-        setShowChangePhone(false);
-        setNewPhone('');
-        setPhoneVerifyPw('');
-      }}]
+      'Your new mobile number was verified and is now registered. You can use it or your User ID to log in.',
+      [{ text: 'OK', onPress: resetPhoneChange }]
     );
   };
 
@@ -196,7 +232,7 @@ export default function SecurityScreen({ navigation }) {
         <View style={s.card}>
           <TouchableOpacity 
             style={s.sectionRow} 
-            onPress={() => setShowChangePhone(prev => !prev)}
+            onPress={() => showChangePhone ? resetPhoneChange() : setShowChangePhone(true)}
             activeOpacity={0.7}
           >
             <View style={[s.secIcon, { backgroundColor: '#E8F5E9' }]}>
@@ -211,56 +247,123 @@ export default function SecurityScreen({ navigation }) {
 
           {showChangePhone && (
             <View style={s.formWrap}>
-              <Text style={s.formDesc}>
-                Enter your new 11-digit mobile number and verify your account password to authorize the change.
-              </Text>
+              {!pendingPhone ? (
+                <>
+                  <View style={s.phoneSafetyNotice}>
+                    <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
+                    <Text style={s.phoneSafetyText}>
+                      Your current number stays registered until a code sent to the new number is successfully verified.
+                    </Text>
+                  </View>
 
-              <View style={s.fieldGroup}>
-                <Text style={s.fieldLabel}>New Mobile Number <Text style={s.req}>*</Text></Text>
-                <View style={s.inputWrap}>
-                  <Ionicons name="phone-portrait-outline" size={17} color={COLORS.textMuted} />
-                  <TextInput
-                    style={s.textInput}
-                    value={newPhone}
-                    onChangeText={setNewPhone}
-                    placeholder="e.g. 0918 987 6543"
-                    placeholderTextColor={COLORS.textMuted}
-                    keyboardType="phone-pad"
-                    maxLength={13}
-                  />
-                </View>
-              </View>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>New Mobile Number <Text style={s.req}>*</Text></Text>
+                    <View style={s.inputWrap}>
+                      <Ionicons name="phone-portrait-outline" size={17} color={COLORS.textMuted} />
+                      <TextInput
+                        style={s.textInput}
+                        value={newPhone}
+                        onChangeText={setNewPhone}
+                        placeholder="e.g. 0918 987 6543"
+                        placeholderTextColor={COLORS.textMuted}
+                        keyboardType="phone-pad"
+                        maxLength={13}
+                        editable={!loadingPhone}
+                      />
+                    </View>
+                  </View>
 
-              <View style={s.fieldGroup}>
-                <Text style={s.fieldLabel}>Confirm Current Password <Text style={s.req}>*</Text></Text>
-                <View style={s.inputWrap}>
-                  <Ionicons name="lock-closed-outline" size={17} color={COLORS.textMuted} />
-                  <TextInput
-                    style={[s.textInput, { flex: 1 }]}
-                    value={phoneVerifyPw}
-                    onChangeText={setPhoneVerifyPw}
-                    secureTextEntry={!showPhoneVerifyPw}
-                    placeholder="Enter password to authorize"
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                  <TouchableOpacity onPress={() => setShowPhoneVerifyPw(p => !p)} style={{ padding: 4 }}>
-                    <Ionicons name={showPhoneVerifyPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Confirm Current Password <Text style={s.req}>*</Text></Text>
+                    <View style={s.inputWrap}>
+                      <Ionicons name="lock-closed-outline" size={17} color={COLORS.textMuted} />
+                      <TextInput
+                        style={[s.textInput, { flex: 1 }]}
+                        value={phoneVerifyPw}
+                        onChangeText={setPhoneVerifyPw}
+                        secureTextEntry={!showPhoneVerifyPw}
+                        placeholder="Enter password to authorize"
+                        placeholderTextColor={COLORS.textMuted}
+                        editable={!loadingPhone}
+                      />
+                      <TouchableOpacity onPress={() => setShowPhoneVerifyPw(p => !p)} style={{ padding: 4 }} disabled={loadingPhone}>
+                        <Ionicons name={showPhoneVerifyPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[s.submitBtn, loadingPhone && s.btnDisabled]}
+                    onPress={handlePhoneVerificationRequest}
+                    disabled={loadingPhone}
+                    activeOpacity={0.8}
+                  >
+                    {loadingPhone ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.submitBtnText}>Send Verification Code</Text>}
                   </TouchableOpacity>
-                </View>
-              </View>
+                </>
+              ) : (
+                <>
+                  <View style={s.phoneVerificationCard}>
+                    <View style={s.phoneVerificationIcon}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={21} color={COLORS.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.phoneVerificationTitle}>Confirm the new number</Text>
+                      <Text style={s.phoneVerificationText}>Enter the 6-digit SMS code sent to {pendingPhone}.</Text>
+                    </View>
+                  </View>
 
-              <TouchableOpacity 
-                style={[s.submitBtn, loadingPhone && s.btnDisabled]} 
-                onPress={handlePhoneSubmit}
-                disabled={loadingPhone}
-                activeOpacity={0.8}
-              >
-                {loadingPhone ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={s.submitBtnText}>Update Registered Number</Text>
-                )}
-              </TouchableOpacity>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Verification Code <Text style={s.req}>*</Text></Text>
+                    <View style={s.inputWrap}>
+                      <Ionicons name="keypad-outline" size={18} color={COLORS.primary} />
+                      <TextInput
+                        style={[s.textInput, s.phoneOtpInput]}
+                        value={phoneOtp}
+                        onChangeText={value => setPhoneOtp(value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        placeholderTextColor={COLORS.textMuted}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        editable={!loadingPhone}
+                        autoFocus
+                      />
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[s.submitBtn, (loadingPhone || phoneOtp.length !== 6) && s.btnDisabled]}
+                    onPress={handlePhoneVerificationConfirm}
+                    disabled={loadingPhone || phoneOtp.length !== 6}
+                    activeOpacity={0.8}
+                  >
+                    {loadingPhone ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.submitBtnText}>Verify &amp; Update Number</Text>}
+                  </TouchableOpacity>
+
+                  <View style={s.phoneSecondaryActions}>
+                    <TouchableOpacity
+                      disabled={loadingPhone || phoneResendSeconds > 0}
+                      onPress={handlePhoneVerificationRequest}
+                      style={{ paddingVertical: 8 }}
+                    >
+                      <Text style={[s.phoneSecondaryText, phoneResendSeconds > 0 && { color: COLORS.textMuted }]}>
+                        {phoneResendSeconds > 0 ? `Resend in ${phoneResendSeconds}s` : 'Resend Code'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      disabled={loadingPhone}
+                      onPress={() => {
+                        setPendingPhone('');
+                        setPhoneOtp('');
+                        setPhoneResendSeconds(0);
+                      }}
+                      style={{ paddingVertical: 8 }}
+                    >
+                      <Text style={s.phoneSecondaryText}>Edit Number</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
             </View>
           )}
         </View>
@@ -481,6 +584,15 @@ const s = StyleSheet.create({
   
   formWrap: { marginTop: SPACING.md, gap: SPACING.md, paddingTop: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border },
   formDesc: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 17 },
+  phoneSafetyNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg },
+  phoneSafetyText: { flex: 1, fontSize: 11.5, lineHeight: 17, color: COLORS.textSecondary },
+  phoneVerificationCard: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg },
+  phoneVerificationIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  phoneVerificationTitle: { fontSize: 13, fontWeight: '800', color: COLORS.text },
+  phoneVerificationText: { marginTop: 2, fontSize: 11.5, lineHeight: 16, color: COLORS.textSecondary },
+  phoneOtpInput: { fontSize: 20, fontWeight: '800', letterSpacing: 6, textAlign: 'center' },
+  phoneSecondaryActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  phoneSecondaryText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
   fieldGroup: { gap: 6 },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
   req: { color: COLORS.danger },

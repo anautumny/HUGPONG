@@ -48,7 +48,6 @@ async function ensurePermission(Notifications, requestPermission) {
       name: 'Farm work reminders',
       description: 'Reminders for scheduled HUGPONG farm work.',
       importance: Notifications.AndroidImportance.DEFAULT,
-      sound: 'default',
       vibrationPattern: [0, 250, 150, 250],
       showBadge: true
     });
@@ -110,8 +109,7 @@ async function runSync(fields, session, requestPermission) {
         content: {
           title: 'Farm work planned tomorrow',
           body: plannerReminderMessage(dateEntries, 'tomorrow'),
-          data: { ...baseData, timing: 'tomorrow' },
-          sound: 'default'
+          data: { ...baseData, timing: 'tomorrow' }
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: dayBefore, channelId: CHANNEL_ID }
       });
@@ -124,8 +122,7 @@ async function runSync(fields, session, requestPermission) {
         content: {
           title: 'Farm work scheduled today',
           body: plannerReminderMessage(dateEntries, 'today'),
-          data: { ...baseData, timing: 'today' },
-          sound: 'default'
+          data: { ...baseData, timing: 'today' }
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: dayOf, channelId: CHANNEL_ID }
       });

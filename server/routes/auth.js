@@ -688,7 +688,7 @@ router.post('/change-password', requireAuth, passwordRateLimit, async (req, res)
   }
 });
 
-router.post('/change-phone', requireAuth, passwordRateLimit, async (req, res) => {
+router.post('/change-phone', requireAuth, passwordRateLimit, otpRequestRateLimit, async (req, res) => {
   const employeeId = req.session.user.employeeId;
   const phone = normalizeContact(req.body?.phone);
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
@@ -705,36 +705,84 @@ router.post('/change-phone', requireAuth, passwordRateLimit, async (req, res) =>
   if (phone === normalizeContact(snapshot.data().phone)) {
     return res.status(400).json({ success: false, error: 'Enter a different mobile number.' });
   }
+
+  try {
+    const challenge = issueOtp('change-phone', employeeId, phone);
+    try {
+      await sendVerificationCode(phone, challenge.code, snapshot.data().displayName, 'phone-change');
+    } catch (error) {
+      discardOtp('change-phone', employeeId);
+      throw error;
+    }
+    return res.status(202).json({
+      success: true,
+      pendingVerification: true,
+      phone,
+      expiresAt: new Date(challenge.expiresAt).toISOString(),
+      ...verificationSendPolicy(req, OTP_REQUEST_LIMITER),
+      message: 'A verification code was sent to the new mobile number. The registered number has not been changed yet.'
+    });
+  } catch (error) {
+    const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
+    return res.status(status).json({ success: false, error: error.message || 'The verification code could not be sent.', code: error.code || 'SMS_DELIVERY_FAILED' });
+  }
+});
+
+router.post('/change-phone/verify', requireAuth, otpVerifyRateLimit, async (req, res) => {
+  const employeeId = req.session.user.employeeId;
+  const phone = normalizeContact(req.body?.phone);
+  const code = String(req.body?.code || '').trim();
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'Enter the new mobile number and its 6-digit verification code.' });
+  }
+
+  const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+  if (!duplicate.empty && duplicate.docs[0].id !== employeeId) {
+    discardOtp('change-phone', employeeId);
+    return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
+  }
+
+  const verification = verifyAndConsumeOtp('change-phone', employeeId, phone, code);
+  if (!verification.success) {
+    return res.status(400).json({ success: false, error: verification.error });
+  }
+
+  const userRef = db.collection(COLLECTIONS.USERS).doc(employeeId);
+  let authVersion;
   const now = nowIso();
-  const authVersion = nextAuthVersion(snapshot.data());
   try {
     await db.runTransaction(async transaction => {
-      const liveSnapshot = await transaction.get(snapshot.ref);
+      const liveSnapshot = await transaction.get(userRef);
       if (!liveSnapshot.exists) throw Object.assign(new Error('Authenticated account was not found.'), { status: 404 });
       const live = liveSnapshot.data();
-      if (live.updatedAt !== snapshot.data().updatedAt) {
-        throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
+      if (phone === normalizeContact(live.phone)) {
+        throw Object.assign(new Error('This mobile number is already registered to your account.'), { status: 409 });
       }
+
       const newPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(phone));
       const oldPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(live.phone));
       const [newClaim, oldClaim] = await Promise.all([transaction.get(newPhoneRef), transaction.get(oldPhoneRef)]);
       if (newClaim.exists && newClaim.data().userId !== employeeId) {
         throw Object.assign(new Error('This mobile number is already registered.'), { status: 409 });
       }
+
+      authVersion = nextAuthVersion(live);
       if (!newClaim.exists) transaction.create(newPhoneRef, { type: 'PHONE', userId: employeeId, createdAt: now, updatedAt: now });
       if (oldClaim.exists && oldClaim.data().userId === employeeId) transaction.delete(oldPhoneRef);
-      transaction.update(snapshot.ref, { phone, phoneVerifiedAt: null, credentialsUpdatedAt: now, authVersion, updatedAt: now });
+      transaction.update(userRef, { phone, phoneVerifiedAt: now, credentialsUpdatedAt: now, authVersion, updatedAt: now });
       queueAuditEvent(transaction, db, {
         eventType: 'USER_PHONE_CHANGED', actorUserId: employeeId,
         entityType: 'USER', entityId: employeeId,
-        details: `Changed the registered phone for account ${employeeId}.`, createdAt: now
+        details: `Changed the registered phone for account ${employeeId} after verifying the new number.`, createdAt: now
       });
     });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.status ? error.message : 'Mobile number update could not be saved.' });
   }
+
   await revokeFirebaseSessions(employeeId);
-  Object.assign(req.session.user, { contact: phone, mobile: phone, phoneVerified: false, pendingFirstLoginVerification: true, authVersion });
+  Object.assign(req.session.user, { contact: phone, mobile: phone, phoneVerified: true, pendingFirstLoginVerification: false, phoneVerifiedAt: now, authVersion });
   return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
 });
 

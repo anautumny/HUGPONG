@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
-import { Card, PrimaryButton, SecondaryButton } from '../ui';
+import { Card, PrimaryButton, SecondaryButton, SearchableSelect } from '../ui';
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -37,10 +37,8 @@ export function AnalyticsScopeCard({
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scopeChipsRowClean}
+      <View
+        style={[styles.scopeChipsRowClean, { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }]}
       >
         {!isMember && farmName && (
           <TouchableOpacity
@@ -82,7 +80,7 @@ export function AnalyticsScopeCard({
             <Text style={styles.scopeChipValueClean}>{period === 'ALL' ? 'All Periods' : period}</Text>
           </TouchableOpacity>
         )}
-      </ScrollView>
+      </View>
     </Card>
   );
 }
@@ -124,107 +122,77 @@ export function AnalyticsScopeModal({
 
           <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 14, paddingVertical: 10 }}>
             {/* Season Selector */}
-            <View>
-              <Text style={styles.filterSectionTitle}>CROP YEAR CYCLE</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsWrap}>
-                {seasons.map(s => {
-                  const isSel = selectedSeason === s;
-                  return (
-                    <TouchableOpacity
-                      key={s}
-                      style={[styles.filterChip, isSel && styles.filterChipActive]}
-                      onPress={() => onSelectSeason(s)}
-                    >
-                      <Text style={[styles.filterChipText, isSel && styles.filterChipTextActive]}>
-                        {s === 'ALL' ? 'All Crop Year Cycles' : `${s}${s === currentSeason ? ' (Current)' : ''}`}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
+            <SearchableSelect
+              label="CROP YEAR CYCLE"
+              options={seasons.map(s => ({
+                id: s,
+                label: s === 'ALL' ? 'All Crop Year Cycles' : `${s}${s === currentSeason ? ' (Current)' : ''}`,
+                sublabel: s === 'ALL' ? 'Aggregate all historical and active cycles' : (s === currentSeason ? 'Active season in progress' : 'Historical cycle records'),
+                icon: 'calendar-outline'
+              }))}
+              selectedValue={selectedSeason}
+              onSelect={(opt) => onSelectSeason(opt.id)}
+              modalTitle="Select Crop Year Cycle"
+              searchPlaceholder="Search crop year..."
+              leftIcon="calendar"
+            />
 
             {/* Farm Selector (if not member) */}
             {!isMember && farms.length > 0 && (
-              <View>
-                <Text style={styles.filterSectionTitle}>BLOCK FARM</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsWrap}>
-                  <TouchableOpacity
-                    style={[styles.filterChip, selectedFarmId === 'ALL' && styles.filterChipActive]}
-                    onPress={() => onSelectFarm('ALL')}
-                  >
-                    <Text style={[styles.filterChipText, selectedFarmId === 'ALL' && styles.filterChipTextActive]}>
-                      All Farms
-                    </Text>
-                  </TouchableOpacity>
-                  {farms.map(f => {
-                    const isSel = selectedFarmId === f.id;
-                    return (
-                      <TouchableOpacity
-                        key={f.id}
-                        style={[styles.filterChip, isSel && styles.filterChipActive]}
-                        onPress={() => onSelectFarm(f.id)}
-                      >
-                        <Text style={[styles.filterChipText, isSel && styles.filterChipTextActive]} numberOfLines={1}>
-                          {f.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+              <SearchableSelect
+                label="BLOCK FARM"
+                options={[
+                  { id: 'ALL', label: 'All Farms', sublabel: `${farms.length} block farms in district`, icon: 'business-outline' },
+                  ...farms.map(f => ({
+                    id: f.id,
+                    label: f.name,
+                    sublabel: f.location || `${f.hectares || 0} Ha`,
+                    icon: 'business-outline'
+                  }))
+                ]}
+                selectedValue={selectedFarmId}
+                onSelect={(opt) => onSelectFarm(opt.id)}
+                modalTitle="Select Block Farm"
+                searchPlaceholder="Search block farm..."
+                leftIcon="business"
+              />
             )}
 
             {/* Field / Plot Selector */}
-            <View>
-              <Text style={styles.filterSectionTitle}>PARCEL / PLOT</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsWrap}>
-                <TouchableOpacity
-                  style={[styles.filterChip, selectedFieldId === 'ALL' && styles.filterChipActive]}
-                  onPress={() => onSelectField('ALL')}
-                >
-                  <Text style={[styles.filterChipText, selectedFieldId === 'ALL' && styles.filterChipTextActive]}>
-                    All Plots ({fields.length})
-                  </Text>
-                </TouchableOpacity>
-                {fields.map(fld => {
-                  const isSel = selectedFieldId === fld.id;
-                  return (
-                    <TouchableOpacity
-                      key={fld.id}
-                      style={[styles.filterChip, isSel && styles.filterChipActive]}
-                      onPress={() => onSelectField(fld.id)}
-                    >
-                      <Text style={[styles.filterChipText, isSel && styles.filterChipTextActive]}>
-                        {fld.id} ({fld.ha || 0} Ha)
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
+            <SearchableSelect
+              label="PARCEL / PLOT"
+              options={[
+                { id: 'ALL', label: `All Plots (${fields.length})`, sublabel: 'Aggregate analytics across all field plots', icon: 'grid-outline' },
+                ...fields.map(fld => ({
+                  id: fld.id,
+                  label: fld.id,
+                  sublabel: `${fld.ha || 0} Ha · Member: ${fld.memberName || fld.farmerName || 'Assigned Member'}`,
+                  icon: 'leaf-outline'
+                }))
+              ]}
+              selectedValue={selectedFieldId}
+              onSelect={(opt) => onSelectField(opt.id)}
+              modalTitle="Select Parcel / Plot"
+              searchPlaceholder="Search plot ID or member..."
+              leftIcon="leaf"
+            />
 
             {/* Period Selector */}
             {periods.length > 0 && (
-              <View>
-                <Text style={styles.filterSectionTitle}>REPORTING PERIOD / MONTH</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsWrap}>
-                  {periods.map(p => {
-                    const isSel = selectedPeriod === p;
-                    return (
-                      <TouchableOpacity
-                        key={p}
-                        style={[styles.filterChip, isSel && styles.filterChipActive]}
-                        onPress={() => onSelectPeriod(p)}
-                      >
-                        <Text style={[styles.filterChipText, isSel && styles.filterChipTextActive]}>
-                          {p === 'ALL' ? 'All Months' : p}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+              <SearchableSelect
+                label="REPORTING PERIOD / MONTH"
+                options={periods.map(p => ({
+                  id: p,
+                  label: p === 'ALL' ? 'All Months' : p,
+                  sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
+                  icon: 'time-outline'
+                }))}
+                selectedValue={selectedPeriod}
+                onSelect={(opt) => onSelectPeriod(opt.id)}
+                modalTitle="Select Reporting Period"
+                searchPlaceholder="Search period (e.g. 2026-03)..."
+                leftIcon="time"
+              />
             )}
           </ScrollView>
 
@@ -443,21 +411,21 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
         )}
       </View>
 
-      <View style={styles.priceGrid}>
-        <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B, ₱/Lkg)</Text>
-          <Text style={styles.priceBoxValue}>₱{sugarPrice.toLocaleString()}</Text>
-          <Text style={styles.priceBoxUnit}>₱/Lkg</Text>
+      <View style={styles.analyticsSugarBox}>
+        <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B · DOMESTIC MILLSITE)</Text>
+        <View style={styles.analyticsSugarPriceRow}>
+          <Text style={styles.analyticsSugarValue}>₱{sugarPrice.toLocaleString()}</Text>
+          <Text style={styles.analyticsSugarUnit}>per 50kg bag (Lkg)</Text>
         </View>
+      </View>
 
-        <View style={styles.priceDivider} />
-
-        <View style={styles.priceBox}>
-          <Text style={styles.priceBoxLabel}>MOLASSES (₱/MT)</Text>
-          <Text style={[styles.priceBoxValue, { color: COLORS.text }]}>
-            ₱{molassesPrice.toLocaleString()}
-          </Text>
-          <Text style={styles.priceBoxUnit}>₱/MT</Text>
+      <View style={styles.analyticsMolassesBox}>
+        <View>
+          <Text style={styles.analyticsMolLabel}>INDUSTRIAL MOLASSES</Text>
+          <View style={styles.analyticsMolPriceRow}>
+            <Text style={styles.analyticsMolValue}>₱{molassesPrice.toLocaleString()}</Text>
+            <Text style={styles.analyticsMolUnit}>/ MT</Text>
+          </View>
         </View>
       </View>
     </Card>
@@ -857,40 +825,66 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#fff'
   },
-  priceGrid: {
-    flexDirection: 'row',
-    backgroundColor: '#F8FAF5',
-    borderRadius: RADIUS.md,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#E4EEE1'
-  },
-  priceBox: {
-    flex: 1,
-    alignItems: 'center'
-  },
-  priceDivider: {
-    width: 1,
-    backgroundColor: '#D7ECD0',
-    marginHorizontal: 8
-  },
   priceBoxLabel: {
     fontSize: 9.5,
     fontWeight: '800',
     color: COLORS.textMuted,
     letterSpacing: 0.3,
-    textAlign: 'center'
   },
-  priceBoxValue: {
-    fontSize: 17,
+  analyticsSugarBox: {
+    paddingVertical: 2,
+    gap: 2,
+  },
+  analyticsSugarPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  analyticsSugarValue: {
+    fontSize: 26,
     fontWeight: '900',
     color: COLORS.primary,
-    marginTop: 2
+    letterSpacing: -0.5,
   },
-  priceBoxUnit: {
-    fontSize: 10,
+  analyticsSugarUnit: {
+    fontSize: 12,
+    fontWeight: '600',
     color: COLORS.textMuted,
-    marginTop: 1
+  },
+  analyticsMolassesBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAF5',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E4EEE1',
+    marginTop: 6,
+  },
+  analyticsMolLabel: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  analyticsMolPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    marginTop: 2,
+  },
+  analyticsMolValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  analyticsMolUnit: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
   },
 
   // Empty State

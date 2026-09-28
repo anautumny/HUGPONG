@@ -13,7 +13,7 @@ export default function AuditQueue({ reports = [], selectedReportId = null, onSe
           <Inbox className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-bold uppercase tracking-wider text-hug-text">{title}</h3>
         </div>
-        <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">{reports.length} {title === 'Audit Inbox' ? 'Awaiting Review' : 'Active'}</span>
+        <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap shrink-0">{reports.length} {title === 'Audit Inbox' ? 'Awaiting Review' : 'Active'}</span>
       </div>
       <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1">
         {isLoading && reports.length === 0 ? [1, 2, 3].map(key => <div key={key} className="h-20 rounded-xl bg-bg animate-pulse" />) : error ? (
@@ -33,12 +33,12 @@ export default function AuditQueue({ reports = [], selectedReportId = null, onSe
           return (
             <button key={report.id || report.reportId} type="button" onClick={() => onSelectReport?.(report)}
               className={`p-3.5 rounded-xl border text-left transition-all ${selected ? 'border-primary bg-primary-bg/30 ring-1 ring-primary' : 'border-border hover:border-primary/50 bg-white dark:bg-surface'}`}>
-              <div className="flex justify-between gap-3">
-                <div className="min-w-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold text-hug-text truncate">{farmName(report)}</p>
                   <p className="text-[11px] text-hug-muted mt-0.5">{new Date(`${report.periodKey || report.period}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
                 </div>
-                <Badge variant={status === 'RETURNED' ? 'danger' : 'warning'} size="sm">{auditStatusLabel(status)}</Badge>
+                <Badge variant={status === 'RETURNED' ? 'danger' : 'warning'} size="sm" className="whitespace-nowrap shrink-0">{auditStatusLabel(status)}</Badge>
               </div>
               <p className="text-[10px] text-hug-muted mt-2">Manager: {report.compiledByName || report.compiledByUserId || 'Unknown'} · {report.deliveryMethod || report.submissionMethod || 'Compiled'}</p>
               <p className="text-[10px] text-hug-muted mt-1">{report.operationCount || report.operationSnapshots?.length || 0} Operations · {report.fieldCount || report.fieldSnapshots?.length || 0} Fields · Submitted {report.submittedAt ? new Date(report.submittedAt).toLocaleString() : '—'}</p>

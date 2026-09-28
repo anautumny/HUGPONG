@@ -7,6 +7,7 @@ import SystemAuditLedger from '../../components/maintenance/SystemAuditLedger';
 export default function MaintenanceView() {
   const [healthData, setHealthData] = useState(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [isLoadingInventory, setIsLoadingInventory] = useState(true);
 
   const [auditLogs, setAuditLogs] = useState([]);
   const [isLogsLoading, setIsLogsLoading] = useState(true);
@@ -27,6 +28,7 @@ export default function MaintenanceView() {
   });
 
   const loadSystemInventory = async ({ force = false } = {}) => {
+    setIsLoadingInventory(true);
     try {
       const inventory = await fetchSystemDiagnostics({ force });
       setCounts(inventory);
@@ -41,6 +43,8 @@ export default function MaintenanceView() {
         activeCropYears: []
       }));
       setErrors(prev => ({ ...prev, inventory: err.message || 'Failed to load system inventory.' }));
+    } finally {
+      setIsLoadingInventory(false);
     }
   };
 
@@ -63,7 +67,7 @@ export default function MaintenanceView() {
       if (document.visibilityState !== 'hidden' && navigator.onLine !== false) {
         loadSystemInventory({ force: true });
       }
-    }, 60000);
+    }, 5 * 60 * 1000);
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({
@@ -120,6 +124,7 @@ export default function MaintenanceView() {
       <SystemHealthSummary
         healthData={healthData}
         collectionCounts={counts}
+        isLoadingInventory={isLoadingInventory}
         isCheckingHealth={isCheckingHealth}
         onRefreshHealth={runHealthCheck}
       />

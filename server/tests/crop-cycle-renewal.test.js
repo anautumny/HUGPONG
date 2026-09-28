@@ -673,7 +673,7 @@ test('duplicate annual Crop Year Cycle for the same field is rejected', async ()
   );
 });
 
-test('new Crop Year Cycle uses the injected server year instead of a client-supplied year', async () => {
+test('new Crop Year Cycle is the stored cycle successor instead of a client-supplied or current server year', async () => {
   const db = database();
   const result = await rolloverFieldCycle(
     db,
@@ -683,7 +683,19 @@ test('new Crop Year Cycle uses the injected server year instead of a client-supp
     '2027-04-10T00:00:00.000Z'
   );
 
+  assert.equal(result.newCycle.cropYear, '2026-2027');
+  assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).cropYear, '2026-2027');
+});
+
+test('rollover advances 2026-2027 to 2027-2028 even when both actions occur during 2026', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).cropYear = '2026-2027';
+
+  const result = await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, NOW);
+
   assert.equal(result.newCycle.cropYear, '2027-2028');
+  assert.equal(result.newCycle.cropYearStart, 2027);
+  assert.equal(result.newCycle.cropYearEnd, 2028);
   assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).cropYear, '2027-2028');
 });
 

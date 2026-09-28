@@ -12,6 +12,7 @@ import {
   verifyPasswordWithServer,
   changePasswordWithServer,
   changePhoneWithServer,
+  verifyPhoneChangeWithServer,
   registerWithServer,
   requestPhoneVerificationWithServer,
   verifyPhoneWithServer,
@@ -981,25 +982,43 @@ export const authenticateUser = async (contactOrId, password) => {
   }
 };
 
-export const updateUserMobileNumber = async (newMobile, passwordVerification) => {
+const normalizePhilippineMobile = value => {
+  const clean = String(value || '').replace(/\D/g, '');
+  return clean.startsWith('639') && clean.length === 12 ? `0${clean.slice(2)}` : clean;
+};
+
+export const requestUserMobileNumberChange = async (newMobile, passwordVerification) => {
   if (!CURRENT_SESSION) {
     return { success: false, error: 'No active user session found.' };
   }
-  const cleanNew = String(newMobile || '').replace(/\D/g, '');
-  if (!cleanNew.startsWith('09') || cleanNew.length !== 11) {
-    if (!(cleanNew.startsWith('639') && cleanNew.length === 12)) {
-      return { success: false, error: 'Please enter a valid 11-digit Philippine mobile number (09XXXXXXXXX).' };
-    }
+  const formatted = normalizePhilippineMobile(newMobile);
+  if (!/^09\d{9}$/.test(formatted)) {
+    return { success: false, error: 'Please enter a valid 11-digit Philippine mobile number (09XXXXXXXXX).' };
   }
 
-  const currentContactClean = String(CURRENT_SESSION.contact || CURRENT_SESSION.mobile || '').replace(/\D/g, '');
-  if (cleanNew === currentContactClean) {
+  const currentContact = normalizePhilippineMobile(CURRENT_SESSION.contact || CURRENT_SESSION.mobile);
+  if (formatted === currentContact) {
     return { success: false, error: 'New mobile number cannot be the same as your current registered number.' };
   }
 
-  const formatted = cleanNew.startsWith('639') ? '0' + cleanNew.slice(2) : cleanNew;
   try {
-    const result = await changePhoneWithServer(formatted, passwordVerification);
+    return await changePhoneWithServer(formatted, passwordVerification);
+  } catch (error) {
+    return { success: false, error: error.message, code: error.code || '', ...(error.data || {}) };
+  }
+};
+
+export const confirmUserMobileNumberChange = async (newMobile, code) => {
+  if (!CURRENT_SESSION) {
+    return { success: false, error: 'No active user session found.' };
+  }
+  const formatted = normalizePhilippineMobile(newMobile);
+  if (!/^09\d{9}$/.test(formatted) || !/^\d{6}$/.test(String(code || '').trim())) {
+    return { success: false, error: 'Enter the 6-digit code sent to the new mobile number.' };
+  }
+
+  try {
+    const result = await verifyPhoneChangeWithServer(formatted, String(code).trim());
     CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
     const existing = users.find(user => user.employeeId === CURRENT_SESSION.employeeId);
     if (existing) Object.assign(existing, result.user);
@@ -1008,7 +1027,7 @@ export const updateUserMobileNumber = async (newMobile, passwordVerification) =>
     notify();
     return { success: true, message: 'Your registered mobile number has been updated successfully.' };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, code: error.code || '', ...(error.data || {}) };
   }
 };
 
@@ -2739,7 +2758,10 @@ export const listenToCloudSync = () => {
 
   activeCloudRefresh = refresh;
   stop.initialRefresh = refresh();
-  refreshTimer = setInterval(refresh, 60000);
+  // Foregrounding and explicit sync still refresh immediately. The periodic
+  // fallback is intentionally infrequent because one refresh fans out across
+  // several server-authoritative resources.
+  refreshTimer = setInterval(refresh, 5 * 60 * 1000);
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
     appState = nextState;

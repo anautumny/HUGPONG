@@ -138,7 +138,7 @@ export default function AuditDossierCard({
           <Badge
             variant={isCertified ? 'success' : 'warning'}
             size="md"
-            className="font-bold uppercase tracking-wider px-3.5 py-1.5"
+            className="font-bold uppercase tracking-wider px-3.5 py-1.5 whitespace-nowrap shrink-0"
           >
             {isCertified ? (
               <span className="flex items-center gap-1.5">
@@ -157,7 +157,7 @@ export default function AuditDossierCard({
 
       {/* Metadata Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-bg border border-border rounded-xl p-4">
-        <div>
+        <div className="min-w-0">
           <span className="text-[10px] text-hug-muted uppercase font-bold tracking-wider block mb-1 flex items-center gap-1">
             <Hash className="w-3 h-3" /> Verification ID
           </span>
@@ -166,7 +166,7 @@ export default function AuditDossierCard({
           </p>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <span className="text-[10px] text-hug-muted uppercase font-bold tracking-wider block mb-1 flex items-center gap-1">
             <Building className="w-3 h-3" /> Block Farm
           </span>
@@ -175,7 +175,7 @@ export default function AuditDossierCard({
           </p>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <span className="text-[10px] text-hug-muted uppercase font-bold tracking-wider block mb-1 flex items-center gap-1">
             <User className="w-3 h-3" /> Compiled By
           </span>
@@ -184,11 +184,11 @@ export default function AuditDossierCard({
           </p>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <span className="text-[10px] text-hug-muted uppercase font-bold tracking-wider block mb-1 flex items-center gap-1">
             <Calendar className="w-3 h-3" /> {isCertified ? 'Certified On' : 'Compiled On'}
           </span>
-          <p className="text-xs sm:text-sm font-bold text-hug-text">
+          <p className="text-xs sm:text-sm font-bold text-hug-text truncate">
             {formatDate(isCertified ? report.certifiedAt : report.compiledAt)}
           </p>
         </div>
@@ -196,38 +196,38 @@ export default function AuditDossierCard({
 
       {/* KPI Metrics Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs">
+        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
           <span className="text-[10px] text-hug-muted uppercase font-semibold block mb-1">
             Compiled Logs
           </span>
-          <strong className="text-lg sm:text-xl font-black text-hug-text">
+          <strong className="text-base sm:text-lg lg:text-xl font-black text-hug-text truncate block">
             {totalLogs} Records
           </strong>
         </div>
 
-        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs">
+        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
           <span className="text-[10px] text-hug-muted uppercase font-semibold block mb-1">
             Certification
           </span>
-          <strong className={`text-lg sm:text-xl font-black ${isCertified ? 'text-primary dark:text-primary-light' : 'text-amber-600 dark:text-amber-400'}`}>
+          <strong className={`text-sm sm:text-base lg:text-lg font-black truncate block ${isCertified ? 'text-primary dark:text-primary-light' : 'text-amber-600 dark:text-amber-400'}`} title={isCertified ? 'Certified' : isPendingReview ? 'Awaiting Review' : auditStatusLabel(status)}>
             {isCertified ? 'Certified' : isPendingReview ? 'Awaiting Review' : auditStatusLabel(status)}
           </strong>
         </div>
 
-        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs">
+        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
           <span className="text-[10px] text-hug-muted uppercase font-semibold block mb-1">
             Hectares Audited
           </span>
-          <strong className="text-lg sm:text-xl font-black text-hug-text">
+          <strong className="text-base sm:text-lg lg:text-xl font-black text-hug-text truncate block">
             {totalAreaHa.toFixed(2)} Ha
           </strong>
         </div>
 
-        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs">
+        <div className="bg-surface border border-border rounded-xl p-3.5 shadow-2xs min-w-0 overflow-hidden flex flex-col justify-between">
           <span className="text-[10px] text-hug-muted uppercase font-semibold block mb-1">
             Certified Cost
           </span>
-          <strong className="text-lg sm:text-xl font-black text-primary dark:text-primary-light">
+          <strong className="text-base sm:text-lg lg:text-xl font-black text-primary dark:text-primary-light truncate block">
             ₱{totalCost.toLocaleString()}
           </strong>
         </div>
@@ -245,8 +245,8 @@ export default function AuditDossierCard({
         </div>
 
         <div className="border border-border rounded-xl overflow-hidden overflow-x-auto max-h-[380px] overflow-y-auto">
-          <table className="w-full text-xs text-left border-collapse">
-            <thead className="bg-bg dark:bg-[#0C1015] sticky top-0 border-b border-border text-hug-muted font-bold uppercase text-[10px] tracking-wider z-10">
+          <table className="w-full min-w-[640px] text-xs text-left border-collapse">
+            <thead className="bg-bg dark:bg-[#0C1015] sticky top-0 border-b border-border text-hug-muted font-bold uppercase text-[10px] tracking-wider z-10 whitespace-nowrap">
               <tr>
                 <th className="px-3 py-2.5 text-center w-10">No.</th>
                 <th className="px-3 py-2.5">Operation</th>

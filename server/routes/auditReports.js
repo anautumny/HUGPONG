@@ -15,7 +15,7 @@ const { queueAuditEvent } = require('../services/auditWriter');
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots,
-  buildFieldSnapshots, auditCropYearCycles, validateCanonicalAuditReport,
+  buildFieldSnapshots, auditCropYearCycles, nextCropYearCycle, validateCanonicalAuditReport,
   AUDIT_DELIVERY_METHOD, AUDIT_DELIVERY_STATUS,
   encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
 } = require('../domain/auditWorkflow');
@@ -37,9 +37,13 @@ function normalizedReport(document) {
   const value = document.data ? document.data() : document;
   const id = document.id || value.id;
   const periodKey = value.periodKey || value.period;
+  const cropYearCycles = auditCropYearCycles(value, value.operationSnapshots || [], value.fieldSnapshots || []);
   return {
     id,
     ...value,
+    cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
+    cropYearCycles,
+    continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
     status: canonicalAuditStatus(value.status) || value.status,
     periodKey,
     period: periodKey,
@@ -359,6 +363,7 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       rootReportId: rootAuditReportId(farm.id, period), reportVersion: version, previousVersionId: latest?.id || null,
       blockFarmId: farm.id, blockFarmName: farm.name || farm.code || farm.id, periodKey: period,
       cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null, cropYearCycles,
+      continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
       status: AUDIT_STATUS.COMPILED, reviewStatus: 'not_submitted', certificationStatus: 'not_certified',
       operationSnapshots, fieldSnapshots, sourceLogIds,
       memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,

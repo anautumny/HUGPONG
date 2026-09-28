@@ -93,7 +93,10 @@ export function AuthProvider({ children }) {
   }, [clearSession]);
 
   useEffect(() => {
-    if (!user) return undefined;
+    // A cached user can exist briefly while the server cookie is being
+    // validated. Wait for that authoritative check so an expired browser
+    // session does not generate a second, avoidable telemetry 401.
+    if (isLoading || !user) return undefined;
     const report = () => {
       if (document.visibilityState === 'visible' && navigator.onLine !== false) {
         reportWebActivity().catch(() => {});
@@ -109,7 +112,7 @@ export function AuthProvider({ children }) {
       window.removeEventListener('focus', report);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user?.employeeId]);
+  }, [isLoading, user?.employeeId]);
 
   const login = async (contactNumber, password) => {
     setSessionExpiredNotice('');

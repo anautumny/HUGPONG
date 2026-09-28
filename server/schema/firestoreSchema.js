@@ -193,6 +193,15 @@ function cropYearParts(value, date = new Date()) {
   };
 }
 
+function nextCropYearParts(value) {
+  const current = cropYearParts(value);
+  return {
+    cropYear: `${current.cropYearEnd}-${current.cropYearEnd + 1}`,
+    cropYearStart: current.cropYearEnd,
+    cropYearEnd: current.cropYearEnd + 1
+  };
+}
+
 function cleanObject(value) {
   if (Array.isArray(value)) return value.map(cleanObject);
   if (!value || typeof value !== 'object') return value;
@@ -456,6 +465,7 @@ module.exports = {
   normalizeCropYear,
   cropYearCycleForDate,
   cropYearParts,
+  nextCropYearParts,
   cleanObject,
   buildOperationLog,
   buildOperationSnapshot,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, TextInput, Platform, Alert
+  TextInput, Platform, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -289,6 +289,20 @@ export default function AnalyticsScreen({ navigation, route }) {
     setNewPriceSource('');
     Alert.alert('Published', 'The source-referenced price record was published to all devices.');
   };
+
+  // Price publishing is a content-heavy form, so keep it inside the current
+  // tab as a normal page. The analytics state remains mounted and returns
+  // exactly as the user left it.
+  if (showPriceModal) {
+    return (
+      <PublishPriceModal
+        visible={true}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={pricesList[0]}
+        onPublished={() => setPricesList(getSortedPrices())}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -620,14 +634,6 @@ export default function AnalyticsScreen({ navigation, route }) {
       />
 
       {/* ── Publish Price Reference Modal (web parity) ── */}
-      <PublishPriceModal
-        visible={showPriceModal}
-        onClose={() => setShowPriceModal(false)}
-        latestPrice={pricesList[0]}
-        onPublished={() => {
-          setPricesList(getSortedPrices());
-        }}
-      />
     </SafeAreaView>
   );
 }

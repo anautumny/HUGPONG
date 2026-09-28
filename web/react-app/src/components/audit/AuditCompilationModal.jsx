@@ -6,7 +6,8 @@ import {
   CloudUpload,
   QrCode,
   Download,
-  Copy
+  Copy,
+  Loader2
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Modal from '../ui/Modal';
@@ -39,12 +40,14 @@ export default function AuditCompilationModal({
   const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreparingQr, setIsPreparingQr] = useState(false);
+  const [isSavingQr, setIsSavingQr] = useState(false);
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const [qrPayload, setQrPayload] = useState('');
   const [qrActionMessage, setQrActionMessage] = useState('');
   const initialReportKey = initialReport
     ? `${initialReport.id || initialReport.reportId}:${initialReport.status || ''}:${initialReport.updatedAt || ''}`
     : '';
+  const isBusy = isCompiling || isSubmitting || isPreparingQr || isSavingQr;
 
   useEffect(() => {
     if (!isOpen || !blockFarm?.id) return;
@@ -149,6 +152,7 @@ export default function AuditCompilationModal({
   }, [eligibleLogs]);
 
   const handleCompile = async () => {
+    if (isCompiling) return;
     if (!blockFarm?.id) {
       setCompileError('No assigned Block Farm identified for your account.');
       return;
@@ -190,6 +194,7 @@ export default function AuditCompilationModal({
   };
 
   const handleClose = () => {
+    if (isBusy) return;
     setStep(1);
     setCompileError(null);
     setCompiledResult(null);
@@ -202,7 +207,7 @@ export default function AuditCompilationModal({
   };
 
   const handleCloudSubmission = async () => {
-    if (!compiledResult?.id) return;
+    if (!compiledResult?.id || isSubmitting) return;
     setIsSubmitting(true);
     setCompileError(null);
     try {
@@ -219,6 +224,7 @@ export default function AuditCompilationModal({
   };
 
   const handleGenerateQr = () => {
+    if (isPreparingQr) return;
     setIsPreparingQr(true);
     setCompileError(null);
     setTimeout(() => {
@@ -236,7 +242,8 @@ export default function AuditCompilationModal({
 
   const downloadCurrentQr = async () => {
     const value = qrPayload;
-    if (!value) return;
+    if (!value || isSavingQr) return;
+    setIsSavingQr(true);
     setCompileError(null);
     try {
       const dataUrl = await QRCode.toDataURL(value, {
@@ -253,6 +260,8 @@ export default function AuditCompilationModal({
       setQrActionMessage('Saved the audit report QR image.');
     } catch (error) {
       setCompileError(error.message || 'Unable to save the QR image.');
+    } finally {
+      setIsSavingQr(false);
     }
   };
 
@@ -286,18 +295,18 @@ export default function AuditCompilationModal({
     </>
   ) : step === 2 && !deliveryMessage ? (
     <div className="grid w-full grid-cols-1 sm:grid-cols-3 gap-2">
-      <Button variant="secondary" size="md" onClick={handleClose} disabled={isSubmitting || isPreparingQr} icon={FileCheck2}>
+      <Button variant="secondary" size="md" onClick={handleClose} disabled={isBusy} icon={FileCheck2}>
         View Report
       </Button>
-      <Button variant="primary" size="md" onClick={handleCloudSubmission} disabled={isSubmitting} isLoading={isSubmitting} loadingText="Submitting report..." icon={CloudUpload}>
+      <Button variant="primary" size="md" onClick={handleCloudSubmission} disabled={isCompiling || isSubmitting || isPreparingQr} isLoading={isSubmitting} loadingText="Submitting report..." icon={CloudUpload}>
         Send Through Cloud
       </Button>
-      <Button variant="primary" size="md" onClick={handleGenerateQr} disabled={isSubmitting || isPreparingQr} isLoading={isPreparingQr} loadingText="Preparing QR transfer..." icon={QrCode}>
+      <Button variant="primary" size="md" onClick={handleGenerateQr} disabled={isCompiling || isSubmitting || isPreparingQr} isLoading={isPreparingQr} loadingText="Preparing QR transfer..." icon={QrCode}>
         Generate QR Transfer
       </Button>
     </div>
   ) : (
-    <Button variant="primary" size="md" className="w-full justify-center" onClick={handleClose}>Done</Button>
+    <Button variant="primary" size="md" className="w-full justify-center" onClick={handleClose} disabled={isBusy}>Done</Button>
   );
 
   return (
@@ -309,7 +318,29 @@ export default function AuditCompilationModal({
       footer={footer}
       preventBackdropClose={isCompiling || isSubmitting || isPreparingQr}
       preventEscapeClose={isCompiling || isSubmitting || isPreparingQr}
+      isLoading={isBusy}
     >
+      {isBusy && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-3 rounded-xl border border-primary/25 bg-primary-bg/50 px-3.5 py-3 text-primary dark:text-primary-light"
+        >
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+          <div>
+            <p className="text-xs font-black">
+              {isCompiling
+                ? `Compiling ${eligibleLogs.length} operation record(s)...`
+                : isSubmitting
+                  ? 'Submitting the report to the SRA Audit Inbox...'
+                  : isPreparingQr
+                    ? 'Preparing the complete QR transfer package...'
+                    : 'Generating and saving the QR image...'}
+            </p>
+            <p className="mt-0.5 text-[10px] font-semibold text-hug-muted">Keep this dialog open until the action is confirmed.</p>
+          </div>
+        </div>
+      )}
       {step === 1 ? (
         <div className="flex flex-col gap-4 text-xs">
           {/* Header Context Banner */}
@@ -507,8 +538,8 @@ export default function AuditCompilationModal({
               <p><strong className="text-hug-text">Operations:</strong> {compiledResult?.operationCount || compiledResult?.operationSnapshots?.length || 0}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
-              <Button variant="secondary" size="sm" icon={Download} onClick={downloadCurrentQr}>Save QR Image</Button>
-              <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference}>Copy Report ID</Button>
+              <Button variant="secondary" size="sm" icon={Download} onClick={downloadCurrentQr} isLoading={isSavingQr} loadingText="Saving QR image...">Save QR Image</Button>
+              <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference} disabled={isSavingQr}>Copy Report ID</Button>
             </div>
             {qrActionMessage && <p className="text-[10px] text-success">{qrActionMessage}</p>}
             {compileError && <p className="text-[10px] text-danger">{compileError}</p>}

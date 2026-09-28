@@ -124,6 +124,13 @@ export function canonicalStoredCropYear(value) {
   return `${match[1]}-${match[2]}`;
 }
 
+export function nextCropYearCycle(value) {
+  const current = canonicalStoredCropYear(value);
+  if (!current) return '';
+  const nextStart = Number(current.slice(5));
+  return `${nextStart}-${nextStart + 1}`;
+}
+
 export function uniqueCropYears(records = [], selector = record => record?.cropYear) {
   const years = new Set();
   records.forEach(record => {

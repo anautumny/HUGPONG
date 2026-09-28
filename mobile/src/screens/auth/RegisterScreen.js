@@ -312,6 +312,15 @@ export default function RegisterScreen({ navigation }) {
 
   const btnInfo = getMainButtonInfo();
 
+  if (showLegalModal) {
+    return (
+      <LegalPolicyModal
+        visible={true}
+        onClose={() => setShowLegalModal(false)}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }}>
@@ -704,7 +713,6 @@ export default function RegisterScreen({ navigation }) {
           </View>
         </View>
       </Modal>
-      <LegalPolicyModal visible={showLegalModal} onClose={() => setShowLegalModal(false)} />
     </SafeAreaView>
   );
 }

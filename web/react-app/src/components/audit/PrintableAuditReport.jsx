@@ -3,7 +3,7 @@ import { Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
 import { formatCropYearDisplay } from '../../utils/formatters';
-import { auditCropYearCycles } from '../../domain/auditWorkflow';
+import { auditCropYearCycles, nextCropYearCycle } from '../../domain/auditWorkflow';
 
 /**
  * Format currency / numeric value with 2 decimals
@@ -112,7 +112,10 @@ export default function PrintableAuditReport({
   const currentCY = cropYearCycles.length
     ? `${cropYearCycles.length === 1 ? 'Crop Year Cycle' : 'Crop Year Cycles'} ${cropYearDisplay}`
     : 'Crop Year Cycle not recorded';
-  const continuationCY = currentCY;
+  const continuationCropYear = nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]);
+  const continuationCY = continuationCropYear
+    ? `Crop Year Cycle ${formatCropYearDisplay(continuationCropYear)}`
+    : 'Crop Year Cycle not recorded';
 
   // Helper to determine which month column to activate for a log
   const getMonthCol = (performedOn, isMilling = false) => {

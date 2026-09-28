@@ -7,9 +7,11 @@ const path = require('node:path');
 const {
   cleanText,
   sanitizeValue,
+  requestEndpoint,
   createSafeErrorEnvelope,
   listDiagnostics
 } = require('../services/diagnosticService');
+const { isRoutineGuestSessionProbe } = require('../middleware/errorHandling');
 const { allowedRolesForRequest } = require('../middleware/requestPermissions');
 const { ROLES } = require('../schema/firestoreSchema');
 
@@ -45,6 +47,37 @@ test('safe error envelopes hide technical failures and include recovery guidance
   assert.equal(envelope.referenceId, 'OPER-20260928-ABC12345');
 });
 
+test('diagnostic endpoints preserve static route names while redacting record identifiers', () => {
+  assert.equal(
+    requestEndpoint({ originalUrl: '/api/terminal-diagnostics/activity?source=web' }),
+    '/api/terminal-diagnostics/activity'
+  );
+  assert.equal(
+    requestEndpoint({ originalUrl: '/api/terminal-diagnostics/*' }),
+    '/api/terminal-diagnostics/*'
+  );
+  assert.equal(
+    requestEndpoint({ originalUrl: '/api/system-diagnostics' }),
+    '/api/system-diagnostics'
+  );
+  assert.equal(
+    requestEndpoint({ originalUrl: '/api/terminal-diagnostics/SYNC-20260928-73547F8E' }),
+    '/api/terminal-diagnostics/:id'
+  );
+  assert.equal(
+    requestEndpoint({ originalUrl: '/api/fields/DEV-FLD-001/operation-schedule' }),
+    '/api/fields/:id/operation-schedule'
+  );
+});
+
+test('only the routine unauthenticated session probe is excluded from warning diagnostics', () => {
+  const request = { method: 'GET', originalUrl: '/auth/session' };
+  assert.equal(isRoutineGuestSessionProbe(request, 401, { code: 'UNAUTHENTICATED' }), true);
+  assert.equal(isRoutineGuestSessionProbe(request, 401, { code: 'SESSION_REVOKED' }), false);
+  assert.equal(isRoutineGuestSessionProbe({ ...request, method: 'POST' }, 401, { code: 'UNAUTHENTICATED' }), false);
+  assert.equal(isRoutineGuestSessionProbe({ ...request, authUser: { employeeId: '03000001' } }, 401, { code: 'UNAUTHENTICATED' }), false);
+});
+
 test('diagnostic list filters bounded sanitized records without using the Audit Ledger', async () => {
   const records = [
     { id: 'one', data: () => ({ referenceId: 'SYNC-20260928-AAAAAA', timestamp: '2026-09-28T01:42:18.000Z', level: 'ERROR', module: 'SYNC', technicalError: 'Timeout - retry queued' }) },
@@ -67,6 +100,23 @@ test('diagnostic list filters bounded sanitized records without using the Audit 
   assert.equal(result.length, 1);
   assert.equal(result[0].referenceId, 'SYNC-20260928-AAAAAA');
   assert.notEqual(requestedCollection, 'audit_logs');
+});
+
+test('unfiltered diagnostic reads scan only the requested page size', async () => {
+  let appliedLimit = null;
+  const db = {
+    collection() {
+      return {
+        orderBy() { return this; },
+        limit(value) { appliedLimit = value; return this; },
+        async get() { return { docs: [] }; }
+      };
+    }
+  };
+  await listDiagnostics(db, { limit: 50 });
+  assert.equal(appliedLimit, 50);
+  await listDiagnostics(db, { limit: 50, search: 'session' });
+  assert.equal(appliedLimit, 500);
 });
 
 test('only Super Admin can read diagnostics while authenticated roles can submit client failures', () => {

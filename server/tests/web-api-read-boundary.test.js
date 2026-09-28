@@ -35,6 +35,24 @@ test('web API reads coalesce in-flight work and invalidate after authoritative m
   assert.match(source, /hugpong:server-mutation/);
   assert.match(source, /forcedRefreshQueued/);
   assert.match(source, /void refresh\(\{ force: true \}\)/);
+  assert.match(source, /READ_CACHE_TTL_MS = 60 \* 1000/);
+  assert.match(source, /DEFAULT_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(source, /const handleFocus = \(\) => \{[\s\S]{0,100}refresh\(\)/);
+});
+
+test('high-cost monitoring and mobile hydration use bounded refresh cadences', () => {
+  const root = path.join(__dirname, '..', '..');
+  const webTelemetry = webService('telemetryService.js');
+  const diagnosticsView = fs.readFileSync(path.join(root, 'web/react-app/src/views/diagnostics/DiagnosticsConsoleView.jsx'), 'utf8');
+  const maintenanceView = fs.readFileSync(path.join(root, 'web/react-app/src/views/maintenance/MaintenanceView.jsx'), 'utf8');
+  const mobileStore = fs.readFileSync(path.join(root, 'mobile/src/data/dataStore.js'), 'utf8');
+  const mobileMonitor = fs.readFileSync(path.join(root, 'mobile/src/screens/SyncMonitorScreen.js'), 'utf8');
+
+  assert.match(webTelemetry, /intervalMs: 2 \* 60 \* 1000/);
+  assert.doesNotMatch(diagnosticsView, /setInterval/);
+  assert.match(maintenanceView, /5 \* 60 \* 1000/);
+  assert.match(mobileStore, /setInterval\(refresh, 5 \* 60 \* 1000\)/);
+  assert.match(mobileMonitor, /setInterval\(refresh, 2 \* 60 \* 1000\)/);
 });
 
 test('web startup excludes the Firestore SDK and lazy-loads role workspaces', () => {

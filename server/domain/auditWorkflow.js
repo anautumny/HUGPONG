@@ -101,6 +101,13 @@ function canonicalCropYearCycle(value) {
   return Number.isInteger(start) && end === start + 1 ? `${start}-${end}` : '';
 }
 
+function nextCropYearCycle(value) {
+  const current = canonicalCropYearCycle(value);
+  if (!current) return '';
+  const nextStart = Number(current.slice(5));
+  return `${nextStart}-${nextStart + 1}`;
+}
+
 function auditCropYearCycles(report = {}, operationSnapshots = [], fieldSnapshots = []) {
   const candidates = [
     report.cropYearCycle,
@@ -134,6 +141,7 @@ function canonicalAuditReport(report = {}) {
     periodKey: report.periodKey || report.period,
     cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
     cropYearCycles,
+    continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
     compiledByUserId: report.compiledByUserId,
     compiledByName: report.compiledByName || '',
     compiledAt: report.compiledAt,
@@ -360,6 +368,7 @@ module.exports = {
   summarizeSnapshots,
   buildFieldSnapshots,
   auditCropYearCycles,
+  nextCropYearCycle,
   canonicalAuditReport,
   validateCanonicalAuditReport,
   newestAuditReport,

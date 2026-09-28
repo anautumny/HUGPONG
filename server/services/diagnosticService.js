@@ -68,9 +68,17 @@ function createReferenceId(module = 'SYSTEM', date = new Date()) {
 }
 
 function requestEndpoint(req) {
-  return cleanText(String(req?.originalUrl || req?.url || '').split(/[?#]/, 1)[0]
-    .replace(/\/(users|block-farms|fields|crop-cycles|logs|audit-reports|tickets|terminal-diagnostics)\/[^/]+/gi, '/$1/:id')
-    .replace(/\/[A-Za-z0-9_-]{18,}(?=\/|$)/g, '/:id'), 240);
+  const path = String(req?.originalUrl || req?.url || '').split(/[?#]/, 1)[0]
+    .replace(/\/(users|block-farms|fields|crop-cycles|logs|audit-reports|tickets)\/[^/]+/gi, '/$1/:id');
+  const normalized = path.split('/').map(segment => {
+    // Long lowercase route slugs such as terminal-diagnostics and
+    // system-diagnostics are static names, not database identifiers. Dynamic
+    // IDs are either digit-bearing or mixed-case high-entropy segments.
+    const dynamicLongId = /^[A-Za-z0-9_-]{18,}$/.test(segment)
+      && (/\d/.test(segment) || (/[a-z]/.test(segment) && /[A-Z]/.test(segment) && !segment.includes('-')));
+    return dynamicLongId ? ':id' : segment;
+  }).join('/');
+  return cleanText(normalized, 240);
 }
 
 function clientContext(req) {
@@ -198,12 +206,14 @@ async function listDiagnostics(db, filters = {}) {
       .where('timestamp', '>=', start.toISOString())
       .where('timestamp', '<', end.toISOString());
   }
-  const snapshot = await query.orderBy('timestamp', 'desc').limit(500).get();
   const level = String(filters.level || '').trim().toUpperCase();
   const module = String(filters.module || '').trim().toUpperCase();
   const date = String(filters.date || '').trim();
   const referenceId = String(filters.referenceId || '').trim().toUpperCase();
   const search = String(filters.search || '').trim().toLowerCase();
+  const requiresInMemoryFiltering = Boolean(level || module || referenceId || search);
+  const scanLimit = requiresInMemoryFiltering ? 500 : limit;
+  const snapshot = await query.orderBy('timestamp', 'desc').limit(scanLimit).get();
   return snapshot.docs
     .map(doc => ({ id: doc.id, ...sanitizeValue(doc.data()) }))
     .filter(item => !level || item.level === level)
@@ -220,6 +230,7 @@ module.exports = {
   MODULES,
   cleanText,
   sanitizeValue,
+  requestEndpoint,
   moduleForRequest,
   createReferenceId,
   createSafeErrorEnvelope,

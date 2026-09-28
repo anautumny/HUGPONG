@@ -27,6 +27,11 @@ test('native planner reminders are local, grouped, navigable, and automatically 
   assert.match(app, /selectedDate: data\.plannedDate/);
 });
 
+test('native planner reminders use the platform default sound without naming it as a custom asset', () => {
+  const service = fs.readFileSync(path.join(root, 'mobile', 'src', 'services', 'plannerNotificationService.js'), 'utf8');
+  assert.doesNotMatch(service, /sound:\s*['"]default['"]/);
+});
+
 test('Expo Go skips notification module initialization while native builds retain reminders', () => {
   const service = fs.readFileSync(path.join(root, 'mobile', 'src', 'services', 'plannerNotificationService.js'), 'utf8');
   assert.doesNotMatch(service, /import \* as Notifications from 'expo-notifications'/);

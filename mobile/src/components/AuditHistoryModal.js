@@ -5,7 +5,6 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Modal,
   View,
   Text,
   TouchableOpacity,
@@ -21,6 +20,7 @@ import { auditLogs, blockFarms, getCurrentSession } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { sortNewestFirst } from '../utils/dataHelpers';
 import { exportAuditReportPdf } from '../services/auditPdfService';
+import { SearchableSelect } from './ui';
 
 const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '0');
 
@@ -103,26 +103,28 @@ export default function AuditHistoryModal({
     }
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-        {/* Header */}
-        <View style={s.header}>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-              <View style={{ width: 32, height: 32, borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="journal-outline" size={18} color={COLORS.primary} />
-              </View>
-              <View>
-                <Text style={s.headerTitle}>{t('monthly_audit_history_title', 'Monthly Audit History')}</Text>
-                <Text style={s.headerSub}>{t('audit_history_sub', 'Monthly operation breakdowns & SRA compliance records')}</Text>
-              </View>
-            </View>
-          </View>
-          <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
-            <Ionicons name="close" size={22} color={COLORS.text} />
-          </TouchableOpacity>
+    <SafeAreaView style={s.safe} edges={['top']}>
+      {/* Standard Header matching My Sync Status */}
+      <View style={s.header}>
+        <TouchableOpacity
+          onPress={onClose}
+          style={s.backBtn}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
+        </TouchableOpacity>
+        <View style={s.headerCopy}>
+          <Text style={s.headerTitle}>{t('monthly_audit_history_title', 'Monthly Audit History')}</Text>
+          <Text style={s.headerSub} numberOfLines={1}>{t('audit_history_sub', 'Monthly operation breakdowns & SRA compliance records')}</Text>
         </View>
+        <View style={{ width: 38 }} />
+      </View>
 
         <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
           {isOffline && (
@@ -145,29 +147,29 @@ export default function AuditHistoryModal({
             </View>
           ) : (
             <>
-          {/* Monthly Selector Horizontal Chips */}
-          <View style={{ gap: 6 }}>
-            <Text style={s.sectionLabel}>{t('select_report_month', 'SELECT REPORT MONTH')}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.monthScroll} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
-              {uniquePeriodAudits.map((audit, idx) => {
-                const auditKey = audit.reportId || audit.id || `audit-${idx}`;
-                const isSel = audit.id === selectedAuditId || audit.reportId === selectedAuditId;
-                return (
-                  <TouchableOpacity
-                    key={auditKey}
-                    style={[s.monthChip, isSel && s.monthChipActive]}
-                    onPress={() => setSelectedAuditId(audit.id || audit.reportId)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="calendar-outline" size={14} color={isSel ? COLORS.primary : COLORS.textMuted} />
-                    <Text style={[s.monthChipText, isSel && s.monthChipTextActive]}>
-                      {formatPhaseMonth ? formatPhaseMonth(audit.month) : (audit.month || audit.period || 'Report')}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
+          {/* Monthly Selector */}
+          <SearchableSelect
+            label={t('select_report_month', 'SELECT REPORT MONTH')}
+            options={uniquePeriodAudits.map((audit, idx) => {
+              const auditKey = audit.reportId || audit.id || `audit-${idx}`;
+              const monthLabel = formatPhaseMonth ? formatPhaseMonth(audit.month) : (audit.month || audit.period || 'Report');
+              const status = audit.status || (audit.certifiedAt ? 'CERTIFIED' : 'AWAITING_REVIEW');
+              return {
+                id: audit.id || audit.reportId || auditKey,
+                label: monthLabel,
+                sublabel: `Status: ${status === 'CERTIFIED' ? 'Certified Regulatory Report' : 'Awaiting SRA Review'} · ${audit.totalRecords || 0} logs`,
+                icon: 'calendar-outline',
+                badge: status === 'CERTIFIED' ? 'Certified' : 'Review',
+                badgeColor: status === 'CERTIFIED' ? '#E8F5E8' : '#FEF3C7',
+                raw: audit
+              };
+            })}
+            selectedValue={selectedAuditId}
+            onSelect={(item) => setSelectedAuditId(item.raw?.id || item.raw?.reportId || item.id)}
+            modalTitle="Select Audit Month"
+            searchPlaceholder="Search audit month or status..."
+            leftIcon="calendar"
+          />
 
           {/* Selected Month Audit Summary Banner */}
           <View style={s.summaryCard}>
@@ -180,8 +182,8 @@ export default function AuditHistoryModal({
               </View>
               <View style={[s.statusBadge, !isCertified && { backgroundColor: '#FEF3C7' }]}>
                 <Ionicons name={isCertified ? "checkmark-done-circle" : "shield-checkmark"} size={14} color={isCertified ? COLORS.primary : '#D97706'} />
-                <Text style={[s.statusText, !isCertified && { color: '#B45309' }]}>
-                  {isCertified ? t('verified_sra_badge', 'Certified Audit') : 'Pending Administrator Review'}
+                <Text style={[s.statusText, !isCertified && { color: '#92400E' }]}>
+                  {isCertified ? t('verified_sra_badge', 'Certified Audit') : 'Awaiting Review'}
                 </Text>
               </View>
             </View>
@@ -318,26 +320,40 @@ export default function AuditHistoryModal({
             </>
           )}
         </ScrollView>
-      </SafeAreaView>
-    </Modal>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F8FAF5' },
   header: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
-    paddingVertical: 14,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB'
+    borderBottomColor: COLORS.border
   },
-  headerTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text },
-  headerSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
-  closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: RADIUS.sm,
+    backgroundColor: '#F8FAF5',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    paddingHorizontal: 8
+  },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: COLORS.text, textAlign: 'center', letterSpacing: -0.2 },
+  headerSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
 
   content: { padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 },
 
@@ -375,10 +391,10 @@ const s = StyleSheet.create({
     ...SHADOW.card,
     gap: 14
   },
-  summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
   monthTitle: { fontSize: 18, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 },
   reportFarm: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.primaryBg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.xs },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.primaryBg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.xs, flexShrink: 0 },
   statusText: { fontSize: 11, fontWeight: '800', color: COLORS.primary },
 
   statsGrid: { flexDirection: 'row', backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, paddingVertical: 12, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: '#EDF2E8' },
@@ -388,9 +404,9 @@ const s = StyleSheet.create({
   statDivider: { width: 1, height: 26, backgroundColor: '#E2E8DC' },
 
   metaBox: { backgroundColor: '#F8FAF5', padding: 12, borderRadius: RADIUS.md, gap: 7, borderWidth: 1, borderColor: '#EDF2E8' },
-  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   metaLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
-  metaValue: { fontSize: 11.5, fontWeight: '800', color: COLORS.text },
+  metaValue: { fontSize: 11.5, fontWeight: '800', color: COLORS.text, flexShrink: 1, textAlign: 'right' },
 
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 2 },
   qrBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 8, borderRadius: RADIUS.md, ...SHADOW.sm },

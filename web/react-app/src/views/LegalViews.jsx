@@ -1,20 +1,37 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, ShieldCheck, FileText, Database, Scale } from 'lucide-react';
 import legalPolicy from '../domain/legalPolicy.json';
 
 function LegalLayout({ title, subtitle, badge, icon: Icon, children }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleBack = () => {
+    if (location.state?.from) {
+      navigate(location.state.from);
+    } else if (window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
+  };
+
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-bg text-hug-text">
       <div className="max-w-4xl mx-auto bg-surface rounded-2xl border border-border p-6 sm:p-10 md:p-12 shadow-sm">
         <div className="flex items-center justify-between pb-6 border-b border-border/80 mb-8">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-primary dark:text-primary-light hover:underline transition-colors focus:ring-2 focus:ring-primary focus:outline-none rounded-lg px-2 py-1"
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-primary dark:text-primary-light hover:underline transition-colors focus:ring-2 focus:ring-primary focus:outline-none rounded-lg px-2 py-1 cursor-pointer"
+            aria-label="Back to previous page"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back to Home</span>
-          </Link>
+            <span>Back</span>
+          </button>
           <div className="flex items-center gap-3">
             <div className="brand-logo-box w-8 h-8 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center">
               <img src="/logo.png" alt="HUGPONG" className="w-full h-full object-contain" />

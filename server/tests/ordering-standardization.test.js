@@ -8,7 +8,7 @@ const {
   sortOperationsNewestFirst,
   sortCropYearsNewestFirst
 } = require('../services/recordOrdering');
-const { cropYearCycleForDate, normalizeCropYear } = require('../schema/firestoreSchema');
+const { cropYearCycleForDate, nextCropYearParts, normalizeCropYear } = require('../schema/firestoreSchema');
 const { summarizeCropYearCycles } = require('../services/systemDiagnosticsService');
 const { canonicalCropYear, eventTimeCropYear, enrichAuditEventsWithCropYears } = require('../services/auditCropYearContext');
 
@@ -79,6 +79,19 @@ test('server date deterministically generates the new Crop Year Cycle', () => {
   }
   assert.equal(cropYearCycleForDate('2026-12-31T16:30:00.000Z'), '2027-2028', 'the canonical year follows Philippine server time');
   assert.equal(normalizeCropYear('2026-2027', new Date('2030-01-01T00:00:00.000Z')), '2026-2027', 'stored history is normalized, not recalculated');
+});
+
+test('the next Crop Year Cycle advances the persisted annual range without using today\'s year', () => {
+  assert.deepEqual(nextCropYearParts('2026-2027'), {
+    cropYear: '2027-2028',
+    cropYearStart: 2027,
+    cropYearEnd: 2028
+  });
+  assert.deepEqual(nextCropYearParts('CY 2034-2035'), {
+    cropYear: '2035-2036',
+    cropYearStart: 2035,
+    cropYearEnd: 2036
+  });
 });
 
 test('system diagnostics exposes stored active Crop Year Cycles instead of presenting the record count as a year', () => {

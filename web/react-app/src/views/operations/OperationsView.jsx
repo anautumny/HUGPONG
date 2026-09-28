@@ -188,6 +188,7 @@ export default function OperationsView() {
   const [editTarget, setEditTarget] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [completingStageFieldId, setCompletingStageFieldId] = useState(null);
   const [updateSuccess, setUpdateSuccess] = useState('');
   const [localDrafts, setLocalDrafts] = useState([]);
   const [activeDraft, setActiveDraft] = useState(null);
@@ -506,6 +507,7 @@ export default function OperationsView() {
   };
 
   const handleCompleteStage = async field => {
+    if (!field?.id || completingStageFieldId) return;
     const currentStage = Number(field.cropCycle?.currentStageNumber || field.stageNumber || 1);
     const completesCycle = currentStage >= 6;
     const nextStage = completesCycle ? 6 : currentStage + 1;
@@ -516,6 +518,7 @@ export default function OperationsView() {
       : `Mark Stage ${currentStage} as complete and make Stage ${nextStage} available?`);
     if (!confirmed) return;
 
+    setCompletingStageFieldId(field.id);
     try {
       const grant = capability.takeover ? takeoverGrant : null;
       const result = await updateCropStageOfflineFirst({
@@ -547,6 +550,8 @@ export default function OperationsView() {
           : `Stage ${currentStage} completed. Stage ${nextStage} is now active.`);
     } catch (error) {
       setUpdateSuccess(error.message || 'The stage could not be completed.');
+    } finally {
+      setCompletingStageFieldId(null);
     }
   };
 
@@ -1064,7 +1069,15 @@ export default function OperationsView() {
 
                       <div className="flex items-center gap-2">
                         {capability.canCreate && !field.isCompleted && (
-                          <Button variant="outline" size="sm" icon={CheckCircle2} onClick={() => handleCompleteStage(field)}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            icon={CheckCircle2}
+                            onClick={() => handleCompleteStage(field)}
+                            disabled={Boolean(completingStageFieldId)}
+                            isLoading={completingStageFieldId === field.id}
+                            loadingText="Completing stage..."
+                          >
                             Complete Stage {Number(field.stageNumber || field.cropCycle?.currentStageNumber || 1)}
                           </Button>
                         )}

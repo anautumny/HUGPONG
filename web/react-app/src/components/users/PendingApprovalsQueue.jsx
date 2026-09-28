@@ -10,6 +10,7 @@ export default function PendingApprovalsQueue({
   className = ''
 }) {
   const [processingId, setProcessingId] = useState(null);
+  const [processingAction, setProcessingAction] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [farmSelections, setFarmSelections] = useState({});
   const [actionError, setActionError] = useState(null);
@@ -41,6 +42,7 @@ export default function PendingApprovalsQueue({
       return;
     }
     setProcessingId(user.id);
+    setProcessingAction('approve');
     setActionError(null);
     try {
       const result = await onApproveUser(user, selectedFarmId);
@@ -49,15 +51,18 @@ export default function PendingApprovalsQueue({
       setActionError(error.message || 'The registration could not be approved.');
     } finally {
       setProcessingId(null);
+      setProcessingAction(null);
     }
   };
 
   const handleReject = async (user) => {
     setProcessingId(user.id);
+    setProcessingAction('reject');
     try {
       await onRejectUser(user);
     } finally {
       setProcessingId(null);
+      setProcessingAction(null);
     }
   };
 
@@ -156,6 +161,8 @@ export default function PendingApprovalsQueue({
                   size="sm"
                   onClick={() => handleReject(p)}
                   disabled={isProcessing}
+                  isLoading={isProcessing && processingAction === 'reject'}
+                  loadingText="Declining..."
                   icon={X}
                 >
                   Decline
@@ -165,7 +172,7 @@ export default function PendingApprovalsQueue({
                   variant="primary"
                   size="sm"
                   onClick={() => handleApprove(p)}
-                  isLoading={isProcessing}
+                  isLoading={isProcessing && processingAction === 'approve'}
                   disabled={isProcessing || ((p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId)}
                   icon={Check}
                 >
