@@ -90,7 +90,8 @@ test('production server config requires exact CORS origins and accepts cloud hos
 
 test('public health and production errors disclose no session or infrastructure details', () => {
   const server = read('server/server.js');
-  const health = server.slice(server.indexOf("app.get('/health'"), server.indexOf('// Legacy client status route'));
+  const healthStart = server.indexOf("app.get('/health'");
+  const health = server.slice(healthStart, server.indexOf('\n});', healthStart) + 4);
   assert.match(health, /Cache-Control', 'no-store'/);
   assert.match(health, /success: true/);
   assert.match(health, /status: 'healthy'/);

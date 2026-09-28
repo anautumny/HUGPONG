@@ -313,7 +313,7 @@ test('role routes and clients preserve agricultural/system separation and scoped
   assert.doesNotMatch(service, /collection\(COLLECTIONS\.FIELDS\)\.get\(\)/);
   assert.match(service, /filter\(user => user\.status === 'ACTIVE'\)/);
   assert.doesNotMatch(route, /req\.query.*blockFarmId|req\.body.*userId/);
-  assert.match(mobileMonitor, /setInterval\(refresh, 30000\)/);
+  assert.match(mobileMonitor, /setInterval\(refresh, 2 \* 60 \* 1000\)/);
   assert.match(mobileMonitor, /navigation\.addListener\('blur', stop\)/);
   assert.match(mobileMonitor, /t\('sync_member_activity'\)/);
   assert.match(mobileMonitor, /activityStatusLabel\(member\.activity, t\)/);

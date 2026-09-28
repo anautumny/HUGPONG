@@ -3,7 +3,10 @@ import { authenticatedRequest, getMobileClientInstanceId } from './authService';
 import { STORAGE_KEYS, getItem } from './storageService';
 
 const ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
+const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
 let lastActivityReportAt = 0;
+let lastSyncReportAt = 0;
+let lastSyncSignature = '';
 
 function deviceMetadata() {
   const constants = Platform.constants || {};
@@ -46,12 +49,25 @@ export async function reportMobileSync({
   connectionState = 'ONLINE',
   syncSucceeded = false
 } = {}) {
+  let signature = '';
   try {
     const session = await getItem(STORAGE_KEYS.SESSION);
     const roleUpper = String(session?.canonicalRole || session?.role || session?.roleKey || '').trim().toUpperCase().replace(/[ -]+/g, '_');
     if (roleUpper && roleUpper !== 'MEMBER_FARMER' && roleUpper !== 'FARM_MANAGER') {
       return null;
     }
+    signature = JSON.stringify({
+      pendingMutationCount: Number(pendingMutationCount || 0),
+      failedMutationCount: Number(failedMutationCount || 0),
+      syncState: String(syncState || 'UNKNOWN').toUpperCase(),
+      connectionState: String(connectionState || 'ONLINE').toUpperCase()
+    });
+    const now = Date.now();
+    if (!syncSucceeded && signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
+      return { throttled: true };
+    }
+    lastSyncSignature = signature;
+    lastSyncReportAt = now;
     return await telemetryRequest('/api/terminal-diagnostics/sync', {
       pendingMutationCount,
       failedMutationCount,
@@ -60,6 +76,10 @@ export async function reportMobileSync({
       syncSucceeded
     });
   } catch (error) {
+    if (signature && lastSyncSignature === signature) {
+      lastSyncSignature = '';
+      lastSyncReportAt = 0;
+    }
     if (!error.message?.includes('Access Denied')) {
       console.warn('[Telemetry] Sync report deferred:', error.message);
     }

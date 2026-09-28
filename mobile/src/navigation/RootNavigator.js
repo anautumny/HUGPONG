@@ -190,6 +190,7 @@ function MainTabs({ navigation }) {
     <>
       <Tab.Navigator
         initialRouteName={!isOnline ? 'Field Ops' : 'Home'}
+        detachInactiveScreens
         tabBar={(props) => (
           <CustomBottomTabBar
             {...props}
@@ -198,6 +199,8 @@ function MainTabs({ navigation }) {
         )}
         screenOptions={{
           headerShown: false,
+          lazy: true,
+          freezeOnBlur: true,
         }}
       >
         <Tab.Screen

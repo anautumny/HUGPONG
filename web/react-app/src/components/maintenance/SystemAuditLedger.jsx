@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, History, CheckCircle2, AlertTriangle, Shield, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
@@ -14,6 +14,7 @@ export default function SystemAuditLedger({
   const [outcomeFilter, setOutcomeFilter] = useState('ALL');
   const [cropYearFilter, setCropYearFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const pageSize = 10;
 
   const cropYearOptions = useMemo(() => {
@@ -36,8 +37,8 @@ export default function SystemAuditLedger({
       result = result.filter(log => (log.cropYears || []).includes(cropYearFilter));
     }
 
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
+    if (deferredSearchTerm.trim()) {
+      const q = deferredSearchTerm.toLowerCase();
       result = result.filter(l =>
         (l.actorUserId && l.actorUserId.toLowerCase().includes(q)) ||
         (l.eventType && l.eventType.toLowerCase().includes(q)) ||
@@ -48,7 +49,7 @@ export default function SystemAuditLedger({
     }
 
     return result;
-  }, [logs, outcomeFilter, cropYearFilter, searchTerm]);
+  }, [logs, outcomeFilter, cropYearFilter, deferredSearchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
   const validPage = Math.min(currentPage, totalPages);

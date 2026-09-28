@@ -59,14 +59,18 @@ async function readSecureValue(key) {
 
 // In-memory shadow cache for synchronous reads after initial hydration
 const memoryCache = new Map();
+// Exact serialized values let us avoid slow device-storage writes when a
+// refresh produces data identical to the already persisted replica.
+const serializedCache = new Map();
 
 /**
  * Save an item to AsyncStorage and update the memory cache
  */
 export async function saveItem(key, value) {
   try {
-    memoryCache.set(key, value);
     const jsonValue = JSON.stringify(value);
+    memoryCache.set(key, value);
+    if (serializedCache.get(key) === jsonValue) return true;
     if (isSecureKey(key)) {
       if (value == null) await SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS);
       else await SecureStore.setItemAsync(secureStorageKey(key), jsonValue, SECURE_OPTIONS);
@@ -74,6 +78,7 @@ export async function saveItem(key, value) {
     } else {
       await AsyncStorage.setItem(key, jsonValue);
     }
+    serializedCache.set(key, jsonValue);
     return true;
   } catch (error) {
     console.warn(`[storageService] Error saving key "${key}":`, error);
@@ -131,8 +136,10 @@ export async function ensureCurrentCacheSchema() {
   if (staleKeys.length) await AsyncStorage.multiRemove(staleKeys);
   await Promise.all(Array.from(SECURE_KEYS).map(key => SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS).catch(() => {})));
   memoryCache.clear();
+  serializedCache.clear();
   await AsyncStorage.setItem(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
   memoryCache.set(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
+  serializedCache.set(STORAGE_KEYS.CACHE_SCHEMA_VERSION, JSON.stringify(MOBILE_CACHE_SCHEMA_VERSION));
   return { reset: true, version: MOBILE_CACHE_SCHEMA_VERSION, removedKeyCount: staleKeys.length };
 }
 
@@ -148,6 +155,7 @@ export async function getItem(key, defaultValue = null) {
       const secureValue = await readSecureValue(key);
       if (secureValue !== null) {
         memoryCache.set(key, secureValue);
+        serializedCache.set(key, JSON.stringify(secureValue));
         return secureValue;
       }
       // One-time migration for installations created before encrypted storage.
@@ -157,6 +165,7 @@ export async function getItem(key, defaultValue = null) {
         await SecureStore.setItemAsync(secureStorageKey(key), legacyValue, SECURE_OPTIONS);
         await AsyncStorage.removeItem(key);
         memoryCache.set(key, parsed);
+        serializedCache.set(key, legacyValue);
         return parsed;
       }
       return defaultValue;
@@ -165,6 +174,7 @@ export async function getItem(key, defaultValue = null) {
     if (jsonValue !== null) {
       const parsed = JSON.parse(jsonValue);
       memoryCache.set(key, parsed);
+      serializedCache.set(key, jsonValue);
       return parsed;
     }
     return defaultValue;
@@ -190,6 +200,7 @@ export function getCachedItem(key, defaultValue = null) {
 export async function removeItem(key) {
   try {
     memoryCache.delete(key);
+    serializedCache.delete(key);
     if (isSecureKey(key)) {
       await SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS);
       await AsyncStorage.removeItem(key);
@@ -207,6 +218,7 @@ export async function removeItems(keys = []) {
   try {
     const normalizedKeys = Array.from(new Set(keys.filter(Boolean).map(String)));
     normalizedKeys.forEach(key => memoryCache.delete(key));
+    normalizedKeys.forEach(key => serializedCache.delete(key));
     const secureKeys = normalizedKeys.filter(isSecureKey);
     const ordinaryKeys = normalizedKeys.filter(key => !isSecureKey(key));
     await Promise.all(secureKeys.map(key => SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS)));
@@ -226,21 +238,26 @@ export async function multiSave(keyValuePairs) {
   try {
     const ordinaryPairs = [];
     const secureWrites = [];
+    const changedSecureKeys = [];
+    const changedEncodedValues = [];
     keyValuePairs.forEach(([key, value]) => {
       memoryCache.set(key, value);
       const encoded = JSON.stringify(value);
+      if (serializedCache.get(key) === encoded) return;
       if (isSecureKey(key)) {
+        changedSecureKeys.push(key);
         secureWrites.push(value == null
           ? SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS)
           : SecureStore.setItemAsync(secureStorageKey(key), encoded, SECURE_OPTIONS));
       } else {
         ordinaryPairs.push([key, encoded]);
       }
+      changedEncodedValues.push([key, encoded]);
     });
     await Promise.all(secureWrites);
     if (ordinaryPairs.length) await AsyncStorage.multiSet(ordinaryPairs);
-    const legacySecureKeys = keyValuePairs.map(([key]) => key).filter(isSecureKey);
-    if (legacySecureKeys.length) await AsyncStorage.multiRemove(legacySecureKeys);
+    if (changedSecureKeys.length) await AsyncStorage.multiRemove(changedSecureKeys);
+    changedEncodedValues.forEach(([key, encoded]) => serializedCache.set(key, encoded));
     return true;
   } catch (error) {
     console.warn('[storageService] Error in multiSave:', error);
@@ -254,6 +271,7 @@ export async function multiSave(keyValuePairs) {
 export async function clearHugpongStorage() {
   try {
     memoryCache.clear();
+    serializedCache.clear();
     const allStoredKeys = await AsyncStorage.getAllKeys();
     const hugpongKeys = allStoredKeys.filter(key =>
       key.startsWith('@hugpong_')
@@ -282,6 +300,7 @@ export async function hydrateAllStorage() {
         try {
           const parsed = JSON.parse(value);
           memoryCache.set(key, parsed);
+          serializedCache.set(key, value);
           hydrated[key] = parsed;
         } catch (e) {
           // ignore corrupted single entry

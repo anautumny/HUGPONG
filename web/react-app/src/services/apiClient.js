@@ -9,7 +9,10 @@
 import { signInWithCustomTokenSilently } from './firebaseClient';
 import { friendlyErrorMessage } from '../domain/presentationContract';
 
-const READ_CACHE_TTL_MS = 5000;
+// Screen data is reused briefly across navigation. Mutations still invalidate
+// affected resources immediately, so this only removes duplicate GETs.
+const READ_CACHE_TTL_MS = 60 * 1000;
+const DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
@@ -181,7 +184,7 @@ export function peekAuthenticatedRead(path) {
 export function subscribeToAuthenticatedResource(path, {
   onData,
   onError,
-  intervalMs = 30000
+  intervalMs = DEFAULT_POLL_INTERVAL_MS
 } = {}) {
   let active = true;
   let inFlight = false;
@@ -221,7 +224,7 @@ export function subscribeToAuthenticatedResource(path, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground()) refresh({ force: true });
+    if (canRefreshInBackground()) refresh();
   };
   const handleMutation = event => {
     if (mutationAffects(event, resources)) refresh({ force: true });
@@ -243,7 +246,7 @@ export function subscribeToAuthenticatedResource(path, {
 export function subscribeToAuthenticatedLoader(load, {
   onData,
   onError,
-  intervalMs = 30000,
+  intervalMs = DEFAULT_POLL_INTERVAL_MS,
   resources = []
 } = {}) {
   let active = true;
@@ -269,7 +272,7 @@ export function subscribeToAuthenticatedLoader(load, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground()) refresh({ force: true });
+    if (canRefreshInBackground()) refresh();
   };
   const handleMutation = event => {
     if (!resources.length || mutationAffects(event, resources)) refresh({ force: true });

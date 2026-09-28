@@ -10,7 +10,8 @@ export const COLLECTIONS = Object.freeze({
   AUDIT_LOGS: 'audit_logs',
   SRA_PRICES: 'sra_prices',
   SUPPORT_TICKETS: 'support_tickets',
-  TERMINAL_DIAGNOSTICS: 'terminal_diagnostics'
+  TERMINAL_DIAGNOSTICS: 'terminal_diagnostics',
+  PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges'
 });
 
 const canonicalAuditStatus = value => {

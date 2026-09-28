@@ -1,6 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { AlertCircle, ImageUp, Inbox, Keyboard, QrCode, ShieldCheck } from 'lucide-react';
-import { BrowserQRCodeReader } from '@zxing/browser';
 import Button from '../ui/Button';
 import {
   verifyAuditQr,
@@ -120,6 +119,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
     setFeedback({ type: 'info', message: 'Reading uploaded QR image...' });
     const imageUrl = URL.createObjectURL(file);
     try {
+      const { BrowserQRCodeReader } = await import('@zxing/browser');
       const result = await new BrowserQRCodeReader().decodeFromImageUrl(imageUrl);
       await readQrPayload(result.getText());
     } catch {

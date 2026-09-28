@@ -2450,6 +2450,8 @@ export const resetLocalCache = async () => {
 // The durable outbox remains responsible for offline mutations; this refresh
 // only replaces canonical read replicas after a successful API response.
 const responseRecords = response => Array.isArray(response?.data) ? response.data : [];
+const CLOUD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const CLOUD_REFRESH_FRESHNESS_MS = 2 * 60 * 1000;
 
 export const listenToCloudSync = () => {
   let active = true;
@@ -2457,6 +2459,7 @@ export const listenToCloudSync = () => {
   let refreshTimer = null;
   let appState = AppState.currentState;
   let appStateSubscription = null;
+  let lastSuccessfulRefreshAt = 0;
 
   const stop = () => {
     active = false;
@@ -2467,8 +2470,9 @@ export const listenToCloudSync = () => {
     if (activeCloudRefresh === refresh) activeCloudRefresh = null;
   };
 
-  const refresh = async () => {
+  const refresh = async ({ force = false } = {}) => {
     if (!active || requestInFlight || (appState && appState !== 'active') || !getNetworkStatus()) return;
+    if (!force && Date.now() - lastSuccessfulRefreshAt < CLOUD_REFRESH_FRESHNESS_MS) return true;
 
     const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
     const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
@@ -2718,6 +2722,7 @@ export const listenToCloudSync = () => {
         await multiSave(cacheEntries);
       }
       if (active) notify();
+      lastSuccessfulRefreshAt = Date.now();
       return true;
     } catch (error) {
       if (error.status === 401) {
@@ -2733,7 +2738,7 @@ export const listenToCloudSync = () => {
 
   activeCloudRefresh = refresh;
   stop.initialRefresh = refresh();
-  refreshTimer = setInterval(refresh, 60000);
+  refreshTimer = setInterval(refresh, CLOUD_REFRESH_INTERVAL_MS);
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
     appState = nextState;
@@ -3015,7 +3020,7 @@ export const fetchAuditHistoryPage = async ({ cursor = null, limit = 20 } = {}) 
 // Register automatic sync on network reconnection
 setOnReconnectCallback(async trigger => {
   const result = await performMobileSync(trigger || 'NETWORK_RESTORED');
-  if (typeof activeCloudRefresh === 'function') await activeCloudRefresh();
+  if (typeof activeCloudRefresh === 'function') await activeCloudRefresh({ force: true });
   return result;
 });
 

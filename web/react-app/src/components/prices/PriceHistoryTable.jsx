@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, ArrowUpDown, ArrowUpRight, ArrowDownRight, Minus, FileText, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
@@ -12,14 +12,15 @@ export default function PriceHistoryTable({
   const [sortField, setSortField] = useState('effectiveDate'); // 'effectiveDate' | 'sugarPricePerLkg' | 'molassesPricePerMetricTon'
   const [sortDirection, setSortDirection] = useState('desc'); // 'asc' | 'desc'
   const [currentPage, setCurrentPage] = useState(1);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const pageSize = 10;
 
   // Filtered & Sorted Prices
   const filteredPrices = useMemo(() => {
     let result = [...prices];
 
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
+    if (deferredSearchTerm.trim()) {
+      const q = deferredSearchTerm.toLowerCase();
       result = result.filter(p =>
         (p.circularNumber && p.circularNumber.toLowerCase().includes(q)) ||
         (p.source && p.source.toLowerCase().includes(q)) ||
@@ -43,7 +44,7 @@ export default function PriceHistoryTable({
     });
 
     return result;
-  }, [prices, searchTerm, sortField, sortDirection]);
+  }, [prices, deferredSearchTerm, sortField, sortDirection]);
 
   // Pagination calculation
   const totalPages = Math.max(1, Math.ceil(filteredPrices.length / pageSize));

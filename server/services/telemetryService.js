@@ -72,8 +72,6 @@ async function recordActivity(db, { userId, platform, clientInstanceId, event = 
     activityReportedAt: at
   };
   if (String(event).toUpperCase() === 'LOGIN') patch.lastLoginAt = at;
-  const current = await ref.get();
-  if (!current.exists) patch.createdAt = at;
   await ref.set(patch, { merge: true });
   return patch;
 }
@@ -106,8 +104,6 @@ async function recordSyncTelemetry(db, {
     telemetryReportedAt: at
   };
   if (syncSucceeded === true) patch.lastSuccessfulSyncAt = at;
-  const current = await ref.get();
-  if (!current.exists) patch.createdAt = at;
   await ref.set(patch, { merge: true });
   return patch;
 }

@@ -50,7 +50,7 @@ export function SyncProvider({ children }) {
     window.addEventListener('offline', handleOffline);
     window.addEventListener('focus', probeApi);
     probeApi();
-    const interval = window.setInterval(probeApi, 30000);
+    const interval = window.setInterval(probeApi, 2 * 60 * 1000);
 
     return () => {
       active = false;
