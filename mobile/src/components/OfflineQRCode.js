@@ -4,10 +4,11 @@
 // Zero external internet requests, 100% offline-first.
 // ══════════════════════════════════════════════════════════════
 
-import React, { forwardRef, useMemo } from 'react';
-import { View } from 'react-native';
+import React, { forwardRef, useEffect, useMemo } from 'react';
+import { Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import QRCode from 'qrcode';
+import { createMobileReference, reportMobileDiagnostic } from '../services/clientDiagnostics';
 
 /**
  * OfflineQRCode renders a vector SVG QR code completely locally.
@@ -26,7 +27,7 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
   errorCorrectionLevel = 'M',
   style
 }, ref) {
-  const { pathData, moduleCount } = useMemo(() => {
+  const { pathData, moduleCount, diagnostic } = useMemo(() => {
     try {
       if (!value) return { pathData: '', moduleCount: 0 };
       const qr = QRCode.create(String(value), {
@@ -50,12 +51,37 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
 
       return { pathData: path, moduleCount: count };
     } catch (err) {
-      console.warn('[OfflineQRCode] QR generation error:', err);
-      return { pathData: '', moduleCount: 0 };
+      const referenceId = createMobileReference();
+      return {
+        pathData: '',
+        moduleCount: 0,
+        diagnostic: {
+          referenceId,
+          message: `${err?.name || 'QrError'}: ${err?.message || 'QR generation failed.'}`
+        }
+      };
     }
   }, [value, errorCorrectionLevel]);
 
-  if (!pathData || !moduleCount) return null;
+  useEffect(() => {
+    if (!diagnostic) return;
+    reportMobileDiagnostic({
+      ...diagnostic,
+      module: 'QR',
+      errorCode: 'MOBILE_QR_GENERATION_FAILURE'
+    });
+  }, [diagnostic]);
+
+  if (!pathData || !moduleCount) {
+    if (!diagnostic) return null;
+    return (
+      <View style={[{ width: size, minHeight: size, justifyContent: 'center', padding: 12, backgroundColor }, style]}>
+        <Text style={{ color: '#9B1C1C', textAlign: 'center', fontSize: 12 }}>
+          QR could not be generated. Try again.{`\n`}Reference ID: {diagnostic.referenceId}
+        </Text>
+      </View>
+    );
+  }
 
   // ISO/IEC 18004 recommends a four-module quiet zone.
   const quietZone = 4;

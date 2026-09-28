@@ -11,6 +11,9 @@ Phase 5 turns the earlier security and hardcoded-data review into a repeatable r
 
 ## Server / API
 
+- `npm run audit:secrets` scans version-controlled and non-ignored files for credential files, private-key material, known secret-token formats, public-environment secrets, and SMS provider credentials/endpoints in Web or Mobile source.
+- Secret findings contain only the rule, file, and line number; the matched value is never included in output.
+- Production startup fails closed when `SMS_PROVIDER=semaphore` is selected without a server-side `SEMAPHORE_API_KEY`.
 - `npm run audit:runtime-authority` scans active Web and Mobile source for direct Firestore mutations/imports, embedded Firebase configuration, deprecated native `SafeAreaView` imports, and known fabricated runtime records.
 - The scan reports only rule, file, and line evidence. It does not print credentials or matched source values.
 - Firebase Admin no longer silently falls back to a named project.
@@ -35,6 +38,6 @@ From the repository root, run:
 npm run verify:release
 ```
 
-The command runs the runtime-authority audit, the complete server test suite, Web tests, the Web production build, and an Android Expo production export. The Android export uses a temporary operating-system directory and removes it even when verification fails.
+The command runs deployment parity, tracked-secret, and runtime-authority audits, the complete server test suite, Web tests, the Web production build, and an Android Expo production export. The Android export uses a temporary operating-system directory and removes it even when verification fails.
 
 Environment-specific Firebase values must be provided before building. Web and Mobile project IDs must identify the same Firebase project as the server unless an intentionally isolated environment is being tested.

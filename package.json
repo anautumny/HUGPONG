@@ -8,6 +8,7 @@
     "web": "node server/server.js",
     "mobile": "cd mobile && npm start",
     "audit:deployment-config": "npm --prefix server run audit:deployment-config",
+    "audit:secrets": "npm --prefix server run audit:secrets",
     "audit:runtime-authority": "npm --prefix server run audit:runtime-authority",
     "verify:release": "node server/scripts/verifyRelease.js"
   },

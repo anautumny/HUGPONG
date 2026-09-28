@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Lock, Eye, EyeOff, Check, Circle, AlertCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { passwordPolicy, passwordPolicyError } from '../../domain/passwordPolicy';
 
 export default function FirstLoginPasswordModal({
   isOpen,
@@ -33,16 +34,11 @@ export default function FirstLoginPasswordModal({
   if (!isOpen) return null;
 
   // Real-time validation checks matching Stage 7
-  const isLengthValid = newPassword.length >= 8;
-  const isCaseValid = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
-  const isNumberValid = /[0-9]/.test(newPassword);
-  const lower = newPassword.toLowerCase();
-  const isNotDefault =
-    newPassword.length > 0 &&
-    lower !== 'hugpong' &&
-    lower !== 'hugpong2026' &&
-    lower !== 'password123' &&
-    lower !== 'admin@hugpong';
+  const policy = passwordPolicy(newPassword);
+  const isLengthValid = policy.hasValidLength;
+  const isCaseValid = policy.hasLowercase && policy.hasUppercase;
+  const isNumberValid = policy.hasNumber;
+  const isNotDefault = policy.isUnpredictable;
 
   const isFormValid = isLengthValid && isCaseValid && isNumberValid && isNotDefault && newPassword === confirmPassword;
 
@@ -50,20 +46,9 @@ export default function FirstLoginPasswordModal({
     e.preventDefault();
     setError('');
 
-    if (!isLengthValid) {
-      setError('Password must be at least 8 characters long.');
-      return;
-    }
-    if (!isCaseValid) {
-      setError('Password must contain both uppercase (A-Z) and lowercase (a-z) letters.');
-      return;
-    }
-    if (!isNumberValid) {
-      setError('Password must contain at least one number (0-9).');
-      return;
-    }
-    if (!isNotDefault) {
-      setError('Please choose a unique password different from default temporary passwords.');
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      setError(policyError);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -200,7 +185,7 @@ export default function FirstLoginPasswordModal({
                 ) : (
                   <Circle className="w-3.5 h-3.5 text-hug-muted shrink-0" />
                 )}
-                <span>At least 8 characters long</span>
+                <span>Between 8 and 256 characters</span>
               </div>
 
               <div
@@ -245,7 +230,7 @@ export default function FirstLoginPasswordModal({
                 ) : (
                   <Circle className="w-3.5 h-3.5 text-hug-muted shrink-0" />
                 )}
-                <span>Cannot be default password ("hugpong" / "hugpong2026")</span>
+                <span>Cannot be a common or default password</span>
               </div>
             </div>
           </div>

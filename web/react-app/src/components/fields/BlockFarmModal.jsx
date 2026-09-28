@@ -88,7 +88,7 @@ export default function BlockFarmModal({
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
-      console.error('[BlockFarmModal] Save error:', err);
+      console.warn('[BlockFarmModal] Save failed; see the displayed reference ID.');
       setServerError(err.message || 'Failed to save block farm record.');
       setIsSubmitting(false);
     }

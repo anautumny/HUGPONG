@@ -22,7 +22,9 @@ import {
   Shield,
   LogOut,
   X,
-  Building2
+  Building2,
+  SquareTerminal,
+  DatabaseBackup
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -235,6 +237,18 @@ export default function Sidebar({
             to: '/maintenance',
             icon: ShieldCheck,
             id: 'nav-maintenance'
+          },
+          {
+            label: 'Diagnostics Console',
+            to: '/diagnostics',
+            icon: SquareTerminal,
+            id: 'nav-diagnostics'
+          },
+          {
+            label: 'Backup & Recovery',
+            to: '/backups',
+            icon: DatabaseBackup,
+            id: 'nav-backups'
           }
         ]
       });

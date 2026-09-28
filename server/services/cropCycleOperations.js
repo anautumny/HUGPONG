@@ -293,6 +293,22 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       archivedAt: null,
       archivedByUserId: null,
       updatedAt: timestamp,
+      amendments: existing.amendments || []
+    };
+    const canonicalUpdate = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    const amendableFields = [
+      'operationName', 'childOperationName', 'variety', 'performedOn', 'areaHa',
+      'peopleCount', 'quantity', 'baseCost', 'totalCost', 'lineItems',
+      'laborEntries', 'isSupplemental'
+    ];
+    const authoritativeChanges = Object.fromEntries(amendableFields
+      .filter(key => JSON.stringify(existing[key] ?? null) !== JSON.stringify(canonicalUpdate[key] ?? null))
+      .map(key => [key, { before: existing[key] ?? null, after: canonicalUpdate[key] ?? null }]));
+    if (!Object.keys(authoritativeChanges).length) {
+      throw serviceError('No meaningful operation changes were provided.');
+    }
+    const payload = buildOperationLog({
+      ...canonicalUpdate,
       amendments: [
         ...(existing.amendments || []),
         {
@@ -300,15 +316,12 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
           amendedByUserId: access.actorId,
           amendedByName: access.actorName,
           amendedByRole: access.actorRole,
-          authorizationMode: access.authorization.submissionSource,
-          takeoverFieldId: access.authorization.takeover ? access.fieldId : null,
           reason: String(amendment.reason).trim(),
           amendedAt: timestamp,
-          changes: amendment.changes || {}
+          changes: authoritativeChanges
         }
       ]
-    };
-    const payload = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    }, { submittedByUserId: existing.submittedByUserId, now: timestamp });
     if (fixedStageNumber === 2 && variety && variety !== String(activeCycle.cycle.variety || '').trim()) {
       transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
     }

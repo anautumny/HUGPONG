@@ -18,6 +18,8 @@ const COLLECTIONS = Object.freeze({
   SRA_PRICES: 'sra_prices',
   SUPPORT_TICKETS: 'support_tickets',
   TERMINAL_DIAGNOSTICS: 'terminal_diagnostics',
+  DIAGNOSTIC_EVENTS: 'diagnostic_events',
+  BACKUP_OPERATIONS: 'backup_operations',
   SERVER_SESSIONS: 'server_sessions',
   SECURITY_RATE_LIMITS: 'security_rate_limits',
   PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges'

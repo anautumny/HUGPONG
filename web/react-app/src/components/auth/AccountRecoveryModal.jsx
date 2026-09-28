@@ -11,24 +11,22 @@ import {
   Shield,
   X
 } from 'lucide-react';
+import { PASSWORD_POLICY_HINT, passwordPolicyError } from '../../domain/passwordPolicy';
+import { responseErrorFromPayload, webClientHeaders } from '../../services/apiClient';
 
 async function recoveryRequest(path, body) {
   const response = await fetch(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-client-platform': 'web'
+      ...webClientHeaders()
     },
     body: JSON.stringify(body),
     credentials: 'include'
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.success) {
-    const error = new Error(result.error || 'Account recovery could not be completed.');
-    error.status = response.status;
-    error.code = result.code || '';
-    error.data = result.data || {};
-    throw error;
+    throw responseErrorFromPayload(result, response.status, 'Account recovery could not be completed.');
   }
   return result;
 }
@@ -127,8 +125,9 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
 
   const resetPassword = async (event) => {
     event.preventDefault();
-    if (newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-      setError('Password must be at least 8 characters and contain at least one letter and one number.');
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      setError(policyError);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -278,7 +277,7 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
 
         {step === 3 && (
           <form onSubmit={resetPassword} className="space-y-4">
-            <p className="text-xs text-hug-muted leading-relaxed">Use at least 8 characters with at least one letter and one number.</p>
+            <p className="text-xs text-hug-muted leading-relaxed">{PASSWORD_POLICY_HINT}</p>
             <label className="block">
               <span className="block text-xs font-bold text-hug-text2 mb-1.5">New Password</span>
               <span className="relative block">

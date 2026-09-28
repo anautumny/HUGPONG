@@ -182,7 +182,7 @@ export default function AuditCompilationModal({
         throw new Error(response.error || 'Server rejected audit report compilation.');
       }
     } catch (err) {
-      console.error('[AuditCompilation] Error:', err);
+      console.warn('[AuditCompilation] Compilation failed; see the displayed reference ID.');
       setCompileError(err.message || 'Failed to compile audit report. Please try again.');
     } finally {
       setIsCompiling(false);

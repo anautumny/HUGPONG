@@ -44,7 +44,7 @@ export const auth = getAuth(app);
 
 // Configure local session persistence
 setPersistence(auth, browserLocalPersistence).catch(err => {
-  console.warn('[HUGPONG Firebase] Persistence warning:', err.message);
+  console.warn('[HUGPONG Firebase] Local authentication persistence is unavailable.');
 });
 
 export async function signInWithCustomTokenSilently(customToken) {

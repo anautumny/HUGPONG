@@ -22,10 +22,52 @@ test('account security versions are backward compatible and advance on revocatio
   assert.equal(verifyToken(token).authVersion, 5);
 });
 
-test('server password policy rejects passwords without both letters and numbers', () => {
-  assert.throws(() => validatePassword('abcdefgh'), /letter and one number/);
-  assert.throws(() => validatePassword('12345678'), /letter and one number|less predictable/);
+test('server password policy consistently requires mixed case, a number, and a non-default value', () => {
+  assert.throws(() => validatePassword('abcdefgh1'), /uppercase letter/);
+  assert.throws(() => validatePassword('ABCDEFGH1'), /lowercase letter/);
+  assert.throws(() => validatePassword('Abcdefgh'), /one number/);
+  assert.throws(() => validatePassword('Hugpong2026'), /less predictable/);
   assert.doesNotThrow(() => validatePassword('StrongPassword123!'));
+});
+
+test('login cooldown is persistent and restored by both clients', () => {
+  const auth = read('server/routes/auth.js');
+  const webLogin = read('web/react-app/src/views/LoginView.jsx');
+  const mobileLogin = read('mobile/src/screens/auth/LoginScreen.js');
+  const mobileStorage = read('mobile/src/services/storageService.js');
+
+  assert.match(auth, /LOGIN_ATTEMPT_LIMIT = 5/);
+  assert.match(auth, /LOGIN_LOCKOUT_MS = 15 \* 60 \* 1000/);
+  assert.match(auth, /Too many login attempts\. Please try again later\./);
+  assert.match(auth, /loginRateLimit\.reset\(req\)/);
+  assert.match(auth, /LOGIN_RATE_LIMITED/);
+  assert.match(webLogin, /hugpong_login_lockout_until/);
+  assert.match(webLogin, /applyServerLockout/);
+  assert.doesNotMatch(webLogin, /Locked \(\$\{lockoutRemaining\}s\)/);
+  assert.match(mobileStorage, /LOGIN_LOCKOUT_UNTIL: '@hugpong_login_lockout_until'/);
+  assert.match(mobileLogin, /getItem\(STORAGE_KEYS\.LOGIN_LOCKOUT_UNTIL/);
+  assert.match(mobileLogin, /applyServerLockout/);
+  assert.doesNotMatch(mobileLogin, /Locked \(\$\{lockoutSeconds\}s\)/);
+});
+
+test('first-login and settings screens mirror the same password policy on Web and Mobile', () => {
+  const webPolicy = read('web/react-app/src/domain/passwordPolicy.js');
+  const webFirstLogin = read('web/react-app/src/components/auth/FirstLoginPasswordModal.jsx');
+  const webSettings = read('web/react-app/src/components/settings/SecuritySettings.jsx');
+  const mobilePolicy = read('mobile/src/domain/passwordPolicy.js');
+  const mobileFirstLogin = read('mobile/src/screens/auth/LoginScreen.js');
+  const mobileSettings = read('mobile/src/screens/SecurityScreen.js');
+
+  for (const policy of [webPolicy, mobilePolicy]) {
+    assert.match(policy, /hasLowercase/);
+    assert.match(policy, /hasUppercase/);
+    assert.match(policy, /hasNumber/);
+    assert.match(policy, /hugpong2026/);
+  }
+  assert.match(webFirstLogin, /passwordPolicy\(newPassword\)/);
+  assert.match(webSettings, /passwordPolicyError\(newPassword\)/);
+  assert.match(mobileFirstLogin, /passwordPolicy\(newPassword\)/);
+  assert.match(mobileSettings, /passwordPolicyError\(newPw\)/);
 });
 
 test('web authentication uses the HttpOnly session and never persists a bearer token', () => {

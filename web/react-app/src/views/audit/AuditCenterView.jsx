@@ -192,7 +192,7 @@ export default function AuditCenterView() {
         throw new Error(response.error || 'Server rejected audit certification.');
       }
     } catch (err) {
-      console.error('[AuditCenter] Certification error:', err);
+      console.warn('[AuditCenter] Certification failed; see the displayed reference ID.');
       showToast(err.message || 'Certification failed.', 'error');
     } finally {
       setIsCertifying(false);

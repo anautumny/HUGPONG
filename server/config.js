@@ -45,6 +45,7 @@ for (const envFile of envFiles) {
 let sessionSecret = process.env.SESSION_SECRET;
 const isProduction = process.env.NODE_ENV === 'production';
 const smsProvider = String(process.env.SMS_PROVIDER || 'semaphore').trim().toLowerCase();
+const semaphoreApiKey = String(process.env.SEMAPHORE_API_KEY || '').trim();
 const host = String(process.env.HOST || '0.0.0.0').trim();
 const port = Number(process.env.PORT || '3000');
 const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '').trim();
@@ -88,6 +89,9 @@ if (!['console', 'semaphore'].includes(smsProvider)) {
 if (isProduction && smsProvider !== 'semaphore') {
   throw new Error('SMS_PROVIDER=console is forbidden in production. Use SMS_PROVIDER=semaphore.');
 }
+if (isProduction && smsProvider === 'semaphore' && !semaphoreApiKey) {
+  throw new Error('SEMAPHORE_API_KEY must be provided through the server environment in production.');
+}
 
 if (!sessionSecret || sessionSecret.length < 32) {
   if (isProduction) {
@@ -117,7 +121,7 @@ if (!sessionSecret || sessionSecret.length < 32) {
 module.exports = {
   sessionSecret,
   smsProvider,
-  semaphoreApiKey: process.env.SEMAPHORE_API_KEY || '',
+  semaphoreApiKey,
   semaphoreSenderName: process.env.SEMAPHORE_SENDER_NAME || 'SEMAPHORE',
   corsOrigins,
   isProduction,

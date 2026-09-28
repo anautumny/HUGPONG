@@ -9,6 +9,13 @@ import FirstLoginVerifyModal from '../components/auth/FirstLoginVerifyModal';
 import FirstLoginPasswordModal from '../components/auth/FirstLoginPasswordModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 
+const LOGIN_LOCKOUT_STORAGE_KEY = 'hugpong_login_lockout_until';
+
+function storedLoginLockoutUntil() {
+  const stored = Number(localStorage.getItem(LOGIN_LOCKOUT_STORAGE_KEY) || 0);
+  return Number.isFinite(stored) && stored > Date.now() ? stored : 0;
+}
+
 export default function LoginView() {
   const { login, saveSession, isAuthenticated, isLoading, roleKey, sessionExpiredNotice, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -27,8 +34,8 @@ export default function LoginView() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [lockoutRemaining, setLockoutRemaining] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState(storedLoginLockoutUntil);
+  const [lockoutRemaining, setLockoutRemaining] = useState(() => Math.max(0, Math.ceil((storedLoginLockoutUntil() - Date.now()) / 1000)));
 
   // Modals state
   const [isRecoveryModalOpen, setIsRecoveryModalOpen] = useState(false);
@@ -48,19 +55,36 @@ export default function LoginView() {
 
   // Security lockout timer
   useEffect(() => {
-    if (lockoutRemaining <= 0) return;
-    const timer = setInterval(() => {
-      setLockoutRemaining((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [lockoutRemaining]);
+    if (!lockoutUntil) return undefined;
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((lockoutUntil - Date.now()) / 1000));
+      setLockoutRemaining(remaining);
+      if (remaining === 0) {
+        localStorage.removeItem(LOGIN_LOCKOUT_STORAGE_KEY);
+        setLockoutUntil(0);
+        setErrorMessage('');
+      }
+    };
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [lockoutUntil]);
+
+  const applyServerLockout = (data = {}) => {
+    const serverExpiry = Date.parse(data.lockoutUntil || data.windowResetsAt || '');
+    const retrySeconds = Math.max(1, Number(data.retryAfterSeconds || 60));
+    const expiry = Number.isFinite(serverExpiry) ? serverExpiry : Date.now() + (retrySeconds * 1000);
+    localStorage.setItem(LOGIN_LOCKOUT_STORAGE_KEY, String(expiry));
+    setLockoutUntil(expiry);
+    setLockoutRemaining(Math.max(1, Math.ceil((expiry - Date.now()) / 1000)));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
     if (lockoutRemaining > 0) {
-      setErrorMessage(`Security lockout active: Please wait ${lockoutRemaining} seconds before retrying.`);
+      setErrorMessage('Too many login attempts. Please try again later.');
       return;
     }
 
@@ -83,6 +107,9 @@ export default function LoginView() {
 
     try {
       const result = await login(identifier.trim(), password);
+      localStorage.removeItem(LOGIN_LOCKOUT_STORAGE_KEY);
+      setLockoutUntil(0);
+      setLockoutRemaining(0);
 
       // Check for first-login phone verification gate
       if (result.needsVerification) {
@@ -106,12 +133,9 @@ export default function LoginView() {
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setIsSubmitting(false);
-      const nextFail = failedAttempts + 1;
-      setFailedAttempts(nextFail);
-
-      if (nextFail >= 5) {
-        setLockoutRemaining(60);
-        setErrorMessage('Too many failed login attempts. Access temporarily locked for 60 seconds.');
+      if (err.code === 'LOGIN_RATE_LIMITED' || err.status === 429) {
+        applyServerLockout(err.data);
+        setErrorMessage(err.message || 'Too many login attempts. Please try again later.');
       } else {
         setErrorMessage(err.message || 'Invalid User ID or password.');
       }
@@ -314,7 +338,7 @@ export default function LoginView() {
             ) : (
               <>
                 <LogIn className="w-4 h-4" />
-                <span>{lockoutRemaining > 0 ? `Locked (${lockoutRemaining}s)` : 'Sign In'}</span>
+                <span>{lockoutRemaining > 0 ? 'Try Again Later' : 'Sign In'}</span>
               </>
             )}
           </button>

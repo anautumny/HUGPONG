@@ -72,6 +72,9 @@ test('server, web, and Android share collection, role, and platform contracts', 
     ACCOUNT_IDENTIFIERS: _serverOnlyAccountIdentifiers,
     SERVER_SESSIONS: _serverOnlySessions,
     SECURITY_RATE_LIMITS: _serverOnlyRateLimits,
+    PASSWORD_RECOVERY_CHALLENGES: _serverOnlyRecoveryChallenges,
+    DIAGNOSTIC_EVENTS: _serverOnlyDiagnostics,
+    BACKUP_OPERATIONS: _serverOnlyBackupOperations,
     ...publicCollections
   } = serverSchema.COLLECTIONS;
 

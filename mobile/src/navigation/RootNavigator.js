@@ -161,7 +161,7 @@ function MainTabs({ navigation }) {
         const activeSession = getCurrentSession();
         if (activeSession?.role === 'SRA Admin') {
           activateSraOfflineSnapshot().catch(error => {
-            console.warn('[Navigation] Unable to restore the cached SRA snapshot:', error?.message || error);
+            console.warn('[Navigation] The cached SRA snapshot could not be restored.');
           });
         }
         if (!hasShownOfflineNoticeRef.current) {

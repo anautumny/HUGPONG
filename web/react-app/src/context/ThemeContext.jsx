@@ -58,7 +58,7 @@ export function ThemeProvider({ children }) {
     try {
       localStorage.setItem(STORAGE_KEY, newTheme);
     } catch (e) {
-      console.warn('[Theme] localStorage unavailable:', e);
+      console.warn('[Theme] The saved theme preference is unavailable.');
     }
   };
 

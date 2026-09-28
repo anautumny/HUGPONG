@@ -12,6 +12,7 @@ import {
   verifyPasswordRecovery,
   completePasswordRecovery
 } from '../../services/authService';
+import { passwordPolicyError } from '../../domain/passwordPolicy';
 
 export default function ForgotPasswordScreen({ navigation }) {
   const { t } = useTranslation();
@@ -110,8 +111,9 @@ export default function ForgotPasswordScreen({ navigation }) {
 
   // ── Step 3: Save New Password ────────────────────────────────
   const handleResetPassword = async () => {
-    if (!newPassword || newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-      Alert.alert(t('recovery_password_requirements'), t('recovery_password_rule'));
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      Alert.alert(t('recovery_password_requirements'), policyError);
       return;
     }
     if (newPassword !== confirmPassword) {

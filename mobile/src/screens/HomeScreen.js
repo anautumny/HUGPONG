@@ -206,7 +206,7 @@ export default function HomeScreen({ navigation }) {
         setDismissedNotifIds(dismissedSet);
         setNotifs(generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs, readSet, dismissedSet));
       } catch (e) {
-        console.warn('[HomeScreen] Failed loading persisted notifications state:', e);
+        console.warn('[HomeScreen] Saved notification state could not be loaded.');
       }
     })();
   }, []);
@@ -352,7 +352,7 @@ export default function HomeScreen({ navigation }) {
         Alert.alert('Sync Incomplete', `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`);
       }
     } catch (e) {
-      console.warn('Sync error:', e);
+      console.warn('[HomeScreen] Synchronization was not completed.');
     } finally {
       setIsSyncing(false);
     }

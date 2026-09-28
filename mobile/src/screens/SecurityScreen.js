@@ -13,6 +13,7 @@ import {
   subscribe 
 } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
+import { PASSWORD_POLICY_HINT, passwordPolicy, passwordPolicyError } from '../domain/passwordPolicy';
 
 export default function SecurityScreen({ navigation }) {
   const { t } = useTranslation();
@@ -56,8 +57,13 @@ export default function SecurityScreen({ navigation }) {
       Alert.alert(t('error_title', 'Required'), 'Please enter your current password.');
       return;
     }
-    if (newPw.length < 8) {
-      Alert.alert(t('error_title', 'Too Short'), 'New password must be at least 8 characters long.');
+    const policyError = passwordPolicyError(newPw);
+    if (policyError) {
+      Alert.alert(t('error_title', 'Invalid Password'), policyError);
+      return;
+    }
+    if (newPw === currentPw) {
+      Alert.alert(t('error_title', 'Invalid Password'), 'New password must be different from the current password.');
       return;
     }
     if (newPw !== confirmPw) {
@@ -317,16 +323,17 @@ export default function SecurityScreen({ navigation }) {
               {newPw.length > 0 && (
                 <View style={s.pwStrength}>
                   {[
-                    { key: '8+ chars', label: '8+ chars' },
+                    { key: 'length', label: '8–256 chars' },
                     { key: 'Uppercase', label: 'Uppercase' },
+                    { key: 'Lowercase', label: 'Lowercase' },
                     { key: 'Number', label: 'Number' },
-                    { key: 'Symbol', label: 'Symbol' }
                   ].map(check => {
+                    const policy = passwordPolicy(newPw);
                     const passed =
-                      check.key === '8+ chars' ? newPw.length >= 8 :
-                      check.key === 'Uppercase' ? /[A-Z]/.test(newPw) :
-                      check.key === 'Number' ? /\d/.test(newPw) :
-                      /[^a-zA-Z0-9]/.test(newPw);
+                      check.key === 'length' ? policy.hasValidLength :
+                      check.key === 'Uppercase' ? policy.hasUppercase :
+                      check.key === 'Lowercase' ? policy.hasLowercase :
+                      policy.hasNumber;
                     return (
                       <View key={check.key} style={s.strengthItem}>
                         <Ionicons name={passed ? 'checkmark-circle' : 'ellipse-outline'} size={13} color={passed ? COLORS.success : COLORS.textMuted} />
@@ -336,6 +343,7 @@ export default function SecurityScreen({ navigation }) {
                   })}
                 </View>
               )}
+              <Text style={s.strengthHint}>{PASSWORD_POLICY_HINT}</Text>
 
               <View style={s.fieldGroup}>
                 <Text style={s.fieldLabel}>{t('sec_confirm_pw', 'Confirm New Password')} <Text style={s.req}>*</Text></Text>
@@ -482,6 +490,7 @@ const s = StyleSheet.create({
   pwStrength: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   strengthItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   strengthText: { fontSize: 11 },
+  strengthHint: { fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted },
   sessionChoice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, backgroundColor: COLORS.background },
   sessionChoiceSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
   sessionChoiceDangerSelected: { borderColor: COLORS.danger, backgroundColor: '#FFF0F0' },

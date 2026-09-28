@@ -33,7 +33,7 @@ router.post('/send-alert', requireAuth, requireRole([ROLES.SUPER_ADMIN]), alertR
     if (!smsResult.success) return res.status(502).json({ success: false, error: 'SMS delivery failed.' });
     return res.json({ success: true, providerAccepted: true });
   } catch (error) {
-    console.error('[HUGPONG SMS Alert Error]', error);
+    res.locals.diagnosticError = error;
     const status = error.code === 'SMS_NOT_CONFIGURED' ? 503 : 500;
     return res.status(status).json({ success: false, error: status === 503 ? 'SMS gateway is not configured.' : 'SMS delivery failed.' });
   }

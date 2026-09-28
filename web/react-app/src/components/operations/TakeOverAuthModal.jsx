@@ -37,7 +37,7 @@ export default function TakeOverAuthModal({
       setPassword('');
       onAuthorized(field, authorization.takeoverGrant, authorization.takeoverGrantExpiresAt);
     } catch (err) {
-      console.warn('[TakeOverAuth] Auth note:', err.message);
+      console.warn('[TakeOverAuth] Authorization was not completed.');
       // If offline or password check fails
       setError(err.message || 'Invalid password or unauthorized supervisor credentials.');
       setIsVerifying(false);

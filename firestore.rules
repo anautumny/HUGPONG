@@ -2,155 +2,84 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null
-        && request.auth.token.accountReady == true
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'ACTIVE'
-        && (
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAny(['authVersion'])
-            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.authVersion == request.auth.token.authVersion)
-          || (!get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAny(['authVersion'])
-            && request.auth.token.authVersion == 1)
-        );
-    }
-
-    function role() {
-      return signedIn() ? request.auth.token.role : null;
-    }
-
-    function hasRole(roles) {
-      return signedIn() && role() in roles;
-    }
-
-    function manager() {
-      return hasRole(['FARM_MANAGER']);
-    }
-
-    function sraAdmin() {
-      return hasRole(['SRA_ADMIN']);
-    }
-
-    function superAdmin() {
-      return hasRole(['SUPER_ADMIN']);
-    }
-
-    function assignedFarm(farmId) {
-      return signedIn()
-        && request.auth.token.blockFarmId is string
-        && request.auth.token.blockFarmId == farmId;
-    }
-
-    function canReadFieldData(fieldData) {
-      return sraAdmin()
-        || (manager() && assignedFarm(fieldData.blockFarmId))
-        || (hasRole(['MEMBER_FARMER']) && fieldData.memberUserId == request.auth.uid);
-    }
-
-    function ownsField(fieldId) {
-      return signedIn()
-        && get(/databases/$(database)/documents/fields/$(fieldId)).data.memberUserId == request.auth.uid;
-    }
-
-    function canReadField(fieldId) {
-      return signedIn()
-        && canReadFieldData(get(/databases/$(database)/documents/fields/$(fieldId)).data);
-    }
-
-    function containsCredentialFields(data) {
-      return data.keys().hasAny([
-        'password', 'passwordHash', 'credentialHash', 'salt',
-        'resetToken', 'resetTokenHash'
-      ]);
-    }
-
-    // Password material is server-only. Firebase Admin bypasses these rules.
-    match /user_credentials/{userId} {
+    // HUGPONG clients authenticate with Firebase, but application data is
+    // authorized and accessed only through the Express API. Firebase Admin on
+    // the server bypasses these rules. No Web or Mobile client may read or
+    // mutate a database document directly.
+    match /users/{documentId} {
       allow read, write: if false;
     }
 
-    // Server-owned uniqueness claims (for example, normalized phone numbers).
-    match /account_identifiers/{identifierId} {
+    match /user_credentials/{documentId} {
       allow read, write: if false;
     }
 
-    match /users/{userId} {
-      allow read: if signedIn()
-        && !containsCredentialFields(resource.data)
-        && (request.auth.uid == userId
-          || (sraAdmin() && resource.data.role != 'SUPER_ADMIN')
-          || superAdmin());
-      allow create, update, delete: if false;
-    }
-
-    match /block_farms/{farmId} {
-      allow read: if sraAdmin()
-        || (manager() && assignedFarm(farmId) && resource.data.managerUserId == request.auth.uid)
-        || (hasRole(['MEMBER_FARMER']) && assignedFarm(farmId));
-      allow write: if false;
-    }
-
-    match /fields/{fieldId} {
-      allow read: if signedIn() && canReadFieldData(resource.data);
-      allow write: if false;
-    }
-
-    match /crop_cycles/{cycleId} {
-      allow read: if canReadField(resource.data.fieldId);
-      allow write: if false;
-    }
-
-    match /operation_logs/{logId} {
-      allow read: if canReadField(resource.data.fieldId);
-      allow write: if false;
-    }
-
-    match /audit_reports/{reportId} {
-      allow read: if sraAdmin()
-        || (manager() && assignedFarm(resource.data.blockFarmId));
-      allow write: if false;
-    }
-
-    match /audit_logs/{eventId} {
-      allow read: if sraAdmin() || superAdmin()
-        || (manager() && (
-          resource.data.actorUserId == request.auth.uid
-          || assignedFarm(resource.data.blockFarmId)
-        ));
-      allow write: if false;
-    }
-
-    match /sra_prices/{priceId} {
-      allow read: if hasRole(['MEMBER_FARMER', 'FARM_MANAGER', 'SRA_ADMIN']);
-      allow write: if false;
-    }
-
-    match /support_tickets/{ticketId} {
-      allow read: if superAdmin()
-        || (signedIn() && resource.data.createdByUserId == request.auth.uid);
-      allow write: if false;
-    }
-
-    match /terminal_diagnostics/{terminalId} {
-      // Fast-changing activity/sync telemetry is exposed only through the
-      // server's canonical role-scoped aggregation endpoint.
-      allow read: if false;
-      allow write: if false;
-    }
-
-    match /server_sessions/{sessionId} {
+    match /account_identifiers/{documentId} {
       allow read, write: if false;
     }
 
-    match /security_rate_limits/{limitId} {
+    match /block_farms/{documentId} {
       allow read, write: if false;
     }
 
-    // Password recovery codes and grants are server-only credential material.
-    match /password_recovery_challenges/{challengeId} {
+    match /fields/{documentId} {
       allow read, write: if false;
     }
 
+    match /crop_cycles/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /operation_logs/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /audit_reports/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /sra_prices/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /support_tickets/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /terminal_diagnostics/{documentId} {
+      allow read, write: if false;
+    }
+
+    // Sanitized technical failures are server-written and available only
+    // through the Super Admin diagnostics API.
+    match /diagnostic_events/{documentId} {
+      allow read, write: if false;
+    }
+
+    // Backup archives never live in Firestore. This collection stores only
+    // server-created operation metadata for Super Admin status reporting.
+    match /backup_operations/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /server_sessions/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /security_rate_limits/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /password_recovery_challenges/{documentId} {
+      allow read, write: if false;
+    }
+
+    // New collections are private by default until a server/API policy is
+    // intentionally implemented. This rule must remain last and deny-all.
     match /{document=**} {
       allow read, write: if false;
     }

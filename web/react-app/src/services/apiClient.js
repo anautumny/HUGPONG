@@ -13,6 +13,41 @@ const READ_CACHE_TTL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
+const WEB_APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '1.0.0');
+
+function browserOs() {
+  if (typeof navigator === 'undefined') return 'unknown';
+  return String(navigator.userAgentData?.platform || navigator.platform || 'web').slice(0, 80);
+}
+
+export function webClientHeaders() {
+  return {
+    'x-client-platform': 'web',
+    'x-app-version': WEB_APP_VERSION,
+    'x-device-model': 'browser',
+    'x-device-os': browserOs()
+  };
+}
+
+export function responseErrorFromPayload(result = {}, status = 0, fallback = 'Request was rejected by the server.') {
+  const errorCode = result.code || result.data?.code || '';
+  const message = result.message || result.error || friendlyErrorMessage(errorCode, fallback || `Request failed (${status}).`);
+  const nextAction = result.nextAction ? ` ${result.nextAction}` : '';
+  const reference = result.referenceId ? ` Reference ID: ${result.referenceId}` : '';
+  const error = new Error(`${message}${nextAction}${reference}`.trim());
+  error.status = status;
+  error.data = result.data;
+  error.code = errorCode;
+  error.referenceId = result.referenceId || '';
+  error.nextAction = result.nextAction || '';
+  return error;
+}
+
+function networkReference() {
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const random = globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+  return `WEB-${day}-${random}`;
+}
 
 function resourceName(path) {
   return String(path || '')
@@ -32,7 +67,8 @@ const RELATED_RESOURCES = Object.freeze({
   'audit-reports': ['audit-reports', 'audit-events'],
   'audit-events': ['audit-events'],
   telemetry: ['terminal-diagnostics'],
-  'terminal-diagnostics': ['terminal-diagnostics']
+  'terminal-diagnostics': ['terminal-diagnostics'],
+  backups: ['backups']
 });
 
 export function affectedResources(path) {
@@ -102,25 +138,30 @@ export async function authenticatedRequest(path, options = {}) {
   const abortFromCaller = () => controller.abort();
   options.signal?.addEventListener?.('abort', abortFromCaller, { once: true });
   let response;
+  const hasRequestBody = requestBody !== undefined;
   try {
     response = await fetch(path, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...webClientHeaders(),
+        ...(hasRequestBody ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {})
       },
-      body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
+      body: hasRequestBody ? JSON.stringify(requestBody) : undefined,
       credentials: 'include',
       signal: controller.signal
     });
   } catch (cause) {
     const timedOut = cause?.name === 'AbortError' && !options.signal?.aborted;
-    const error = new Error(timedOut
+    const referenceId = networkReference();
+    const message = timedOut
       ? 'The server is taking too long to respond. Check your connection and try again.'
-      : 'Unable to reach HUGPONG. Check your connection and try again.');
+      : 'Unable to reach HUGPONG. Check your connection and try again.';
+    const error = new Error(`${message} Reference ID: ${referenceId}`);
     error.code = timedOut ? 'API_REQUEST_TIMEOUT' : 'API_UNREACHABLE';
     error.isNetworkError = true;
+    error.referenceId = referenceId;
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -131,15 +172,12 @@ export async function authenticatedRequest(path, options = {}) {
 
   if (!response.ok || !result.success) {
     const errorCode = result.code || result.data?.code || '';
+    const error = responseErrorFromPayload(result, response.status);
     if (response.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hugpong:session-revoked', {
-        detail: { code: errorCode, message: result.error }
+        detail: { code: errorCode, message: error.message }
       }));
     }
-    const error = new Error(friendlyErrorMessage(errorCode, result.error || 'Request was rejected by the server.'));
-    error.status = response.status;
-    error.data = result.data;
-    error.code = errorCode;
     throw error;
   }
 

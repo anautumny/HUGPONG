@@ -53,6 +53,22 @@ HUGPONG is an offline-capable sugarcane block-farm management system for Silay C
 
 Clients may cache data and queue offline intent, but all authoritative validation and mutations must pass through the server/API. Firestore is the persistent database. A client cache is never an independent authority.
 
+For deployments that cannot enable paid Firestore managed backups, the Super
+Admin web console provides a manual encrypted logical backup workflow through
+the Express API. It exports an allowlisted business-data set, records metadata
+and Audit Ledger events, validates archives before recovery, and only recreates
+missing documents. Credentials, sessions, security throttles, recovery
+challenges, telemetry, diagnostics, and backup metadata are excluded. Mobile
+has no backup controls. See `MANUAL_BACKUP_AND_RECOVERY.md`.
+
+The Express gateway also applies bounded request-abuse controls before body
+parsing or database access, separate persistent login limits for IP, account,
+and IP/account identity, authenticated account budgets, expensive-operation
+limits, and aggregated diagnostics for repetitive rejected traffic. These
+controls apply equally to Web and Mobile API calls. Internet-facing production
+deployments still require upstream edge/WAF protection. See
+`ABUSE_PROTECTION.md`.
+
 ### Observed topology
 
 The implementation is hybrid:
@@ -189,8 +205,8 @@ Observed implementation:
 
 Observed features:
 
-- Web login by 8-digit user ID or Philippine mobile number; privacy/terms acknowledgement; five-attempt, 60-second UI lockout; phone verification and first-login password change; local token/session persistence; logout.
-- Mobile login, registration, forgot/reset password, first-login password change, local session restore, profile contact/password changes, PIN/biometric preferences, and five-attempt UI lockout.
+- Web login by 8-digit user ID or Philippine mobile number; privacy/terms acknowledgement; server-authoritative five-failed-attempt, 15-minute persistent lockout restored after refresh without exposing the remaining duration; phone verification and first-login password change; local session persistence; logout.
+- Mobile login, registration, forgot/reset password, first-login password change, local session restore, profile contact/password changes, PIN/biometric preferences, and the same server-authoritative five-failed-attempt lockout restored after app restart.
 - SMS OTP via server/Semaphore with simulation fallback; mobile also contains a direct Semaphore fallback.
 
 Important baseline limitations:

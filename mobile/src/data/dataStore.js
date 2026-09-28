@@ -38,6 +38,7 @@ import {
 } from './firestoreSchema';
 import { SRA_OPERATIONS_CATALOGUE, getDefaultStageOperations, getOperationDefinition } from '../domain/operationCatalogue';
 import { SUGARCANE_STAGES } from '../constants/cropStages';
+import { passwordPolicyError } from '../domain/passwordPolicy';
 import { canCreateSupportTicket, canonicalSupportRole, SUPPORT_TICKET_STATUS } from '../domain/supportTickets';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
 import {
@@ -286,7 +287,7 @@ const applySraOfflineSnapshot = (snapshot, session) => {
     try {
       restoredPrices.push(fromPriceDocument(record.id, record));
     } catch (error) {
-      console.warn('[Mobile] Ignoring invalid cached SRA price record:', record?.id || '(missing id)', error.message);
+      console.warn('[Mobile] An invalid cached SRA price record was ignored.');
     }
   });
   const restoredCertifiedHistory = (Array.isArray(snapshot.certifiedAuditReports) ? snapshot.certifiedAuditReports : [])
@@ -622,7 +623,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
       await saveItem(STORAGE_KEYS.FIELDS, fields);
     }
   } catch (e) {
-    console.warn('[dataStore] Field mutation rejected:', e);
+    console.warn('[dataStore] A field mutation was rejected.');
     return { success: false, message: e.message || 'The field change was rejected by the server.' };
   }
 
@@ -805,7 +806,7 @@ export const clearAuthSessionStorage = async () => {
   try {
     await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
   } catch (e) {
-    console.warn('[dataStore] Error clearing auth session:', e);
+    console.warn('[dataStore] The local authentication session could not be cleared completely.');
   }
 };
 
@@ -914,7 +915,7 @@ export const restoreSessionFromToken = async () => {
     notify();
     return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
   } catch (err) {
-    console.warn('[dataStore] Error restoring session:', err);
+    console.warn('[dataStore] The local authentication session could not be restored.');
     return { success: false, error: err.message };
   }
 };
@@ -970,6 +971,7 @@ export const authenticateUser = async (contactOrId, password) => {
       error: error.message || 'Authentication service is unavailable.',
       code: error.code || null,
       status: error.status || null,
+      data: error.data || null,
       isNetworkError: error.isNetworkError === true || [
         'API_CONFIGURATION_ERROR',
         'API_REQUEST_TIMEOUT',
@@ -1014,8 +1016,12 @@ export const updateUserPassword = async (currentPassword, newPassword, sessionAc
   if (!CURRENT_SESSION) {
     return { success: false, error: 'No active user session found.' };
   }
-  if (!newPassword || newPassword.length < 8) {
-    return { success: false, error: 'New password must be at least 8 characters long.' };
+  const policyError = passwordPolicyError(newPassword);
+  if (policyError) {
+    return { success: false, error: policyError };
+  }
+  if (newPassword === currentPassword) {
+    return { success: false, error: 'New password must be different from the current password.' };
   }
 
   try {
@@ -1342,7 +1348,7 @@ const persistAllToStorage = () => {
         [STORAGE_KEYS.SYSTEM_HISTORY, systemHistory],
       ]);
     } catch (e) {
-      console.warn('[dataStore] Background persistence error:', e);
+      console.warn('[dataStore] Background persistence was deferred.');
     }
   }, 350);
 };
@@ -1353,7 +1359,7 @@ const notify = () => {
     try {
       l();
     } catch (e) {
-      console.warn('Subscriber error', e);
+      console.warn('[dataStore] A local subscriber update failed.');
     }
   });
 };
@@ -2296,7 +2302,7 @@ export const saveFieldOperationSchedule = async (fieldId, operationSchedule) => 
   // records are durable, then synchronize without holding the form open.
   setTimeout(() => {
     performMobileSync('POST_MUTATION').catch(error => {
-      console.warn('[PLANNER] Background schedule sync deferred:', error?.message || error);
+      console.warn('[PLANNER] Background schedule synchronization was deferred.');
     });
   }, 0);
   return field.operationSchedule;
@@ -2550,7 +2556,7 @@ export const listenToCloudSync = () => {
         try {
           remotePrices.push(fromPriceDocument(record.id, record));
         } catch (error) {
-          console.warn('[Mobile] Ignoring invalid server price record:', record?.id || '(missing id)', error.message);
+          console.warn('[Mobile] An invalid server price record was ignored.');
         }
       });
       const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate', 'publishedAt']);
@@ -2724,7 +2730,7 @@ export const listenToCloudSync = () => {
         stop();
         return false;
       }
-      console.warn('[Mobile] Server data refresh notice:', error.message);
+      console.warn('[Mobile] Server data refresh was deferred.');
       return false;
     } finally {
       requestInFlight = false;
@@ -3134,7 +3140,7 @@ export const initializeOfflineStorage = async () => {
         try {
           priceHistory.push(fromPriceDocument(p.id, p));
         } catch (error) {
-          console.warn('[Mobile] Ignoring non-canonical cached sra_prices record:', p?.id || '(missing id)', error.message);
+          console.warn('[Mobile] A non-canonical cached SRA price record was ignored.');
         }
       });
     }
@@ -3208,10 +3214,10 @@ export const initializeOfflineStorage = async () => {
         }
       });
     } catch (cloudErr) {
-      console.warn('[dataStore] Cloud sync listener deferred:', cloudErr);
+      console.warn('[dataStore] Cloud synchronization listener was deferred.');
     }
   } catch (error) {
-    console.warn('[dataStore] Startup hydration notice:', error);
+    console.warn('[dataStore] Startup data hydration was incomplete.');
   }
 };
 

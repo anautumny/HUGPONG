@@ -50,7 +50,7 @@ function notifySyncEngine() {
     try {
       listener([...outboxQueue]);
     } catch (e) {
-      console.warn('[syncEngine] Listener error:', e);
+      console.warn('[syncEngine] A synchronization listener failed.');
     }
   });
 }
@@ -230,7 +230,7 @@ function migrateQueuedPayload(type, payload = {}) {
     });
     return { id: payload.id, ...normalized };
   } catch (error) {
-    console.warn(`[syncEngine] Queued ${type} requires manual correction:`, error.message);
+    console.warn('[syncEngine] A queued change requires manual correction.');
     return { ...payload };
   }
 }
@@ -277,7 +277,7 @@ export async function initSyncEngine(userId = '') {
     notifySyncEngine();
     return outboxQueue;
   } catch (error) {
-    console.warn('[syncEngine] Error initializing outbox:', error);
+    console.warn('[syncEngine] The synchronization queue could not be initialized.');
     outboxQueue = [];
     return [];
   }
@@ -610,7 +610,7 @@ export async function flushOutboxToApi() {
       return executeMutationViaApi(item);
     });
   } catch (err) {
-    console.warn('[syncEngine] Error flushing through API:', err);
+    console.warn('[syncEngine] The synchronization queue could not be sent.');
     return {
       success: false,
       error: err.message,

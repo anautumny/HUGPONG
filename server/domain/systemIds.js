@@ -49,6 +49,10 @@ function createAuditEventId() {
   return createSystemId('EVT');
 }
 
+function createBackupOperationId() {
+  return createSystemId('BKP');
+}
+
 function assertNoClientIdentity(body, keys, entityLabel) {
   const suppliedKey = keys.find(key => Object.prototype.hasOwnProperty.call(body || {}, key));
   if (suppliedKey) {
@@ -77,6 +81,7 @@ module.exports = {
   createPriceId,
   createTicketId,
   createAuditEventId,
+  createBackupOperationId,
   assertNoClientIdentity,
   readDevelopmentSeedId
 };

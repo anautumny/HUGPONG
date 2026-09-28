@@ -6,6 +6,7 @@ import { SyncProvider } from './context/SyncContext';
 import AppShell from './components/layout/AppShell';
 import { ROLE_KEYS } from './utils/authRouting';
 import UsersView from './views/users/UsersView';
+import { createClientReference, reportClientDiagnostic } from './services/clientDiagnostics';
 
 const LandingView = lazy(() => import('./views/LandingView'));
 const LoginView = lazy(() => import('./views/LoginView'));
@@ -23,6 +24,8 @@ const AnalyticsView = lazy(() => import('./views/analytics/AnalyticsView'));
 const SyncView = lazy(() => import('./views/sync/SyncView'));
 const TicketsView = lazy(() => import('./views/support/TicketsView'));
 const MaintenanceView = lazy(() => import('./views/maintenance/MaintenanceView'));
+const DiagnosticsConsoleView = lazy(() => import('./views/diagnostics/DiagnosticsConsoleView'));
+const BackupManagementView = lazy(() => import('./views/backups/BackupManagementView'));
 const SettingsView = lazy(() => import('./views/settings/SettingsView'));
 
 function RouteLoadingState() {
@@ -67,7 +70,14 @@ class UsersRouteErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    console.error('[UsersView] Render failed:', error, info);
+    const referenceId = createClientReference('WEB');
+    this.setState({ referenceId });
+    void reportClientDiagnostic({
+      referenceId,
+      module: 'WEB',
+      message: `${error?.name || 'RenderError'}: ${error?.message || 'User directory render failed.'} ${info?.componentStack || ''}`,
+      errorCode: 'USER_DIRECTORY_RENDER_FAILURE'
+    });
   }
 
   render() {
@@ -76,8 +86,9 @@ class UsersRouteErrorBoundary extends React.Component {
       <div className="mx-auto max-w-3xl rounded-2xl border border-danger/30 bg-danger-bg/30 p-6 text-hug-text">
         <h1 className="text-xl font-black">User directory could not be displayed</h1>
         <p className="mt-2 text-sm text-hug-muted">
-          The page encountered an invalid or outdated browser state. Reload the directory to request a fresh copy.
+          The user directory could not be displayed. Reload the directory to request a fresh copy.
         </p>
+        {this.state.referenceId && <p className="mt-2 font-mono text-xs text-hug-muted">Reference ID: {this.state.referenceId}</p>}
         <button
           type="button"
           className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white"
@@ -86,6 +97,42 @@ class UsersRouteErrorBoundary extends React.Component {
           Reload User Directory
         </button>
       </div>
+    );
+  }
+}
+
+class ApplicationErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, referenceId: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    const referenceId = createClientReference('WEB');
+    this.setState({ referenceId });
+    void reportClientDiagnostic({
+      referenceId,
+      module: 'WEB',
+      message: `${error?.name || 'RenderError'}: ${error?.message || 'Web application render failed.'} ${info?.componentStack || ''}`,
+      errorCode: 'WEB_RENDER_FAILURE'
+    });
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-bg p-5 text-hug-text dark:bg-[#0C1015]">
+        <section className="w-full max-w-xl rounded-2xl border border-danger/30 bg-surface p-6 shadow-lg">
+          <h1 className="text-xl font-black">HUGPONG could not display this page</h1>
+          <p className="mt-2 text-sm text-hug-muted">Reload the application and try again. If the problem continues, contact support with the reference ID.</p>
+          {this.state.referenceId && <p className="mt-3 font-mono text-xs text-hug-muted">Reference ID: {this.state.referenceId}</p>}
+          <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white">Reload HUGPONG</button>
+        </section>
+      </main>
     );
   }
 }
@@ -102,6 +149,7 @@ export default function App() {
         <SyncProvider>
           <BrowserRouter>
             <Suspense fallback={<RouteLoadingState />}>
+              <ApplicationErrorBoundary>
               <Routes>
               {/* Public Surfaces */}
               <Route path="/" element={<RootRoute />} />
@@ -125,6 +173,8 @@ export default function App() {
                 <Route path="/sync" element={<RoleRoute allowed={SYNC_MONITOR_ROLES}><SyncView /></RoleRoute>} />
                 <Route path="/support" element={<RoleRoute allowed={MANAGEMENT_ROLES}><TicketsView /></RoleRoute>} />
                 <Route path="/maintenance" element={<RoleRoute allowed={GOVERNANCE_ROLES}><MaintenanceView /></RoleRoute>} />
+                <Route path="/diagnostics" element={<RoleRoute allowed={GOVERNANCE_ROLES}><DiagnosticsConsoleView /></RoleRoute>} />
+                <Route path="/backups" element={<RoleRoute allowed={GOVERNANCE_ROLES}><BackupManagementView /></RoleRoute>} />
                 <Route path="/settings" element={<SettingsView />} />
                 <Route path="/analytics" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AnalyticsView /></RoleRoute>} />
               </Route>
@@ -132,6 +182,7 @@ export default function App() {
               {/* Catch-all fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </ApplicationErrorBoundary>
             </Suspense>
           </BrowserRouter>
         </SyncProvider>

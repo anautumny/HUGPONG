@@ -32,7 +32,7 @@ export function subscribeToAuditLogs({ onUpdate, onError }) {
       onUpdate({ logs, isLoading: false, error: null });
     },
     onError: error => {
-      console.warn('[MaintenanceService] Audit API subscription notice:', error.message);
+      console.warn('[MaintenanceService] Audit Ledger refresh was deferred.');
       if (onError) onError(error);
     }
   });

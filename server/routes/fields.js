@@ -27,6 +27,7 @@ const { operationAuthorization } = require('../domain/operationAuthorization');
 const { queueAuditEvent } = require('../services/auditWriter');
 const { normalizeCustomOperationsPlan } = require('../domain/operationPlan');
 const { normalizeOperationSchedule } = require('../domain/operationSchedule');
+const { normalizeCustomStages } = require('../domain/customStages');
 
 function withoutLegacySoilType(value = {}) {
   const { soilType: _removedSoilType, ...field } = value;
@@ -142,8 +143,8 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       cropYear: cropYearVal,
       currentCycleId: cycleId,
       status: 'ACTIVE',
-      customStages: Array.isArray(req.body.customStages) ? req.body.customStages : [],
-      customOperations: req.body.customOperations && typeof req.body.customOperations === 'object' ? req.body.customOperations : {},
+      customStages: normalizeCustomStages(req.body.customStages),
+      customOperations: normalizeCustomOperationsPlan(req.body.customOperations || {}),
       operationSchedule: [],
       createdAt: now,
       updatedAt: now,
@@ -350,11 +351,8 @@ router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER]),
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Field not found.' });
     await assertManagerScope(snapshot.data().blockFarmId, req.session.user);
-    if (!Array.isArray(req.body.customStages)) {
-      return res.status(400).json({ success: false, error: 'customStages must be an array.' });
-    }
     const mutationContext = readMutationContext(req);
-    const customStages = req.body.customStages;
+    const customStages = normalizeCustomStages(req.body.customStages);
     const result = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });

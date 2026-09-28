@@ -34,7 +34,7 @@ test('phone uniqueness claims are opaque, deterministic, and server-only', () =>
   assert.match(first, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(first, /09171234567/);
   const rules = read('firestore.rules');
-  assert.match(rules, /match \/account_identifiers\/\{identifierId\}[\s\S]*?allow read, write: if false;/);
+  assert.match(rules, /match \/account_identifiers\/\{documentId\}[\s\S]*?allow read, write: if false;/);
   const provisioning = read('server/services/accountProvisioningService.js');
   assert.match(provisioning, /batch\.create\(phoneRef/);
   assert.match(provisioning, /queueAuditEvent\(batch/);

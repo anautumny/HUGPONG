@@ -8,6 +8,7 @@ const { requireRole } = require('../middleware/roleGuard');
 const { ROLES } = require('../schema/firestoreSchema');
 const { actor } = require('../services/resourceScope');
 const { recordActivity, recordSyncTelemetry, buildAgriculturalMonitor, buildSystemMonitor } = require('../services/telemetryService');
+const { createReferenceId, recordDiagnostic } = require('../services/diagnosticService');
 
 const AGRICULTURAL_ROLES = [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER];
 const MONITOR_ROLES = [...AGRICULTURAL_ROLES, ROLES.SUPER_ADMIN];
@@ -66,6 +67,21 @@ router.post('/sync', requireAuth, requireRole(AGRICULTURAL_ROLES), async (req, r
       syncSucceeded: req.body?.syncSucceeded === true,
       metadata: metadata(req.body)
     });
+    const failedCount = Number(req.body?.failedMutationCount || 0);
+    const syncState = String(req.body?.syncState || '').trim().toUpperCase();
+    if (failedCount > 0 || ['FAILED', 'SYNC_FAILED', 'CONFLICT'].includes(syncState)) {
+      await recordDiagnostic(db, {
+        req,
+        level: 'WARN',
+        module: 'SYNC',
+        referenceId: createReferenceId('SYNC'),
+        technicalError: `Client sync reported ${failedCount} failed mutation(s) with state ${syncState || 'UNKNOWN'}.`,
+        statusCode: 0,
+        errorCode: 'CLIENT_SYNC_FAILURE',
+        syncStatus: syncState || 'FAILED',
+        source: 'CLIENT_TELEMETRY'
+      });
+    }
     return res.json({ success: true, data });
   } catch (error) {
     return res.status(400).json({ success: false, error: error.message });

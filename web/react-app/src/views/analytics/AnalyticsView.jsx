@@ -61,7 +61,7 @@ export default function AnalyticsView() {
         setErrors(current => ({ ...current, fields: null }));
       },
       onError: (err) => {
-        console.warn('[AnalyticsView] Fields err:', err.message);
+        console.warn('[AnalyticsView] Field analytics are temporarily unavailable.');
         setIsFieldsLoading(false);
         setErrors(current => ({ ...current, fields: err.message || 'Field analytics are temporarily unavailable.' }));
       }
@@ -76,7 +76,7 @@ export default function AnalyticsView() {
         setErrors(current => ({ ...current, operations: null }));
       },
       onError: (err) => {
-        console.warn('[AnalyticsView] Ops err:', err.message);
+        console.warn('[AnalyticsView] Operation analytics are temporarily unavailable.');
         setIsOpsLoading(false);
         setErrors(current => ({ ...current, operations: err.message || 'Operation analytics are temporarily unavailable.' }));
       }
@@ -90,7 +90,7 @@ export default function AnalyticsView() {
         setErrors(current => ({ ...current, prices: null }));
       },
       onError: (err) => {
-        console.warn('[AnalyticsView] Prices err:', err.message);
+        console.warn('[AnalyticsView] Price analytics are temporarily unavailable.');
         setIsPricesLoading(false);
         setErrors(current => ({ ...current, prices: err.message || 'Price analytics are temporarily unavailable.' }));
       }

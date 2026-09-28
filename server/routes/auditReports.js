@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { cleanText } = require('../services/diagnosticService');
 const router = express.Router();
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
@@ -82,7 +83,7 @@ async function loadFarmAuditData(blockFarmId, period) {
       ]));
       activeFields.forEach(field => { field.memberName = memberNames.get(field.memberUserId) || field.memberUserId || null; });
     } catch (error) {
-      console.warn('[Audit Reports] Member names could not be embedded in the snapshot:', error.message);
+      console.warn('[Audit Reports] Member names could not be embedded in the snapshot:', cleanText(error.message));
       activeFields.forEach(field => { field.memberName = field.memberName || field.memberUserId || null; });
     }
   }

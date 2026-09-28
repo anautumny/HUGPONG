@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { createClientReference, reportClientDiagnostic } from '../../services/clientDiagnostics';
 
 export default function QRCodeView({
   value = '',
@@ -35,8 +36,14 @@ export default function QRCodeView({
         setError(null);
       })
       .catch(err => {
-        console.warn('[QRCodeView] QR generation failed:', err);
-        setError(err.message);
+        const referenceId = createClientReference('QR');
+        setError(referenceId);
+        void reportClientDiagnostic({
+          referenceId,
+          module: 'QR',
+          message: `${err?.name || 'QrError'}: ${err?.message || 'QR generation failed.'}`,
+          errorCode: 'WEB_QR_GENERATION_FAILURE'
+        });
       });
   }, [value, size, color, bgColor, errorCorrectionLevel]);
 
@@ -57,7 +64,7 @@ export default function QRCodeView({
         style={{ width: size, height: size }}
         className={`flex items-center justify-center bg-danger-bg dark:bg-danger/10 text-danger rounded-xl border border-danger/30 text-xs text-center p-2 ${className}`}
       >
-        <span>QR Error</span>
+        <span>QR could not be generated. Try again.<br />Reference ID: {error}</span>
       </div>
     );
   }

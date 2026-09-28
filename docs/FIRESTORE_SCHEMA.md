@@ -21,8 +21,10 @@ Compatibility policy: existing records must pass the Phase 4 legacy-data audit a
 13. User, Block Farm, Field, and Crop Year Cycle document IDs are server-issued and immutable. Relationship forms select scoped entities; they never accept a new canonical document ID as user input.
 14. Offline-capable operation, report, ticket, and mutation IDs are non-editable idempotency identifiers. A client may generate them once, but every retry must reuse the same value.
 15. Every account carries an `authVersion`. Password, phone, role, and status changes increment it so old server and Firebase credentials are rejected immediately.
-16. `account_identifiers`, `server_sessions`, `security_rate_limits`, and `password_recovery_challenges` are server-only operational collections. Web and Mobile never read or write them directly.
+16. `account_identifiers`, `server_sessions`, `security_rate_limits`, `password_recovery_challenges`, `diagnostic_events`, and `backup_operations` are server-only operational collections. Web and Mobile never read or write them directly.
 17. A normalized phone number is reserved atomically in `account_identifiers` when an account is created or its phone changes. This prevents concurrent requests from creating duplicate login identifiers.
+18. Every Firestore collection is client-denied. Web and Mobile access application data only through the authenticated Express API; Firebase Admin is the sole database authority.
+19. Request objects are never written directly. The server validates transport structure first and then constructs each Firestore document through collection-specific canonicalizers; unknown fields are discarded or rejected before persistence.
 
 ## 2. Relationship model
 
@@ -123,6 +125,16 @@ Production browser sessions are stored here by Express. Records contain the seri
 ### `security_rate_limits/{limitId}` — server only
 
 Authentication, OTP, password-verification, account-creation, and SMS throttles are persisted here so multiple API instances enforce one shared limit. Verification-code send records include `count`, `windowEndsAtMs`, and `lastAcceptedAtMs`; registration, first-login verification, and password recovery allow at most three accepted code requests with at least 60 seconds between sends. The third accepted send starts a full one-hour lock. IDs are SHA-256 digests of the limiter namespace and normalized request key; raw passwords and OTP values are never stored.
+
+Login throttle records use the same server-only collection. Independent
+15-minute windows limit an IP to 30 attempts, a normalized account identifier
+to 10 attempts, and an IP/account pair to 5 attempts. A successful credential
+verification clears the account and pair records but does not erase the IP
+traffic budget. Web and Mobile may cache the server-issued lock expiry only to
+restore enforcement after restart; user-facing surfaces do not reveal the
+remaining lock duration. High-volume generic request limits are deliberately
+kept in a bounded in-memory gateway store so rejected bot traffic does not
+produce a Firestore read/write for every request.
 
 ### `password_recovery_challenges/{challengeId}` — server only
 
@@ -467,6 +479,68 @@ reports received by the server; an offline device's unreported AsyncStorage
 Outbox cannot be observed remotely. Legacy v1 fields (`cachedLogs`, `status`,
 `lastSyncedAt`, `operatingSystem`, and `pendingOperationCount`) are read only as
 device-history metadata and never promoted to a successful canonical sync.
+
+### `diagnostic_events/{referenceId}` — server only
+
+```js
+{
+  referenceId: string,
+  timestamp: string,
+  level: "ERROR" | "WARN" | "INFO",
+  module: string,
+  userRole: string,
+  platform: "web" | "mobile" | "unknown",
+  appVersion: string,
+  deviceModel: string,
+  deviceOs: string,
+  syncStatus: string,
+  endpoint: string,                 // sanitized path; identifiers replaced
+  method: string,
+  statusCode: number,
+  errorCode: string,
+  source: "SERVER" | "CLIENT" | "CLIENT_TELEMETRY",
+  technicalError: string            // sanitized; no stack trace or secrets
+}
+```
+
+This collection is separate from `audit_logs`: the Audit Ledger records meaningful
+business and security actions, while Diagnostics records technical failures, sync
+issues, database/API problems, and QR failures. Only Firebase Admin writes it and
+only the Super Admin web API may read it. Passwords, keys, tokens, credentials,
+session secrets, private keys, and unnecessary personal data are prohibited.
+
+### `backup_operations/{backupOperationId}` — server only
+
+This collection stores metadata about manual encrypted export, validation, and
+missing-record recovery operations. It never stores an archive, encryption
+passphrase, password, credential hash, session, or raw diagnostic log.
+
+```js
+{
+  operation: "EXPORT" | "VALIDATION" | "RESTORE_MISSING",
+  status: "READY" | "VALIDATED" | "USED" | "SUCCESS" | "FAILED",
+  actorUserId: string,
+  createdAt: string,
+  completedAt: string | null,
+  expiresAt: string | null,          // validation receipt only
+  schemaVersion: string,
+  documentCount: number,
+  archiveByteSize: number,
+  archiveSha256: string,             // encrypted archive fingerprint only
+  collectionCounts: object | null,
+  plan: object | null,
+  result: object | null,
+  referenceId: string,
+  errorCode: string | null
+}
+```
+
+Backup contents are returned once to the authenticated Super Admin as an
+AES-256-GCM encrypted `.hpbak` archive. The logical archive allowlists business
+collections and excludes credentials, account-identifier hashes, sessions,
+rate limits, recovery challenges, telemetry, diagnostics, and backup metadata.
+Recovery is create-only: it recreates documents that are missing and never
+overwrites, merges into, or deletes a current document.
 
 ## 4. Required indexes
 

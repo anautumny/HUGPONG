@@ -58,7 +58,8 @@ test('login reports connectivity failures without treating them as bad credentia
   assert.match(login, /CONNECTIVITY_STATUS\.NO_INTERNET/);
   assert.match(login, /API_UNAVAILABLE_MESSAGE/);
   assert.match(failureBranch, /if \(res\.isNetworkError\)[\s\S]*return;/);
-  assert.match(failureBranch, /const nextAttempts = failedAttempts \+ 1/);
+  assert.match(failureBranch, /res\.code === 'LOGIN_RATE_LIMITED'/);
+  assert.match(failureBranch, /applyServerLockout\(res\.data\)/);
 });
 
 test('production server config requires exact CORS origins and accepts cloud host/port', () => {
@@ -88,6 +89,26 @@ test('production server config requires exact CORS origins and accepts cloud hos
   assert.match(configured.stdout, /0\.0\.0\.0 8080 https:\/\/app\.example\.test/);
 });
 
+test('production server refuses to start without the server-side Semaphore key', () => {
+  const result = spawnSync(process.execPath, ['-e', "require('./server/config')"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      SESSION_SECRET: 'test-only-production-session-secret-123456789',
+      SMS_PROVIDER: 'semaphore',
+      SEMAPHORE_API_KEY: '',
+      CORS_ORIGINS: 'https://app.example.test',
+      HOST: '0.0.0.0',
+      PORT: '8080'
+    },
+    encoding: 'utf8'
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stderr}${result.stdout}`, /SEMAPHORE_API_KEY must be provided through the server environment/);
+});
+
 test('public health and production errors disclose no session or infrastructure details', () => {
   const server = read('server/server.js');
   const health = server.slice(server.indexOf("app.get('/health'"), server.indexOf('// Legacy client status route'));
@@ -95,7 +116,11 @@ test('public health and production errors disclose no session or infrastructure 
   assert.match(health, /success: true/);
   assert.match(health, /status: 'healthy'/);
   assert.doesNotMatch(health, /firebaseAdmin|authenticated|session|user|uptime/);
-  assert.match(server, /isProduction[\s\S]*status === 403[\s\S]*'Internal Server Error'/);
-  assert.match(server, /res\.statusCode >= 500[\s\S]*service is temporarily unavailable/);
+  assert.match(server, /safeErrorResponses\(db\)/);
+  const errorHandling = read('server/middleware/errorHandling.js');
+  const diagnosticService = read('server/services/diagnosticService.js');
+  assert.match(errorHandling, /createSafeErrorEnvelope/);
+  assert.match(diagnosticService, /status >= 500[\s\S]*HUGPONG could not complete this request/);
+  assert.match(diagnosticService, /referenceId/);
   assert.match(server, /app\.listen\(port, host/);
 });

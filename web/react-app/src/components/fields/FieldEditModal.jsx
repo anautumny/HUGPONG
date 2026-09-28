@@ -64,7 +64,7 @@ export default function FieldEditModal({
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
-      console.error('[FieldEdit] Error:', err);
+      console.warn('[FieldEdit] Save failed; see the displayed reference ID.');
       setServerError(err.message || 'Failed to update field plot.');
       setIsSubmitting(false);
     }

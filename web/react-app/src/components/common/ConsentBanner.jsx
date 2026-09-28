@@ -29,7 +29,7 @@ export default function ConsentBanner() {
         })
       );
     } catch (e) {
-      console.warn('[Consent] localStorage unavailable:', e);
+      console.warn('[Consent] The saved consent preference is unavailable.');
     }
     setIsVisible(false);
   };

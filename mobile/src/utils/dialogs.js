@@ -6,7 +6,7 @@ export const safeAlert = (title, message, buttons, options) => {
     try {
       Alert.alert(title, message, buttons, options);
     } catch (e) {
-      console.warn('[safeAlert] Failed to show alert safely:', e.message);
+      console.warn('[safeAlert] The system alert could not be displayed.');
     }
   }, 100);
 };

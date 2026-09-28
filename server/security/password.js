@@ -9,16 +9,37 @@ const VERSION = 'v1';
 const KEY_LENGTH = 64;
 const SALT_BYTES = 16;
 const SCRYPT_OPTIONS = Object.freeze({ N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+const BLOCKED_PASSWORDS = new Set([
+  'password',
+  'password123',
+  'hugpong',
+  'hugpong123',
+  'hugpong2026',
+  'adminhugpong',
+  '12345678'
+]);
+
+function passwordPolicy(password) {
+  const value = typeof password === 'string' ? password : '';
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return {
+    hasValidLength: value.length >= 8 && value.length <= 256,
+    hasLowercase: /[a-z]/.test(value),
+    hasUppercase: /[A-Z]/.test(value),
+    hasNumber: /\d/.test(value),
+    isUnpredictable: normalized.length > 0 && !BLOCKED_PASSWORDS.has(normalized)
+  };
+}
 
 function validatePassword(password) {
-  if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
+  const policy = passwordPolicy(password);
+  if (!policy.hasValidLength) {
     throw new Error('Password must contain between 8 and 256 characters.');
   }
-  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    throw new Error('Password must contain at least one letter and one number.');
+  if (!policy.hasLowercase || !policy.hasUppercase || !policy.hasNumber) {
+    throw new Error('Password must contain at least one uppercase letter, one lowercase letter, and one number.');
   }
-  const normalized = password.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (['password', 'password123', 'hugpong', 'hugpong123', '12345678'].includes(normalized)) {
+  if (!policy.isUnpredictable) {
     throw new Error('Choose a less predictable password.');
   }
 }
@@ -63,5 +84,6 @@ module.exports = {
   hashPassword,
   verifyPassword,
   validatePassword,
+  passwordPolicy,
   PASSWORD_HASH_FORMAT: `${FORMAT}$${VERSION}`
 };

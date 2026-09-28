@@ -88,18 +88,12 @@ test('manager write paths attach optional verified grants and central service di
   assert.match(middleware, /verifyTakeoverGrant/);
 });
 
-test('Firestore read rules enforce operational scope and exclude Super Admin from agriculture', () => {
+test('Firestore rules force every operational read through the scoped API', () => {
   const rules = read('../../firestore.rules');
-  assert.match(rules, /manager\(\) && assignedFarm\(fieldData\.blockFarmId\)/);
-  assert.match(rules, /MEMBER_FARMER[\s\S]{0,100}fieldData\.memberUserId == request\.auth\.uid/);
-  assert.match(rules, /match \/operation_logs[\s\S]{0,150}canReadField\(resource\.data\.fieldId\)/);
-  assert.match(rules, /match \/audit_reports[\s\S]{0,180}manager\(\) && assignedFarm\(resource\.data\.blockFarmId\)/);
-  assert.match(rules, /match \/support_tickets[\s\S]{0,180}createdByUserId == request\.auth\.uid/);
-  assert.match(rules, /sraAdmin\(\) && resource\.data\.role != 'SUPER_ADMIN'/);
-  const agriculturalRules = ['block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'sra_prices']
-    .map(name => rules.slice(rules.indexOf(`match /${name}/`), rules.indexOf('allow write: if false;', rules.indexOf(`match /${name}/`))))
-    .join('\n');
-  assert.doesNotMatch(agriculturalRules, /superAdmin\(\)|SUPER_ADMIN/);
+  for (const collection of ['block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'sra_prices', 'support_tickets']) {
+    assert.match(rules, new RegExp(`match \/${collection}\/[\\s\\S]{0,100}allow read, write: if false;`));
+  }
+  assert.doesNotMatch(rules, /allow read: if|allow write: if (?!false)/);
 });
 
 test('Farm Manager operation subscriptions delegate scoped aggregation to the server', () => {

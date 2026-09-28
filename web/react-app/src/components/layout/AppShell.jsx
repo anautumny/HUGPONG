@@ -50,7 +50,7 @@ export default function AppShell() {
       try {
         localStorage.setItem(STORAGE_COLLAPSED_KEY, String(next));
       } catch (err) {
-        console.warn('[AppShell] localStorage error:', err);
+        console.warn('[AppShell] A saved layout preference is unavailable.');
       }
       return next;
     });

@@ -61,7 +61,17 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
       case '/maintenance':
         return {
           title: 'Maintenance & Security',
-          subtitle: 'Platform diagnostics, access logs, and integrity controls'
+          subtitle: 'System inventory, security controls, and the Audit Ledger'
+        };
+      case '/diagnostics':
+        return {
+          title: 'Diagnostics Console',
+          subtitle: 'Sanitized technical errors, sync issues, and backend failures'
+        };
+      case '/backups':
+        return {
+          title: 'Backup & Recovery',
+          subtitle: 'Manual encrypted exports and non-destructive emergency recovery'
         };
       case '/settings':
         return {

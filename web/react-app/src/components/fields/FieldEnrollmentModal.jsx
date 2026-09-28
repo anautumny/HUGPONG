@@ -68,7 +68,7 @@ export default function FieldEnrollmentModal({
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
-      console.error('[FieldEnrollment] Error:', err);
+      console.warn('[FieldEnrollment] Enrollment failed; see the displayed reference ID.');
       setServerError(err.message || 'Failed to enroll field plot.');
       setIsSubmitting(false);
     }

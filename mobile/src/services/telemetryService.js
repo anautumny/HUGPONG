@@ -34,7 +34,7 @@ export async function reportMobileActivity(event = 'HEARTBEAT') {
     return await telemetryRequest('/api/terminal-diagnostics/activity', { event });
   } catch (error) {
     lastActivityReportAt = 0;
-    console.warn('[Telemetry] Activity report deferred:', error.message);
+    console.warn('[Telemetry] Activity report was deferred.');
     return null;
   }
 }
@@ -61,7 +61,7 @@ export async function reportMobileSync({
     });
   } catch (error) {
     if (!error.message?.includes('Access Denied')) {
-      console.warn('[Telemetry] Sync report deferred:', error.message);
+      console.warn('[Telemetry] Sync report was deferred.');
     }
     return null;
   }

@@ -283,6 +283,45 @@ test('verification-code send budgets allow three codes per hour with a persisten
   assert.equal(nextHour.remaining, 2);
 });
 
+test('login attempt budget starts a 15-minute lock on the fifth reserved attempt', () => {
+  const startedAt = Date.parse('2026-09-28T00:00:00.000Z');
+  const policy = { max: 5, windowMs: 15 * 60 * 1000 };
+  let stored = {};
+  let fifth;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const evaluated = rateLimitTestHelpers.evaluateRateLimitState(stored, {
+      now: startedAt + attempt,
+      ...policy
+    });
+    assert.equal(evaluated.accepted, true);
+    assert.equal(evaluated.count, attempt);
+    stored = {
+      count: evaluated.count,
+      windowEndsAtMs: evaluated.windowEndsAtMs,
+      lastAcceptedAtMs: evaluated.lastAcceptedAtMs
+    };
+    fifth = evaluated;
+  }
+
+  assert.equal(fifth.remaining, 0);
+  assert.equal(fifth.retryAfterSeconds, 15 * 60);
+  const blocked = rateLimitTestHelpers.evaluateRateLimitState(stored, {
+    now: startedAt + 1000,
+    ...policy
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.reason, 'WINDOW_LIMIT');
+
+  const afterLock = rateLimitTestHelpers.evaluateRateLimitState(stored, {
+    now: fifth.windowEndsAtMs + 1,
+    ...policy
+  });
+  assert.equal(afterLock.accepted, true);
+  assert.equal(afterLock.count, 1);
+  assert.equal(afterLock.remaining, 4);
+});
+
 test('mobile first-login keeps the code-entry modal available during a resend lock', () => {
   const mobileLogin = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/auth/LoginScreen.js'), 'utf8');
   assert.match(mobileLogin, /request\.code === 'RESEND_COOLDOWN'/);
@@ -332,21 +371,20 @@ test('web and mobile runtime source contain no Semaphore credential or provider 
   roots.forEach(visit);
 });
 
-test('Firestore rules deny all client access to credentials and deny unmatched collections', () => {
+test('Firestore rules deny all client database access and deny unmatched collections', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
-  assert.match(rules, /match \/user_credentials\/\{userId\}[\s\S]*?allow read, write: if false;/);
-  assert.match(rules, /match \/password_recovery_challenges\/\{challengeId\}[\s\S]*?allow read, write: if false;/);
-  assert.match(rules, /request\.auth\.token\.accountReady == true/);
-  assert.match(rules, /request\.auth\.uid == userId/);
-  assert.match(rules, /fieldData\.memberUserId == request\.auth\.uid/);
+  for (const collection of ['users', 'user_credentials', 'account_identifiers', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics', 'diagnostic_events', 'backup_operations', 'server_sessions', 'security_rate_limits', 'password_recovery_challenges']) {
+    assert.match(rules, new RegExp(`match \/${collection}\/\\{documentId\\}[\\s\\S]*?allow read, write: if false;`));
+  }
+  assert.doesNotMatch(rules, /allow\s+(?:read|write|create|update|delete)(?:\s*,\s*(?:read|write|create|update|delete))*\s*:\s*if\s+(?!false\b)/);
   assert.match(rules, /match \/\{document=\*\*\}[\s\S]*?allow read, write: if false;/);
 });
 
-test('canonical Firestore collections deny every client write', () => {
+test('canonical Firestore collections deny every client read and write', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
   for (const collection of ['account_identifiers', 'users', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics']) {
-    const block = new RegExp(`match \/${collection}\/\\{[^}]+\\}[\\s\\S]*?allow (?:create, update, delete|write): if false;`);
-    assert.match(rules, block, `${collection} must be server-write-only`);
+    const block = new RegExp(`match \/${collection}\/\\{[^}]+\\}[\\s\\S]*?allow read, write: if false;`);
+    assert.match(rules, block, `${collection} must be server-only`);
   }
 });
 
@@ -469,7 +507,9 @@ test('role platforms are enforced by auth for both web and mobile', () => {
   );
 
   const webAuthSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/context/AuthContext.jsx'), 'utf8');
+  const webApiSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/apiClient.js'), 'utf8');
   const appShellSource = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/layout/AppShell.jsx'), 'utf8');
-  assert.match(webAuthSource, /'x-client-platform': 'web'/);
+  assert.match(webApiSource, /webClientHeaders[\s\S]*'x-client-platform': 'web'/);
+  assert.match(webAuthSource, /webClientHeaders\(\)/);
   assert.match(appShellSource, /await logout\(\)[\s\S]*navigate\('\/login', \{ replace: true \}\)/);
 });

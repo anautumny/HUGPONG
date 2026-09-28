@@ -357,7 +357,7 @@ export default function TakeOverView() {
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
-          console.warn('[TakeOver] Crop Year Cycle stage advancement note:', stageErr.message);
+          console.warn('[TakeOver] Crop Year Cycle stage advancement was not completed.');
         }
       }
 
@@ -371,7 +371,7 @@ export default function TakeOverView() {
       }
       if (!isSingleItemSubmission) navigate('/operations');
     } catch (err) {
-      console.error('[TakeOver] Submit error:', err);
+      console.warn('[TakeOver] Submission failed; see the displayed reference ID.');
       setServerError(err.message || 'Unable to record Manager Takeover operation.');
       setIsSubmitting(false);
     }

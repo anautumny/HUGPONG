@@ -22,6 +22,8 @@ import {
 import { API_UNAVAILABLE_MESSAGE } from '../../config/apiConfig';
 import CirclingRetryButton from '../../components/CirclingRetryButton';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
+import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
+import { passwordPolicy } from '../../domain/passwordPolicy';
 
 const LOGO = require('../../../assets/HUGPONG LOGO.png');
 
@@ -39,9 +41,8 @@ export default function LoginScreen({ navigation, route }) {
   const [showLegalModal, setShowLegalModal] = useState(false);
 
   // Security: Brute-Force Rate Limiting & Account Lockout
-  const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
-  const timerRef = useRef(null);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
 
   // First-Time Password Change Assistant State
   const [showFirstLoginModal, setShowFirstLoginModal] = useState(false);
@@ -130,16 +131,45 @@ export default function LoginScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
-    if (lockoutSeconds > 0) {
-      timerRef.current = setTimeout(() => {
-        setLockoutSeconds(prev => prev - 1);
-      }, 1000);
-    } else if (lockoutSeconds === 0 && failedAttempts >= 5) {
-      setFailedAttempts(0);
-      setAuthError('');
-    }
-    return () => clearTimeout(timerRef.current);
-  }, [lockoutSeconds, failedAttempts]);
+    let active = true;
+    getItem(STORAGE_KEYS.LOGIN_LOCKOUT_UNTIL, 0).then(stored => {
+      if (!active) return;
+      const expiry = Number(stored || 0);
+      if (Number.isFinite(expiry) && expiry > Date.now()) {
+        setLockoutUntil(expiry);
+        setLockoutSeconds(Math.max(1, Math.ceil((expiry - Date.now()) / 1000)));
+        setAuthError(t('auth_lockout_60'));
+      } else {
+        removeItem(STORAGE_KEYS.LOGIN_LOCKOUT_UNTIL);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!lockoutUntil) return undefined;
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((lockoutUntil - Date.now()) / 1000));
+      setLockoutSeconds(remaining);
+      if (remaining === 0) {
+        setLockoutUntil(0);
+        setAuthError('');
+        removeItem(STORAGE_KEYS.LOGIN_LOCKOUT_UNTIL);
+      }
+    };
+    updateRemaining();
+    const timer = setInterval(updateRemaining, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutUntil]);
+
+  const applyServerLockout = async (data = {}) => {
+    const serverExpiry = Date.parse(data.lockoutUntil || data.windowResetsAt || '');
+    const retrySeconds = Math.max(1, Number(data.retryAfterSeconds || 60));
+    const expiry = Number.isFinite(serverExpiry) ? serverExpiry : Date.now() + (retrySeconds * 1000);
+    setLockoutUntil(expiry);
+    setLockoutSeconds(Math.max(1, Math.ceil((expiry - Date.now()) / 1000)));
+    await saveItem(STORAGE_KEYS.LOGIN_LOCKOUT_UNTIL, expiry);
+  };
 
   useEffect(() => {
     if (phoneVerificationResendSeconds <= 0) return undefined;
@@ -171,7 +201,7 @@ export default function LoginScreen({ navigation, route }) {
     if (lockoutSeconds > 0) {
       Alert.alert(
         t('auth_lockout_title'),
-        t('auth_lockout_wait').replace('{seconds}', String(lockoutSeconds))
+        t('auth_lockout_wait')
       );
       return;
     }
@@ -201,12 +231,9 @@ export default function LoginScreen({ navigation, route }) {
             : API_UNAVAILABLE_MESSAGE);
           return;
         }
-        const nextAttempts = failedAttempts + 1;
-        setFailedAttempts(nextAttempts);
-
-        if (nextAttempts >= 5) {
-          setLockoutSeconds(60);
-          setAuthError(t('auth_lockout_60'));
+        if (res.code === 'LOGIN_RATE_LIMITED' || res.status === 429) {
+          await applyServerLockout(res.data);
+          setAuthError(res.error || t('auth_lockout_60'));
         } else {
           setAuthError(res.error || t('auth_invalid_credentials', 'Invalid User ID, mobile number, or password.'));
         }
@@ -214,7 +241,9 @@ export default function LoginScreen({ navigation, route }) {
       }
 
       // Successful authentication
-      setFailedAttempts(0);
+      await removeItem(STORAGE_KEYS.LOGIN_LOCKOUT_UNTIL);
+      setLockoutUntil(0);
+      setLockoutSeconds(0);
       setAuthError('');
 
       setAuthenticatedUser(res.user);
@@ -334,10 +363,11 @@ export default function LoginScreen({ navigation, route }) {
   };
 
   const handleSaveFirstLoginPassword = async () => {
-    const isLen = newPassword.length >= 8;
-    const isCase = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
-    const isNum = /[0-9]/.test(newPassword);
-    const isNotDefault = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase());
+    const policy = passwordPolicy(newPassword);
+    const isLen = policy.hasValidLength;
+    const isCase = policy.hasLowercase && policy.hasUppercase;
+    const isNum = policy.hasNumber;
+    const isNotDefault = policy.isUnpredictable;
 
     if (!isLen) {
       setFirstLoginError(t('auth_password_min_full'));
@@ -384,10 +414,11 @@ export default function LoginScreen({ navigation, route }) {
   };
 
   // Requirement status calculations
-  const reqLen = newPassword.length >= 8;
-  const reqCase = /[a-z]/.test(newPassword) && /[A-Z]/.test(newPassword);
-  const reqNum = /[0-9]/.test(newPassword);
-  const reqDiff = !['hugpong', 'hugpong2026', 'password123'].includes(newPassword.trim().toLowerCase()) && newPassword.trim().length > 0;
+  const firstLoginPolicy = passwordPolicy(newPassword);
+  const reqLen = firstLoginPolicy.hasValidLength;
+  const reqCase = firstLoginPolicy.hasLowercase && firstLoginPolicy.hasUppercase;
+  const reqNum = firstLoginPolicy.hasNumber;
+  const reqDiff = firstLoginPolicy.isUnpredictable;
   const isReqValid = reqLen && reqCase && reqNum && reqDiff && newPassword === confirmPassword && confirmPassword.length > 0;
 
   if (!deviceOnline && connectivityStatus !== CONNECTIVITY_STATUS.CHECKING && !showFirstLoginModal && !showPhoneVerificationModal) {
@@ -497,7 +528,7 @@ export default function LoginScreen({ navigation, route }) {
                   color={lockoutSeconds > 0 ? "#B45309" : "#DC2626"} 
                 />
                 <Text style={[s.errorBannerText, lockoutSeconds > 0 && s.lockoutBannerText]}>
-                  {lockoutSeconds > 0 ? `Security Lockout: Wait ${lockoutSeconds}s` : authError}
+                  {lockoutSeconds > 0 ? t('auth_lockout_wait') : authError}
                 </Text>
               </View>
             ) : null}
@@ -577,7 +608,7 @@ export default function LoginScreen({ navigation, route }) {
               ) : (
                 <>
                   <Text style={s.btnText}>
-                    {lockoutSeconds > 0 ? `Locked (${lockoutSeconds}s)` : t('auth_sign_in', 'Sign In to App')}
+                    {lockoutSeconds > 0 ? t('auth_try_again_later', 'Try Again Later') : t('auth_sign_in', 'Sign In to App')}
                   </Text>
                   <Ionicons name={lockoutSeconds > 0 ? "lock-closed" : "arrow-forward"} size={18} color="#fff" />
                 </>

@@ -5,8 +5,9 @@
 
 const { verifyToken } = require('../security/token');
 const { db } = require('../firebase-admin');
-const { COLLECTIONS, canonicalRole, publicRoleLabel } = require('../schema/firestoreSchema');
+const { COLLECTIONS, canonicalRole, publicRoleLabel, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { authVersionOf } = require('../security/accountSecurity');
+const { resolveAccountAssignments } = require('../services/accountAuthorization');
 
 function bearerToken(req) {
   const header = String(req.headers?.authorization || '');
@@ -20,6 +21,7 @@ function rejectAuthentication(req, res, error, code = 'UNAUTHENTICATED') {
 }
 
 async function requireAuth(req, res, next) {
+  if (req.authorizationVerified === true && req.authUser) return next();
   const presented = req.session?.user || verifyToken(bearerToken(req));
   if (!presented) {
     return rejectAuthentication(req, res,
@@ -46,6 +48,15 @@ async function requireAuth(req, res, next) {
     if (presentedVersion !== currentVersion || canonicalRole(presented.role || presented.roleKey) !== currentRole) {
       return rejectAuthentication(req, res, 'Your session was revoked. Please sign in again.', 'SESSION_REVOKED');
     }
+    const requestPlatform = String(req.headers?.['x-client-platform'] || '').trim().toLowerCase();
+    const sessionPlatform = String(presented.platform || '').trim().toLowerCase();
+    if (!['web', 'mobile'].includes(requestPlatform)) {
+      return res.status(403).json({ success: false, error: 'A recognized client platform is required.', code: 'CLIENT_PLATFORM_REQUIRED' });
+    }
+    if ((sessionPlatform && sessionPlatform !== requestPlatform) || !isRoleAllowedOnPlatform(currentRole, requestPlatform)) {
+      return res.status(403).json({ success: false, error: 'This account is not authorized for the requested platform.', code: 'PLATFORM_FORBIDDEN' });
+    }
+    const assignments = await resolveAccountAssignments(db, userId, currentRole);
 
     const user = {
       employeeId: userId,
@@ -55,20 +66,22 @@ async function requireAuth(req, res, next) {
       role: publicRoleLabel(currentRole),
       canonicalRole: currentRole,
       roleKey: presented.roleKey || currentRole,
-      blockFarmId: presented.blockFarmId || '',
-      fieldId: presented.fieldId || '',
+      blockFarmId: assignments.blockFarmId,
+      fieldId: assignments.fieldId,
       phoneVerified: Boolean(account.phoneVerifiedAt),
       pendingFirstLoginVerification: !account.phoneVerifiedAt,
       requiresPasswordChange: account.requiresPasswordChange === true,
       passwordChanged: Boolean(account.passwordChangedAt) || account.requiresPasswordChange !== true,
       authVersion: currentVersion,
+      platform: requestPlatform,
       authenticatedAt: presented.authenticatedAt || new Date().toISOString()
     };
     req.authUser = user;
+    req.authorizationVerified = true;
     if (req.session) req.session.user = user;
     return next();
   } catch (error) {
-    console.error('[HUGPONG Auth] Authorization lookup failed:', error);
+    res.locals.diagnosticError = error;
     return res.status(503).json({
       success: false,
       error: 'Account authorization is temporarily unavailable.',

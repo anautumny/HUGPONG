@@ -107,7 +107,7 @@ export default function AuditDossierCard({
       setShowConfirmModal(false);
       setCertificationNotes('');
     } catch (err) {
-      console.error('[AuditDossier] Certification error:', err);
+      console.warn('[AuditDossier] Certification failed; see the displayed reference ID.');
     }
   };
 

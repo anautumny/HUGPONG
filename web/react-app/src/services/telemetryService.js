@@ -59,7 +59,7 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
       }
     });
   } catch (error) {
-    if (!error.message?.includes('Access Denied')) { console.warn('[TelemetryService] Web sync report deferred:', error.message); }
+    if (!error.message?.includes('Access Denied')) { console.warn('[TelemetryService] Web sync report was deferred.'); }
     return null;
   }
 }

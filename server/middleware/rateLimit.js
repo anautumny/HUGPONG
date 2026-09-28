@@ -85,7 +85,10 @@ function createRateLimit({
   max,
   windowMs,
   minIntervalMs = 0,
-  key = req => `${clientAddress(req)}:${identifier(req)}`
+  key = req => `${clientAddress(req)}:${identifier(req)}`,
+  rejectionCode,
+  rejectionMessage,
+  rejectionData
 }) {
   if (
     !name
@@ -100,12 +103,16 @@ function createRateLimit({
     throw new Error('A valid persistent rate-limit configuration is required.');
   }
 
-  return async function persistentRateLimit(req, res, next) {
+  const referenceFor = req => {
+    const digest = crypto.createHash('sha256').update(`${name}:${key(req)}`).digest('hex');
+    return db.collection(COLLECTIONS.SECURITY_RATE_LIMITS).doc(`${name}-${digest}`);
+  };
+
+  const persistentRateLimit = async function persistentRateLimit(req, res, next) {
     if (!db) {
       return res.status(503).json({ success: false, error: 'Security controls are temporarily unavailable.', code: 'RATE_LIMIT_UNAVAILABLE' });
     }
-    const digest = crypto.createHash('sha256').update(`${name}:${key(req)}`).digest('hex');
-    const ref = db.collection(COLLECTIONS.SECURITY_RATE_LIMITS).doc(`${name}-${digest}`);
+    const ref = referenceFor(req);
     const now = Date.now();
     try {
       const state = await db.runTransaction(async transaction => {
@@ -128,22 +135,39 @@ function createRateLimit({
       res.set('RateLimit-Reset', String(Math.ceil(state.windowEndsAtMs / 1000)));
       if (!state.accepted) {
         res.set('Retry-After', String(state.retryAfterSeconds));
+        const code = typeof rejectionCode === 'function'
+          ? rejectionCode(state)
+          : (rejectionCode || (state.reason === 'COOLDOWN' ? 'RESEND_COOLDOWN' : 'HOURLY_CODE_LIMIT'));
+        const error = typeof rejectionMessage === 'function'
+          ? rejectionMessage(state)
+          : (rejectionMessage || (state.reason === 'COOLDOWN'
+            ? `Please wait ${state.retryAfterSeconds} seconds before requesting another verification code.`
+            : `The ${max}-code hourly limit has been reached. Please wait before requesting another verification code.`));
+        const data = typeof rejectionData === 'function'
+          ? rejectionData(publicState, state)
+          : publicState;
         return res.status(429).json({
           success: false,
-          error: state.reason === 'COOLDOWN'
-            ? `Please wait ${state.retryAfterSeconds} seconds before requesting another verification code.`
-            : `The ${max}-code hourly limit has been reached. Please wait before requesting another verification code.`,
-          code: state.reason === 'COOLDOWN' ? 'RESEND_COOLDOWN' : 'HOURLY_CODE_LIMIT',
-          data: publicState
+          error,
+          code,
+          data
         });
       }
       req.rateLimitStates = { ...(req.rateLimitStates || {}), [name]: publicState };
       return next();
     } catch (error) {
-      console.error(`[HUGPONG Rate Limit] ${name} failed:`, error);
+      res.locals.diagnosticError = error;
       return res.status(503).json({ success: false, error: 'Security controls are temporarily unavailable.', code: 'RATE_LIMIT_UNAVAILABLE' });
     }
   };
+
+  persistentRateLimit.reset = async req => {
+    if (!db) return false;
+    await referenceFor(req).delete();
+    return true;
+  };
+
+  return persistentRateLimit;
 }
 
 module.exports = {

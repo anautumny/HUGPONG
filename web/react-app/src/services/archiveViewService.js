@@ -25,7 +25,7 @@ export function readArchiveClearViewPreference(preferenceKey) {
   try {
     return localStorage.getItem(preferenceKey) === 'true';
   } catch (error) {
-    console.warn('[archiveViewService] Unable to read Clear View preference:', error);
+    console.warn('[archiveViewService] The saved Clear View preference could not be read.');
     return false;
   }
 }
@@ -36,7 +36,7 @@ export function writeArchiveClearViewPreference(preferenceKey, isCleared) {
     localStorage.setItem(preferenceKey, String(Boolean(isCleared)));
     return true;
   } catch (error) {
-    console.warn('[archiveViewService] Unable to save Clear View preference:', error);
+    console.warn('[archiveViewService] The Clear View preference could not be saved.');
     return false;
   }
 }

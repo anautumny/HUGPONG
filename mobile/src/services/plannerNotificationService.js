@@ -138,7 +138,7 @@ async function runSync(fields, session, requestPermission) {
 export function syncPlannerDeviceNotifications(fields, session, options = {}) {
   const start = () => runSync(fields, session, options.requestPermission === true)
     .catch(error => {
-      console.warn('[Planner Notifications] Reminder refresh deferred:', error?.message || error);
+      console.warn('[Planner Notifications] Reminder refresh was deferred.');
       return { scheduled: 0, error };
     })
     .finally(() => { activeSync = null; });

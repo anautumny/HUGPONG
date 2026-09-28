@@ -4059,7 +4059,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               catch (err) {
                 await releaseLocalDraftSubmission(d.id);
                 remainingDrafts.push(d);
-                console.warn('[FieldOpsScreen] Batch draft rejected; draft retained:', err.message);
+                console.warn('[FieldOpsScreen] Batch draft was retained after a rejected request.');
                 continue;
               }
 

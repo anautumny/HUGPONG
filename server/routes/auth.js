@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const { normalizeStructuredName } = require('../domain/personName');
+const { resolveAccountAssignments } = require('../services/accountAuthorization');
 const { db, auth } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { issueToken } = require('../security/token');
@@ -16,6 +17,7 @@ const { sendSms } = require('../services/smsGateway');
 const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { recordActivity } = require('../services/telemetryService');
+const { cleanText } = require('../services/diagnosticService');
 const { createRateLimit, clientAddress, identifier, rateLimitState } = require('../middleware/rateLimit');
 const {
   PASSWORD_SESSION_ACTIONS,
@@ -38,8 +40,54 @@ const VERIFICATION_CODE_WINDOW_MS = 60 * 60 * 1000;
 const VERIFICATION_CODE_RESEND_DELAY_MS = 60 * 1000;
 const OTP_REQUEST_LIMITER = 'auth-otp-request';
 const PASSWORD_RECOVERY_ACCOUNT_LIMITER = 'auth-password-recovery-account';
+const LOGIN_ATTEMPT_LIMIT = 5;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+const LOGIN_LOCKOUT_MESSAGE = 'Too many login attempts. Please try again later.';
 
-const loginRateLimit = createRateLimit({ name: 'auth-login', max: 10, windowMs: 15 * 60 * 1000 });
+function canonicalLoginIdentifier(req) {
+  const raw = String(req.body?.contactNumber || req.body?.identifier || '').trim().toLowerCase();
+  const digits = raw.replace(/\D/g, '');
+  if (/^0[1-4]\d{6}$/.test(digits)) return digits;
+  if (/^639\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^09\d{9}$/.test(digits)) return digits;
+  return raw.slice(0, 160);
+}
+
+function loginRateLimitData(publicState) {
+  return {
+    ...publicState,
+    attemptsRemaining: publicState.remaining,
+    lockoutUntil: publicState.windowResetsAt
+  };
+}
+
+const loginRateLimit = createRateLimit({
+  name: 'auth-login',
+  max: LOGIN_ATTEMPT_LIMIT,
+  windowMs: LOGIN_LOCKOUT_MS,
+  key: req => `${clientAddress(req)}:${canonicalLoginIdentifier(req)}`,
+  rejectionCode: 'LOGIN_RATE_LIMITED',
+  rejectionMessage: LOGIN_LOCKOUT_MESSAGE,
+  rejectionData: loginRateLimitData
+});
+const loginIpRateLimit = createRateLimit({
+  name: 'auth-login-ip',
+  max: 30,
+  windowMs: LOGIN_LOCKOUT_MS,
+  key: clientAddress,
+  rejectionCode: 'LOGIN_RATE_LIMITED',
+  rejectionMessage: LOGIN_LOCKOUT_MESSAGE,
+  rejectionData: loginRateLimitData
+});
+const loginAccountRateLimit = createRateLimit({
+  name: 'auth-login-account',
+  max: 10,
+  windowMs: LOGIN_LOCKOUT_MS,
+  key: req => canonicalLoginIdentifier(req) || 'missing',
+  rejectionCode: 'LOGIN_RATE_LIMITED',
+  rejectionMessage: LOGIN_LOCKOUT_MESSAGE,
+  rejectionData: loginRateLimitData
+});
 const mobileSessionRateLimit = createRateLimit({ name: 'auth-mobile-session', max: 60, windowMs: 15 * 60 * 1000, key: clientAddress });
 const otpRequestRateLimit = createRateLimit({
   name: OTP_REQUEST_LIMITER,
@@ -104,25 +152,6 @@ function platformRestrictionMessage(role, platform) {
   return 'This account is not authorized for the requested platform.';
 }
 
-async function resolveAssignments(userId, role) {
-  if (!db) return { blockFarmId: '', fieldId: '' };
-  if (role === ROLES.FARM_MANAGER) {
-    const farms = await db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', userId).limit(1).get();
-    const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).limit(1).get();
-    const field = fields.empty ? null : fields.docs[0];
-    return {
-      blockFarmId: field ? field.data().blockFarmId : (farms.empty ? '' : farms.docs[0].id),
-      fieldId: field ? field.id : ''
-    };
-  }
-  if (role === ROLES.MEMBER_FARMER) {
-    const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId).limit(1).get();
-    const field = fields.empty ? null : fields.docs[0];
-    return { blockFarmId: field ? field.data().blockFarmId : '', fieldId: field ? field.id : '' };
-  }
-  return { blockFarmId: '', fieldId: '' };
-}
-
 async function findUser(identifier) {
   if (!db) return null;
   const raw = String(identifier || '').trim();
@@ -141,7 +170,7 @@ async function findUser(identifier) {
 async function buildSessionUser(userId, user) {
   const role = canonicalRole(user.role);
   if (!role) throw new Error('Account has an invalid role.');
-  const assignments = await resolveAssignments(userId, role);
+  const assignments = await resolveAccountAssignments(db, userId, role);
   const requiresPasswordChange = user.requiresPasswordChange === true;
   return {
     employeeId: userId,
@@ -217,6 +246,7 @@ router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
     if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, 'mobile')) {
       return res.status(403).json({ success: false, error: platformRestrictionMessage(sessionUser.canonicalRole, 'mobile') });
     }
+    sessionUser.platform = 'mobile';
     if (req.session) req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {
@@ -242,7 +272,7 @@ async function resolvePasswordRecoveryAccount(req, res, next) {
   try {
     req.passwordRecoveryUser = await findUser(req.body?.identifier);
   } catch (error) {
-    console.warn('[HUGPONG Auth] Password recovery account lookup notice:', error.message);
+    console.warn('[HUGPONG Auth] Password recovery account lookup notice:', cleanText(error.message));
     req.passwordRecoveryUser = null;
   }
   return next();
@@ -277,7 +307,7 @@ router.post('/password-recovery/request', passwordRecoveryIpRateLimit, resolvePa
       expiresAt = createdChallenge.expiresAt;
     }
   } catch (error) {
-    console.warn('[HUGPONG Auth] Password recovery request notice:', error.message);
+    console.warn('[HUGPONG Auth] Password recovery request notice:', cleanText(error.message));
   }
 
   return res.status(202).json({
@@ -323,7 +353,7 @@ router.post('/password-recovery/complete', passwordRecoveryCompleteRateLimit, as
     await revokeFirebaseSessions(result.userId);
     if (req.session && typeof req.session.destroy === 'function') {
       await new Promise(resolve => req.session.destroy(error => {
-        if (error) console.warn('[HUGPONG Auth] Password recovery session cleanup notice:', error.message);
+        if (error) console.warn('[HUGPONG Auth] Password recovery session cleanup notice:', cleanText(error.message));
         resolve();
       }));
     }
@@ -333,7 +363,7 @@ router.post('/password-recovery/complete', passwordRecoveryCompleteRateLimit, as
         result.phone,
         '[HUGPONG] Your account password was reset successfully. All devices were signed out. If this was not you, contact your administrator immediately.',
         { purpose: 'password-recovery-confirmation' }
-      ).catch(error => console.warn('[HUGPONG Auth] Password reset confirmation notice:', error.message));
+      ).catch(error => console.warn('[HUGPONG Auth] Password reset confirmation notice:', cleanText(error.message)));
     }
     return res.json({
       success: true,
@@ -349,28 +379,57 @@ router.post('/password-recovery/complete', passwordRecoveryCompleteRateLimit, as
   }
 });
 
-router.post('/login', loginRateLimit, async (req, res) => {
+function rejectedLogin(req, res, error = 'Invalid credentials.') {
+  const states = ['auth-login', 'auth-login-account', 'auth-login-ip']
+    .map(name => rateLimitState(req, name))
+    .filter(Boolean)
+    .sort((left, right) => left.remaining - right.remaining);
+  const state = states[0] || null;
+  const exhaustedState = states.find(item => item.remaining === 0) || null;
+  const exhausted = Boolean(exhaustedState);
+  if (exhausted) res.set('Retry-After', String(exhaustedState.retryAfterSeconds));
+  return res.status(exhausted ? 429 : 401).json({
+    success: false,
+    error: exhausted ? LOGIN_LOCKOUT_MESSAGE : error,
+    code: exhausted ? 'LOGIN_RATE_LIMITED' : 'INVALID_CREDENTIALS',
+    data: (exhaustedState || state) ? loginRateLimitData(exhaustedState || state) : undefined
+  });
+}
+
+router.post('/login', (req, res, next) => {
   const identifier = req.body?.contactNumber || req.body?.identifier;
   const password = req.body?.password;
   if (!String(identifier || '').trim() || !password) {
     return res.status(400).json({ success: false, error: 'User ID or contact number and password are required.' });
   }
+  return next();
+}, loginIpRateLimit, loginAccountRateLimit, loginRateLimit, async (req, res) => {
+  const identifier = req.body?.contactNumber || req.body?.identifier;
+  const password = req.body?.password;
   if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication service is unavailable.' });
   try {
     const matchedUser = await findUser(identifier);
-    if (!matchedUser) return res.status(401).json({ success: false, error: 'Invalid credentials.' });
+    if (!matchedUser) return rejectedLogin(req, res);
     if (matchedUser.status !== 'ACTIVE') return res.status(403).json({ success: false, error: 'This account is not active.' });
     if (!(await verifyCurrentPassword(matchedUser.id, password))) {
-      return res.status(401).json({ success: false, error: 'Invalid credentials.' });
+      return rejectedLogin(req, res);
     }
+    await Promise.all([
+      loginRateLimit.reset(req),
+      loginAccountRateLimit.reset(req)
+    ]).catch(error => console.warn('[HUGPONG Auth] Login throttle reset notice:', cleanText(error.message)));
     const sessionUser = await buildSessionUser(matchedUser.id, matchedUser);
     const clientPlatform = String(req.headers['x-client-platform'] || req.body?.clientPlatform || '').trim().toLowerCase();
-    if (clientPlatform && !isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
+    if (!['web', 'mobile'].includes(clientPlatform)) {
+      return res.status(403).json({ success: false, error: 'A recognized client platform is required.', code: 'CLIENT_PLATFORM_REQUIRED' });
+    }
+    if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
       return res.status(403).json({
         success: false,
         error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
       });
     }
+    sessionUser.platform = clientPlatform;
     await establishSession(req, sessionUser);
     const credentials = await issueCredentials(sessionUser);
     recordActivity(db, {
@@ -378,7 +437,7 @@ router.post('/login', loginRateLimit, async (req, res) => {
       platform: clientPlatform,
       clientInstanceId: req.headers['x-client-instance-id'] || req.body?.clientInstanceId || `${clientPlatform}-login`,
       event: 'LOGIN'
-    }).catch(error => console.warn('[HUGPONG Auth] Activity telemetry notice:', error.message));
+    }).catch(error => console.warn('[HUGPONG Auth] Activity telemetry notice:', cleanText(error.message)));
     return res.json({
       success: true,
       user: sessionUser,
@@ -386,7 +445,7 @@ router.post('/login', loginRateLimit, async (req, res) => {
       ...credentials
     });
   } catch (error) {
-    console.error('[HUGPONG Auth] Login error:', error);
+    res.locals.diagnosticError = error;
     return res.status(500).json({ success: false, error: 'Authentication could not be completed.' });
   }
 });
@@ -544,7 +603,7 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
 
 router.post('/verify-password', requireAuth, passwordRateLimit, async (req, res) => {
   const valid = await verifyCurrentPassword(req.session.user.employeeId, req.body?.password);
-  if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.' });
+  if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.', code: 'INVALID_CURRENT_PASSWORD' });
   if (req.body?.purpose !== TAKEOVER_GRANT_PURPOSE) {
     return res.json({ success: true, verified: true });
   }
@@ -574,7 +633,10 @@ router.post('/change-password', requireAuth, passwordRateLimit, async (req, res)
     const sessionAction = normalizePasswordSessionAction(req.body?.sessionAction);
     validatePassword(newPassword);
     if (req.session.user.requiresPasswordChange !== true && !(await verifyCurrentPassword(employeeId, currentPassword))) {
-      return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+      return res.status(403).json({ success: false, error: 'Current password is incorrect.', code: 'INVALID_CURRENT_PASSWORD' });
+    }
+    if (await verifyCurrentPassword(employeeId, newPassword)) {
+      return res.status(400).json({ success: false, error: 'New password must be different from the current or temporary password.' });
     }
     const userSnapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
     if (!userSnapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
@@ -598,7 +660,7 @@ router.post('/change-password', requireAuth, passwordRateLimit, async (req, res)
       if (req.session) req.session.user = null;
       if (req.session && typeof req.session.destroy === 'function') {
         await new Promise(resolve => req.session.destroy(error => {
-          if (error) console.warn(`[HUGPONG Auth] Current-session destruction notice for ${employeeId}:`, error.message);
+          if (error) console.warn('[HUGPONG Auth] Current-session destruction was not acknowledged.');
           resolve();
         }));
       }
@@ -632,7 +694,7 @@ router.post('/change-phone', requireAuth, passwordRateLimit, async (req, res) =>
   if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
   if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
   if (!(await verifyCurrentPassword(employeeId, req.body?.currentPassword))) {
-    return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+    return res.status(403).json({ success: false, error: 'Current password is incorrect.', code: 'INVALID_CURRENT_PASSWORD' });
   }
   const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
   if (!duplicate.empty && duplicate.docs[0].id !== employeeId) {
@@ -684,7 +746,10 @@ router.get('/session', requireAuth, async (req, res) => {
     }
     const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
     const clientPlatform = String(req.headers['x-client-platform'] || '').trim().toLowerCase();
-    if (clientPlatform && !isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
+    if (!['web', 'mobile'].includes(clientPlatform)) {
+      return res.status(403).json({ success: false, authenticated: false, error: 'A recognized client platform is required.', code: 'CLIENT_PLATFORM_REQUIRED' });
+    }
+    if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
       req.session.user = null;
       res.clearCookie('hugpong.sid');
       return res.status(403).json({
@@ -693,6 +758,7 @@ router.get('/session', requireAuth, async (req, res) => {
         error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
       });
     }
+    sessionUser.platform = clientPlatform;
     req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {

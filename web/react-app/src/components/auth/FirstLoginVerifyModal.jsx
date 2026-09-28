@@ -37,7 +37,7 @@ export default function FirstLoginVerifyModal({
             setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
           })
           .catch((err) => {
-            console.warn('[FirstLoginVerify] SMS dispatch note:', err.message);
+            console.warn('[FirstLoginVerify] Verification-code delivery was deferred.');
             if (err.data?.retryAfterSeconds) {
               setResendCooldown(Math.max(0, Number(err.data.retryAfterSeconds)));
               setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));

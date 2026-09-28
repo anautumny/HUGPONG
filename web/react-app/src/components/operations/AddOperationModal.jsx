@@ -455,7 +455,7 @@ export default function AddOperationModal({
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
-          console.warn('[AddOperationModal] Crop Year Cycle stage advancement note:', stageErr.message);
+          console.warn('[AddOperationModal] Crop Year Cycle stage advancement was not completed.');
         }
       }
 
@@ -497,7 +497,7 @@ export default function AddOperationModal({
         onClose();
       }
     } catch (err) {
-      console.error('[AddOperationModal] Submit error:', err);
+      console.warn('[AddOperationModal] Submission failed; see the displayed reference ID.');
       setServerError(err.message || 'Unable to record operation.');
       setIsSubmitting(false);
       setSubmittingLineItemId(null);

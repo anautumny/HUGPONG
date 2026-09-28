@@ -32,7 +32,7 @@ export default function MaintenanceView() {
       setCounts(inventory);
       setErrors(prev => ({ ...prev, inventory: null }));
     } catch (err) {
-      console.warn('[MaintenanceView] System inventory err:', err.message);
+      console.warn('[MaintenanceView] System inventory is temporarily unavailable.');
       setCounts(prev => ({
         ...prev,
         cropCycles: 'UNAVAILABLE',
@@ -50,7 +50,7 @@ export default function MaintenanceView() {
       const data = await checkSystemHealth();
       setHealthData(data);
     } catch (err) {
-      console.warn('[MaintenanceView] Health ping err:', err.message);
+      console.warn('[MaintenanceView] Health check is temporarily unavailable.');
     } finally {
       setIsCheckingHealth(false);
     }

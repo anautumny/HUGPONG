@@ -11,6 +11,7 @@ import { useTranslation } from '../../services/i18n';
 import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
 import { formatToE164 } from '../../services/smsService';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
+import { passwordPolicy, passwordPolicyError } from '../../domain/passwordPolicy';
 
 const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
 
@@ -109,22 +110,23 @@ export default function RegisterScreen({ navigation }) {
   const [showLegalModal, setShowLegalModal] = useState(false);
 
   const getPasswordStrength = (pwd) => {
-    if (!pwd) return { score: 0, level: '', color: COLORS.border, pct: 0, hasMin: false, hasLetter: false, hasNum: false, hasUpper: false };
-    const hasMin = pwd.length >= 8;
-    const hasLetter = /[a-zA-Z]/.test(pwd);
-    const hasNum = /[0-9]/.test(pwd);
-    const hasUpper = /[A-Z]/.test(pwd) && /[a-z]/.test(pwd);
+    if (!pwd) return { score: 0, level: '', color: COLORS.border, pct: 0, hasMin: false, hasLetter: false, hasNum: false, hasUpper: false, isUnpredictable: false };
+    const policy = passwordPolicy(pwd);
+    const hasMin = policy.hasValidLength;
+    const hasLetter = policy.hasLowercase;
+    const hasNum = policy.hasNumber;
+    const hasUpper = policy.hasUppercase;
     const hasSpecial = /[^A-Za-z0-9]/.test(pwd);
 
     let score = 0;
     if (hasMin) score += 1;
-    if (hasLetter && hasNum) score += 1;
-    if (hasUpper) score += 1;
+    if (hasLetter && hasUpper) score += 1;
+    if (hasNum && policy.isUnpredictable) score += 1;
     if (hasSpecial) score += 1;
 
-    if (score >= 3) return { score, level: 'Strong', color: '#267326', pct: 100, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
-    if (score === 2) return { score, level: 'Moderate', color: '#F59E0B', pct: 60, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
-    return { score, level: 'Weak', color: '#EF4444', pct: 30, hasMin, hasLetter, hasNum, hasUpper, hasSpecial };
+    if (score >= 3) return { score, level: 'Strong', color: '#267326', pct: 100, hasMin, hasLetter, hasNum, hasUpper, hasSpecial, isUnpredictable: policy.isUnpredictable };
+    if (score === 2) return { score, level: 'Moderate', color: '#F59E0B', pct: 60, hasMin, hasLetter, hasNum, hasUpper, hasSpecial, isUnpredictable: policy.isUnpredictable };
+    return { score, level: 'Weak', color: '#EF4444', pct: 30, hasMin, hasLetter, hasNum, hasUpper, hasSpecial, isUnpredictable: policy.isUnpredictable };
   };
 
   const set = (key, val) => { setForm(p => ({ ...p, [key]: val })); setErrors(p => ({ ...p, [key]: null })); };
@@ -225,15 +227,8 @@ export default function RegisterScreen({ navigation }) {
     }
     if (step === 4) {
       const pwd = form.password || '';
-      if (!pwd) {
-        e.password = t('reg_password_required');
-      } else if (pwd.length < 8) {
-        e.password = t('reg_password_length');
-      } else if (!/[0-9]/.test(pwd)) {
-        e.password = t('reg_password_number');
-      } else if (!/[a-zA-Z]/.test(pwd)) {
-        e.password = t('reg_password_letter');
-      }
+      const policyError = passwordPolicyError(pwd);
+      if (policyError) e.password = policyError;
 
       if (!form.confirmPassword) {
         e.confirmPassword = t('reg_confirm_required');
@@ -544,19 +539,19 @@ export default function RegisterScreen({ navigation }) {
                     </View>
                     <View style={s.pwRuleItem}>
                       <Ionicons 
-                        name={str.hasLetter && str.hasNum ? 'checkmark-circle' : 'ellipse-outline'} 
+                        name={str.hasLetter && str.hasUpper && str.hasNum ? 'checkmark-circle' : 'ellipse-outline'}
                         size={15} 
-                        color={str.hasLetter && str.hasNum ? COLORS.success : COLORS.textMuted} 
+                        color={str.hasLetter && str.hasUpper && str.hasNum ? COLORS.success : COLORS.textMuted}
                       />
-                      <Text style={[s.pwRuleText, str.hasLetter && str.hasNum && s.pwRuleTextMet]}>{t('reg_rule_letters_numbers')}</Text>
+                      <Text style={[s.pwRuleText, str.hasLetter && str.hasUpper && str.hasNum && s.pwRuleTextMet]}>Uppercase, lowercase, and a number</Text>
                     </View>
                     <View style={s.pwRuleItem}>
                       <Ionicons 
-                        name={str.hasUpper || str.hasSpecial ? 'checkmark-circle' : 'ellipse-outline'} 
+                        name={str.isUnpredictable ? 'checkmark-circle' : 'ellipse-outline'}
                         size={15} 
-                        color={str.hasUpper || str.hasSpecial ? COLORS.success : COLORS.textMuted} 
+                        color={str.isUnpredictable ? COLORS.success : COLORS.textMuted}
                       />
-                      <Text style={[s.pwRuleText, (str.hasUpper || str.hasSpecial) && s.pwRuleTextMet]}>{t('reg_rule_symbol')}</Text>
+                      <Text style={[s.pwRuleText, str.isUnpredictable && s.pwRuleTextMet]}>Not a common or default password</Text>
                     </View>
                   </View>
 

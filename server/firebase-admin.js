@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════════════════════
 
 const admin = require('firebase-admin');
+const { cleanText } = require('./services/diagnosticService');
 const fs = require('fs');
 const path = require('path');
 
@@ -54,7 +55,7 @@ try {
   db = admin.firestore();
   auth = admin.auth();
 } catch (error) {
-  console.warn('[HUGPONG Server] Firebase Admin initialization note:', error.message);
+  console.warn('[HUGPONG Server] Firebase Admin initialization note:', cleanText(error.message));
   db = null;
   auth = null;
 }

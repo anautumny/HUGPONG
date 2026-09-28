@@ -10,6 +10,11 @@ const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
 const FirestoreSessionStore = require('./services/firestoreSessionStore');
 const { COLLECTIONS } = require('./schema/firestoreSchema');
+const { requireAuth } = require('./middleware/auth');
+const { requireAccountReady, requireApiPermission } = require('./middleware/requestPermissions');
+const { validateRequestInput, malformedJsonHandler } = require('./middleware/requestInputValidation');
+const { safeErrorResponses } = require('./middleware/errorHandling');
+const { createEarlyAbuseProtection, createAuthenticatedApiRateLimit } = require('./middleware/abuseProtection');
 const {
   LEGACY_ROLE_DASHBOARD_REDIRECTS,
   LEGACY_LEGAL_PAGE_REDIRECTS
@@ -32,9 +37,13 @@ const smsRoutes = require('./routes/sms');
 const auditEventRoutes = require('./routes/auditEvents');
 const telemetryRoutes = require('./routes/telemetry');
 const systemDiagnosticsRoutes = require('./routes/systemDiagnostics');
+const diagnosticsRoutes = require('./routes/diagnostics');
+const backupRoutes = require('./routes/backups');
 
 const app = express();
 app.disable('x-powered-by');
+app.set('query parser', 'simple');
+if (isProduction) app.set('trust proxy', 1);
 
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
@@ -47,6 +56,14 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Install the safe error envelope before any middleware that can reject a
+// request, including CORS and JSON parsing.
+app.use(safeErrorResponses(db));
+
+// Reject abusive bursts and oversized declared payloads before CORS, JSON
+// parsing, sessions, authentication, logging, or any Firestore operation.
+app.use(createEarlyAbuseProtection());
 
 // Credentialed browser requests are restricted to explicitly configured origins.
 app.use(cors({
@@ -66,9 +83,12 @@ app.use(cors({
 // Operation photo evidence is resized and capped by both clients before it is
 // accepted by the canonical schema. Keep the transport ceiling below the
 // Firestore document limit while allowing one compact JPEG attachment.
+// Encrypted logical backup uploads are explicitly bounded and validated by the
+// backup service. Keep the larger parser isolated from every other endpoint.
+app.use('/api/backups', express.json({ limit: '12mb' }));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
-if (isProduction) app.set('trust proxy', 1);
+app.use(malformedJsonHandler);
+app.use(validateRequestInput);
 
 // Cookie-authenticated writes must originate from an approved browser origin.
 // Native clients authenticate with a bearer token and do not send Origin.
@@ -97,29 +117,28 @@ app.use(session({
   }
 }));
 
-// Route handlers may include internal exception text in development. In
-// production, sanitize all 5xx payloads even when the route handled the error.
+// Log successful traffic once it completes. Rejected traffic is handled by
+// the bounded diagnostic aggregator so a bot cannot amplify one request into
+// one console line and one Firestore diagnostic write indefinitely.
 app.use((req, res, next) => {
-  const sendJson = res.json.bind(res);
-  res.json = payload => {
-    if (isProduction && res.statusCode >= 500 && payload && typeof payload === 'object') {
-      return sendJson({ ...payload, error: 'The service is temporarily unavailable.' });
-    }
-    return sendJson(payload);
-  };
-  next();
-});
-
-// Request Logger. Protected routes hydrate bearer sessions in requireAuth.
-app.use((req, res, next) => {
-  const timestamp = new Date().toLocaleTimeString();
-  const sessionUser = req.session && req.session.user ? `[${req.session.user.name} (${req.session.user.role})]` : '[Guest]';
-  console.log(`[${timestamp}] ${req.method} ${req.originalUrl} ${sessionUser}`);
+  const startedAt = Date.now();
+  res.once('finish', () => {
+    if (res.statusCode >= 400) return;
+    const endpoint = String(req.originalUrl || '').split(/[?#]/, 1)[0];
+    if (!endpoint.startsWith('/api/') && !endpoint.startsWith('/auth/')) return;
+    const timestamp = new Date().toLocaleTimeString();
+    const sessionRole = req.authUser?.role || req.session?.user?.role || 'Guest';
+    console.log(`[${timestamp}] ${req.method} ${endpoint} ${res.statusCode} ${Date.now() - startedAt}ms [${sessionRole}]`);
+  });
   next();
 });
 
 // ── Mount Primary API Routes ────────────────────────────────
 app.use('/auth', authRoutes);
+// Every application-data request is re-authorized against the live account,
+// onboarding state, client platform, and an explicit method/path role policy.
+// Unknown API routes fail closed until a policy is deliberately added.
+app.use('/api', requireAuth, createAuthenticatedApiRateLimit(), requireAccountReady, requireApiPermission);
 app.use('/api/prices', priceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/block-farms', blockFarmRoutes);
@@ -132,6 +151,8 @@ app.use('/api/sms', smsRoutes);
 app.use('/api/audit-events', auditEventRoutes);
 app.use('/api/terminal-diagnostics', telemetryRoutes);
 app.use('/api/system-diagnostics', systemDiagnosticsRoutes);
+app.use('/api/diagnostics', diagnosticsRoutes);
+app.use('/api/backups', backupRoutes);
 
 // ── Static Web Serving (React Production SPA + Legacy Web Fallback) ──────
 const reactDistPath = path.join(__dirname, '../web/react-app/dist');
@@ -167,7 +188,7 @@ app.get('/health', (req, res) => {
 
 // Legacy client status route.
 // Compatibility health endpoint retained for deployed clients.
-app.get('/api/data', require('./middleware/auth').requireAuth, (req, res) => {
+app.get('/api/data', (req, res) => {
   res.json({
     success: true,
     message: 'HUGPONG Server active. Please use dedicated /api/* endpoints or Firestore real-time sync.'
@@ -194,13 +215,12 @@ app.use((req, res) => {
 
 // Error Handler
 app.use((err, req, res, next) => {
-  console.error('[HUGPONG Server Error]', err);
   const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  res.locals.diagnosticError = err;
   res.status(status).json({
     success: false,
-    error: isProduction
-      ? (status === 403 ? 'Request origin is not authorized.' : 'Internal Server Error')
-      : (err.message || 'Internal Server Error')
+    error: err.message || 'Internal Server Error',
+    code: err.code || (status === 403 ? 'ORIGIN_FORBIDDEN' : 'SERVER_ERROR')
   });
 });
 

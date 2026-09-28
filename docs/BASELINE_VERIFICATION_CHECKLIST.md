@@ -33,7 +33,7 @@
 
 - [ ] B-01 Web login accepts valid 8-digit ID credentials for Farm Manager, SRA Admin, and Super Admin.
 - [ ] B-02 Web login accepts a registered Philippine mobile number.
-- [ ] B-03 Invalid web credentials show an error; five failures trigger a 60-second UI lockout.
+- [ ] B-03 Invalid web credentials show an error; five failures trigger a server-authoritative 15-minute lockout restored after refresh without displaying the remaining duration.
 - [ ] B-04 Web first-login phone verification blocks dashboard entry until completed.
 - [ ] B-05 Web first-login password change enforces length, mixed case, number, confirmation, and non-default password.
 - [ ] B-06 Web session survives reload and routes to the correct role dashboard.
@@ -41,7 +41,7 @@
 - [ ] B-08 New login requires the server; a previously authenticated web/Firebase session restores offline without rechecking a password locally.
 - [ ] B-09 Mobile login accepts valid Farm Member, Farm Manager, and SRA Admin credentials.
 - [ ] B-10 Mobile rejects Super Admin with the web-only message.
-- [ ] B-11 Invalid mobile credentials show an error; five failures trigger a 60-second UI lockout.
+- [ ] B-11 Invalid mobile credentials show an error; five failures trigger the same server-authoritative 15-minute lockout restored after app restart without displaying the remaining duration.
 - [ ] B-12 Mobile first-login password change meets the same password rules.
 - [ ] B-13 Mobile session restores after process restart and logout clears it.
 - [ ] B-14 Forgot-password uses the server recovery request, SMS verification, and reset-grant endpoints; clients perform no direct password mutation, and successful recovery signs out every device.
@@ -231,8 +231,8 @@
 
 - [ ] O-01 District plot and user monitors are read/scoped as intended.
 - [ ] O-02 System audit ledger renders registration, field, operation, audit, security, and archive events without fabricating missing data.
-- [ ] O-03 Backup export contains the documented collections and excludes secrets/password material.
-- [ ] O-04 Restore validates schema, requires authorization, and persists through server-controlled transactions. **Expected current direct/local limitation.**
+- [x] O-03 Manual encrypted logical backup contains only the documented business collections and excludes credential, session, recovery, throttle, telemetry, diagnostic, and backup-operation collections.
+- [x] O-04 Recovery verifies the Super Admin password, encryption, project, schema, checksum, document manifest, and a short-lived dry run before performing server-controlled create-only recovery. Existing records are never overwritten or deleted.
 - [ ] O-05 Maintenance controls clearly distinguish functional controls from UI-only simulations.
 - [ ] O-06 Cache/reset actions cannot delete canonical data or submitted log history.
 - [ ] O-07 User and security logs are append-only under server authority. **Not established currently.**

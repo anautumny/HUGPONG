@@ -5,6 +5,7 @@ import PasswordInput from '../ui/PasswordInput';
 import Button from '../ui/Button';
 import { authenticatedRequest } from '../../services/apiClient';
 import { useAuth } from '../../context/AuthContext';
+import { PASSWORD_POLICY_HINT, passwordPolicyError } from '../../domain/passwordPolicy';
 
 export default function SecuritySettings({
   className = ''
@@ -28,8 +29,13 @@ export default function SecuritySettings({
       setError('Current password is required.');
       return;
     }
-    if (!newPassword || newPassword.length < 8) {
-      setError('New password must be at least 8 characters in length.');
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      setError(policyError);
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setError('New password must be different from the current password.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -111,7 +117,7 @@ export default function SecuritySettings({
             id="security-new-password"
             label="New Password"
             required
-            helperText="Minimum 8 characters"
+            helperText={PASSWORD_POLICY_HINT}
           >
             <PasswordInput
               id="security-new-password"

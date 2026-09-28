@@ -33,7 +33,7 @@ async function revokeFirebaseSessions(userId) {
     await auth.revokeRefreshTokens(String(userId));
   } catch (error) {
     if (error?.code !== 'auth/user-not-found') {
-      console.warn(`[HUGPONG Auth] Firebase refresh-token revocation notice for ${userId}:`, error.message);
+      console.warn('[HUGPONG Auth] Firebase refresh-token revocation was not acknowledged.');
     }
   }
 }
@@ -44,7 +44,7 @@ async function setFirebaseAccountDisabled(userId, disabled) {
     await auth.updateUser(String(userId), { disabled: disabled === true });
   } catch (error) {
     if (error?.code !== 'auth/user-not-found') {
-      console.warn(`[HUGPONG Auth] Firebase account-state synchronization notice for ${userId}:`, error.message);
+      console.warn('[HUGPONG Auth] Firebase account-state synchronization was not acknowledged.');
     }
   }
 }

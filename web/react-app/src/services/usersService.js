@@ -29,7 +29,7 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
       onUpdate({ users: active, pendingUsers, isLoading: false, error: null });
     },
     onError: error => {
-      console.warn('[UsersService] API subscription notice:', error.message);
+      console.warn('[UsersService] User directory refresh was deferred.');
       if (onError) onError(error);
     }
   });

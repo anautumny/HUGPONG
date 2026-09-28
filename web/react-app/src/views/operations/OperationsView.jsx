@@ -701,7 +701,7 @@ export default function OperationsView() {
       setUpdateSuccess('Operation record archived successfully.');
       setArchiveReloadKey(key => key + 1);
     } catch (err) {
-      console.error('[OperationsView] Archive error:', err);
+      console.warn('[OperationsView] Archive request failed; see the displayed reference ID.');
       setIsArchiving(false);
       alert(err.message || 'Failed to archive operation record.');
     }

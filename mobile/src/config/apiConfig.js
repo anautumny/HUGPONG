@@ -66,7 +66,6 @@ export function getApiBaseUrl() {
   if (configurationError) {
     const error = new Error('HUGPONG server configuration is unavailable. Contact the system administrator.');
     error.code = 'API_CONFIGURATION_ERROR';
-    if (isDevelopmentBuild) error.cause = configurationError;
     throw error;
   }
   return configuredApiBaseUrl;
@@ -74,8 +73,7 @@ export function getApiBaseUrl() {
 
 export function logApiDiagnostic(message, error = null) {
   if (!isDevelopmentBuild) return;
-  if (error) console.warn(`[HUGPONG API] ${message}`, error);
-  else console.info(`[HUGPONG API] ${message}`);
+  console.warn('[HUGPONG API] A request failed before a safe server response was received.');
 }
 
 export { normalizeApiBaseUrl };

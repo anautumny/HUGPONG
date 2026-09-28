@@ -3,13 +3,33 @@ import { auth } from '../firebase/config';
 import { STORAGE_KEYS, getItem, saveItem, removeItem, removeItems } from './storageService';
 import { friendlyErrorMessage } from '../domain/presentationContract';
 import { createClientRecordId } from './secureId';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import {
   API_BASE_URL,
-  API_ENVIRONMENT,
   API_REQUEST_TIMEOUT_MS,
   getApiBaseUrl,
   logApiDiagnostic
 } from '../config/apiConfig';
+
+const MOBILE_APP_VERSION = String(Constants.expoConfig?.version || '1.0.0');
+const MOBILE_OS = `${Platform.OS} ${Platform.Version}`.slice(0, 80);
+const MOBILE_DEVICE_MODEL = String(Platform.constants?.Model || Platform.constants?.model || 'unknown').slice(0, 80);
+
+function mobileHeaders(clientInstanceId) {
+  return {
+    'x-client-platform': 'mobile',
+    'x-client-instance-id': clientInstanceId,
+    'x-app-version': MOBILE_APP_VERSION,
+    'x-device-model': MOBILE_DEVICE_MODEL,
+    'x-device-os': MOBILE_OS
+  };
+}
+
+function mobileNetworkReference() {
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return createClientRecordId('MOB', day).replace(/-([A-Z0-9]{10})[A-Z0-9]+$/, '-$1');
+}
 
 async function fetchFromApi(path, options = {}) {
   const origin = getApiBaseUrl();
@@ -19,10 +39,11 @@ async function fetchFromApi(path, options = {}) {
     return await fetch(`${origin}${path}`, { ...options, signal: controller.signal });
   } catch (cause) {
     logApiDiagnostic(`${options.method || 'GET'} ${path} could not reach ${origin}.`, cause);
-    const error = new Error('Unable to connect to HUGPONG. Check your internet connection and try again.');
+    const referenceId = mobileNetworkReference();
+    const error = new Error(`Unable to connect to HUGPONG. Check your internet connection and try again. Reference ID: ${referenceId}`);
     error.code = cause?.name === 'AbortError' ? 'API_REQUEST_TIMEOUT' : 'API_UNREACHABLE';
     error.isNetworkError = true;
-    if (API_ENVIRONMENT === 'development') error.cause = cause;
+    error.referenceId = referenceId;
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -42,9 +63,10 @@ export async function getMobileClientInstanceId() {
 
 export async function probeServerConnectivity() {
   try {
+    const clientInstanceId = await getMobileClientInstanceId();
     const response = await fetchFromApi('/health', {
       method: 'GET',
-      headers: { 'x-client-platform': 'mobile' }
+      headers: mobileHeaders(clientInstanceId)
     });
     return response.ok;
   } catch {
@@ -56,10 +78,15 @@ async function parseResponse(response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.success) {
     const errorCode = data.code || data.data?.code || '';
-    const error = new Error(friendlyErrorMessage(errorCode, data.error || `Request failed (${response.status}).`));
+    const message = data.message || data.error || friendlyErrorMessage(errorCode, `Request failed (${response.status}).`);
+    const nextAction = data.nextAction ? ` ${data.nextAction}` : '';
+    const reference = data.referenceId ? ` Reference ID: ${data.referenceId}` : '';
+    const error = new Error(`${message}${nextAction}${reference}`.trim());
     error.status = response.status;
     error.data = data.data;
     error.code = errorCode;
+    error.referenceId = data.referenceId || '';
+    error.nextAction = data.nextAction || '';
     throw error;
   }
   return data;
@@ -76,8 +103,7 @@ export async function publicAuthRequest(path, body) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-client-platform': 'mobile',
-      'x-client-instance-id': clientInstanceId
+      ...mobileHeaders(clientInstanceId)
     },
     body: JSON.stringify(body || {})
   });
@@ -88,16 +114,16 @@ export async function authenticatedRequest(path, options = {}) {
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
   const clientInstanceId = await getMobileClientInstanceId();
   if (!token) throw new Error('No authenticated server session is available.');
+  const hasRequestBody = options.body !== undefined;
   const response = await fetchFromApi(path, {
     method: options.method || 'GET',
     headers: {
-      'Content-Type': 'application/json',
-      'x-client-platform': 'mobile',
-      'x-client-instance-id': clientInstanceId,
+      ...mobileHeaders(clientInstanceId),
+      ...(hasRequestBody ? { 'Content-Type': 'application/json' } : {}),
       Authorization: `Bearer ${token}`,
       ...(options.headers || {})
     },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: hasRequestBody ? JSON.stringify(options.body) : undefined
   });
   try {
     return await parseResponse(response);
@@ -139,8 +165,7 @@ export async function refreshMobileSessionFromFirebase() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-client-platform': 'mobile',
-      'x-client-instance-id': clientInstanceId,
+      ...mobileHeaders(clientInstanceId),
       Authorization: `Bearer ${firebaseIdToken}`
     },
     body: JSON.stringify({})

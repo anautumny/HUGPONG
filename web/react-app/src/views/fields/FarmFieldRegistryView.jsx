@@ -246,7 +246,7 @@ export default function FarmFieldRegistryView() {
       setIsArchiving(false);
       setArchiveTarget(null);
     } catch (err) {
-      console.error('[FarmFieldRegistry] Archive error:', err);
+      console.warn('[FarmFieldRegistry] Archive request failed; see the displayed reference ID.');
       setIsArchiving(false);
       alert(err.message || 'Unable to archive field plot.');
     }

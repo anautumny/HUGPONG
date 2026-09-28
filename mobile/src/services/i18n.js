@@ -1373,8 +1373,9 @@ export const TRANSLATIONS = {
     auth_no_internet_desc: "Internet is required when signing in. Offline mode is available only after you are signed in.",
     btn_dismiss: "Dismiss",
     auth_lockout_title: "Account Temporarily Locked",
-    auth_lockout_wait: "Too many failed attempts. Please wait {seconds} seconds before trying again.",
-    auth_lockout_60: "Too many failed attempts. Login is locked for 60 seconds to protect your account.",
+    auth_lockout_wait: "Too many login attempts. Please try again later.",
+    auth_lockout_60: "Too many login attempts. Please try again later.",
+    auth_try_again_later: "Try Again Later",
     auth_latest_code: "Use the most recently sent verification code.",
     auth_code_send_failed: "A phone verification code could not be sent.",
     auth_code_complete: "Enter the complete 6-digit verification code.",
@@ -2809,8 +2810,9 @@ export const TRANSLATIONS = {
     auth_no_internet_desc: "Kailangan ng internet sa pag-sign in. Magagamit lamang ang offline mode kapag naka-sign in ka na.",
     btn_dismiss: "Isara",
     auth_lockout_title: "Pansamantalang Naka-lock ang Account",
-    auth_lockout_wait: "Masyadong maraming nabigong pagtatangka. Maghintay ng {seconds} segundo bago subukan muli.",
-    auth_lockout_60: "Masyadong maraming nabigong pagtatangka. Naka-lock ang pag-login nang 60 segundo upang protektahan ang iyong account.",
+    auth_lockout_wait: "Masyadong maraming pagtatangka sa pag-login. Subukan muli mamaya.",
+    auth_lockout_60: "Masyadong maraming pagtatangka sa pag-login. Subukan muli mamaya.",
+    auth_try_again_later: "Subukan Muli Mamaya",
     auth_latest_code: "Gamitin ang pinakahuling verification code na ipinadala.",
     auth_code_send_failed: "Hindi maipadala ang phone verification code.",
     auth_code_complete: "Ilagay ang kumpletong 6-digit na verification code.",
@@ -4022,8 +4024,9 @@ export const TRANSLATIONS = {
     auth_no_internet_desc: "Kinahanglan sang internet sa pag-sign in. Magamit lang ang offline mode kon naka-sign in ka na.",
     btn_dismiss: "Isira",
     auth_lockout_title: "Temporaryo nga Na-lock ang Account",
-    auth_lockout_wait: "Madamo na nga napaslawan nga pagtilaw. Maghulat sang {seconds} segundos antes magtilaw liwat.",
-    auth_lockout_60: "Madamo na nga napaslawan nga pagtilaw. Na-lock ang pag-login sa 60 segundos agod protektahan ang imo account.",
+    auth_lockout_wait: "Madamo gid nga pagtilaw sa pag-login. Magtilaw liwat sa ulihi.",
+    auth_lockout_60: "Madamo gid nga pagtilaw sa pag-login. Magtilaw liwat sa ulihi.",
+    auth_try_again_later: "Magtilaw Liwat sa Ulihi",
     auth_latest_code: "Gamita ang pinakabag-o nga verification code nga ginpadala.",
     auth_code_send_failed: "Indi mapadala ang phone verification code.",
     auth_code_complete: "Ibutang ang kompleto nga 6-digit verification code.",
@@ -4131,7 +4134,7 @@ export function initializeLanguage() {
           notifyLanguageChange();
         }
       } catch (e) {
-        console.warn('[i18n] Failed to load language:', e);
+        console.warn('[i18n] The saved language could not be loaded.');
       }
       return currentLanguage;
     })();
@@ -4155,7 +4158,7 @@ export function setLanguage(langKey) {
     currentLanguage = langKey;
     notifyLanguageChange();
     return setItem(STORAGE_KEY, langKey).catch(e => {
-      console.warn('[i18n] Failed to save language:', e);
+      console.warn('[i18n] The language preference could not be saved.');
       throw e;
     });
   }
@@ -4185,7 +4188,7 @@ function notifyLanguageChange() {
     try {
       fn(currentLanguage);
     } catch (e) {
-      console.warn('[i18n] Listener error:', e);
+      console.warn('[i18n] A language update listener failed.');
     }
   });
 }

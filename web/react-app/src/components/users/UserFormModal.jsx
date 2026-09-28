@@ -7,6 +7,7 @@ import PasswordInput from '../ui/PasswordInput';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import { approveOrProvisionUser, updateUser } from '../../services/usersService';
+import { PASSWORD_POLICY_HINT, passwordPolicyError } from '../../domain/passwordPolicy';
 
 export default function UserFormModal({
   isOpen = false,
@@ -104,8 +105,9 @@ export default function UserFormModal({
     }
 
     if (!isEditing) {
-      if (!password || password.length < 8) {
-        setFormError('Initial temporary password must be at least 8 characters.');
+      const policyError = passwordPolicyError(password);
+      if (policyError) {
+        setFormError(`Initial temporary password: ${policyError}`);
         return;
       }
     }
@@ -320,7 +322,7 @@ export default function UserFormModal({
             id="user-form-password"
             label="Temporary Initial Password"
             required
-            helperText="Minimum 8 characters. On first login, the user verifies the registered phone and then replaces this password."
+            helperText={`${PASSWORD_POLICY_HINT} On first login, the user verifies the registered phone and then replaces this password.`}
           >
             <PasswordInput
               id="user-form-password"

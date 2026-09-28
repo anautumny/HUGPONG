@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { roleKeyFromUser } from '../utils/authRouting';
 import { signInWithCustomTokenSilently, signOutFirebase } from '../services/firebaseClient';
 import { getWebClientInstanceId, reportWebActivity } from '../services/telemetryService';
+import { responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -44,9 +45,7 @@ export function AuthProvider({ children }) {
   const refreshSession = useCallback(async () => {
     try {
       const response = await fetch('/auth/session', {
-        headers: {
-          'x-client-platform': 'web'
-        },
+        headers: webClientHeaders(),
         credentials: 'include'
       });
       const data = await response.json().catch(() => ({}));
@@ -60,7 +59,7 @@ export function AuthProvider({ children }) {
         return { user: data.user, roleKey: resolvedRole, authenticated: true };
       } else if (response.status === 401 || response.status === 403 || response.ok) {
         if (user) {
-          clearSession('Your session expired. Please sign in again.');
+          clearSession(responseErrorFromPayload(data, response.status, 'Your session expired. Please sign in again.').message);
         } else {
           clearSession();
         }
@@ -73,7 +72,7 @@ export function AuthProvider({ children }) {
         return { user, roleKey, authenticated: Boolean(user) };
       }
     } catch (err) {
-      console.warn('[AuthContext] Session resolution error:', err.message);
+      console.warn('[AuthContext] Session resolution is temporarily unavailable.');
       // If server unreachable, retain cached session for offline degradation if previously saved
       return { user, roleKey, authenticated: Boolean(user) };
     } finally {
@@ -118,7 +117,7 @@ export function AuthProvider({ children }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-client-platform': 'web',
+        ...webClientHeaders(),
         'x-client-instance-id': getWebClientInstanceId()
       },
       body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
@@ -127,7 +126,7 @@ export function AuthProvider({ children }) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Authentication failed. Please verify your credentials.');
+      throw responseErrorFromPayload(data, res.status, 'Authentication failed. Check your sign-in details and try again.');
     }
 
     const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
@@ -176,16 +175,14 @@ export function AuthProvider({ children }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...webClientHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       credentials: 'include'
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
-      const error = new Error(data.error || 'Failed to dispatch verification code.');
-      error.code = data.code || '';
-      error.data = data.data || {};
-      throw error;
+      throw responseErrorFromPayload(data, res.status, 'The verification code could not be sent.');
     }
     return data;
   };
@@ -196,6 +193,7 @@ export function AuthProvider({ children }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...webClientHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: JSON.stringify({ code }),
@@ -203,7 +201,7 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Phone verification failed.');
+      throw responseErrorFromPayload(data, res.status, 'Phone verification failed.');
     }
 
     if (data.user) {
@@ -218,6 +216,7 @@ export function AuthProvider({ children }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...webClientHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: JSON.stringify({ newPassword, sessionAction }),
@@ -225,7 +224,7 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Password update failed.');
+      throw responseErrorFromPayload(data, res.status, 'Password update failed.');
     }
 
     if (data.signOutRequired === true) {
@@ -240,7 +239,7 @@ export function AuthProvider({ children }) {
     try {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
     } catch (e) {
-      console.warn('[AuthContext] Logout warning:', e);
+      console.warn('[AuthContext] Remote sign-out was not acknowledged.');
     } finally {
       clearSession();
     }

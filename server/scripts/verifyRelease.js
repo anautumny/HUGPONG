@@ -32,6 +32,7 @@ function run(label, command, args, cwd = root) {
 }
 
 run('Deployment configuration parity', process.execPath, ['server/scripts/auditDeploymentConfig.js']);
+run('Tracked secret exposure audit', process.execPath, ['server/scripts/auditSecretExposure.js']);
 run('Runtime authority audit', process.execPath, ['server/scripts/auditRuntimeAuthority.js']);
 const serverTests = packageCommand('npm', ['test']);
 run('Server contract and integration tests', serverTests.command, serverTests.args, path.join(root, 'server'));

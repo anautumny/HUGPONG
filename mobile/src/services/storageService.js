@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   CACHE_SCHEMA_VERSION: '@hugpong_cache_schema_version',
   AUTH_TOKEN: '@hugpong_auth_token',
   CLIENT_INSTANCE_ID: '@hugpong_client_instance_id',
+  LOGIN_LOCKOUT_UNTIL: '@hugpong_login_lockout_until',
   SESSION: '@hugpong_session',
   USERS: '@hugpong_users',
   BLOCK_FARMS: '@hugpong_block_farms',
@@ -76,7 +77,7 @@ export async function saveItem(key, value) {
     }
     return true;
   } catch (error) {
-    console.warn(`[storageService] Error saving key "${key}":`, error);
+    console.warn('[storageService] A local value could not be saved.');
     return false;
   }
 }
@@ -169,7 +170,7 @@ export async function getItem(key, defaultValue = null) {
     }
     return defaultValue;
   } catch (error) {
-    console.warn(`[storageService] Error reading key "${key}":`, error);
+    console.warn('[storageService] A local value could not be read.');
     return defaultValue;
   }
 }
@@ -198,7 +199,7 @@ export async function removeItem(key) {
     }
     return true;
   } catch (error) {
-    console.warn(`[storageService] Error removing key "${key}":`, error);
+    console.warn('[storageService] A local value could not be removed.');
     return false;
   }
 }
@@ -214,7 +215,7 @@ export async function removeItems(keys = []) {
     if (ordinaryKeys.length) await AsyncStorage.multiRemove(ordinaryKeys);
     return true;
   } catch (error) {
-    console.warn('[storageService] Error removing keys:', error);
+    console.warn('[storageService] Local values could not be removed.');
     return false;
   }
 }
@@ -243,7 +244,7 @@ export async function multiSave(keyValuePairs) {
     if (legacySecureKeys.length) await AsyncStorage.multiRemove(legacySecureKeys);
     return true;
   } catch (error) {
-    console.warn('[storageService] Error in multiSave:', error);
+    console.warn('[storageService] Local values could not be saved.');
     return false;
   }
 }
@@ -264,7 +265,7 @@ export async function clearHugpongStorage() {
     await Promise.all(Array.from(SECURE_KEYS).map(key => SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS)));
     return true;
   } catch (error) {
-    console.warn('[storageService] Error clearing storage:', error);
+    console.warn('[storageService] Local storage could not be cleared completely.');
     return false;
   }
 }
@@ -294,7 +295,7 @@ export async function hydrateAllStorage() {
     }
     return hydrated;
   } catch (error) {
-    console.warn('[storageService] Error hydrating storage:', error);
+    console.warn('[storageService] Local storage hydration was incomplete.');
     return {};
   }
 }
