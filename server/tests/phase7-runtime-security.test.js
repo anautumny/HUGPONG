@@ -32,7 +32,9 @@ test('manager takeover grants are signed, actor-bound, field-bound, and short-li
   assert.equal(verifyTakeoverGrant(grant, { actorId: '03000002', fieldId: 'FLD-1', now: issuedAt + 1 }), null);
   assert.equal(verifyTakeoverGrant(grant, { actorId: '03000001', fieldId: 'FLD-2', now: issuedAt + 1 }), null);
   assert.equal(verifyTakeoverGrant(grant, { actorId: '03000001', fieldId: 'FLD-1', now: issuedAt + TAKEOVER_GRANT_TTL_MS }), null);
-  assert.equal(verifyTakeoverGrant(`${grant.slice(0, -1)}0`, { actorId: '03000001', fieldId: 'FLD-1', now: issuedAt + 1 }), null);
+  const replacementCharacter = grant.endsWith('0') ? '1' : '0';
+  const tamperedGrant = `${grant.slice(0, -1)}${replacementCharacter}`;
+  assert.equal(verifyTakeoverGrant(tamperedGrant, { actorId: '03000001', fieldId: 'FLD-1', now: issuedAt + 1 }), null);
 });
 
 test('takeover authorization denies wrong role and another manager block farm while own-field requests reach server authorization', async () => {
