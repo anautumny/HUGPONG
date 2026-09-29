@@ -129,6 +129,8 @@ export const blockFarms = [];
 export const cropCycles = [];
 
 export const users = [];
+let userDirectoryNextCursor = null;
+let userDirectoryHasMore = false;
 
 export const archivedFields = [];
 
@@ -188,6 +190,8 @@ export const assignmentRequests = [];
 export const supportTickets = [];
 
 export const systemHistory = [];
+let auditEventsNextCursor = null;
+let auditEventsHasMore = false;
 
 export const requestFieldAssignment = (fieldId, memberName, ha, memberId = null) => {
   const curSession = getCurrentSession();
@@ -247,6 +251,10 @@ const clearCanonicalRuntimeData = () => {
   ].forEach(collection => {
     collection.length = 0;
   });
+  userDirectoryNextCursor = null;
+  userDirectoryHasMore = false;
+  auditEventsNextCursor = null;
+  auditEventsHasMore = false;
   sraCertifiedAuditHistory.length = 0;
   sraOfflineSnapshotStatus = {
     available: false,
@@ -2537,10 +2545,10 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/prices'),
         authenticatedRequest('/api/tickets'),
         authenticatedRequest('/api/tickets?view=history&limit=20'),
-        canReadUserDirectory ? authenticatedRequest('/api/users') : Promise.resolve({ data: [] }),
+        canReadUserDirectory ? authenticatedRequest('/api/users?limit=50') : Promise.resolve({ data: [] }),
         canReadAuditReports ? authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
         activeRole === ROLES.SRA_ADMIN ? authenticatedRequest('/api/audit-reports?view=history&limit=50') : Promise.resolve({ data: [] }),
-        canReadAuditEvents ? authenticatedRequest('/api/audit-events') : Promise.resolve({ data: [] })
+        canReadAuditEvents ? authenticatedRequest('/api/audit-events?limit=50') : Promise.resolve({ data: [] })
       ]);
 
       if (!active) return;
@@ -2595,6 +2603,8 @@ export const listenToCloudSync = () => {
       const remoteUsers = canReadUserDirectory
         ? responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record))
         : [];
+      userDirectoryNextCursor = usersResponse.page?.nextCursor || null;
+      userDirectoryHasMore = Boolean(usersResponse.page?.hasMore && userDirectoryNextCursor);
       const remoteUserById = new Map(remoteUsers.flatMap(user => {
         const ids = [user.id, user.employeeId, user.userId].filter(Boolean).map(String);
         return ids.map(id => [id, user]);
@@ -2653,6 +2663,8 @@ export const listenToCloudSync = () => {
       const remoteHistory = canReadAuditEvents
         ? sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt'])
         : [];
+      auditEventsNextCursor = auditEventsResponse.page?.nextCursor || null;
+      auditEventsHasMore = Boolean(auditEventsResponse.page?.hasMore && auditEventsNextCursor);
 
       blockFarms.length = 0;
       blockFarms.push(...remoteBlockFarms);
@@ -3043,6 +3055,69 @@ export const fetchAuditHistoryPage = async ({ cursor = null, limit = 20 } = {}) 
     hasMore: Boolean(response.hasMore),
     nextCursor: response.nextCursor || null
   };
+};
+
+export const getUserDirectoryPagination = () => ({
+  hasMore: userDirectoryHasMore,
+  nextCursor: userDirectoryNextCursor
+});
+
+export const fetchUserDirectoryPage = async ({ cursor = null, limit = 50 } = {}) => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  const response = await authenticatedRequest(`/api/users?${query.toString()}`);
+  return {
+    users: responseRecords(response).map(record => fromUserDocument(record.id || record.employeeId, record)),
+    hasMore: Boolean(response.page?.hasMore),
+    nextCursor: response.page?.nextCursor || null
+  };
+};
+
+export const loadMoreUserDirectory = async ({ limit = 50 } = {}) => {
+  if (!userDirectoryHasMore || !userDirectoryNextCursor) {
+    return { users: [], hasMore: false, nextCursor: null };
+  }
+  const page = await fetchUserDirectoryPage({ cursor: userDirectoryNextCursor, limit });
+  const byId = new Map(users.map(user => [String(user.id || user.employeeId || ''), user]));
+  page.users.forEach(user => byId.set(String(user.id || user.employeeId || ''), user));
+  users.length = 0;
+  users.push(...Array.from(byId.values()).sort((left, right) =>
+    String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || ''))));
+  userDirectoryHasMore = page.hasMore;
+  userDirectoryNextCursor = page.nextCursor;
+  notify();
+  return page;
+};
+
+export const getAuditEventsPagination = () => ({
+  hasMore: auditEventsHasMore,
+  nextCursor: auditEventsNextCursor
+});
+
+export const fetchAuditEventsPage = async ({ cursor = null, limit = 50 } = {}) => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  const response = await authenticatedRequest(`/api/audit-events?${query.toString()}`);
+  return {
+    events: sortNewestFirst(responseRecords(response), ['createdAt']),
+    hasMore: Boolean(response.page?.hasMore),
+    nextCursor: response.page?.nextCursor || null
+  };
+};
+
+export const loadMoreAuditEvents = async ({ limit = 50 } = {}) => {
+  if (!auditEventsHasMore || !auditEventsNextCursor) {
+    return { events: [], hasMore: false, nextCursor: null };
+  }
+  const page = await fetchAuditEventsPage({ cursor: auditEventsNextCursor, limit });
+  const byId = new Map(systemHistory.map(event => [String(event.id || ''), event]));
+  page.events.forEach(event => byId.set(String(event.id || ''), event));
+  systemHistory.length = 0;
+  systemHistory.push(...sortNewestFirst(Array.from(byId.values()), ['createdAt']));
+  auditEventsHasMore = page.hasMore;
+  auditEventsNextCursor = page.nextCursor;
+  notify();
+  return page;
 };
 
 // Register automatic sync on network reconnection

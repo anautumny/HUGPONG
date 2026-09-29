@@ -67,8 +67,8 @@ function auditFiles(root, files) {
     addMatches(findings, source, file, 'KNOWN_SECRET_TOKEN', /\b(?:AKIA[0-9A-Z]{16}|ghp_[0-9A-Za-z]{30,}|github_pat_[0-9A-Za-z_]{40,}|sk_live_[0-9A-Za-z]{20,})\b/);
 
     if (CLIENT_SOURCE_PREFIXES.some(prefix => file.startsWith(prefix))) {
-      addMatches(findings, source, file, 'CLIENT_SMS_PROVIDER_CREDENTIAL', /\b(?:SEMAPHORE_API_KEY|semaphoreApiKey)\b/);
-      addMatches(findings, source, file, 'CLIENT_SMS_PROVIDER_ENDPOINT', /\bapi\.semaphore\.co\b/i);
+      addMatches(findings, source, file, 'CLIENT_SMS_PROVIDER_CREDENTIAL', /\b(?:SEMAPHORE_API_KEY|semaphoreApiKey|IPROG_SMS_API_TOKEN|iprogSmsApiToken)\b/);
+      addMatches(findings, source, file, 'CLIENT_SMS_PROVIDER_ENDPOINT', /\b(?:api\.semaphore\.co|iprogsms\.com\/api)\b/i);
       addMatches(
         findings,
         source,
@@ -81,7 +81,7 @@ function auditFiles(root, files) {
         source,
         file,
         'PUBLIC_ENV_SECRET',
-        /\b(?:EXPO_PUBLIC|VITE)_[A-Z0-9_]*(?:SECRET|PRIVATE_KEY|ACCESS_TOKEN|SEMAPHORE)[A-Z0-9_]*\b/
+        /\b(?:EXPO_PUBLIC|VITE)_[A-Z0-9_]*(?:SECRET|PRIVATE_KEY|ACCESS_TOKEN|SEMAPHORE|IPROG)[A-Z0-9_]*\b/
       );
     }
   }

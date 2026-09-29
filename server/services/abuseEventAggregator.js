@@ -9,6 +9,12 @@ const {
 
 const AGGREGATION_WINDOW_MS = 30 * 1000;
 const MAX_BUCKETS = 100;
+const IMPORTANT_SECURITY_CODES = Object.freeze([
+  'ORIGIN_FORBIDDEN',
+  'CLIENT_PLATFORM_REQUIRED',
+  'PLATFORM_FORBIDDEN',
+  'API_PERMISSION_POLICY_MISSING'
+]);
 const buckets = new Map();
 
 function endpointGroup(req) {
@@ -93,12 +99,11 @@ function queueAggregatedDiagnostic(db, details) {
 function shouldAggregateDiagnostic(statusCode, errorCode, forced = false) {
   if (forced) return true;
   const code = String(errorCode || '').toUpperCase();
-  return [401, 404, 413, 429].includes(Number(statusCode))
-    || ['ORIGIN_FORBIDDEN', 'CLIENT_PLATFORM_REQUIRED', 'API_PERMISSION_POLICY_MISSING'].includes(code);
+  return Number(statusCode) === 429 || IMPORTANT_SECURITY_CODES.includes(code);
 }
 
 module.exports = {
   queueAggregatedDiagnostic,
   shouldAggregateDiagnostic,
-  _test: { endpointGroup, requestSnapshot, flushBucket, buckets, AGGREGATION_WINDOW_MS, MAX_BUCKETS }
+  _test: { endpointGroup, requestSnapshot, flushBucket, buckets, AGGREGATION_WINDOW_MS, MAX_BUCKETS, IMPORTANT_SECURITY_CODES }
 };

@@ -18,28 +18,37 @@ function isAlreadyExists(error) {
   return code === '6' || code === 'already-exists' || /already exists/i.test(String(error?.message || ''));
 }
 
+function queueUserAccountCreation(writer, database, input, userId) {
+  if (!writer || typeof writer.create !== 'function') throw new Error('An atomic database writer is required.');
+  if (!database) throw new Error('Account database is unavailable.');
+  if (!userId) throw new Error('A server-issued User ID is required.');
+  const phoneRef = database.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(input.user.phone));
+  writer.create(database.collection(COLLECTIONS.USERS).doc(userId), input.user);
+  writer.create(database.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), input.credential);
+  writer.create(phoneRef, {
+    type: 'PHONE',
+    userId,
+    createdAt: input.user.createdAt,
+    updatedAt: input.user.updatedAt
+  });
+  queueAuditEvent(writer, database, {
+    eventType: input.eventType || 'USER_ACCOUNT_CREATED',
+    actorUserId: input.actorUserId || userId,
+    entityType: 'USER',
+    entityId: userId,
+    details: input.details || `Created ${input.user.role} account ${userId}.`,
+    createdAt: input.user.createdAt
+  });
+  return userId;
+}
+
 async function createUserAccount(database, input) {
   const requestedUserId = input.requestedUserId || null;
   const phoneRef = database.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(input.user.phone));
   for (let attempt = 0; attempt < (requestedUserId ? 1 : MAX_ID_ATTEMPTS); attempt += 1) {
     const userId = requestedUserId || createUserId(input.user.role);
     const batch = database.batch();
-    batch.create(database.collection(COLLECTIONS.USERS).doc(userId), input.user);
-    batch.create(database.collection(COLLECTIONS.USER_CREDENTIALS).doc(userId), input.credential);
-    batch.create(phoneRef, {
-      type: 'PHONE',
-      userId,
-      createdAt: input.user.createdAt,
-      updatedAt: input.user.updatedAt
-    });
-    queueAuditEvent(batch, database, {
-      eventType: input.eventType || 'USER_ACCOUNT_CREATED',
-      actorUserId: input.actorUserId || userId,
-      entityType: 'USER',
-      entityId: userId,
-      details: input.details || `Created ${input.user.role} account ${userId}.`,
-      createdAt: input.user.createdAt
-    });
+    queueUserAccountCreation(batch, database, input, userId);
     try {
       await batch.commit();
       return userId;
@@ -59,4 +68,4 @@ async function createUserAccount(database, input) {
   throw exhausted;
 }
 
-module.exports = { createUserAccount, phoneIdentifierId, isAlreadyExists };
+module.exports = { createUserAccount, queueUserAccountCreation, phoneIdentifierId, isAlreadyExists };

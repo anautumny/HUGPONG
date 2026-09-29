@@ -103,7 +103,7 @@ export function AuthProvider({ children }) {
       }
     };
     report();
-    const interval = window.setInterval(report, 5 * 60 * 1000);
+    const interval = window.setInterval(report, 15 * 60 * 1000);
     const onVisibility = () => report();
     window.addEventListener('focus', report);
     document.addEventListener('visibilitychange', onVisibility);

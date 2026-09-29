@@ -138,7 +138,6 @@ function createEarlyAbuseProtection({
       ? BACKUP_JSON_LIMIT_BYTES
       : JSON_LIMIT_BYTES;
     if (Number.isFinite(contentLength) && contentLength > maximum) {
-      res.locals.aggregateDiagnostic = true;
       return res.status(413).json({
         success: false,
         error: 'The submitted information is too large.',

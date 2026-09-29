@@ -36,20 +36,29 @@ export default function SyncView() {
   const [subjects, setSubjects] = useState([]);
   const [scope, setScope] = useState({});
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadMore, setLoadMore] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => subscribeToTerminalDiagnostics({
-    onUpdate: data => {
-      setSubjects(data.subjects);
-      setScope(data.scope);
-      setIsLoading(false);
-      setError(null);
-    },
-    onError: err => {
-      setError(err.message || 'Failed to load synchronization status.');
-      setIsLoading(false);
-    }
-  }), []);
+  useEffect(() => {
+    const subscription = subscribeToTerminalDiagnostics({
+      onUpdate: data => {
+        setSubjects(data.subjects);
+        setScope(data.scope);
+        setIsLoading(false);
+        setIsLoadingMore(Boolean(data.isLoadingMore));
+        setHasMore(Boolean(data.hasMore));
+        setError(null);
+      },
+      onError: err => {
+        setError(err.message || 'Failed to load synchronization status.');
+        setIsLoading(false);
+      }
+    });
+    setLoadMore(() => subscription.loadMore || null);
+    return subscription;
+  }, []);
 
   const ownStatus = subjects.find(subject => subject.isSelf) || null;
   const members = subjects.filter(subject => !subject.isSelf);
@@ -89,6 +98,13 @@ export default function SyncView() {
             showIcons={false}
             statusMode="activity"
           />
+          {hasMore && (
+            <div className="flex justify-center">
+              <button type="button" onClick={loadMore} disabled={isLoadingMore} className="rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-bold text-hug-text disabled:opacity-60">
+                {isLoadingMore ? 'Loading accounts...' : 'Load 50 more accounts'}
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <>

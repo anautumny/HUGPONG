@@ -51,18 +51,60 @@ function monitorDb({ users = [], telemetry = [] } = {}) {
       }
     }))
   });
+  const query = (sourceRecords, operations = []) => ({
+    where(field, operator, value) {
+      return query(sourceRecords, [...operations, { type: 'where', field, operator, value }]);
+    },
+    orderBy(field, direction = 'asc') {
+      return query(sourceRecords, [...operations, {
+        type: 'orderBy',
+        field: typeof field === 'string' ? field : '__name__',
+        direction
+      }]);
+    },
+    startAfter(...values) {
+      return query(sourceRecords, [...operations, { type: 'startAfter', values }]);
+    },
+    limit(value) {
+      return query(sourceRecords, [...operations, { type: 'limit', value }]);
+    },
+    async get() {
+      let selected = [...sourceRecords];
+      const ordering = operations.filter(operation => operation.type === 'orderBy');
+      for (const operation of operations) {
+        if (operation.type !== 'where') continue;
+        if (operation.operator === '==') {
+          selected = selected.filter(record => record[operation.field] === operation.value);
+        } else if (operation.operator === 'in') {
+          selected = selected.filter(record => operation.value.includes(record[operation.field]));
+        } else {
+          assert.fail(`Unsupported monitorDb operator: ${operation.operator}`);
+        }
+      }
+      selected.sort((left, right) => {
+        for (const order of ordering) {
+          const leftValue = order.field === '__name__' ? left.id : left[order.field];
+          const rightValue = order.field === '__name__' ? right.id : right[order.field];
+          const compared = String(leftValue || '').localeCompare(String(rightValue || ''));
+          if (compared) return order.direction === 'desc' ? -compared : compared;
+        }
+        return 0;
+      });
+      const cursor = operations.find(operation => operation.type === 'startAfter');
+      if (cursor) {
+        selected = selected.filter(record => ordering.some((order, index) => {
+          const recordValue = order.field === '__name__' ? record.id : record[order.field];
+          return String(recordValue || '').localeCompare(String(cursor.values[index] || '')) > 0;
+        }));
+      }
+      const cap = operations.find(operation => operation.type === 'limit');
+      if (cap) selected = selected.slice(0, cap.value);
+      return snapshot(selected);
+    }
+  });
   return {
     collection(name) {
-      const records = collections[name] || [];
-      return {
-        async get() {
-          return snapshot(records);
-        },
-        where(field, operator, value) {
-          assert.equal(operator, '==');
-          return { get: async () => snapshot(records.filter(record => record[field] === value)) };
-        }
-      };
+      return query(collections[name] || []);
     }
   };
 }
@@ -236,6 +278,7 @@ test('Super Admin system monitor aggregates active accounts and terminal sync wi
   assert.equal(monitor.scope.systemWide, true);
   assert.deepEqual(monitor.subjects.map(subject => subject.userId).sort(), ['01000001', '04000001']);
   assert.equal(monitor.subjects.find(subject => subject.userId === '04000001').sync.pendingMutationCount, 2);
+  assert.deepEqual(monitor.page, { limit: 50, hasMore: false, nextCursor: null });
   await assert.rejects(
     () => buildSystemMonitor(db, { userId: '03000001', role: 'FARM_MANAGER' }),
     /requires Super Admin access/

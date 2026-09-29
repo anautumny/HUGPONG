@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
-const { smsProvider, semaphoreApiKey, semaphoreSenderName } = require('../config');
+const { smsProvider, semaphoreApiKey, semaphoreSenderName, iprogSmsApiToken } = require('../config');
 const { sendSms } = require('../services/smsGateway');
 const { db } = require('../firebase-admin');
 const { COLLECTIONS, ROLES } = require('../schema/firestoreSchema');
@@ -42,8 +42,10 @@ router.post('/send-alert', requireAuth, requireRole([ROLES.SUPER_ADMIN]), alertR
 router.get('/status', requireAuth, requireRole([ROLES.SUPER_ADMIN]), (req, res) => {
   res.json({
     gateway: smsProvider,
-    configured: smsProvider === 'console' || Boolean(semaphoreApiKey),
-    sender: semaphoreSenderName
+    configured: smsProvider === 'console'
+      || (smsProvider === 'semaphore' && Boolean(semaphoreApiKey))
+      || (smsProvider === 'iprog' && Boolean(iprogSmsApiToken)),
+    sender: smsProvider === 'iprog' ? 'HUGPONG' : semaphoreSenderName
   });
 });
 

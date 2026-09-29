@@ -8,6 +8,9 @@ import { formatCropYearDisplay } from '../../utils/formatters';
 export default function SystemAuditLedger({
   logs = [],
   isLoading = false,
+  isLoadingMore = false,
+  hasMore = false,
+  onLoadMore,
   className = ''
 }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -258,6 +261,13 @@ export default function SystemAuditLedger({
           </button>
         </div>
       </div>
+      {hasMore && (
+        <div className="flex justify-center border-t border-border/60 bg-bg/20 px-4 py-3">
+          <Button variant="secondary" size="sm" onClick={onLoadMore} disabled={isLoadingMore}>
+            {isLoadingMore ? 'Loading older events...' : 'Load 50 older events'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,26 +16,55 @@ import { sortNewestFirst } from '../utils/recordOrdering';
  * @param {Function} [options.onError]
  */
 export function subscribeToAuditLogs({ onUpdate, onError }) {
-  return subscribeToAuthenticatedResource('/api/audit-events', {
+  let logs = [];
+  let nextCursor = null;
+  let hasMore = false;
+  let loadingMore = false;
+
+  const mapLogs = response => sortNewestFirst((response.data || []).map(data => ({
+    id: data.id,
+    actorUserId: data.actorUserId || 'System',
+    eventType: data.eventType || 'SYSTEM_EVENT',
+    entityType: data.entityType || 'SYSTEM',
+    entityId: data.entityId || data.id,
+    details: data.details || '',
+    outcome: data.outcome || 'SUCCESS',
+    createdAt: data.createdAt || null,
+    cropYears: Array.isArray(data.cropYears) ? data.cropYears : []
+  })), ['createdAt']);
+
+  const notify = () => onUpdate({ logs, hasMore, isLoadingMore: loadingMore, isLoading: false, error: null });
+  const unsubscribe = subscribeToAuthenticatedResource('/api/audit-events?limit=50', {
     onData: response => {
-      const logs = sortNewestFirst((response.data || []).map(data => ({
-        id: data.id,
-        actorUserId: data.actorUserId || 'System',
-        eventType: data.eventType || 'SYSTEM_EVENT',
-        entityType: data.entityType || 'SYSTEM',
-        entityId: data.entityId || data.id,
-        details: data.details || '',
-        outcome: data.outcome || 'SUCCESS',
-        createdAt: data.createdAt || null,
-        cropYears: Array.isArray(data.cropYears) ? data.cropYears : []
-      })), ['createdAt']);
-      onUpdate({ logs, isLoading: false, error: null });
+      logs = mapLogs(response);
+      nextCursor = response.page?.nextCursor || null;
+      hasMore = Boolean(response.page?.hasMore && nextCursor);
+      notify();
     },
     onError: error => {
       console.warn('[MaintenanceService] Audit Ledger refresh was deferred.');
       if (onError) onError(error);
     }
   });
+  unsubscribe.loadMore = async () => {
+    if (!hasMore || !nextCursor || loadingMore) return;
+    loadingMore = true;
+    notify();
+    try {
+      const response = await authenticatedRequest(`/api/audit-events?limit=50&cursor=${encodeURIComponent(nextCursor)}`);
+      const byId = new Map(logs.map(item => [item.id, item]));
+      mapLogs(response).forEach(item => byId.set(item.id, item));
+      logs = sortNewestFirst(Array.from(byId.values()), ['createdAt']);
+      nextCursor = response.page?.nextCursor || null;
+      hasMore = Boolean(response.page?.hasMore && nextCursor);
+    } catch (error) {
+      if (onError) onError(error);
+    } finally {
+      loadingMore = false;
+      notify();
+    }
+  };
+  return unsubscribe;
 }
 
 /**

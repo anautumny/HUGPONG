@@ -126,11 +126,13 @@ test('known routes avoid the scanner budget while unknown paths are grouped safe
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/wp-admin.php' })), '/unknown');
 });
 
-test('routine bot-noise responses are aggregated instead of persisted one by one', () => {
-  assert.equal(shouldAggregateDiagnostic(401, 'UNAUTHENTICATED'), true);
-  assert.equal(shouldAggregateDiagnostic(404, ''), true);
+test('only rate-limit abuse and important security responses are aggregated for persistence', () => {
+  assert.equal(shouldAggregateDiagnostic(401, 'UNAUTHENTICATED'), false);
+  assert.equal(shouldAggregateDiagnostic(404, ''), false);
   assert.equal(shouldAggregateDiagnostic(429, 'GLOBAL_RATE_LIMITED'), true);
-  assert.equal(shouldAggregateDiagnostic(413, 'REQUEST_TOO_LARGE'), true);
+  assert.equal(shouldAggregateDiagnostic(413, 'REQUEST_TOO_LARGE'), false);
+  assert.equal(shouldAggregateDiagnostic(403, 'ORIGIN_FORBIDDEN'), true);
+  assert.equal(shouldAggregateDiagnostic(403, 'PLATFORM_FORBIDDEN'), true);
   assert.equal(shouldAggregateDiagnostic(500, 'DATABASE_FAILED'), false);
 });
 

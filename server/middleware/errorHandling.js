@@ -18,6 +18,14 @@ function isRoutineGuestSessionProbe(req, statusCode, payload = {}) {
     && !req?.authUser;
 }
 
+function shouldPersistErrorDiagnostic(statusCode, errorCode) {
+  const status = Number(statusCode);
+  const code = String(errorCode || '').trim().toUpperCase();
+  return status >= 500
+    || status === 429
+    || ['ORIGIN_FORBIDDEN', 'CLIENT_PLATFORM_REQUIRED', 'PLATFORM_FORBIDDEN', 'API_PERMISSION_POLICY_MISSING'].includes(code);
+}
+
 function safeErrorResponses(db) {
   return (req, res, next) => {
     const sendJson = res.json.bind(res);
@@ -59,7 +67,8 @@ function safeErrorResponses(db) {
         operation: `${req.method} ${String(req.originalUrl || '').split(/[?#]/, 1)[0]}`
       };
 
-      if (!aggregate && !routineGuestProbe) {
+      const persist = !routineGuestProbe && shouldPersistErrorDiagnostic(res.statusCode, payload.code);
+      if (!aggregate && persist) {
         logPrivateDiagnostic(details);
         void recordDiagnostic(db, details);
       }
@@ -69,4 +78,4 @@ function safeErrorResponses(db) {
   };
 }
 
-module.exports = { safeErrorResponses, isRoutineGuestSessionProbe };
+module.exports = { safeErrorResponses, isRoutineGuestSessionProbe, shouldPersistErrorDiagnostic };

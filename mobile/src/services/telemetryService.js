@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { authenticatedRequest, getMobileClientInstanceId } from './authService';
 import { STORAGE_KEYS, getItem } from './storageService';
 
-const ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
+const ACTIVITY_HEARTBEAT_MS = 15 * 60 * 1000;
 const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
 let lastActivityReportAt = 0;
 let lastSyncReportAt = 0;
@@ -87,8 +87,10 @@ export async function reportMobileSync({
   }
 }
 
-export async function fetchAgriculturalSyncMonitor() {
-  const response = await authenticatedRequest('/api/terminal-diagnostics');
+export async function fetchAgriculturalSyncMonitor({ cursor = null, limit = 50 } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  const response = await authenticatedRequest(`/api/terminal-diagnostics?${query.toString()}`);
   return response.data || { scope: {}, subjects: [] };
 }
 

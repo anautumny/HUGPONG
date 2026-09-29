@@ -13,6 +13,7 @@
     "audit:crop-years": "node scripts/auditCropYearIntegrity.js",
     "audit:legacy-data": "node scripts/migrateLegacyData.js",
     "migrate:legacy-data": "node scripts/migrateLegacyData.js --execute",
+    "bootstrap:production-super-admin": "node scripts/bootstrapProductionSuperAdmin.js",
     "bootstrap:dev-test-accounts": "node scripts/bootstrapDevelopmentTestAccounts.js",
     "reset:dev-firestore:plan": "node scripts/resetDevelopmentFirestore.js",
     "reset:dev-firestore": "node scripts/resetDevelopmentFirestore.js --execute"

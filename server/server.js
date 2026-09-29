@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
 const FirestoreSessionStore = require('./services/firestoreSessionStore');
+const { startOperationalCleanup } = require('./services/operationalCleanupService');
 const { COLLECTIONS } = require('./schema/firestoreSchema');
 const { requireAuth } = require('./middleware/auth');
 const { requireAccountReady, requireApiPermission } = require('./middleware/requestPermissions');
@@ -234,6 +235,9 @@ console.log(`  Server listening on ${host}:${port}`);
 console.log(`  Authentication & Role Protection: ACTIVE`);
   console.log('══════════════════════════════════════════════════════════');
 });
+
+const operationalCleanup = isProduction && db ? startOperationalCleanup(db) : null;
+server.on('close', () => operationalCleanup?.stop());
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {

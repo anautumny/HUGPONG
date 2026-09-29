@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { db } = require('../firebase-admin');
+const { admin, db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
 const { hashPassword, validatePassword } = require('../security/password');
@@ -22,6 +22,7 @@ const { authVersionOf, nextAuthVersion, revokeFirebaseSessions, setFirebaseAccou
 const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
 const { queueAuditEvent } = require('../services/auditWriter');
 const { normalizeStructuredName, hasStructuredNameInput } = require('../domain/personName');
+const { pageLimit, decodeCursor, encodeCursor } = require('../services/cursorPagination');
 
 const accountCreationLimit = createRateLimit({ name: 'users-account-create', max: 30, windowMs: 60 * 60 * 1000 });
 
@@ -45,6 +46,7 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
     const actorId = String(req.session.user.employeeId || '').trim();
     let documents = [];
+    let page = { limit: pageLimit(req.query.limit), hasMore: false, nextCursor: null };
     if (actorRole === ROLES.FARM_MANAGER) {
       const permittedFarmIds = await managerFarmIds(actorId);
       const permittedIds = new Set([actorId]);
@@ -70,6 +72,21 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
         affiliated.docs.forEach(doc => recordsById.set(doc.id, doc));
       }
       documents = Array.from(recordsById.values());
+    } else if (actorRole === ROLES.SUPER_ADMIN) {
+      const cursor = decodeCursor(req.query.cursor);
+      let query = db.collection(COLLECTIONS.USERS)
+        .orderBy('displayName', 'asc')
+        .orderBy(admin.firestore.FieldPath.documentId(), 'asc');
+      if (cursor) query = query.startAfter(cursor.value, cursor.id);
+      const snapshot = await query.limit(page.limit + 1).get();
+      const hasMore = snapshot.docs.length > page.limit;
+      documents = snapshot.docs.slice(0, page.limit);
+      const last = documents.at(-1);
+      page = {
+        limit: page.limit,
+        hasMore,
+        nextCursor: hasMore && last ? encodeCursor(last.data().displayName, last.id) : null
+      };
     } else {
       const snapshot = await db.collection(COLLECTIONS.USERS).get();
       documents = snapshot.docs;
@@ -79,9 +96,9 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
       .map(doc => publicUser(doc.data(), doc.id))
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')) || String(left.id || '').localeCompare(String(right.id || '')));
     const data = await resolveDirectoryAssignmentsFromDatabase(db, scopedUsers);
-    return res.json({ success: true, count: data.length, data });
+    return res.json({ success: true, count: data.length, data, page });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(error.status || 500).json({ success: false, error: error.message });
   }
 });
 

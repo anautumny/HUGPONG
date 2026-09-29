@@ -46,6 +46,7 @@ let sessionSecret = process.env.SESSION_SECRET;
 const isProduction = process.env.NODE_ENV === 'production';
 const smsProvider = String(process.env.SMS_PROVIDER || 'semaphore').trim().toLowerCase();
 const semaphoreApiKey = String(process.env.SEMAPHORE_API_KEY || '').trim();
+const iprogSmsApiToken = String(process.env.IPROG_SMS_API_TOKEN || '').trim();
 const host = String(process.env.HOST || '0.0.0.0').trim();
 const port = Number(process.env.PORT || '3000');
 const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '').trim();
@@ -83,14 +84,17 @@ const corsOrigins = String(configuredCorsOrigins || 'http://localhost:3000,http:
     return parsed.origin;
   });
 
-if (!['console', 'semaphore'].includes(smsProvider)) {
-  throw new Error('SMS_PROVIDER must be either "console" or "semaphore".');
+if (!['console', 'semaphore', 'iprog'].includes(smsProvider)) {
+  throw new Error('SMS_PROVIDER must be "console", "semaphore", or "iprog".');
 }
-if (isProduction && smsProvider !== 'semaphore') {
-  throw new Error('SMS_PROVIDER=console is forbidden in production. Use SMS_PROVIDER=semaphore.');
+if (isProduction && smsProvider === 'console') {
+  throw new Error('SMS_PROVIDER=console is forbidden in production. Use a configured SMS provider.');
 }
 if (isProduction && smsProvider === 'semaphore' && !semaphoreApiKey) {
   throw new Error('SEMAPHORE_API_KEY must be provided through the server environment in production.');
+}
+if (isProduction && smsProvider === 'iprog' && !iprogSmsApiToken) {
+  throw new Error('IPROG_SMS_API_TOKEN must be provided through the server environment in production.');
 }
 
 if (!sessionSecret || sessionSecret.length < 32) {
@@ -123,6 +127,7 @@ module.exports = {
   smsProvider,
   semaphoreApiKey,
   semaphoreSenderName: process.env.SEMAPHORE_SENDER_NAME || 'SEMAPHORE',
+  iprogSmsApiToken,
   corsOrigins,
   isProduction,
   host,

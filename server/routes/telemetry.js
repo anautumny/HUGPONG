@@ -9,6 +9,7 @@ const { ROLES } = require('../schema/firestoreSchema');
 const { actor } = require('../services/resourceScope');
 const { recordActivity, recordSyncTelemetry, buildAgriculturalMonitor, buildSystemMonitor } = require('../services/telemetryService');
 const { createReferenceId, recordDiagnostic } = require('../services/diagnosticService');
+const { pageLimit, decodeCursor } = require('../services/cursorPagination');
 
 const AGRICULTURAL_ROLES = [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER];
 const MONITOR_ROLES = [...AGRICULTURAL_ROLES, ROLES.SUPER_ADMIN];
@@ -29,11 +30,14 @@ router.get('/', requireAuth, requireRole(MONITOR_ROLES), async (req, res) => {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const identity = actor(req.session.user);
     const data = identity.role === ROLES.SUPER_ADMIN
-      ? await buildSystemMonitor(db, identity)
+      ? await buildSystemMonitor(db, identity, {
+        limit: pageLimit(req.query.limit),
+        cursor: decodeCursor(req.query.cursor)
+      })
       : await buildAgriculturalMonitor(db, identity);
     return res.json({ success: true, count: data.subjects.length, data });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(error.status || 500).json({ success: false, error: error.message });
   }
 });
 

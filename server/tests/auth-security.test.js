@@ -210,8 +210,8 @@ test('production login surfaces cannot manufacture development sessions or seed 
 
 test('server-scoped users subscription updates the directory but never the authenticated identity', () => {
   const usersService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/usersService.js'), 'utf8');
-  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users'/);
-  assert.match(usersService, /onUpdate\(\{ users: active, pendingUsers,/);
+  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users(?:\?[^']*)?'/);
+  assert.match(usersService, /onUpdate\(\{[\s\S]*users: mapped\.filter[\s\S]*pendingUsers: mapped\.filter/);
   assert.doesNotMatch(usersService, /hugpong_user|setUser\(|saveSession\(|localStorage/);
 });
 
@@ -372,7 +372,7 @@ test('OTP request responses never serialize the generated challenge code', () =>
   assert.doesNotMatch(authRoute, /res\.json\(\s*\{[\s\S]{0,300}challenge\.code/);
 });
 
-test('web and mobile runtime source contain no Semaphore credential or provider endpoint', () => {
+test('web and mobile runtime source contain no SMS-provider credential or endpoint', () => {
   const roots = [path.resolve(__dirname, '../../web'), path.resolve(__dirname, '../../mobile/src')];
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -384,7 +384,11 @@ test('web and mobile runtime source contain no Semaphore credential or provider 
       }
       else if (entry.isFile() && /\.(js|jsx|ts|tsx|html)$/.test(entry.name)) {
         const source = fs.readFileSync(fullPath, 'utf8');
-        assert.doesNotMatch(source, /\bSEMAPHORE_(?:API_KEY|SENDER_NAME)\b|api\.semaphore\.co/i, `Semaphore material in ${fullPath}`);
+        assert.doesNotMatch(
+          source,
+          /\b(?:SEMAPHORE_(?:API_KEY|SENDER_NAME)|IPROG_SMS_API_TOKEN)\b|api\.semaphore\.co|iprogsms\.com\/api/i,
+          `SMS-provider material in ${fullPath}`
+        );
       }
     }
   };
@@ -466,13 +470,13 @@ test('governance and support reads use server-scoped APIs instead of client coll
 
   assert.match(apiClient, /subscribeToAuthenticatedResource/);
   assert.match(ticketsService, /subscribeToAuthenticatedResource\('\/api\/tickets'/);
-  assert.match(maintenanceService, /subscribeToAuthenticatedResource\('\/api\/audit-events'/);
+  assert.match(maintenanceService, /subscribeToAuthenticatedResource\('\/api\/audit-events(?:\?[^']*)?'/);
   assert.match(maintenanceService, /authenticatedRead\('\/api\/system-diagnostics'/);
-  assert.match(telemetryService, /subscribeToAuthenticatedResource\('\/api\/terminal-diagnostics'/);
-  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users'/);
+  assert.match(telemetryService, /subscribeToAuthenticatedResource\('\/api\/terminal-diagnostics(?:\?[^']*)?'/);
+  assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users(?:\?[^']*)?'/);
   assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /onSnapshot|collection\(db/);
   for (const endpoint of ['/api/block-farms', '/api/fields', '/api/crop-cycles', '/api/logs', '/api/prices', '/api/tickets', '/api/users', '/api/audit-reports', '/api/audit-events']) {
-    assert.match(mobileStore, new RegExp(`authenticatedRequest\\('${endpoint}'`));
+    assert.match(mobileStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
   }
   assert.doesNotMatch(mobileStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
 });

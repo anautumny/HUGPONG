@@ -16,30 +16,67 @@ import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiCli
  * @param {Function} [options.onError]
  */
 export function subscribeToUsersData({ user, onUpdate, onError }) {
-  return subscribeToAuthenticatedResource('/api/users', {
+  let records = [];
+  let nextCursor = null;
+  let hasMore = false;
+  let loadingMore = false;
+
+  const present = () => {
+    const mapped = records
+      .filter(record => record && typeof record === 'object')
+      .map(record => fromUser(String(record.id || record.employeeId || '').trim(), record))
+      .filter(record => record.id)
+      .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
+    onUpdate({
+      users: mapped.filter(record => record.status !== 'PENDING'),
+      pendingUsers: mapped.filter(record => record.status === 'PENDING'),
+      hasMore,
+      isLoadingMore: loadingMore,
+      isLoading: false,
+      error: null
+    });
+  };
+
+  const unsubscribe = subscribeToAuthenticatedResource('/api/users?limit=50', {
     onData: response => {
-      const records = Array.isArray(response?.data) ? response.data : [];
-      const users = records
-        .filter(record => record && typeof record === 'object')
-        .map(record => fromUser(String(record.id || record.employeeId || '').trim(), record))
-        .filter(record => record.id)
-        .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
-      const active = users.filter(record => record.status !== 'PENDING');
-      const pendingUsers = users.filter(record => record.status === 'PENDING');
-      onUpdate({ users: active, pendingUsers, isLoading: false, error: null });
+      records = Array.isArray(response?.data) ? response.data : [];
+      nextCursor = response.page?.nextCursor || null;
+      hasMore = Boolean(response.page?.hasMore && nextCursor);
+      present();
     },
     onError: error => {
       console.warn('[UsersService] User directory refresh was deferred.');
       if (onError) onError(error);
     }
   });
+  unsubscribe.loadMore = async () => {
+    if (!hasMore || !nextCursor || loadingMore) return;
+    loadingMore = true;
+    present();
+    try {
+      const response = await authenticatedRequest(`/api/users?limit=50&cursor=${encodeURIComponent(nextCursor)}`);
+      const byId = new Map(records.map(record => [String(record.id || record.employeeId), record]));
+      (response.data || []).forEach(record => byId.set(String(record.id || record.employeeId), record));
+      records = Array.from(byId.values());
+      nextCursor = response.page?.nextCursor || null;
+      hasMore = Boolean(response.page?.hasMore && nextCursor);
+    } catch (error) {
+      if (onError) onError(error);
+    } finally {
+      loadingMore = false;
+      present();
+    }
+  };
+  return unsubscribe;
 }
 
 /**
  * Fetch users via authoritative API
  */
-export async function fetchUsers() {
-  return authenticatedRequest('/api/users');
+export async function fetchUsers({ cursor = null, limit = 50 } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  return authenticatedRequest(`/api/users?${query.toString()}`);
 }
 
 /**

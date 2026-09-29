@@ -1,7 +1,7 @@
 import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 
 const CLIENT_INSTANCE_KEY = 'hugpong_web_client_instance_id';
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
 const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
 let lastHeartbeatAt = 0;
 let lastSyncReportAt = 0;
@@ -81,16 +81,50 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
 }
 
 export function subscribeToTerminalDiagnostics({ onUpdate, onError }) {
-  return subscribeToAuthenticatedResource('/api/terminal-diagnostics', {
+  let subjects = [];
+  let scope = {};
+  let nextCursor = null;
+  let hasMore = false;
+  let loadingMore = false;
+  const notify = () => onUpdate({
+    subjects,
+    scope,
+    hasMore,
+    isLoadingMore: loadingMore,
+    isLoading: false,
+    error: null
+  });
+  const unsubscribe = subscribeToAuthenticatedResource('/api/terminal-diagnostics?limit=50', {
     intervalMs: 2 * 60 * 1000,
-    onData: response => onUpdate({
-      subjects: response.data?.subjects || [],
-      scope: response.data?.scope || {},
-      isLoading: false,
-      error: null
-    }),
+    onData: response => {
+      subjects = response.data?.subjects || [];
+      scope = response.data?.scope || {};
+      nextCursor = response.data?.page?.nextCursor || null;
+      hasMore = Boolean(response.data?.page?.hasMore && nextCursor);
+      notify();
+    },
     onError
   });
+  unsubscribe.loadMore = async () => {
+    if (!hasMore || !nextCursor || loadingMore) return;
+    loadingMore = true;
+    notify();
+    try {
+      const response = await authenticatedRequest(`/api/terminal-diagnostics?limit=50&cursor=${encodeURIComponent(nextCursor)}`);
+      const byId = new Map(subjects.map(subject => [subject.userId, subject]));
+      (response.data?.subjects || []).forEach(subject => byId.set(subject.userId, subject));
+      subjects = Array.from(byId.values());
+      scope = response.data?.scope || scope;
+      nextCursor = response.data?.page?.nextCursor || null;
+      hasMore = Boolean(response.data?.page?.hasMore && nextCursor);
+    } catch (error) {
+      if (onError) onError(error);
+    } finally {
+      loadingMore = false;
+      notify();
+    }
+  };
+  return unsubscribe;
 }
 
 export function syncStatusPresentation(state, pending = 0, failed = 0) {

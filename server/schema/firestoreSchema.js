@@ -22,7 +22,8 @@ const COLLECTIONS = Object.freeze({
   BACKUP_OPERATIONS: 'backup_operations',
   SERVER_SESSIONS: 'server_sessions',
   SECURITY_RATE_LIMITS: 'security_rate_limits',
-  PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges'
+  PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges',
+  SYSTEM_METADATA: 'system_metadata'
 });
 
 const ROLES = Object.freeze({

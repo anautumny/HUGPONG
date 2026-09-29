@@ -43,6 +43,25 @@ test('client secret findings do not disclose the matched value', () => {
   }
 });
 
+test('IPROG credentials and API endpoints are forbidden in client source', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hugpong-iprog-audit-'));
+  const credentialFile = 'web/react-app/src/exposed.js';
+  const endpointFile = 'mobile/src/exposed.js';
+  fs.mkdirSync(path.dirname(path.join(temporaryRoot, credentialFile)), { recursive: true });
+  fs.mkdirSync(path.dirname(path.join(temporaryRoot, endpointFile)), { recursive: true });
+  fs.writeFileSync(path.join(temporaryRoot, credentialFile), "const IPROG_SMS_API_TOKEN = 'sensitive-test-value-123456789';\n");
+  fs.writeFileSync(path.join(temporaryRoot, endpointFile), "const endpoint = 'https://iprogsms.com/api/v1/sms_messages';\n");
+
+  try {
+    const report = auditFiles(temporaryRoot, [credentialFile, endpointFile]);
+    assert.ok(report.findings.some(finding => finding.rule === 'CLIENT_SMS_PROVIDER_CREDENTIAL'));
+    assert.ok(report.findings.some(finding => finding.rule === 'CLIENT_SMS_PROVIDER_ENDPOINT'));
+    assert.doesNotMatch(JSON.stringify(report), /sensitive-test-value/);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('public Firebase client identifiers are not treated as server secrets', () => {
   const report = auditFiles(root, [
     'mobile/src/firebase/config.js',

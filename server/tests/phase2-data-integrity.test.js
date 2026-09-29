@@ -36,8 +36,10 @@ test('phone uniqueness claims are opaque, deterministic, and server-only', () =>
   const rules = read('firestore.rules');
   assert.match(rules, /match \/account_identifiers\/\{documentId\}[\s\S]*?allow read, write: if false;/);
   const provisioning = read('server/services/accountProvisioningService.js');
-  assert.match(provisioning, /batch\.create\(phoneRef/);
-  assert.match(provisioning, /queueAuditEvent\(batch/);
+  assert.match(provisioning, /function queueUserAccountCreation\(writer/);
+  assert.match(provisioning, /writer\.create\(phoneRef/);
+  assert.match(provisioning, /queueAuditEvent\(writer/);
+  assert.match(provisioning, /queueUserAccountCreation\(batch/);
 });
 
 test('authoritative mutations write their audit event in the same batch or transaction', () => {

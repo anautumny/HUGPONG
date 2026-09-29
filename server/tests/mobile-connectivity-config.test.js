@@ -67,8 +67,8 @@ test('production server config requires exact CORS origins and accepts cloud hos
     ...process.env,
     NODE_ENV: 'production',
     SESSION_SECRET: 'test-only-production-session-secret-123456789',
-    SMS_PROVIDER: 'semaphore',
-    SEMAPHORE_API_KEY: 'test-only',
+    SMS_PROVIDER: 'iprog',
+    IPROG_SMS_API_TOKEN: 'test-only',
     HOST: '0.0.0.0',
     PORT: '8080'
   };
@@ -107,6 +107,26 @@ test('production server refuses to start without the server-side Semaphore key',
 
   assert.notEqual(result.status, 0);
   assert.match(`${result.stderr}${result.stdout}`, /SEMAPHORE_API_KEY must be provided through the server environment/);
+});
+
+test('production server refuses to start without the server-side IPROG token', () => {
+  const result = spawnSync(process.execPath, ['-e', "require('./server/config')"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      SESSION_SECRET: 'test-only-production-session-secret-123456789',
+      SMS_PROVIDER: 'iprog',
+      IPROG_SMS_API_TOKEN: '',
+      CORS_ORIGINS: 'https://app.example.test',
+      HOST: '0.0.0.0',
+      PORT: '8080'
+    },
+    encoding: 'utf8'
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stderr}${result.stdout}`, /IPROG_SMS_API_TOKEN must be provided through the server environment/);
 });
 
 test('public health and production errors disclose no session or infrastructure details', () => {

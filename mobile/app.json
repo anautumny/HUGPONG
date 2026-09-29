@@ -11,7 +11,7 @@
         "foregroundImage": "./assets/HUGPONG LOGO.png",
         "backgroundColor": "#F7F9F4"
       },
-      "package": "com.anonymous.hugpong",
+      "package": "com.hugpong.app",
       "permissions": [
         "CAMERA"
       ]

@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { COLLECTIONS, canonicalRole } = require('../schema/firestoreSchema');
+const { RETENTION_MS, deleteAfter } = require('./retentionPolicy');
 
 const LEVELS = Object.freeze(['ERROR', 'WARN', 'INFO']);
 const MODULES = Object.freeze([
@@ -172,7 +173,10 @@ async function recordDiagnostic(db, details) {
   const record = diagnosticRecord(details);
   if (db) {
     try {
-      await db.collection(COLLECTIONS.DIAGNOSTIC_EVENTS).doc(record.referenceId).set(record, { merge: true });
+      await db.collection(COLLECTIONS.DIAGNOSTIC_EVENTS).doc(record.referenceId).set({
+        ...record,
+        deleteAfter: deleteAfter(record.timestamp, RETENTION_MS.DIAGNOSTIC_EVENT)
+      }, { merge: true });
     } catch (writeError) {
       console.error(JSON.stringify({
         level: 'ERROR', module: 'DATABASE', referenceId: record.referenceId,
@@ -212,7 +216,7 @@ async function listDiagnostics(db, filters = {}) {
   const referenceId = String(filters.referenceId || '').trim().toUpperCase();
   const search = String(filters.search || '').trim().toLowerCase();
   const requiresInMemoryFiltering = Boolean(level || module || referenceId || search);
-  const scanLimit = requiresInMemoryFiltering ? 500 : limit;
+  const scanLimit = requiresInMemoryFiltering ? 100 : limit;
   const snapshot = await query.orderBy('timestamp', 'desc').limit(scanLimit).get();
   return snapshot.docs
     .map(doc => ({ id: doc.id, ...sanitizeValue(doc.data()) }))

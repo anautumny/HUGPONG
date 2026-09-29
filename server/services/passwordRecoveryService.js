@@ -71,7 +71,7 @@ async function createPasswordRecoveryChallenge(database, {
     maxAttempts: MAX_RECOVERY_ATTEMPTS,
     expiresAt: new Date(expiresAtMs).toISOString(),
     expiresAtMs,
-    // Firestore TTL policies require an actual timestamp value.
+    // The bounded production cleanup job queries this timestamp directly.
     deleteAfter: new Date(now + RECOVERY_RETENTION_MS),
     deleteAfterMs: now + RECOVERY_RETENTION_MS,
     createdAt: new Date(now).toISOString(),

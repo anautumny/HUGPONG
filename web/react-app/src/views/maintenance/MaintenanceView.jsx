@@ -11,6 +11,9 @@ export default function MaintenanceView() {
 
   const [auditLogs, setAuditLogs] = useState([]);
   const [isLogsLoading, setIsLogsLoading] = useState(true);
+  const [isAuditLoadingMore, setIsAuditLoadingMore] = useState(false);
+  const [hasMoreAuditLogs, setHasMoreAuditLogs] = useState(false);
+  const [loadMoreAuditLogs, setLoadMoreAuditLogs] = useState(null);
   const [errors, setErrors] = useState({ audit: null, inventory: null });
   const error = errors.audit || errors.inventory;
 
@@ -74,6 +77,8 @@ export default function MaintenanceView() {
       onUpdate: (data) => {
         setAuditLogs(data.logs || []);
         setIsLogsLoading(data.isLoading);
+        setIsAuditLoadingMore(Boolean(data.isLoadingMore));
+        setHasMoreAuditLogs(Boolean(data.hasMore));
         setErrors(prev => ({ ...prev, audit: data.error || null }));
       },
       onError: (err) => {
@@ -81,6 +86,7 @@ export default function MaintenanceView() {
         setIsLogsLoading(false);
       }
     });
+    setLoadMoreAuditLogs(() => unsubLogs.loadMore || null);
 
     return () => {
       clearInterval(inventoryTimer);
@@ -133,6 +139,9 @@ export default function MaintenanceView() {
       <SystemAuditLedger
         logs={auditLogs}
         isLoading={isLogsLoading}
+        isLoadingMore={isAuditLoadingMore}
+        hasMore={hasMoreAuditLogs}
+        onLoadMore={loadMoreAuditLogs}
       />
     </div>
   );

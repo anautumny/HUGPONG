@@ -23,6 +23,9 @@ export default function UsersView() {
   const [blockFarms, setBlockFarms] = useState([]);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreUsers, setHasMoreUsers] = useState(false);
+  const [loadMoreUsers, setLoadMoreUsers] = useState(null);
   const [error, setError] = useState(null);
 
   // Tab State: 'directory' | 'pending'
@@ -45,6 +48,8 @@ export default function UsersView() {
         setUsers(Array.isArray(data?.users) ? data.users : []);
         setPendingUsers(Array.isArray(data?.pendingUsers) ? data.pendingUsers : []);
         setIsLoading(Boolean(data?.isLoading));
+        setIsLoadingMore(Boolean(data?.isLoadingMore));
+        setHasMoreUsers(Boolean(data?.hasMore));
         setError(data?.error || null);
       },
       onError: (err) => {
@@ -52,6 +57,7 @@ export default function UsersView() {
         setIsLoading(false);
       }
     });
+    setLoadMoreUsers(() => unsubUsers.loadMore || null);
 
     const unsubFields = subscribeToFieldsData({
       user,
@@ -238,6 +244,14 @@ export default function UsersView() {
           onApproveUser={handleApprovePending}
           onRejectUser={handleRejectPending}
         />
+      )}
+
+      {hasMoreUsers && (
+        <div className="flex justify-center">
+          <Button variant="secondary" size="md" onClick={loadMoreUsers} disabled={isLoadingMore} icon={RefreshCw}>
+            {isLoadingMore ? 'Loading users...' : 'Load 50 more users'}
+          </Button>
+        </div>
       )}
 
       {/* Provisioning / Editing Modal */}

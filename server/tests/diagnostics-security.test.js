@@ -11,7 +11,7 @@ const {
   createSafeErrorEnvelope,
   listDiagnostics
 } = require('../services/diagnosticService');
-const { isRoutineGuestSessionProbe } = require('../middleware/errorHandling');
+const { isRoutineGuestSessionProbe, shouldPersistErrorDiagnostic } = require('../middleware/errorHandling');
 const { allowedRolesForRequest } = require('../middleware/requestPermissions');
 const { ROLES } = require('../schema/firestoreSchema');
 
@@ -78,6 +78,17 @@ test('only the routine unauthenticated session probe is excluded from warning di
   assert.equal(isRoutineGuestSessionProbe({ ...request, authUser: { employeeId: '03000001' } }, 401, { code: 'UNAUTHENTICATED' }), false);
 });
 
+test('persistent diagnostics keep failures and security signals but skip routine client errors', () => {
+  assert.equal(shouldPersistErrorDiagnostic(500, 'DATABASE_FAILED'), true);
+  assert.equal(shouldPersistErrorDiagnostic(502, 'SMS_DELIVERY_FAILED'), true);
+  assert.equal(shouldPersistErrorDiagnostic(429, 'GLOBAL_RATE_LIMITED'), true);
+  assert.equal(shouldPersistErrorDiagnostic(403, 'ORIGIN_FORBIDDEN'), true);
+  assert.equal(shouldPersistErrorDiagnostic(403, 'PLATFORM_FORBIDDEN'), true);
+  assert.equal(shouldPersistErrorDiagnostic(400, 'INVALID_REQUEST'), false);
+  assert.equal(shouldPersistErrorDiagnostic(403, 'FORBIDDEN'), false);
+  assert.equal(shouldPersistErrorDiagnostic(404, 'NOT_FOUND'), false);
+});
+
 test('diagnostic list filters bounded sanitized records without using the Audit Ledger', async () => {
   const records = [
     { id: 'one', data: () => ({ referenceId: 'SYNC-20260928-AAAAAA', timestamp: '2026-09-28T01:42:18.000Z', level: 'ERROR', module: 'SYNC', technicalError: 'Timeout - retry queued' }) },
@@ -116,7 +127,7 @@ test('unfiltered diagnostic reads scan only the requested page size', async () =
   await listDiagnostics(db, { limit: 50 });
   assert.equal(appliedLimit, 50);
   await listDiagnostics(db, { limit: 50, search: 'session' });
-  assert.equal(appliedLimit, 500);
+  assert.equal(appliedLimit, 100);
 });
 
 test('only Super Admin can read diagnostics while authenticated roles can submit client failures', () => {

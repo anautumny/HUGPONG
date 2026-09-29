@@ -10,6 +10,7 @@
     "audit:deployment-config": "npm --prefix server run audit:deployment-config",
     "audit:secrets": "npm --prefix server run audit:secrets",
     "audit:runtime-authority": "npm --prefix server run audit:runtime-authority",
+    "bootstrap:production-super-admin": "npm --prefix server run bootstrap:production-super-admin",
     "verify:release": "node server/scripts/verifyRelease.js"
   },
   "keywords": [],

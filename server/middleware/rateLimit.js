@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { db } = require('../firebase-admin');
 const { COLLECTIONS } = require('../schema/firestoreSchema');
+const { RETENTION_MS, deleteAfter } = require('../services/retentionPolicy');
 
 function clientAddress(req) {
   return String(req.ip || req.socket?.remoteAddress || 'unknown').trim().slice(0, 120);
@@ -125,6 +126,7 @@ function createRateLimit({
           count: evaluated.count,
           windowEndsAtMs: evaluated.windowEndsAtMs,
           lastAcceptedAtMs: evaluated.lastAcceptedAtMs,
+          deleteAfter: deleteAfter(evaluated.windowEndsAtMs, RETENTION_MS.RATE_LIMIT),
           updatedAt: new Date(now).toISOString()
         });
         return evaluated;

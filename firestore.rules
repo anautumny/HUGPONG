@@ -78,6 +78,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // One-time server bootstrap markers and other infrastructure state are
+    // never client-readable or client-writable.
+    match /system_metadata/{documentId} {
+      allow read, write: if false;
+    }
+
     // New collections are private by default until a server/API policy is
     // intentionally implemented. This rule must remain last and deny-all.
     match /{document=**} {

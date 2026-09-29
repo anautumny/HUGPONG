@@ -75,6 +75,7 @@ test('server, web, and Android share collection, role, and platform contracts', 
     PASSWORD_RECOVERY_CHALLENGES: _serverOnlyRecoveryChallenges,
     DIAGNOSTIC_EVENTS: _serverOnlyDiagnostics,
     BACKUP_OPERATIONS: _serverOnlyBackupOperations,
+    SYSTEM_METADATA: _serverOnlySystemMetadata,
     ...publicCollections
   } = serverSchema.COLLECTIONS;
 

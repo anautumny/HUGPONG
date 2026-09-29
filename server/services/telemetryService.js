@@ -3,6 +3,8 @@
 const crypto = require('crypto');
 const { admin } = require('../firebase-admin');
 const { COLLECTIONS, ROLES, nowIso } = require('../schema/firestoreSchema');
+const { encodeCursor } = require('./cursorPagination');
+const { RETENTION_MS, deleteAfter } = require('./retentionPolicy');
 
 const SYNC_STATES = Object.freeze(['UP_TO_DATE', 'PENDING_SYNC', 'SYNCING', 'SYNC_FAILED', 'OFFLINE', 'UNKNOWN']);
 const CONNECTION_STATES = Object.freeze(['ONLINE', 'OFFLINE', 'UNKNOWN']);
@@ -72,7 +74,10 @@ async function recordActivity(db, { userId, platform, clientInstanceId, event = 
     activityReportedAt: at
   };
   if (String(event).toUpperCase() === 'LOGIN') patch.lastLoginAt = at;
-  await ref.set(patch, { merge: true });
+  await ref.set({
+    ...patch,
+    deleteAfter: deleteAfter(at, RETENTION_MS.TERMINAL_DIAGNOSTIC)
+  }, { merge: true });
   return patch;
 }
 
@@ -104,7 +109,10 @@ async function recordSyncTelemetry(db, {
     telemetryReportedAt: at
   };
   if (syncSucceeded === true) patch.lastSuccessfulSyncAt = at;
-  await ref.set(patch, { merge: true });
+  await ref.set({
+    ...patch,
+    deleteAfter: deleteAfter(at, RETENTION_MS.TERMINAL_DIAGNOSTIC)
+  }, { merge: true });
   return patch;
 }
 
@@ -310,28 +318,33 @@ async function buildAgriculturalMonitor(db, identity) {
       role: identity.role,
       blockFarms: blockFarms.map(farm => ({ id: farm.id, name: farm.name || farm.displayName || farm.id }))
     },
-    subjects
+    subjects,
+    page: { limit: subjects.length, hasMore: false, nextCursor: null }
   };
 }
 
-async function buildSystemMonitor(db, identity) {
+async function buildSystemMonitor(db, identity, { limit = 50, cursor = null } = {}) {
   if (identity.role !== ROLES.SUPER_ADMIN) {
     throw Object.assign(new Error('System synchronization telemetry requires Super Admin access.'), { status: 403 });
   }
 
-  const [userSnapshot, telemetrySnapshot] = await Promise.all([
-    db.collection(COLLECTIONS.USERS).where('status', '==', 'ACTIVE').get(),
-    db.collection(COLLECTIONS.TERMINAL_DIAGNOSTICS).get()
-  ]);
+  let userQuery = db.collection(COLLECTIONS.USERS)
+    .where('status', '==', 'ACTIVE')
+    .orderBy('displayName', 'asc')
+    .orderBy(admin.firestore.FieldPath.documentId(), 'asc');
+  if (cursor) userQuery = userQuery.startAfter(cursor.value, cursor.id);
+  const userSnapshot = await userQuery.limit(limit + 1).get();
+  const hasMore = userSnapshot.docs.length > limit;
+  const userDocuments = userSnapshot.docs.slice(0, limit);
+  const telemetry = await telemetryByUserIds(db, userDocuments.map(document => document.id));
   const telemetryMap = new Map();
-  for (const document of telemetrySnapshot.docs) {
-    const record = { id: document.id, ...document.data() };
+  for (const record of telemetry) {
     if (!record.userId) continue;
     if (!telemetryMap.has(record.userId)) telemetryMap.set(record.userId, []);
     telemetryMap.get(record.userId).push(record);
   }
 
-  const subjects = userSnapshot.docs
+  const subjects = userDocuments
     .map(document => ({ id: document.id, ...document.data() }))
     .map(user => aggregateSubjectTelemetry({
       userId: user.id,
@@ -353,7 +366,14 @@ async function buildSystemMonitor(db, identity) {
       role: identity.role,
       systemWide: true
     },
-    subjects
+    subjects,
+    page: {
+      limit,
+      hasMore,
+      nextCursor: hasMore && userDocuments.length
+        ? encodeCursor(userDocuments.at(-1).data().displayName, userDocuments.at(-1).id)
+        : null
+    }
   };
 }
 
