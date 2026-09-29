@@ -6,7 +6,8 @@ const PRIVATE_USER_FIELDS = new Set([
   'credentialHash',
   'salt',
   'resetToken',
-  'resetTokenHash'
+  'resetTokenHash',
+  'phoneVerificationReason'
 ]);
 
 function publicUser(user = {}, id = null) {

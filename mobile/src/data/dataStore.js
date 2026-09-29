@@ -349,13 +349,22 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   if (!assignedFarm) return { success: false, message: 'Select an existing block farm before approving this registration.' };
 
   const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const requiresStaffVerification = applicant.phoneVerified !== true;
+  const staffVerificationReason = String(options.staffVerificationReason || '').trim();
+  if (requiresStaffVerification && activeRole !== ROLES.SRA_ADMIN) {
+    return { success: false, message: 'An SRA Admin or Super Admin must verify this applicant phone before activation.' };
+  }
+  if (requiresStaffVerification && staffVerificationReason.length < 10) {
+    return { success: false, message: 'Enter a staff-verification reason of at least 10 characters.' };
+  }
   const empId = applicant.employeeId || applicant.id || ('04' + cleanContact.slice(-6).padStart(6, '0'));
   if (activeRole === ROLES.SRA_ADMIN) {
     try {
       const approvalOutcome = await commitExplicitMutation('user_approve', {
         id: empId,
         role: 'MEMBER_FARMER',
-        blockFarmId: assignedFarm.id
+        blockFarmId: assignedFarm.id,
+        ...(requiresStaffVerification ? { staffVerificationReason } : {})
       }, { baseVersion: applicant.updatedAt || null });
       const approved = approvalOutcome.response;
       const publicAccount = fromUserDocument(empId, approved?.data || applicant);
@@ -394,7 +403,8 @@ export const approvePendingRegistration = async (contact, options = {}) => {
     const approvalOutcome = await commitExplicitMutation('user_approve', {
       id: empId,
       role: 'MEMBER_FARMER',
-      blockFarmId: assignedFarm.id
+      blockFarmId: assignedFarm.id,
+      ...(requiresStaffVerification ? { staffVerificationReason } : {})
     }, { baseVersion: applicant.updatedAt || null });
     const approved = approvalOutcome.response;
     approvedAccountId = approved?.accountId || approved?.data?.id || empId;
@@ -1149,7 +1159,8 @@ export const registerUser = async (userData) => {
       phone: cleaned,
       password: userData.password,
       role: 'MEMBER_FARMER',
-      blockFarmId: selectedFarm?.id || ''
+      blockFarmId: selectedFarm?.id || '',
+      staffVerificationToken: String(userData.staffVerificationToken || '')
     });
     if (result.user) {
       const publicAccount = fromUserDocument(result.user.id, result.user);

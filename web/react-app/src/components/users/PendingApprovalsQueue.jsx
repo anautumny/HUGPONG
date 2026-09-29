@@ -7,12 +7,14 @@ export default function PendingApprovalsQueue({
   blockFarms = [],
   onApproveUser,
   onRejectUser,
+  canStaffVerify = false,
   className = ''
 }) {
   const [processingId, setProcessingId] = useState(null);
   const [processingAction, setProcessingAction] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [farmSelections, setFarmSelections] = useState({});
+  const [verificationReasons, setVerificationReasons] = useState({});
   const [actionError, setActionError] = useState(null);
   const pageSize = 8;
 
@@ -41,11 +43,23 @@ export default function PendingApprovalsQueue({
       setActionError('Select a Block Farm before approving this Farm Member.');
       return;
     }
+    const requiresStaffVerification = !user.phoneVerified;
+    const staffVerificationReason = String(verificationReasons[user.id] || '').trim();
+    if (requiresStaffVerification && !canStaffVerify) {
+      setActionError('This application requires phone verification by an SRA Admin or Super Admin.');
+      return;
+    }
+    if (requiresStaffVerification && staffVerificationReason.length < 10) {
+      setActionError('Enter a staff-verification reason of at least 10 characters.');
+      return;
+    }
     setProcessingId(user.id);
     setProcessingAction('approve');
     setActionError(null);
     try {
-      const result = await onApproveUser(user, selectedFarmId);
+      const result = requiresStaffVerification
+        ? await onApproveUser(user, selectedFarmId, staffVerificationReason)
+        : await onApproveUser(user, selectedFarmId);
       if (!result?.success) setActionError(result?.error || 'The registration could not be approved.');
     } catch (error) {
       setActionError(error.message || 'The registration could not be approved.');
@@ -93,6 +107,8 @@ export default function PendingApprovalsQueue({
           const farmName = farmMap.get(p.requestedBlockFarmId) || p.requestedBlockFarmId || 'Unassigned Farm';
           const isProcessing = processingId === p.id;
           const selectedFarmId = farmSelections[p.id] ?? p.requestedBlockFarmId ?? '';
+          const requiresStaffVerification = !p.phoneVerified;
+          const verificationReason = verificationReasons[p.id] || '';
 
           return (
             <div
@@ -153,6 +169,38 @@ export default function PendingApprovalsQueue({
                     {p.createdAt ? p.createdAt.slice(0, 10) : 'Recent'}
                   </span>
                 </div>
+
+                {requiresStaffVerification && (
+                  <div className="mt-3 max-w-xl rounded-xl border border-amber-300/70 bg-amber-50/80 dark:bg-amber-950/20 p-3">
+                    <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                      Phone not verified by SMS
+                    </p>
+                    {canStaffVerify ? (
+                      <label className="mt-2 block text-xs font-semibold text-hug-text">
+                        Verification reason
+                        <textarea
+                          value={verificationReason}
+                          onChange={(event) => {
+                            setVerificationReasons(current => ({ ...current, [p.id]: event.target.value }));
+                            setActionError(null);
+                          }}
+                          disabled={isProcessing}
+                          maxLength={500}
+                          rows={2}
+                          placeholder="Example: Applicant presented a registered SIM and valid government ID in person."
+                          className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
+                        />
+                        <span className="mt-1 block font-normal text-hug-muted">
+                          Confirm identity and SIM ownership before approving. This action is audited.
+                        </span>
+                      </label>
+                    ) : (
+                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                        Awaiting verification by an SRA Admin or Super Admin.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
@@ -173,10 +221,12 @@ export default function PendingApprovalsQueue({
                   size="sm"
                   onClick={() => handleApprove(p)}
                   isLoading={isProcessing && processingAction === 'approve'}
-                  disabled={isProcessing || ((p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId)}
+                  disabled={isProcessing
+                    || ((p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId)
+                    || (requiresStaffVerification && (!canStaffVerify || verificationReason.trim().length < 10))}
                   icon={Check}
                 >
-                  Approve Application
+                  {requiresStaffVerification ? 'Verify & Approve' : 'Approve Application'}
                 </Button>
               </div>
             </div>

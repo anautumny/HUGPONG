@@ -1307,6 +1307,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingActionLoading, setPendingActionLoading] = useState(false);
   const [pendingFarmSelections, setPendingFarmSelections] = useState({});
+  const [pendingVerificationReasons, setPendingVerificationReasons] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date(2026, 4, 21));
   const [showAddField, setShowAddField] = useState(false);
@@ -7190,6 +7191,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                   || blockFarms.find(farm => farm.name === u.blockFarm)?.id
                   || '';
                 const selectedPendingFarmId = pendingFarmSelections[pendingKey] ?? requestedFarmId;
+                const requiresStaffVerification = u.phoneVerified !== true;
+                const canStaffVerify = canonicalRole(session?.role) === 'SRA_ADMIN';
+                const staffVerificationReason = pendingVerificationReasons[pendingKey] || '';
                 return (
                 <View key={u.contact} style={{
                   backgroundColor: '#fff',
@@ -7253,13 +7257,42 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Text style={{ color: '#B45309', fontSize: 10.5, marginBottom: 8 }}>Select the member's Block Farm before approval.</Text>
                   )}
 
+                  {requiresStaffVerification && (
+                    <View style={{ backgroundColor: '#FFF7E6', borderWidth: 1, borderColor: '#F3C969', borderRadius: RADIUS.md, padding: 10, marginTop: 4 }}>
+                      <Text style={{ color: '#92400E', fontSize: 11.5, fontWeight: '800' }}>Phone not verified by SMS</Text>
+                      {canStaffVerify ? (
+                        <>
+                          <TextInput
+                            value={staffVerificationReason}
+                            onChangeText={value => setPendingVerificationReasons(current => ({ ...current, [pendingKey]: value }))}
+                            editable={!pendingActionLoading}
+                            maxLength={500}
+                            multiline
+                            placeholder="Describe how the applicant's identity and SIM ownership were checked."
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{ marginTop: 7, minHeight: 64, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: RADIUS.md, padding: 9, fontSize: 11.5, color: COLORS.text, textAlignVertical: 'top' }}
+                          />
+                          <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 5 }}>This verification and reason will be recorded in the audit trail.</Text>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 4 }}>Awaiting verification by an SRA Admin or Super Admin.</Text>
+                      )}
+                    </View>
+                  )}
+
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <TouchableOpacity
-                      disabled={pendingActionLoading || !selectedPendingFarmId}
+                      disabled={pendingActionLoading
+                        || !selectedPendingFarmId
+                        || (requiresStaffVerification && (!canStaffVerify || staffVerificationReason.trim().length < 10))}
                       onPress={async () => {
                         setPendingActionLoading(true);
                         try {
-                          const res = await approvePendingRegistration(u.contact, { area: u.area, blockFarmId: selectedPendingFarmId });
+                          const res = await approvePendingRegistration(u.contact, {
+                            area: u.area,
+                            blockFarmId: selectedPendingFarmId,
+                            staffVerificationReason
+                          });
                           setPendingActionLoading(false);
                           if (res.success) {
                             Alert.alert(
@@ -7279,7 +7312,10 @@ export default function FieldOpsScreen({ navigation, route }) {
                       }}
                       style={{
                         flex: 1.4,
-                        backgroundColor: selectedPendingFarmId ? COLORS.primary : COLORS.border,
+                        backgroundColor: selectedPendingFarmId
+                          && (!requiresStaffVerification || (canStaffVerify && staffVerificationReason.trim().length >= 10))
+                          ? COLORS.primary
+                          : COLORS.border,
                         paddingVertical: 10,
                         borderRadius: RADIUS.md,
                         flexDirection: 'row',
@@ -7299,7 +7335,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                         <>
                           <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
                           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
-                            {canonicalRole(session?.role) === 'SRA_ADMIN' ? 'Approve & Assign Farm' : 'Approve & Assign Plot'}
+                            {requiresStaffVerification
+                              ? (canStaffVerify ? 'Verify & Approve' : 'Awaiting SRA Verification')
+                              : (canonicalRole(session?.role) === 'SRA_ADMIN' ? 'Approve & Assign Farm' : 'Approve & Assign Plot')}
                           </Text>
                         </>
                       )}

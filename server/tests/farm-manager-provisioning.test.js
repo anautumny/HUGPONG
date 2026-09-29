@@ -235,6 +235,52 @@ test('provisioning refuses to replace a Block Farm existing manager', async () =
   assert.equal(database.records.get('block_farms').get('BF-001').managerUserId, '03000001');
 });
 
+test('only SRA or Super Admin can staff-verify an unverified pending registration', async () => {
+  const seed = () => ({
+    users: {
+      '04000077': {
+        firstName: 'Juan', lastName: 'Farmer', displayName: 'Juan Farmer', phone: '09181234567',
+        role: 'MEMBER_FARMER', status: 'PENDING', requestedBlockFarmId: 'BF-001',
+        phoneVerifiedAt: null, phoneVerificationStatus: 'PENDING_STAFF',
+        updatedAt: '2026-09-29T00:00:00.000Z'
+      }
+    },
+    block_farms: {
+      'BF-001': { name: 'North Block Farm', managerUserId: '03000001', status: 'ACTIVE' }
+    }
+  });
+
+  const managerDatabase = new MemoryDb(seed());
+  const denied = responseCapture();
+  await loadApproveHandler(managerDatabase)({
+    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', staffVerificationReason: 'Checked in person.' },
+    session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } },
+    get: () => ''
+  }, denied);
+  assert.equal(denied.statusCode, 403);
+  assert.equal(managerDatabase.records.get('users').get('04000077').status, 'PENDING');
+
+  const sraDatabase = new MemoryDb(seed());
+  const approved = responseCapture();
+  await loadApproveHandler(sraDatabase)({
+    body: {
+      id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001',
+      staffVerificationReason: 'Applicant presented a valid ID and registered SIM in person.'
+    },
+    session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } },
+    get: () => ''
+  }, approved);
+
+  assert.equal(approved.statusCode, 200);
+  const user = sraDatabase.records.get('users').get('04000077');
+  assert.equal(user.status, 'ACTIVE');
+  assert.equal(user.phoneVerificationMethod, 'STAFF');
+  assert.equal(user.phoneVerifiedByUserId, '02000001');
+  assert.ok(user.phoneVerifiedAt);
+  const auditTypes = [...sraDatabase.records.get('audit_logs').values()].map(record => record.eventType);
+  assert.ok(auditTypes.includes('USER_PHONE_STAFF_VERIFIED'));
+});
+
 test('editing a Farm Manager moves the canonical assignment to the selected Block Farm', async () => {
   const database = new MemoryDb({
     users: {

@@ -169,6 +169,20 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       }
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
+      const needsStaffPhoneVerification = !current.phoneVerifiedAt;
+      let staffVerificationReason = null;
+      if (needsStaffPhoneVerification) {
+        if (![ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(actorRole)) {
+          return res.status(403).json({ success: false, error: 'Only an SRA Admin or Super Admin may verify an applicant phone on behalf of the account owner.' });
+        }
+        if (actorId === userId) {
+          return res.status(403).json({ success: false, error: 'Administrators cannot staff-verify their own account.' });
+        }
+        staffVerificationReason = requiredString(req.body.staffVerificationReason, 'staffVerificationReason', { max: 500 });
+        if (staffVerificationReason.length < 10) {
+          return res.status(400).json({ success: false, error: 'staffVerificationReason must contain at least 10 characters.' });
+        }
+      }
       assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
       let affiliatedBlockFarmId = current.affiliatedBlockFarmId || null;
       let managerFarmSnapshot = null;
@@ -191,6 +205,11 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         ...current,
         status: 'ACTIVE',
         affiliatedBlockFarmId,
+        phoneVerifiedAt: needsStaffPhoneVerification ? now : current.phoneVerifiedAt,
+        phoneVerificationStatus: 'VERIFIED',
+        phoneVerificationMethod: needsStaffPhoneVerification ? 'STAFF' : (current.phoneVerificationMethod || 'SMS_OTP'),
+        phoneVerifiedByUserId: needsStaffPhoneVerification ? actorId : (current.phoneVerifiedByUserId || null),
+        phoneVerificationReason: needsStaffPhoneVerification ? staffVerificationReason : (current.phoneVerificationReason || null),
         authVersion: authVersionOf(current),
         disabledAt: null,
         approvedByUserId: String(req.session.user.employeeId || '').trim(),
@@ -203,6 +222,11 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         affiliatedBlockFarmId: approved.affiliatedBlockFarmId,
         approvedByUserId: approved.approvedByUserId,
         approvedAt: approved.approvedAt,
+        phoneVerifiedAt: approved.phoneVerifiedAt,
+        phoneVerificationStatus: approved.phoneVerificationStatus,
+        phoneVerificationMethod: approved.phoneVerificationMethod,
+        phoneVerifiedByUserId: approved.phoneVerifiedByUserId,
+        phoneVerificationReason: approved.phoneVerificationReason,
         authVersion: approved.authVersion,
         disabledAt: approved.disabledAt,
         updatedAt: approved.updatedAt
@@ -223,6 +247,16 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         details: `Approved ${role} account ${userId}.`,
         createdAt: now
       });
+      if (needsStaffPhoneVerification) {
+        queueAuditEvent(batch, db, {
+          eventType: 'USER_PHONE_STAFF_VERIFIED',
+          actorUserId: actorId,
+          entityType: 'USER',
+          entityId: userId,
+          details: `Staff-verified the registered phone for account ${userId}; the confidential verification reason is retained on the user record.`,
+          createdAt: now
+        });
+      }
       await batch.commit();
       const approvedUser = publicUser(approved, userId);
       const data = managerFarmSnapshot
@@ -267,6 +301,11 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       // The account owner, never the provisioning administrator, verifies the
       // registered phone and replaces the temporary password on first login.
       phoneVerifiedAt: null,
+      phoneVerificationStatus: 'PENDING_OWNER',
+      phoneVerificationMethod: null,
+      phoneVerificationRequestedAt: null,
+      phoneVerifiedByUserId: null,
+      phoneVerificationReason: null,
       requiresPasswordChange: true,
       passwordChangedAt: null,
       authVersion: 1,
@@ -373,6 +412,11 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       role: targetRole,
       status: req.body.status == null ? current.status : String(req.body.status).trim().toUpperCase(),
       phoneVerifiedAt,
+      phoneVerificationStatus: phoneChanged ? 'PENDING_OWNER' : (current.phoneVerificationStatus || (phoneVerifiedAt ? 'VERIFIED' : 'PENDING_OWNER')),
+      phoneVerificationMethod: phoneChanged ? null : (current.phoneVerificationMethod || null),
+      phoneVerificationRequestedAt: phoneChanged ? null : (current.phoneVerificationRequestedAt || null),
+      phoneVerifiedByUserId: phoneChanged ? null : (current.phoneVerifiedByUserId || null),
+      phoneVerificationReason: phoneChanged ? null : (current.phoneVerificationReason || null),
       updatedAt: nowIso()
     };
     if (!['PENDING', 'ACTIVE', 'DISABLED'].includes(update.status)) throw new Error('status is invalid.');

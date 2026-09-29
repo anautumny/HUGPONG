@@ -103,11 +103,12 @@ export default function UsersView() {
   };
 
   // Handle Approve Pending User
-  const handleApprovePending = async (pendingUser, blockFarmId) => {
+  const handleApprovePending = async (pendingUser, blockFarmId, staffVerificationReason = '') => {
     const result = await approveOrProvisionUser({
       id: pendingUser.id,
       role: pendingUser.canonicalRole || 'MEMBER_FARMER',
-      blockFarmId
+      blockFarmId,
+      ...(pendingUser.phoneVerified ? {} : { staffVerificationReason })
     });
     if (result.success) {
       setAccountIdNotice({
@@ -243,6 +244,7 @@ export default function UsersView() {
           blockFarms={blockFarms}
           onApproveUser={handleApprovePending}
           onRejectUser={handleRejectPending}
+          canStaffVerify={isSraAdmin || isSuperAdmin}
         />
       )}
 
