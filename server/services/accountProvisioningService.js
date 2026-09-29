@@ -39,6 +39,9 @@ function queueUserAccountCreation(writer, database, input, userId) {
     details: input.details || `Created ${input.user.role} account ${userId}.`,
     createdAt: input.user.createdAt
   });
+  if (typeof input.queueRelatedWrites === 'function') {
+    input.queueRelatedWrites(writer, database, userId);
+  }
   return userId;
 }
 

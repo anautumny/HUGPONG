@@ -29,7 +29,7 @@ function summarizeCropStages(cycles) {
 }
 
 export default function ManagerHomeView({ session = {}, fields = [], cropCycles = [], blockFarms = [], navigation }) {
-  const { t } = useTranslation();
+  const { t, formatOperationName } = useTranslation();
   const [showAllLogs, setShowAllLogs] = React.useState(false);
   const [activityMonitor, setActivityMonitor] = React.useState(null);
   const [activityError, setActivityError] = React.useState('');
@@ -45,14 +45,14 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
     && managedFieldIds.has(log.fieldId)
   ));
   const visibleLogs = showAllLogs ? logs : logs.slice(0, 3);
-  const farmName = managedFarms.map(farm => farm.name).filter(Boolean).join(', ') || 'Unassigned Block Farm';
+  const farmName = managedFarms.map(farm => farm.name).filter(Boolean).join(', ') || `${t('unassigned', 'Unassigned')} ${t('block_farm', 'Block Farm')}`;
   const activeCropCycles = cropCycles.filter(cycle => (
     cycle.status === 'ACTIVE' && managedFields.some(field => field.currentCycleId === cycle.id)
   ));
   const cropCycleDescription = managedFields.length === 0
-    ? 'Register a member plot before starting a Crop Year Cycle.'
+    ? t('manager_register_plot_hint', 'Register a member plot before starting a Crop Year Cycle.')
     : activeCropCycles.length === 0
-      ? 'No active Crop Year Cycle is recorded for the assigned plots.'
+      ? t('manager_no_active_cycles', 'No active Crop Year Cycle is recorded for the assigned plots.')
       : summarizeCropStages(activeCropCycles);
   const memberActivity = activityMonitor?.subjects?.filter(account => !account.isSelf) || [];
   const attentionAccounts = memberActivity.filter(account => account.activity?.attentionStatus === 'NEEDS_ATTENTION');
@@ -63,12 +63,12 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
     ? `${criticalAccounts.length} Critical Member Account${criticalAccounts.length === 1 ? '' : 's'}`
     : attentionAccounts.length > 0
       ? `${attentionAccounts.length} Member Account${attentionAccounts.length === 1 ? '' : 's'} Need Attention`
-      : 'Member Activity Status';
+      : t('member_activity_status', 'Member Activity Status');
   const activityDescription = activityError
-    ? 'Member activity status is unavailable. Open the monitor to retry.'
+    ? t('member_activity_unavailable', 'Member activity status is unavailable. Open the monitor to retry.')
     : issueNames.length > 0
       ? `${issueNames.slice(0, 3).join(', ')}${issueNames.length > 3 ? ` and ${issueNames.length - 3} more` : ''}`
-      : 'All assigned members are within the expected activity window.';
+      : t('all_members_activity_expected', 'All assigned members are within the expected activity window.');
 
   const refreshMemberActivity = React.useCallback(async () => {
     try {
@@ -88,21 +88,21 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
   return (
     <View style={s.container}>
       <View style={s.summaryCard}>
-        <Text style={s.eyebrow}>MANAGER WORKSPACE</Text>
+        <Text style={s.eyebrow}>{t('manager_workspace_eyebrow', 'MANAGER WORKSPACE')}</Text>
         <Text style={s.farmName}>{farmName}</Text>
-        <Text style={s.managerName}>Supervising: {session.name || 'Farm Manager'}</Text>
+        <Text style={s.managerName}>{t('supervising_prefix', 'Supervising')}: {session.name || t('role_manager', 'Farm Manager')}</Text>
         <View style={s.metrics}>
           <Metric value={managedFields.length} label={t('active_plots', 'Active Plots')} />
           <Metric value={logs.length} label={t('logged_ops', 'Logged Ops')} />
-          <Metric value={`${totalHectares.toFixed(2)} Ha`} label="Managed Area" />
+          <Metric value={`${totalHectares.toFixed(2)} Ha`} label={t('managed_area_lbl', 'Managed Area')} />
         </View>
       </View>
 
       <View style={s.cycleCard}>
-        <Text style={s.cycleLabel}>CROP YEAR CYCLES</Text>
+        <Text style={s.cycleLabel}>{t('crop_year_cycles_title', 'CROP YEAR CYCLES')}</Text>
         <View style={s.cycleSummary}>
-          <Text style={s.cycleValue}>{activeCropCycles.length} Active</Text>
-          <Text style={s.cycleCoverage}>{activeCropCycles.length}/{managedFields.length} plots</Text>
+          <Text style={s.cycleValue}>{activeCropCycles.length} {t('active_unit', 'Active')}</Text>
+          <Text style={s.cycleCoverage}>{activeCropCycles.length}/{managedFields.length} {t('plots_count_unit', 'plots')}</Text>
         </View>
         <Text style={s.cycleDescription}>{cropCycleDescription}</Text>
       </View>
@@ -117,28 +117,28 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
       </TouchableOpacity>
 
       <View style={s.sectionHeader}>
-        <View>
+        <View style={s.sectionTitleWrap}>
           <Text style={s.sectionTitle}>{t('recent_field_activity', 'Latest Field Activity & Logs')}</Text>
-          <Text style={s.sectionSub}>{logs.length} active-cycle operation{logs.length === 1 ? '' : 's'}</Text>
+          <Text style={s.sectionSub}>{logs.length} {logs.length === 1 ? t('active_cycle_op_single', 'active-cycle operation') : t('active_cycle_op_plural', 'active-cycle operations')}</Text>
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('Field Ops')}>
-          <Text style={s.link}>Field Ops →</Text>
+        <TouchableOpacity style={s.sectionActionBtn} onPress={() => navigation.navigate('Field Ops')}>
+          <Text style={s.link}>{t('field_ops_link', 'Field Ops →')}</Text>
         </TouchableOpacity>
       </View>
 
       {visibleLogs.length === 0 ? (
         <View style={s.emptyCard}>
-          <Text style={s.emptyTitle}>No submitted field operations yet</Text>
-          <Text style={s.emptySub}>Activity from assigned Block Farm fields will appear here.</Text>
+          <Text style={s.emptyTitle}>{t('no_submitted_ops_yet', 'No submitted field operations yet')}</Text>
+          <Text style={s.emptySub}>{t('assigned_fields_empty_sub', 'Activity from assigned Block Farm fields will appear here.')}</Text>
         </View>
       ) : visibleLogs.map(log => {
         const field = managedFields.find(item => item.id === log.fieldId);
         return (
           <TouchableOpacity key={log.id} style={s.logCard} onPress={() => navigation.navigate('Field Ops')} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
-              <Text style={s.logTitle}>{log.activity || log.operationName || 'Field Operation'}</Text>
-              <Text style={s.logMeta}>{field?.member || log.loggedBy || 'Farm Member'} · {log.fieldId}</Text>
-              <Text style={s.logDate}>{log.period || log.date || 'Recent'}</Text>
+              <Text style={s.logTitle}>{formatOperationName ? formatOperationName(log.activity || log.operationName) : (log.activity || log.operationName || t('field_operation_label', 'Field Operation'))}</Text>
+              <Text style={s.logMeta}>{field?.member || log.loggedBy || t('role_member', 'Farm Member')} · {log.fieldId}</Text>
+              <Text style={s.logDate}>{log.period || log.date || t('recent', 'Recent')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -147,7 +147,7 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
 
       {logs.length > 3 ? (
         <TouchableOpacity style={s.showButton} onPress={() => setShowAllLogs(value => !value)}>
-          <Text style={s.showText}>{showAllLogs ? 'Show Latest 3' : `Show All ${logs.length}`}</Text>
+          <Text style={s.showText}>{showAllLogs ? t('show_latest_three', 'Show Latest 3') : `${t('show_all_logs', 'Show All')} (${logs.length})`}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -157,8 +157,8 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
 function Metric({ value, label }) {
   return (
     <View style={s.metric}>
-      <Text style={s.metricValue}>{value}</Text>
-      <Text style={s.metricLabel}>{label}</Text>
+      <Text style={s.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
+      <Text style={s.metricLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{label}</Text>
     </View>
   );
 }
@@ -183,7 +183,9 @@ const s = StyleSheet.create({
   syncIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
   syncTitle: { fontSize: 14, fontWeight: '900', color: COLORS.text },
   syncSub: { fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted, marginTop: 2 },
-  sectionHeader: { marginTop: 5, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  sectionHeader: { marginTop: 5, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  sectionTitleWrap: { flex: 1 },
+  sectionActionBtn: { flexShrink: 0, paddingTop: 2 },
   sectionTitle: { fontSize: 15, fontWeight: '900', color: COLORS.text },
   sectionSub: { fontSize: 10.5, color: COLORS.textMuted, marginTop: 2 },
   link: { color: COLORS.primary, fontSize: 12, fontWeight: '800' },

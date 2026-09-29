@@ -57,9 +57,9 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 
       {/* ── District Summary Card (matches Manager style) ── */}
       <View style={s.summaryCard}>
-        <Text style={s.eyebrow}>SRA REGULATORY WORKSPACE</Text>
+        <Text style={s.eyebrow}>{t('sra_workspace_eyebrow', 'SRA REGULATORY WORKSPACE')}</Text>
         <Text style={s.districtName}>{session?.district || session?.location || t('district_name_title', 'Regulatory District')}</Text>
-        <Text style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || 'SRA Admin'}</Text>
+        <Text style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || t('sra_admin', 'SRA Admin')}</Text>
         <View style={s.metrics}>
           <Metric value={blockFarmsList.length} label={t('block_farms_count_lbl', 'Block Farms')} />
           <Metric
@@ -68,17 +68,17 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             onPress={() => navigation.navigate('Field Ops')}
           />
           <Metric value={`${totalDistrictHa.toFixed(2)} Ha`} label={t('district_area_lbl', 'District Area')} />
-          <Metric value={complianceRate == null ? 'No data' : `${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
+          <Metric value={complianceRate == null ? t('no_data', 'No data') : `${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
         </View>
       </View>
 
       {/* ── Supervised Block Farms ── */}
       <View style={s.sectionHeader}>
-        <View>
+        <View style={s.sectionTitleWrap}>
           <Text style={s.sectionTitle}>{t('supervised_block_farms', 'Supervised Block Farms')}</Text>
           <Text style={s.sectionSub}>{t('tap_farm_to_view', 'Tap a farm to view field operations')}</Text>
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('Field Ops')}>
+        <TouchableOpacity style={s.sectionActionBtn} onPress={() => navigation.navigate('Field Ops')}>
           <Text style={s.seeAllText}>{t('audit_desk_link', 'Audit Desk →')}</Text>
         </TouchableOpacity>
       </View>
@@ -96,12 +96,12 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
                 <Text style={s.plotName}>{farm.name}</Text>
                 {farm.status && (
                   <View style={s.statusBadge}>
-                    <Text style={s.statusText}>{farm.status}</Text>
+                    <Text style={s.statusText}>{t('manager_unassigned', 'Manager Unassigned')}</Text>
                   </View>
                 )}
               </View>
-              <Text style={s.plotManager}>{t('manager_label', 'Manager')}: {farm.manager}</Text>
-              <Text style={s.plotMeta}>{farm.plots} {t('member_plots_count', 'Farm Member Fields')} · New Plant: {farm.ha} Ha · Total: {farm.totalFarmHa} Ha</Text>
+              <Text style={s.plotManager}>{t('manager_label', 'Manager')}: {farm.manager === 'Unassigned' ? t('unassigned', 'Unassigned') : farm.manager}</Text>
+              <Text style={s.plotMeta}>{farm.plots} {t('member_plots_count', 'Farm Member Fields')} · {t('new_plant_label', 'New Plant')}: {farm.ha} Ha · {t('total_label', 'Total')}: {farm.totalFarmHa} Ha</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -115,8 +115,15 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 function Metric({ value, label, onPress }) {
   const content = (
     <>
-      <Text style={s.metricValue}>{value}</Text>
-      <Text style={s.metricLabel} numberOfLines={2}>{label}</Text>
+      <Text style={s.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
+      <Text
+        style={s.metricLabel}
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
+        {label}
+      </Text>
     </>
   );
 
@@ -197,10 +204,13 @@ const s = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: SPACING.sm,
     marginTop: 4,
+    gap: 12,
   },
+  sectionTitleWrap: { flex: 1 },
+  sectionActionBtn: { flexShrink: 0, paddingTop: 2 },
   sectionTitle: { fontSize: 15.5, fontWeight: '800', color: COLORS.text },
   sectionSub:   { fontSize: 12.5, color: COLORS.textMuted, marginTop: 2 },
   seeAllText:   { fontSize: 13.5, fontWeight: '800', color: COLORS.primary },

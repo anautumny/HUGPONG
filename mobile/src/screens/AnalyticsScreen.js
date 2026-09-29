@@ -652,26 +652,26 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
-    backgroundColor: '#FFFBEB',
+    backgroundColor: COLORS.warningBg,
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: COLORS.warning,
     borderRadius: RADIUS.md,
     padding: 12
   },
   offlineSnapshotTitle: {
     fontSize: 12.5,
     fontWeight: '900',
-    color: '#92400E'
+    color: COLORS.warning
   },
   offlineSnapshotText: {
     fontSize: 11,
     lineHeight: 16,
-    color: '#B45309',
+    color: COLORS.warning,
     marginTop: 2
   },
   segmentedTabBar: {
     flexDirection: 'row',
-    backgroundColor: '#EEF4EC',
+    backgroundColor: COLORS.surfaceSubtle,
     borderRadius: RADIUS.md,
     padding: 3,
     gap: 3
@@ -688,7 +688,7 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.sm
   },
   segmentedTabBtnActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     ...SHADOW.card
   },
   segmentedTabText: {
@@ -714,7 +714,7 @@ const s = StyleSheet.create({
   kpiRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAF5',
+    backgroundColor: COLORS.background,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
     borderWidth: 1,
@@ -857,7 +857,7 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.xs
   },
   timeframeChipActive: {
-    backgroundColor: '#fff'
+    backgroundColor: COLORS.surface
   },
   timeframeChipText: {
     fontSize: 11,
@@ -903,7 +903,7 @@ const s = StyleSheet.create({
     padding: SPACING.md
   },
   modalCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
     padding: SPACING.lg,
     ...SHADOW.float

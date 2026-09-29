@@ -77,10 +77,11 @@ export const PALETTE = {
 // ── Semantic Colors ─────────────────────────────────────────────
 export const COLORS = {
   // Brand
-  primary:        PALETTE.forest700,      // #2D5A1E — main green
-  primaryLight:   PALETTE.forest500,      // #4A8A32 — lighter green
+  primary:        '#2D5016',              // Web light-mode --primary
+  primaryDark:    '#223D11',              // Web light-mode --primary-hover
+  primaryLight:   '#4A7C2F',              // Web light-mode --primary-light
   primaryMuted:   PALETTE.forest400,      // #6BA04E — muted green
-  primaryBg:      PALETTE.forest50,       // #F2F7EE — green tint bg
+  primaryBg:      '#EAF2E4',              // Web light-mode --primary-bg
   primaryBorder:  PALETTE.forest200,      // #C0D9A8 — green border
 
   // Accent — harvest amber
@@ -89,37 +90,43 @@ export const COLORS = {
   accentBg:       PALETTE.amber50,        // #FFFBF0
 
   // Status
-  success:        PALETTE.emerald500,     // #267326
-  successLight:   PALETTE.emerald100,     // #E8F5E8
-  danger:         PALETTE.crimson400,     // #D9534F
-  dangerBg:       PALETTE.crimson50,      // #FFF5F5
-  warning:        PALETTE.amber400,       // #E8920A
-  warningBg:      PALETTE.amber100,       // #FEF0D0
-  blue:           PALETTE.steel500,       // #1A6B9A
-  blueBg:         PALETTE.steel100,       // #DFF0FB
+  success:        '#2E7D32',              // Web light-mode --success
+  successBg:      '#EAF4EB',              // Web light-mode --success-bg
+  successLight:   '#EAF4EB',              // Backward-compatible alias
+  danger:         '#C53030',              // Web light-mode --danger
+  dangerBg:       '#FEE2E2',              // Web light-mode --danger-bg
+  warning:        '#B45309',              // Web light-mode --warning
+  warningBg:      '#FEF3C7',              // Web light-mode --warning-bg
+  info:           '#2B6CB0',              // Web light-mode --info
+  infoBg:         '#EBF8FF',              // Web light-mode --info-bg
+  blue:           '#2B6CB0',              // Backward-compatible alias
+  blueBg:         '#EBF8FF',              // Backward-compatible alias
   conflict:       '#7B4FA6',              // purple — conflict state
 
   // Backgrounds
-  background:     PALETTE.neutral50,      // #F7F9F4 — warm off-white
-  surface:        PALETTE.white,          // #FFFFFF
-  surfaceRaised:  PALETTE.white,
+  background:     '#F9F9F6',              // Web light-mode --background
+  bg:             '#F9F9F6',              // Backward-compatible alias
+  surface:        '#FFFFFF',              // Web light-mode --surface
+  surfaceSubtle:  '#F1F3EE',              // Web light-mode --surface-subtle
+  surfaceRaised:  '#FFFFFF',              // Web light-mode --surface-elevated
   overlay:        'rgba(22,45,15,0.5)',    // forest-tinted modal overlay
 
   // Typography
-  text:           PALETTE.neutral900,     // #1A200E — near-black, green-tinted
-  textSecondary:  PALETTE.neutral700,     // #455038 — secondary
-  textMuted:      PALETTE.neutral500,     // #7A8A6A — muted/caption
+  text:           '#1B221C',              // Web light-mode --foreground
+  textSecondary:  '#505E54',              // Web light-mode --foreground-secondary
+  textMuted:      '#78877E',              // Web light-mode --foreground-muted
   textDisabled:   PALETTE.neutral400,     // #9EAE8E — disabled
   textInverse:    PALETTE.white,
 
   // Borders & Dividers
-  border:         PALETTE.neutral200,     // #DCE8CC
-  borderStrong:   PALETTE.neutral300,     // #C0CCB0
-  divider:        PALETTE.neutral100,     // #EDF3E5
+  border:         '#DFE3DC',              // Web light-mode --border
+  borderStrong:   '#CBD1C7',              // Web light-mode --border-strong
+  borderLight:    '#F1F3EE',              // Subtle separators
+  divider:        '#F1F3EE',
 
   // Nav bar
-  tabBar:         PALETTE.white,
-  tabBarBorder:   PALETTE.neutral200,
+  tabBar:         '#FFFFFF',
+  tabBarBorder:   '#DFE3DC',
 
   // Carry-forwards for backward compat
   inProgress:     PALETTE.steel500,

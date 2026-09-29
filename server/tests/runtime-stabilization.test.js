@@ -538,6 +538,16 @@ test('operation submission has a synchronous duplicate-tap lock and processing U
   assert.match(fieldOps, /submissionLockRef\.current = false/);
 });
 
+test('member draft scope is initialized before the Field Operations ledger early return', () => {
+  const scopedDraftDeclaration = fieldOps.indexOf('const scopedDrafts = React.useMemo');
+  const ledgerEarlyReturn = fieldOps.indexOf('if (showHistoryModal)');
+
+  assert.ok(scopedDraftDeclaration >= 0, 'Field Operations must derive a safe member draft array');
+  assert.ok(ledgerEarlyReturn >= 0, 'Field Operations must keep its ledger sub-screen');
+  assert.ok(scopedDraftDeclaration < ledgerEarlyReturn, 'Draft scope must exist before rendering the ledger');
+  assert.match(fieldOps, /Array\.isArray\(draftLogsStore\) \? \[\.\.\.draftLogsStore\] : \[\]/);
+});
+
 test('completed-stage mobile entries require supplemental confirmation and complete inputs', () => {
   assert.match(fieldOps, /Continue as Supplemental/);
   assert.match(fieldOps, /This stage is already completed/);

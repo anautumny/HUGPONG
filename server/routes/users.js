@@ -16,7 +16,7 @@ const {
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
-const { resolveDirectoryAssignmentsFromDatabase } = require('../services/userDirectoryService');
+const { resolveDirectoryAssignments, resolveDirectoryAssignmentsFromDatabase } = require('../services/userDirectoryService');
 const { createRateLimit } = require('../middleware/rateLimit');
 const { authVersionOf, nextAuthVersion, revokeFirebaseSessions, setFirebaseAccountDisabled } = require('../security/accountSecurity');
 const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
@@ -38,6 +38,45 @@ async function assertManagerUserScope(actorId, targetUserId, requestedBlockFarmI
   if (!fields.docs.some(doc => farmIds.includes(doc.data().blockFarmId))) {
     throw Object.assign(new Error('Member account is outside the Farm Manager assigned block farm.'), { status: 403 });
   }
+}
+
+async function loadManagerFarmForAssignment(blockFarmId, managerUserId = null) {
+  const normalizedFarmId = String(blockFarmId || '').trim().toUpperCase();
+  if (!normalizedFarmId) {
+    throw Object.assign(new Error('Select a Block Farm before creating this Farm Manager.'), { status: 400 });
+  }
+  const snapshot = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(normalizedFarmId).get();
+  if (!snapshot.exists || String(snapshot.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+    throw Object.assign(new Error('The selected Block Farm is not available.'), { status: 400 });
+  }
+  const assignedManagerId = String(snapshot.data().managerUserId || '').trim();
+  if (assignedManagerId && assignedManagerId !== String(managerUserId || '').trim()) {
+    throw Object.assign(new Error('The selected Block Farm already has a Farm Manager.'), { status: 409 });
+  }
+  return snapshot;
+}
+
+function queueManagerFarmAssignment(writer, database, farmSnapshot, managerUserId, actorUserId, updatedAt) {
+  if (!farmSnapshot) return;
+  const farmRef = database.collection(COLLECTIONS.BLOCK_FARMS).doc(farmSnapshot.id);
+  const update = {
+    managerUserId,
+    updatedAt
+  };
+  if (farmSnapshot.updateTime) {
+    writer.update(farmRef, update, { lastUpdateTime: farmSnapshot.updateTime });
+  } else {
+    writer.update(farmRef, update);
+  }
+  queueAuditEvent(writer, database, {
+    eventType: 'BLOCK_FARM_MANAGER_ASSIGNED',
+    actorUserId,
+    entityType: 'BLOCK_FARM',
+    entityId: farmSnapshot.id,
+    blockFarmId: farmSnapshot.id,
+    details: `Assigned Farm Manager ${managerUserId} to block farm ${farmSnapshot.id}.`,
+    createdAt: updatedAt
+  });
 }
 
 router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
@@ -132,6 +171,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
       assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
       let affiliatedBlockFarmId = current.affiliatedBlockFarmId || null;
+      let managerFarmSnapshot = null;
       if (role === ROLES.MEMBER_FARMER) {
         affiliatedBlockFarmId = String(req.body.blockFarmId || current.requestedBlockFarmId || '').trim().toUpperCase();
         if (!affiliatedBlockFarmId) {
@@ -144,6 +184,8 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         if (actorRole === ROLES.FARM_MANAGER) {
           await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), userId, affiliatedBlockFarmId);
         }
+      } else if (role === ROLES.FARM_MANAGER) {
+        managerFarmSnapshot = await loadManagerFarmForAssignment(req.body.blockFarmId, userId);
       }
       const approved = {
         ...current,
@@ -165,6 +207,14 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         disabledAt: approved.disabledAt,
         updatedAt: approved.updatedAt
       });
+      queueManagerFarmAssignment(
+        batch,
+        db,
+        managerFarmSnapshot,
+        userId,
+        approved.approvedByUserId,
+        approved.updatedAt
+      );
       queueAuditEvent(batch, db, {
         eventType: 'USER_ACCOUNT_APPROVED',
         actorUserId: approved.approvedByUserId,
@@ -174,7 +224,15 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         createdAt: now
       });
       await batch.commit();
-      return res.json({ success: true, accountId: userId, data: publicUser(approved, userId) });
+      const approvedUser = publicUser(approved, userId);
+      const data = managerFarmSnapshot
+        ? resolveDirectoryAssignments(
+          [approvedUser],
+          [{ id: managerFarmSnapshot.id, ...managerFarmSnapshot.data(), managerUserId: userId }],
+          []
+        )[0]
+        : approvedUser;
+      return res.json({ success: true, accountId: userId, data });
     }
     if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
     const phone = requiredString(req.body.phone, 'phone', { max: 20 }).replace(/\D/g, '');
@@ -185,12 +243,16 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     const identity = normalizeStructuredName(req.body || {});
     const requestedBlockFarmId = String(req.body.blockFarmId || '').trim().toUpperCase();
     let affiliatedBlockFarmId = null;
+    let managerFarmSnapshot = null;
     if (role === ROLES.MEMBER_FARMER && requestedBlockFarmId) {
       const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(requestedBlockFarmId).get();
       if (!farm.exists || String(farm.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
         throw new Error('The selected Block Farm is not available.');
       }
       affiliatedBlockFarmId = requestedBlockFarmId;
+    }
+    if (role === ROLES.FARM_MANAGER) {
+      managerFarmSnapshot = await loadManagerFarmForAssignment(requestedBlockFarmId, developmentSeedId);
     }
     if (actorRole === ROLES.FARM_MANAGER) {
       if (!requestedBlockFarmId) throw new Error('Farm Managers must assign a Block Farm when creating a Farm Member.');
@@ -223,12 +285,35 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       credential: { passwordHash, credentialsUpdatedAt: now, createdAt: now, updatedAt: now },
       actorUserId: actorId,
       eventType: 'USER_ACCOUNT_CREATED',
-      details: `Created ${role} account ${payload.displayName}.`
+      details: `Created ${role} account ${payload.displayName}.`,
+      queueRelatedWrites: managerFarmSnapshot
+        ? (writer, database, createdUserId) => queueManagerFarmAssignment(
+          writer,
+          database,
+          managerFarmSnapshot,
+          createdUserId,
+          actorId,
+          now
+        )
+        : null
     });
-    return res.status(201).json({ success: true, accountId: userId, data: publicUser(payload, userId) });
+    const createdUser = publicUser(payload, userId);
+    const data = managerFarmSnapshot
+      ? resolveDirectoryAssignments(
+        [createdUser],
+        [{ id: managerFarmSnapshot.id, ...managerFarmSnapshot.data(), managerUserId: userId }],
+        []
+      )[0]
+      : createdUser;
+    return res.status(201).json({ success: true, accountId: userId, data });
   } catch (error) {
-    const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
-    return res.status(status).json({ success: false, error: error.message });
+    const errorCode = String(error?.code ?? '').toLowerCase();
+    const assignmentConflict = ['9', '10', 'aborted', 'failed-precondition'].includes(errorCode);
+    const status = error.status || ((assignmentConflict || /already exists/i.test(error.message)) ? 409 : 400);
+    const message = assignmentConflict
+      ? 'The selected Block Farm changed while the account was being created. Reload and try again.'
+      : error.message;
+    return res.status(status).json({ success: false, error: message });
   }
 });
 
@@ -269,6 +354,13 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
     }
     const phoneChanged = phone !== current.phone;
     const phoneVerifiedAt = phoneChanged ? null : (current.phoneVerifiedAt || null);
+    const currentRole = canonicalRole(current.role);
+    const managerAssignmentRequested = req.body.blockFarmId !== undefined;
+    const shouldUpdateManagerAssignment = managerAssignmentRequested || currentRole !== targetRole;
+    let requestedManagerFarmSnapshot = null;
+    if (targetRole === ROLES.FARM_MANAGER && shouldUpdateManagerAssignment) {
+      requestedManagerFarmSnapshot = await loadManagerFarmForAssignment(req.body.blockFarmId, targetSnapshot.id);
+    }
     const update = {
       ...(hasStructuredNameInput(req.body) ? normalizeStructuredName(req.body, current) : {
         firstName: current.firstName || null,
@@ -300,6 +392,24 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       if (live.updatedAt !== current.updatedAt) {
         throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
       }
+      let managedFarmsSnapshot = null;
+      let selectedFarmSnapshot = null;
+      if (shouldUpdateManagerAssignment && currentRole === ROLES.FARM_MANAGER) {
+        managedFarmsSnapshot = await transaction.get(
+          db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', targetSnapshot.id)
+        );
+      }
+      if (requestedManagerFarmSnapshot) {
+        selectedFarmSnapshot = managedFarmsSnapshot?.docs.find(doc => doc.id === requestedManagerFarmSnapshot.id)
+          || await transaction.get(db.collection(COLLECTIONS.BLOCK_FARMS).doc(requestedManagerFarmSnapshot.id));
+        if (!selectedFarmSnapshot.exists || String(selectedFarmSnapshot.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+          throw Object.assign(new Error('The selected Block Farm is not available.'), { status: 400 });
+        }
+        const assignedManagerId = String(selectedFarmSnapshot.data().managerUserId || '').trim();
+        if (assignedManagerId && assignedManagerId !== targetSnapshot.id) {
+          throw Object.assign(new Error('The selected Block Farm already has a Farm Manager.'), { status: 409 });
+        }
+      }
       if (phoneChanged) {
         const newPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(phone));
         const oldPhoneRef = db.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(phoneIdentifierId(current.phone));
@@ -309,6 +419,21 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
         }
         if (!newClaim.exists) transaction.create(newPhoneRef, { type: 'PHONE', userId: targetSnapshot.id, createdAt: update.updatedAt, updatedAt: update.updatedAt });
         if (oldClaim.exists && oldClaim.data().userId === targetSnapshot.id) transaction.delete(oldPhoneRef);
+      }
+      if (managedFarmsSnapshot) {
+        managedFarmsSnapshot.docs
+          .filter(doc => doc.id !== selectedFarmSnapshot?.id)
+          .forEach(doc => transaction.update(doc.ref, { managerUserId: null, updatedAt: update.updatedAt }));
+      }
+      if (selectedFarmSnapshot) {
+        queueManagerFarmAssignment(
+          transaction,
+          db,
+          selectedFarmSnapshot,
+          targetSnapshot.id,
+          actorId,
+          update.updatedAt
+        );
       }
       transaction.update(targetRef, update);
       queueAuditEvent(transaction, db, {
@@ -324,7 +449,15 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       await revokeFirebaseSessions(targetSnapshot.id);
       await setFirebaseAccountDisabled(targetSnapshot.id, update.status === 'DISABLED');
     }
-    return res.json({ success: true, data: publicUser({ ...current, ...update }, targetSnapshot.id) });
+    const updatedUser = publicUser({ ...current, ...update }, targetSnapshot.id);
+    const data = requestedManagerFarmSnapshot
+      ? resolveDirectoryAssignments(
+        [updatedUser],
+        [{ id: requestedManagerFarmSnapshot.id, ...requestedManagerFarmSnapshot.data(), managerUserId: targetSnapshot.id }],
+        []
+      )[0]
+      : updatedUser;
+    return res.json({ success: true, data });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });
   }

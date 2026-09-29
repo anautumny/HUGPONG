@@ -168,7 +168,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
 };
 
 export default function HomeScreen({ navigation }) {
-  const { t } = useTranslation();
+  const { t, formatSyncTime } = useTranslation();
   const [chartMode, setChartMode] = useState('weekly');
   const [showNotifs, setShowNotifs] = useState(false);
   const [session, setSessionState] = useState(getCurrentSession());
@@ -435,7 +435,7 @@ export default function HomeScreen({ navigation }) {
 
         {notifs.length === 0 ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: 12 }}>
-            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.surfaceSubtle, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="notifications-off-outline" size={32} color={COLORS.textMuted} />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.text }}>{t('notif_empty', 'No Notifications')}</Text>
@@ -448,7 +448,7 @@ export default function HomeScreen({ navigation }) {
             {notifs.map(n => (
               <TouchableOpacity
                 key={n.id}
-                style={[s.notifItem, { backgroundColor: n.unread ? '#FAFAF9' : '#fff', padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: n.unread ? n.color + '40' : COLORS.border, marginBottom: 10, ...SHADOW.card }]}
+                style={[s.notifItem, { backgroundColor: n.unread ? COLORS.background : COLORS.surface, padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: n.unread ? n.color + '40' : COLORS.border, marginBottom: 10, ...SHADOW.card }]}
                 onPress={() => handleNotifPress(n)}
                 activeOpacity={0.8}
               >
@@ -554,8 +554,8 @@ export default function HomeScreen({ navigation }) {
               <Ionicons name="calendar-outline" size={11} color={COLORS.textMuted} />
               <Text style={s.priceDateBadgeText} numberOfLines={1}>
               {liveWeek !== 'No records' && liveDate !== 'No records' 
-                ? (isOnline ? `${liveWeek} · ${liveDate}` : (isFieldRole ? 'Offline: Cached' : `${liveWeek} · ${liveDate}`))
-                : 'No records'}
+                ? (isOnline ? `${liveWeek} · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Offline: Cached') : `${liveWeek} · ${liveDate}`))
+                : t('no_records', 'No records')}
               </Text>
             </View>
           </View>
@@ -578,7 +578,7 @@ export default function HomeScreen({ navigation }) {
                   s.trendPillText,
                   liveChange > 0 ? s.trendTextUp : (liveChange < 0 ? s.trendTextDown : s.trendTextSteady)
                 ]}>
-                  {livePrice == null ? 'No price' : (liveChange > 0 ? `+₱${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? `-₱${Math.abs(Number(liveChange)).toFixed(2)}` : 'Steady'))}
+                  {livePrice == null ? t('no_price', 'No price') : (liveChange > 0 ? `+₱${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? `-₱${Math.abs(Number(liveChange)).toFixed(2)}` : t('trend_steady', 'Steady')))}
                 </Text>
               </View>
             </View>
@@ -616,7 +616,7 @@ export default function HomeScreen({ navigation }) {
                 s.trendPillText,
                 (liveMolChange || 0) > 0 ? s.trendTextUp : ((liveMolChange || 0) < 0 ? s.trendTextDown : s.trendTextSteady)
               ]}>
-                {liveMol == null ? 'No price' : ((liveMolChange || 0) > 0 ? `+₱${Number(liveMolChange).toFixed(2)}` : ((liveMolChange || 0) < 0 ? `-₱${Math.abs(Number(liveMolChange)).toFixed(2)}` : 'Steady'))}
+                {liveMol == null ? t('no_price', 'No price') : ((liveMolChange || 0) > 0 ? `+₱${Number(liveMolChange).toFixed(2)}` : ((liveMolChange || 0) < 0 ? `-₱${Math.abs(Number(liveMolChange)).toFixed(2)}` : t('trend_steady', 'Steady')))}
               </Text>
             </View>
           </View>
@@ -624,7 +624,7 @@ export default function HomeScreen({ navigation }) {
           {session?.role === 'SRA Admin' && (
             <View style={s.sraEditHint}>
               <Ionicons name="create-outline" size={13} color={COLORS.primary} />
-              <Text style={s.sraEditText}>Publish Price Reference</Text>
+              <Text style={s.sraEditText}>{t('post_official_price', 'Publish Price Reference')}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -644,13 +644,15 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
           <Text style={s.syncStamp}>
-            {synced ? `Published price record · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Last synced: Cached') : `Published price record · ${liveDate}`)}
+            {synced
+              ? `${t('published_price_record', 'Published price record')} · ${liveDate === 'No records' ? t('no_records', 'No records') : liveDate}`
+              : (isFieldRole ? t('sync_cached_stamp', 'Last synced: Cached') : `${t('published_price_record', 'Published price record')} · ${liveDate === 'No records' ? t('no_records', 'No records') : liveDate}`)}
           </Text>
 
           {/* Bar Chart with Dynamic Headroom Scaling & Overflow Protection */}
           {!priceAnalytics.hasData ? (
             <View style={{ paddingVertical: 28, alignItems: 'center' }}>
-              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>No source-referenced price records available.</Text>
+              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>{t('no_source_price_records', 'No source-referenced price records available.')}</Text>
             </View>
           ) : (() => {
             const allVals = [];
@@ -724,7 +726,7 @@ export default function HomeScreen({ navigation }) {
               {['Week 1', 'Week 2', 'Week 3', 'Week 4'].map((l, i) => (
                 <View key={i} style={s.legendItem}>
                   <View style={[s.legendDot, { backgroundColor: BAR_COLORS[i] }]} />
-                  <Text style={s.legendText}>{l}</Text>
+                  <Text style={s.legendText}>{`${t('time_week', 'Week')} ${i + 1}`}</Text>
                 </View>
               ))}
             </View>
@@ -783,31 +785,31 @@ export default function HomeScreen({ navigation }) {
                 <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#E8F5E8' : '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
                   <Ionicons name={isOnline && synced && pendingSyncCount === 0 ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline")} size={16} color={isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706'} />
                 </View>
-                <Text style={s.syncTitle}>Cloud &amp; Device Sync</Text>
+                <Text style={s.syncTitle}>{t('cloud_device_sync', 'Cloud & Device Sync')}</Text>
               </View>
               <View style={[s.syncBadge, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? '#E8F5E8' : '#FEF3C7' }]}>
                 <View style={[s.syncDot, { backgroundColor: isOnline && synced && pendingSyncCount === 0 ? COLORS.success : '#D97706' }]} />
                 <Text style={[s.syncBadgeText, { color: isOnline && synced && pendingSyncCount === 0 ? '#15803D' : '#B45309' }]}>
-                  {isOnline && synced && pendingSyncCount === 0 ? 'Synced' : `${pendingSyncCount} Unsynced`}
+                  {isOnline && synced && pendingSyncCount === 0 ? t('synced', 'Synced') : `${pendingSyncCount} ${t('not_synced', 'Unsynced')}`}
                 </Text>
               </View>
             </View>
 
             <View style={s.syncMetricsRow}>
               <View style={s.syncMetricCol}>
-                <Text style={s.syncMetricLabel}>Pending</Text>
+                <Text style={s.syncMetricLabel}>{t('pending_label', 'Pending')}</Text>
                 <Text style={[s.syncMetricVal, pendingSyncCount > 0 && { color: '#D97706' }]}>{pendingSyncCount}</Text>
               </View>
               <View style={s.syncMetricDivider} />
               <View style={s.syncMetricCol}>
-                <Text style={s.syncMetricLabel}>Last Synced</Text>
-                <Text style={s.syncMetricVal}>{syncTimeStr}</Text>
+                <Text style={s.syncMetricLabel}>{t('last_synced_label', 'Last Synced')}</Text>
+                <Text style={s.syncMetricVal}>{formatSyncTime(syncTimeStr)}</Text>
               </View>
               <View style={s.syncMetricDivider} />
               <View style={s.syncMetricCol}>
-                <Text style={s.syncMetricLabel}>Status</Text>
+                <Text style={s.syncMetricLabel}>{t('status_label', 'Status')}</Text>
                 <Text style={[s.syncMetricVal, { color: isOnline ? COLORS.success : '#D97706' }]}>
-                  {isOnline ? 'Online' : 'Offline'}
+                  {isOnline ? t('status_online', 'Online') : t('status_offline', 'Offline')}
                 </Text>
               </View>
             </View>
@@ -818,8 +820,8 @@ export default function HomeScreen({ navigation }) {
               disabled={isSyncing}
               activeOpacity={0.8}
             >
-              <Ionicons name={isSyncing ? "refresh" : "cloud-upload-outline"} size={15} color="#fff" />
-              <Text style={s.syncBtnTextCompact}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
+              <Ionicons name={isSyncing ? "refresh" : "cloud-upload-outline"} size={15} color={COLORS.textInverse} />
+              <Text style={s.syncBtnTextCompact}>{isSyncing ? t('profile_syncing', 'Syncing...') : t('btn_sync_now', 'Sync Now')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -863,7 +865,7 @@ const s = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 24,
   },
   offlineSimpleIconBtn: {
@@ -884,9 +886,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: COLORS.surfaceSubtle,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: RADIUS.full,
@@ -905,9 +907,9 @@ const s = StyleSheet.create({
     backgroundColor: COLORS.danger, width: 16, height: 16,
     borderRadius: 8, alignItems: 'center', justifyContent: 'center'
   },
-  badgeText: { color: '#FFF', fontSize: 9, fontWeight: '800' },
+  badgeText: { color: COLORS.textInverse, fontSize: 9, fontWeight: '800' },
   card: {
-    backgroundColor: '#FFF',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
     padding: SPACING.lg,
     ...SHADOW.card
@@ -918,7 +920,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     padding: SPACING.lg,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
   },
   priceCardHeader: {
     flexDirection: 'row',
@@ -1060,7 +1062,7 @@ const s = StyleSheet.create({
     backgroundColor: COLORS.dangerBg,
   },
   trendPillSteady: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: COLORS.surfaceSubtle,
   },
   trendPillText: {
     fontSize: 10,
@@ -1097,7 +1099,7 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text },
   chartModeRow: { flexDirection: 'row', backgroundColor: COLORS.background, borderRadius: 10, padding: 3, gap: 2 },
   modeChip: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
-  modeChipActive: { backgroundColor: '#fff', ...SHADOW.card },
+  modeChipActive: { backgroundColor: COLORS.surface, ...SHADOW.card },
   modeChipText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
   modeChipTextActive: { color: COLORS.primary, fontWeight: '700' },
   syncStamp: { fontSize: 10, color: COLORS.textMuted, marginBottom: SPACING.sm },
@@ -1135,17 +1137,17 @@ const s = StyleSheet.create({
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: SPACING.md },
-  modalCard: { backgroundColor: '#FFF', borderRadius: RADIUS.xl, padding: SPACING.lg, maxHeight: '92%', ...SHADOW.lg },
+  modalCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, maxHeight: '92%', ...SHADOW.lg },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   modalBadge: { alignSelf: 'flex-start', backgroundColor: '#EBF3E8', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, marginBottom: 4 },
   modalBadgeText: { fontSize: 9.5, fontWeight: '900', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.5 },
   modalTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },
   modalSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 2, lineHeight: 15 },
   inputLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', color: COLORS.textMuted, marginTop: 8, marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.text, backgroundColor: '#FFF' },
-  priceBoxContainer: { flexDirection: 'row', gap: 10, backgroundColor: '#F8FAF5', padding: 12, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, marginTop: 4 },
+  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.text, backgroundColor: COLORS.surface },
+  priceBoxContainer: { flexDirection: 'row', gap: 10, backgroundColor: COLORS.background, padding: 12, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, marginTop: 4 },
   priceBoxItem: { flex: 1 },
-  priceInputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 8 },
+  priceInputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 8 },
   currencySymbol: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginRight: 2 },
   priceInput: { flex: 1, paddingVertical: 8, fontSize: 13, fontWeight: '700', color: COLORS.text },
   priceDeltaText: { fontSize: 10.5, fontWeight: '600', color: COLORS.textMuted, marginTop: 4 },
@@ -1155,9 +1157,9 @@ const s = StyleSheet.create({
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border },
   cancelBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
   publishBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 16, borderRadius: RADIUS.md },
-  publishBtnText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
+  publishBtnText: { color: COLORS.textInverse, fontSize: 12, fontWeight: '800' },
   saveModalBtn: { backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: RADIUS.lg, alignItems: 'center', marginTop: SPACING.lg },
-  saveModalBtnText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
+  saveModalBtnText: { color: COLORS.textInverse, fontSize: 13, fontWeight: '800' },
   notifItem: { flexDirection: 'row', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   notifIconBox: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   notifTitle: { fontSize: 13, fontWeight: '700', color: COLORS.text },
@@ -1166,7 +1168,7 @@ const s = StyleSheet.create({
 
   // Compact Sync Dashboard
   syncCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
     padding: SPACING.md,
     borderWidth: 1,
@@ -1204,7 +1206,7 @@ const s = StyleSheet.create({
   syncMetricsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAF5',
+    backgroundColor: COLORS.background,
     borderRadius: RADIUS.md,
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -1244,7 +1246,7 @@ const s = StyleSheet.create({
     minHeight: 38
   },
   syncBtnTextCompact: {
-    color: '#fff',
+    color: COLORS.textInverse,
     fontSize: 12.5,
     fontWeight: '800'
   },
@@ -1256,12 +1258,12 @@ const s = StyleSheet.create({
     paddingBottom: 24
   },
   offlineGateCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
     padding: 24,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
     ...SHADOW.sm
   },
   offlineIconCircle: {
@@ -1291,11 +1293,11 @@ const s = StyleSheet.create({
   },
   offlineAvailableBox: {
     width: '100%',
-    backgroundColor: '#F8FAF5',
+    backgroundColor: COLORS.background,
     borderRadius: RADIUS.lg,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderColor: COLORS.borderLight,
     marginBottom: 20
   },
   offlineAvailableTitle: {
@@ -1308,11 +1310,11 @@ const s = StyleSheet.create({
   offlineActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
     gap: 12,
     ...SHADOW.xs
   },
@@ -1357,7 +1359,7 @@ const s = StyleSheet.create({
     width: '100%'
   },
   offlineRetryBtnText: {
-    color: '#fff',
+    color: COLORS.textInverse,
     fontSize: 13,
     fontWeight: '800'
   }

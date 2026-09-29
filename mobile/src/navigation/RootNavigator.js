@@ -89,7 +89,7 @@ const modalStyles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#FFF',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
@@ -99,7 +99,7 @@ const modalStyles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#FEF3C7',
+    backgroundColor: COLORS.warningBg,
     borderWidth: 1.5,
     borderColor: '#FDE68A',
     justifyContent: 'center',
@@ -135,7 +135,7 @@ const modalStyles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 14,
     fontWeight: '800',
-    color: '#FFF',
+    color: COLORS.textInverse,
     textAlign: 'center',
   },
 });

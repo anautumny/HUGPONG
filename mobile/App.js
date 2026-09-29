@@ -9,6 +9,7 @@ import { checkConnectivity, startNetworkMonitor, stopNetworkMonitor } from './sr
 import { fields, getCurrentSession, performMobileSync, subscribe } from './src/data/dataStore';
 import { reportMobileActivity } from './src/services/telemetryService';
 import { createMobileReference, reportMobileDiagnostic } from './src/services/clientDiagnostics';
+import { COLORS } from './src/theme';
 import {
   clearLastPlannerNotificationResponse,
   getLastPlannerNotificationResponse,
@@ -108,6 +109,9 @@ class MobileErrorBoundary extends React.Component {
   componentDidCatch(error, info) {
     const referenceId = createMobileReference();
     this.setState({ referenceId });
+    if (__DEV__) {
+      console.error('[HUGPONG Render Error]', error?.stack || error?.message || error, info?.componentStack || '');
+    }
     reportMobileDiagnostic({
       referenceId,
       module: 'MOBILE',
@@ -138,11 +142,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  errorScreen: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#F4F7F5' },
-  errorCard: { padding: 22, borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DDE5E0' },
-  errorTitle: { color: '#17251D', fontSize: 20, fontWeight: '800' },
-  errorBody: { marginTop: 10, color: '#56645C', fontSize: 14, lineHeight: 21 },
-  reference: { marginTop: 12, color: '#56645C', fontSize: 12, fontFamily: 'monospace' },
-  retryButton: { alignSelf: 'flex-start', marginTop: 18, borderRadius: 10, backgroundColor: '#187748', paddingHorizontal: 18, paddingVertical: 11 },
-  retryText: { color: '#FFFFFF', fontWeight: '800' }
+  errorScreen: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: COLORS.background },
+  errorCard: { padding: 22, borderRadius: 18, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
+  errorTitle: { color: COLORS.text, fontSize: 20, fontWeight: '800' },
+  errorBody: { marginTop: 10, color: COLORS.textSecondary, fontSize: 14, lineHeight: 21 },
+  reference: { marginTop: 12, color: COLORS.textSecondary, fontSize: 12, fontFamily: 'monospace' },
+  retryButton: { alignSelf: 'flex-start', marginTop: 18, borderRadius: 10, backgroundColor: COLORS.primary, paddingHorizontal: 18, paddingVertical: 11 },
+  retryText: { color: COLORS.textInverse, fontWeight: '800' }
 });

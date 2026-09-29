@@ -11,8 +11,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { useTranslation } from '../services/i18n';
 
 export default function LiveQRScanner({ visible = false, onClose, onCodeDetected }) {
+  const { t } = useTranslation();
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraError, setCameraError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
@@ -61,11 +63,11 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     lastScanRef.current = { data: normalizedData, scannedAt };
     scanLockedRef.current = true;
     setScanLocked(true);
-    setScanMessage('Validating audit report...');
+    setScanMessage(t('qr_validating', 'Validating audit report...'));
     try {
       const outcome = await onCodeDetected?.(normalizedData, { source });
       if (outcome?.continueScanning && mountedRef.current) {
-        setScanMessage(outcome.message || 'This QR code is not a valid HUGPONG audit report.');
+        setScanMessage(outcome.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
         scanRearmTimerRef.current = setTimeout(() => {
           if (!mountedRef.current) return;
           scanLockedRef.current = false;
@@ -74,19 +76,19 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       }
     } catch (error) {
       if (!mountedRef.current) return;
-      setScanMessage(error.message || 'This QR code is not a valid HUGPONG audit report.');
+      setScanMessage(error.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
       scanRearmTimerRef.current = setTimeout(() => {
         if (!mountedRef.current) return;
         scanLockedRef.current = false;
         setScanLocked(false);
       }, 650);
     }
-  }, [onCodeDetected]);
+  }, [onCodeDetected, t]);
 
   const openCamera = useCallback(async () => {
     if (cameraBusy || scanLockedRef.current) return;
     setCameraError('');
-    setScanMessage('Opening the device QR scanner...');
+    setScanMessage(t('qr_opening_device', 'Opening the device QR scanner...'));
 
     let currentPermission = permission;
     if (!currentPermission?.granted && currentPermission?.canAskAgain !== false) {
@@ -94,11 +96,11 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       currentPermission = await requestPermission();
     }
     if (!currentPermission?.granted) {
-      setCameraError('Camera permission is required. Enable it in device settings, or upload a QR image.');
+      setCameraError(t('qr_permission_error', 'Camera permission is required. Enable it in device settings, or upload a QR image.'));
       return;
     }
     if (!CameraView.isModernBarcodeScannerAvailable) {
-      setCameraError('The native QR camera is unavailable on this device. Upload a QR image instead.');
+      setCameraError(t('qr_native_unavailable', 'The native QR camera is unavailable on this device. Upload a QR image instead.'));
       return;
     }
 
@@ -109,15 +111,15 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       await new Promise(resolve => setTimeout(resolve, 120));
       await CameraView.launchScanner({ barcodeTypes: ['qr'] });
       if (mountedRef.current && !scanLockedRef.current) {
-        setScanMessage('System scanner closed. The live scanner is ready.');
+        setScanMessage(t('qr_system_closed', 'System scanner closed. The live scanner is ready.'));
       }
     } catch (error) {
       if (!mountedRef.current) return;
       const message = String(error?.message || '');
       if (/cancel/i.test(message)) {
-        setScanMessage('System scanner closed. The live scanner is ready.');
+        setScanMessage(t('qr_system_closed', 'System scanner closed. The live scanner is ready.'));
       } else {
-        setCameraError(message || 'The device QR camera could not be opened. Upload a QR image instead.');
+        setCameraError(message || t('qr_camera_open_failed', 'The device QR camera could not be opened. Upload a QR image instead.'));
       }
     } finally {
       if (mountedRef.current) {
@@ -126,7 +128,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
         setSystemScannerActive(false);
       }
     }
-  }, [cameraBusy, permission, requestPermission]);
+  }, [cameraBusy, permission, requestPermission, t]);
 
   useEffect(() => {
     if (!visible || !CameraView.isModernBarcodeScannerAvailable) return undefined;
@@ -141,7 +143,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     setCameraError('');
     const result = await requestPermission();
     if (!result.granted) {
-      setCameraError('Camera permission is required. Enable it in device settings, or upload a QR image.');
+      setCameraError(t('qr_permission_error', 'Camera permission is required. Enable it in device settings, or upload a QR image.'));
     }
   };
 
@@ -149,7 +151,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     if (uploadBusy || scanLockedRef.current) return;
     setUploadBusy(true);
     setCameraError('');
-    setScanMessage('Choose the QR image and crop closely around the square code.');
+    setScanMessage(t('qr_choose_crop', 'Choose the QR image and crop closely around the square code.'));
     try {
       const selection = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
@@ -158,20 +160,20 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
         quality: 1,
       });
       if (selection.canceled || !selection.assets?.[0]?.uri) {
-        setScanMessage('Choose a QR image or open the camera.');
+        setScanMessage(t('qr_choose_or_camera', 'Choose a QR image or open the camera.'));
         return;
       }
-      setScanMessage('Reading uploaded QR image...');
+      setScanMessage(t('qr_reading_upload', 'Reading uploaded QR image...'));
       const barcodes = await scanFromURLAsync(selection.assets[0].uri, ['qr']);
       const qrCode = barcodes.find(barcode => Boolean(barcode.data));
       if (!qrCode) {
-        setScanMessage('No readable QR was found. Upload it again and crop tightly around the QR square.');
+        setScanMessage(t('qr_not_found', 'No readable QR was found. Upload it again and crop tightly around the QR square.'));
         return;
       }
       await handleBarcodeScanned({ data: qrCode.data }, 'image');
     } catch (error) {
       if (mountedRef.current) {
-        setScanMessage(error.message || 'The QR image could not be read. Try a PNG or a clear screenshot.');
+        setScanMessage(error.message || t('qr_image_read_failed', 'The QR image could not be read. Try a PNG or a clear screenshot.'));
       }
     } finally {
       if (mountedRef.current) setUploadBusy(false);
@@ -187,10 +189,10 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.closeButton} onPress={onClose}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('qr_back', 'Back')} style={styles.closeButton} onPress={onClose}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.title}>Scan QR</Text>
+          <Text style={styles.title} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{t('qr_scan_title', 'Scan QR')}</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -202,22 +204,22 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
           {permissionLoading ? (
             <>
               <ActivityIndicator size="large" color="#2F6B3B" />
-              <Text style={styles.heading}>Checking camera...</Text>
+              <Text style={styles.heading}>{t('qr_checking_camera', 'Checking camera...')}</Text>
             </>
           ) : permissionDenied ? (
             <>
-              <Text style={styles.heading}>Camera Permission Needed</Text>
-              <Text style={styles.help}>Allow camera access to open the device QR scanner. Image upload works without the camera.</Text>
+              <Text style={styles.heading}>{t('qr_permission_needed', 'Camera Permission Needed')}</Text>
+              <Text style={styles.help}>{t('qr_permission_help', 'Allow camera access to open the device QR scanner. Image upload works without the camera.')}</Text>
               {permission.canAskAgain ? (
                 <TouchableOpacity style={styles.primaryButton} onPress={retryPermission}>
-                  <Text style={styles.primaryButtonText}>Allow Camera</Text>
+                  <Text style={styles.primaryButtonText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{t('qr_allow_camera', 'Allow Camera')}</Text>
                 </TouchableOpacity>
               ) : null}
             </>
           ) : (
             <>
-              <Text style={styles.heading}>Scan Audit QR</Text>
-              <Text style={styles.help}>Keep the complete QR square inside the frame. The report will be securely retrieved after one scan.</Text>
+              <Text style={styles.heading}>{t('qr_scan_audit_heading', 'Scan Audit QR')}</Text>
+              <Text style={styles.help}>{t('qr_scan_help', 'Keep the complete QR square inside the frame. The report will be securely retrieved after one scan.')}</Text>
               <View style={styles.cameraFrame}>
                 {!systemScannerActive ? (
                   <CameraView
@@ -231,7 +233,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
                     }}
                     onMountError={error => {
                       setCameraReady(false);
-                      setCameraError(error?.message || 'The camera preview could not be started.');
+                      setCameraError(error?.message || t('qr_preview_failed', 'The camera preview could not be started.'));
                     }}
                   />
                 ) : null}
@@ -239,7 +241,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
               {systemScannerActive || (!cameraReady && !cameraError) ? (
                 <View style={styles.cameraStatus}>
                   <ActivityIndicator size="small" color="#2F6B3B" />
-                  <Text style={styles.cameraStatusText}>{systemScannerActive ? 'Opening system scanner...' : 'Starting camera...'}</Text>
+                  <Text style={styles.cameraStatusText}>{systemScannerActive ? t('qr_opening_system', 'Opening system scanner...') : t('qr_starting_camera', 'Starting camera...')}</Text>
                 </View>
               ) : null}
               {CameraView.isModernBarcodeScannerAvailable ? (
@@ -251,7 +253,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
                   {cameraBusy
                     ? <ActivityIndicator size="small" color="#2F6B3B" />
                     : <Ionicons name="scan-outline" size={18} color="#2F6B3B" />}
-                  <Text style={styles.deviceScannerButtonText}>{cameraBusy ? 'Opening...' : 'Use System Scanner'}</Text>
+                  <Text style={styles.deviceScannerButtonText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{cameraBusy ? t('qr_opening', 'Opening...') : t('qr_use_system_scanner', 'Use System Scanner')}</Text>
                 </TouchableOpacity>
               ) : null}
             </>
@@ -273,9 +275,9 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             {uploadBusy
               ? <ActivityIndicator size="small" color="#2F6B3B" />
               : <Ionicons name="image-outline" size={20} color="#2F6B3B" />}
-            <Text style={styles.uploadButtonText}>{uploadBusy ? 'Reading Image...' : 'Upload QR Image'}</Text>
+            <Text style={styles.uploadButtonText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{uploadBusy ? t('qr_reading_image', 'Reading Image...') : t('qr_upload_image', 'Upload QR Image')}</Text>
           </TouchableOpacity>
-          <Text style={styles.uploadHint}>Crop the image so the QR square fills most of the frame.</Text>
+          <Text style={styles.uploadHint}>{t('qr_upload_hint', 'Crop the image so the QR square fills most of the frame.')}</Text>
         </View>
       </SafeAreaView>
     </Modal>

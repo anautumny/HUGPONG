@@ -30,7 +30,6 @@ export default function ThemePreferences({
 
   return (
     <div className={`space-y-3.5 ${className}`}>
-      {/* Section Header */}
       <div className="flex items-center justify-between pb-1 border-b border-border/60">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">

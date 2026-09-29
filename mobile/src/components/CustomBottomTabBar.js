@@ -258,13 +258,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: '#FFFFFF',
+    borderColor: COLORS.surface,
     ...SHADOW.card,
   },
   syncBadgeText: {
     fontSize: 10,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: COLORS.textInverse,
     lineHeight: 12,
   },
   offlineChip: {

@@ -29,8 +29,10 @@ function MemberHomeView({
     <View style={s.container}>
       {/* Primary Field Card */}
       <View style={s.sectionHeader}>
-        <Text style={s.sectionTitle}>{t('my_active_field', 'My Active Field')}</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Field Ops')}>
+        <View style={s.sectionTitleWrap}>
+          <Text style={s.sectionTitle}>{t('my_active_field', 'My Active Field')}</Text>
+        </View>
+        <TouchableOpacity style={s.sectionActionBtn} onPress={() => navigation.navigate('Field Ops')}>
           <Text style={s.seeAllText}>{t('view_ops', 'View Ops')} →</Text>
         </TouchableOpacity>
       </View>
@@ -38,25 +40,27 @@ function MemberHomeView({
       {!hasPlot ? (
         <View style={[s.fieldCard, { backgroundColor: '#FFFBEB', borderColor: '#FEF0D0' }]}>
           <View style={s.fieldCardHeader}>
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={[s.fieldId, { color: '#92400E' }]}>No Plot Allocated</Text>
+            <View style={s.fieldCardLeft}>
+              <View style={s.fieldTitleRow}>
+                <Text style={[s.fieldId, { color: '#92400E' }]}>{t('no_plot_allocated', 'No Plot Allocated')}</Text>
                 <View style={[s.memberIdBadge, { backgroundColor: '#FEF3C7', borderColor: '#FEF0D0' }]}>
                   <Text style={[s.memberIdBadgeText, { color: '#B45309' }]}>ID: {session?.employeeId || session?.contact || '—'}</Text>
                 </View>
               </View>
-              <Text style={[s.fieldFarm, { color: '#B45309' }]}>{session?.farm || session?.blockFarm || 'Block Farm'}</Text>
+              <Text style={[s.fieldFarm, { color: '#B45309' }]}>{session?.farm || session?.blockFarm || t('block_farm', 'Block Farm')}</Text>
             </View>
             <View style={[s.haBadge, { backgroundColor: '#FEF3C7' }]}>
-              <Text style={[s.haText, { color: '#B45309' }]}>UNASSIGNED</Text>
+              <Text style={[s.haText, { color: '#B45309' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                {t('badge_unassigned', 'UNASSIGNED')}
+              </Text>
             </View>
           </View>
 
           <View style={[s.stageBox, { backgroundColor: '#FFF', borderColor: '#FEF0D0', borderWidth: 1 }]}>
-            <Text style={[s.stageLabel, { color: '#B45309' }]}>Plot Allocation Status</Text>
-            <Text style={[s.stageValue, { color: '#78350F' }]}>Awaiting Plot Assignment by Farm Manager</Text>
+            <Text style={[s.stageLabel, { color: '#B45309' }]}>{t('plot_allocation_status', 'Plot Allocation Status')}</Text>
+            <Text style={[s.stageValue, { color: '#78350F' }]}>{t('awaiting_plot_assignment', 'Awaiting Plot Assignment by Farm Manager')}</Text>
             <Text style={{ fontSize: 11, color: '#92400E', marginTop: 3, lineHeight: 15 }}>
-              Your member account is active. Once your Farm Manager registers your sugarcane plot in the cooperative registry, your plot hectarage and operations timeline will appear here.
+              {t('member_no_plot_notice', 'Your member account is active. Once your Farm Manager registers your sugarcane plot in the cooperative registry, your plot hectarage and operations timeline will appear here.')}
             </Text>
           </View>
 
@@ -64,7 +68,7 @@ function MemberHomeView({
             <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#92400E' }]} onPress={() => navigation.navigate('Field Ops')} activeOpacity={0.8}>
               <Ionicons name="information-circle-outline" size={16} color="#FFF" />
               <Text style={s.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
-                View Status Notice
+                {t('btn_view_status_notice', 'View Status Notice')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.syncActionBtn} onPress={onManualSync} activeOpacity={0.8}>
@@ -78,31 +82,31 @@ function MemberHomeView({
       ) : (
         <View style={s.fieldCard}>
           <View style={s.fieldCardHeader}>
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={s.fieldCardLeft}>
+              <View style={s.fieldTitleRow}>
                 <Text style={s.fieldId}>{primaryField.id}</Text>
                 <View style={s.memberIdBadge}>
                   <Text style={s.memberIdBadgeText}>ID: {session?.employeeId || primaryField.memberId || session?.contact || '—'}</Text>
                 </View>
               </View>
-              <Text style={s.fieldFarm}>{session?.farm || session?.blockFarm || primaryField.blockFarm || 'Block Farm'}</Text>
+              <Text style={s.fieldFarm}>{session?.farm || session?.blockFarm || primaryField.blockFarm || t('block_farm', 'Block Farm')}</Text>
             </View>
             <View style={s.haBadge}>
-              <Text style={s.haText}>{primaryField.ha} Ha</Text>
+              <Text style={s.haText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{primaryField.ha} Ha</Text>
             </View>
           </View>
 
           <View style={s.stageBox}>
             <View style={s.fieldContextRow}>
               <View style={s.fieldContextItem}>
-                <Text style={s.stageLabel}>Crop Year Cycle</Text>
+                <Text style={s.stageLabel}>{t('crop_year_cycle_label', 'Crop Year Cycle')}</Text>
                 <Text style={s.stageValue}>{formatCropYearDisplay(primaryField.cropYear)}</Text>
               </View>
               <View style={s.fieldContextItem}>
                 <Text style={s.stageLabel}>{t('current_stage', 'Current Stage')}</Text>
                 <Text style={s.stageValue}>
                   {currentStage
-                    ? STAGE_DISPLAY_LABELS[currentStage.stageNumber]
+                    ? (formatStageName ? formatStageName(`Stage ${currentStage.stageNumber}`) : STAGE_DISPLAY_LABELS[currentStage.stageNumber])
                     : t('current_stage_unset', 'Current stage not set')}
                 </Text>
               </View>
@@ -131,7 +135,9 @@ function MemberHomeView({
 
 const s = StyleSheet.create({
   container: { marginTop: 0 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm, gap: 10 },
+  sectionTitleWrap: { flex: 1 },
+  sectionActionBtn: { flexShrink: 0 },
   sectionTitle: { fontSize: 15.5, fontWeight: '800', color: COLORS.text },
   seeAllText: { fontSize: 13.5, fontWeight: '800', color: COLORS.primary },
 
@@ -143,13 +149,15 @@ const s = StyleSheet.create({
     borderColor: '#E2EBDC',
     ...SHADOW.card
   },
-  fieldCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm },
-  fieldId: { fontSize: 18, fontWeight: '900', color: COLORS.text },
-  memberIdBadge: { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: RADIUS.xs },
+  fieldCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm, gap: 8 },
+  fieldCardLeft: { flex: 1, minWidth: 0, marginRight: 6 },
+  fieldTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2 },
+  fieldId: { fontSize: 17, fontWeight: '900', color: COLORS.text },
+  memberIdBadge: { backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: RADIUS.xs, flexShrink: 0 },
   memberIdBadgeText: { fontSize: 11, fontWeight: '800', color: COLORS.primary, fontFamily: 'monospace' },
   fieldFarm: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
-  haBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 12, paddingVertical: 5, borderRadius: RADIUS.full },
-  haText: { fontSize: 13, fontWeight: '900', color: COLORS.primary },
+  haBadge: { backgroundColor: COLORS.primaryBg, paddingHorizontal: 9, paddingVertical: 4.5, borderRadius: RADIUS.full, flexShrink: 0, alignSelf: 'flex-start', maxWidth: '45%' },
+  haText: { fontSize: 11.5, fontWeight: '900', color: COLORS.primary, letterSpacing: 0.2 },
   stageBox: { backgroundColor: '#F8FAF5', padding: SPACING.sm + 2, borderRadius: RADIUS.md, marginVertical: SPACING.sm, borderWidth: 1, borderColor: '#E5EDE0' },
   fieldContextRow: { flexDirection: 'row', gap: SPACING.md },
   fieldContextItem: { flex: 1 },

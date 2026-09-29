@@ -84,6 +84,10 @@ The server derives `displayName` from the structured name fields. Legacy documen
 
 `affiliatedBlockFarmId` records the Block Farm confirmed during onboarding so the responsible Farm Manager can see the member before a plot exists. It does not grant access to farm records and is not a field assignment. A manager assignment remains `block_farms.managerUserId`; a Farm Member plot assignment remains `fields.memberUserId`.
 
+When an administrator provisions, approves, or edits a Farm Manager with a selected Block Farm, the server updates that Block Farm's `managerUserId` atomically with the account mutation. Editing a manager to select a different farm clears the manager from the previous farm in the same transaction. A Block Farm that already has a different manager is rejected instead of being silently reassigned.
+
+The Block Farm edit workflow may explicitly replace its manager. When an administrator selects a manager who currently manages another Block Farm, the server clears that previous relationship and assigns the selected manager to the edited Block Farm in one transaction; the edited farm's former manager is left unassigned.
+
 `GET /api/users` resolves those canonical relationships after applying the caller's visibility scope. Its response adds a non-persisted `assignment` projection (`status`, type, Block Farm identity, Field identities, and display label). Web and Mobile consume that projection; it is never written back to `users` and does not create a role-specific copy of assignment data.
 
 ### `user_credentials/{userId}` — server only

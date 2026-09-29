@@ -32,7 +32,7 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const farmManagers = (usersResult.data || [])
       .map(account => fromUser(account.id || account.employeeId, account))
-      .filter(account => account.canonicalRole === 'FARM_MANAGER')
+      .filter(account => account.canonicalRole === 'FARM_MANAGER' && String(account.status || '').toUpperCase() === 'ACTIVE')
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')));
     return { blockFarms, fields, farmManagers };
   }, {

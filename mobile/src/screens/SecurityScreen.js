@@ -301,7 +301,7 @@ export default function SecurityScreen({ navigation }) {
                     disabled={loadingPhone}
                     activeOpacity={0.8}
                   >
-                    {loadingPhone ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.submitBtnText}>Send Verification Code</Text>}
+                    {loadingPhone ? <ActivityIndicator size="small" color={COLORS.textInverse} /> : <Text style={s.submitBtnText}>Send Verification Code</Text>}
                   </TouchableOpacity>
                 </>
               ) : (
@@ -340,7 +340,7 @@ export default function SecurityScreen({ navigation }) {
                     disabled={loadingPhone || phoneOtp.length !== 6}
                     activeOpacity={0.8}
                   >
-                    {loadingPhone ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.submitBtnText}>Verify &amp; Update Number</Text>}
+                    {loadingPhone ? <ActivityIndicator size="small" color={COLORS.textInverse} /> : <Text style={s.submitBtnText}>Verify &amp; Update Number</Text>}
                   </TouchableOpacity>
 
                   <View style={s.phoneSecondaryActions}>
@@ -511,7 +511,7 @@ export default function SecurityScreen({ navigation }) {
                 activeOpacity={0.8}
               >
                 {loadingPw ? (
-                  <ActivityIndicator size="small" color="#fff" />
+                  <ActivityIndicator size="small" color={COLORS.textInverse} />
                 ) : (
                   <Text style={s.submitBtnText}>{t('sec_update_pw', 'Update Password')}</Text>
                 )}
@@ -539,7 +539,7 @@ export default function SecurityScreen({ navigation }) {
               ]
             )}
           >
-            <View style={[s.secIcon, { backgroundColor: '#FFF0F0' }]}>
+            <View style={[s.secIcon, { backgroundColor: COLORS.dangerBg }]}>
               <Ionicons name="log-out" size={17} color="#D9534F" />
             </View>
             <View style={s.dangerBody}>
@@ -558,12 +558,12 @@ export default function SecurityScreen({ navigation }) {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 12, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   backBtn: { padding: 8 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
   scroll: { padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 },
   
-  accountCard: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING.lg, borderWidth: 1, borderColor: COLORS.border, gap: SPACING.md, ...SHADOW.card },
+  accountCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.lg, borderWidth: 1, borderColor: COLORS.border, gap: SPACING.md, ...SHADOW.card },
   accountHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatarWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: COLORS.primaryBg, justifyContent: 'center', alignItems: 'center' },
   userName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
@@ -578,7 +578,7 @@ const s = StyleSheet.create({
   lostSimNote: { flexDirection: 'row', gap: 8, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.md, padding: 10, alignItems: 'flex-start' },
   lostSimText: { flex: 1, fontSize: 11, color: COLORS.textSecondary, lineHeight: 16 },
 
-  card: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING.lg, ...SHADOW.card },
+  card: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.lg, ...SHADOW.card },
   cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: SPACING.sm },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
   secIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
@@ -590,7 +590,7 @@ const s = StyleSheet.create({
   phoneSafetyNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg },
   phoneSafetyText: { flex: 1, fontSize: 11.5, lineHeight: 17, color: COLORS.textSecondary },
   phoneVerificationCard: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg },
-  phoneVerificationIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  phoneVerificationIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.surface },
   phoneVerificationTitle: { fontSize: 13, fontWeight: '800', color: COLORS.text },
   phoneVerificationText: { marginTop: 2, fontSize: 11.5, lineHeight: 16, color: COLORS.textSecondary },
   phoneOtpInput: { fontSize: 20, fontWeight: '800', letterSpacing: 6, textAlign: 'center' },
@@ -608,13 +608,13 @@ const s = StyleSheet.create({
   strengthHint: { fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted },
   sessionChoice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, backgroundColor: COLORS.background },
   sessionChoiceSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
-  sessionChoiceDangerSelected: { borderColor: COLORS.danger, backgroundColor: '#FFF0F0' },
+  sessionChoiceDangerSelected: { borderColor: COLORS.danger, backgroundColor: COLORS.dangerBg },
   sessionChoiceBody: { flex: 1, gap: 2 },
   sessionChoiceTitle: { fontSize: 12, fontWeight: '700', color: COLORS.text },
   sessionChoiceSub: { fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted },
   
   submitBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
-  submitBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  submitBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.textInverse },
   btnDisabled: { opacity: 0.6 },
 
   dangerRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: 8 },

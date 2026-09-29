@@ -1180,7 +1180,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     variety: '',
     isSubmit: true
   });
-  const [draftLogs, setDraftLogs] = useState(draftLogsStore);
+  const [draftLogs, setDraftLogs] = useState(() => Array.isArray(draftLogsStore) ? [...draftLogsStore] : []);
   const [isSavingLog, setIsSavingLog] = useState(false);
   const submissionLockRef = React.useRef(false);
   const childSubmissionLockRef = React.useRef(new Set());
@@ -4270,6 +4270,14 @@ export default function FieldOpsScreen({ navigation, route }) {
       }));
   }, [visibleLogs, activeFieldId, isLogPastCycle]);
 
+  // This collection is used by both the main screen and the ledger's early-return view.
+  // Keep it above that return so Hermes never evaluates an uninitialized binding.
+  const scopedDrafts = React.useMemo(() => (
+    activeRole === 'Farm Member' && selectedField?.id && Array.isArray(draftLogs)
+      ? draftLogs.filter(draft => draft?.fieldId === safeField.id)
+      : []
+  ), [activeRole, selectedField?.id, safeField.id, draftLogs]);
+
   const pastLogs = archiveState.records;
   const accessibleArchiveFieldIds = new Set(accessibleFields.map(field => field.id));
   const authorizedArchiveCycles = cropCycles.filter(cycle => accessibleArchiveFieldIds.has(cycle.fieldId));
@@ -5270,7 +5278,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         />
         {/* Streamlined Summary Banner */}
           {(() => {
-            const scopedDrafts = draftLogs.filter(d => d.fieldId === safeField.id);
             const submittedTotalCost = fieldLogs.reduce((sum, l) => sum + Number(l.cost || 0), 0);
             const draftsTotalCost = scopedDrafts.reduce((sum, d) => sum + Number(d.cost || 0), 0);
             const pastTotalCost = pastLogs.reduce((sum, l) => sum + Number(l.cost || 0), 0);
@@ -7611,7 +7618,6 @@ export default function FieldOpsScreen({ navigation, route }) {
     );
   }
 
-  const scopedDrafts = (activeRole === 'Farm Member' && selectedField?.id) ? draftLogs.filter(d => d.fieldId === safeField.id) : [];
   const totalLedgerCount = fieldLogs.length + (activeRole === 'Farm Member' ? scopedDrafts.length : 0);
 
   return (

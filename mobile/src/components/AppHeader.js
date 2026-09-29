@@ -233,9 +233,9 @@ function AppHeader({ right }) {
               {isSyncing
                 ? (syncStatusText || t('syncing_progress', 'Syncing...'))
                 : (isFullySynced
-                  ? (isSraAdmin ? 'Online' : t('synced', 'Synced'))
+                  ? (isSraAdmin ? t('status_online', 'Online') : t('synced', 'Synced'))
                   : (!isOnline
-                    ? (safeCount > 0 ? `Offline (${safeCount})` : 'Offline')
+                    ? (safeCount > 0 ? `${t('status_offline', 'Offline')} (${safeCount})` : t('status_offline', 'Offline'))
                     : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}
             </Text>
           </TouchableOpacity>

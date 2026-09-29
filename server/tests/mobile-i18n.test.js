@@ -68,8 +68,16 @@ test('language persistence and long-label layouts are guarded against regression
   const bottomTabs = read('mobile/src/components/CustomBottomTabBar.js');
   const planner = read('mobile/src/screens/PlannerScreen.js');
   const syncMonitor = read('mobile/src/screens/SyncMonitorScreen.js');
+  const profile = read('mobile/src/screens/ProfileScreen.js');
+  const liveQrScanner = read('mobile/src/components/LiveQRScanner.js');
+  const home = read('mobile/src/screens/HomeScreen.js');
+  const sraHome = read('mobile/src/screens/sra/SRAHomeView.js');
+  const memberHome = read('mobile/src/screens/member/MemberHomeView.js');
+  const managerHome = read('mobile/src/screens/manager/ManagerHomeView.js');
+  const login = read('mobile/src/screens/auth/LoginScreen.js');
 
   assert.match(service, /initializeLanguage\(\)\.then\(setLang\)/);
+  assert.match(service, /tab_profile:\s*'Profayl'/);
   assert.match(selector, /await setLanguage\(selected\)/);
   assert.match(selector, /flexWrap:\s*'wrap'/);
   assert.match(selector, /minWidth:\s*0/);
@@ -77,4 +85,28 @@ test('language persistence and long-label layouts are guarded against regression
   assert.match(bottomTabs, /minHeight:\s*26/);
   assert.match(planner, /useTranslation\(\)/);
   assert.match(syncMonitor, /useTranslation\(\)/);
+  assert.match(profile, /t\('ticket_tab_history',\s*'History'\)/);
+  assert.match(profile, /numberOfLines=\{2\}[\s\S]*?minimumFontScale=\{0\.78\}/);
+  assert.match(profile, /ticketTabBtn:\s*\{[^}]*minWidth:\s*0/);
+  assert.doesNotMatch(profile, />\s*History\s*</);
+  assert.match(liveQrScanner, /useTranslation\(\)/);
+  assert.match(liveQrScanner, /t\('qr_upload_image',\s*'Upload QR Image'\)/);
+  assert.doesNotMatch(liveQrScanner, />\s*Upload QR Image\s*</);
+  assert.match(home, /t\('cloud_device_sync',\s*'Cloud & Device Sync'\)/);
+  assert.match(home, /t\('post_official_price'/);
+  assert.match(sraHome, /sectionTitleWrap:\s*\{\s*flex:\s*1\s*\}/);
+  assert.match(sraHome, /adjustsFontSizeToFit[\s\S]*?minimumFontScale=\{0\.75\}/);
+  assert.match(sraHome, /t\('sra_admin',\s*'SRA Admin'\)/);
+  assert.match(memberHome, /t\('no_plot_allocated'/);
+  assert.match(memberHome, /t\('awaiting_plot_assignment'/);
+  assert.match(memberHome, /fieldCardLeft:\s*\{[^}]*flex:\s*1/);
+  assert.match(memberHome, /fieldTitleRow:\s*\{[^}]*flexWrap:\s*'wrap'/);
+  assert.match(memberHome, /haBadge:\s*\{[^}]*flexShrink:\s*0/);
+  assert.match(memberHome, /formatStageName/);
+  assert.match(managerHome, /t\('manager_workspace_eyebrow'/);
+  assert.match(managerHome, /formatOperationName/);
+  assert.match(managerHome, /t\('manager_no_active_cycles'/);
+  assert.match(managerHome, /t\('member_activity_status'/);
+  assert.match(login, /flexWrap:\s*'wrap'/);
 });
+

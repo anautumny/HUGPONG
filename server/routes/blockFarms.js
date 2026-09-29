@@ -106,40 +106,57 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
     const ref = db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId);
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Block farm not found.' });
-    const existing = snapshot.data();
-    const managerUserId = req.body.managerUserId === undefined ? existing.managerUserId : nullableId(req.body.managerUserId);
-    if (managerUserId) {
-      const manager = await db.collection(COLLECTIONS.USERS).doc(managerUserId).get();
-      if (!manager.exists || manager.data().role !== ROLES.FARM_MANAGER) {
-        throw new Error('managerUserId must reference a Farm Manager.');
-      }
-    }
-    const payload = {
-      code: existing.code || blockFarmId,
-      name: req.body.name === undefined ? existing.name : requiredString(req.body.name, 'name', { max: 200 }),
-      location: req.body.location === undefined ? existing.location : requiredString(req.body.location, 'location', { max: 300 }),
-      declaredAreaHa: req.body.declaredAreaHa === undefined ? existing.declaredAreaHa : finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 }),
-      managerUserId,
-      status: existing.status,
-      createdAt: existing.createdAt,
-      updatedAt: nowIso(),
-      archivedAt: existing.archivedAt || null
-    };
-    await db.runTransaction(async transaction => {
+    const managerAssignmentRequested = req.body.managerUserId !== undefined;
+    const requestedManagerUserId = managerAssignmentRequested ? nullableId(req.body.managerUserId) : null;
+    const requestedName = req.body.name === undefined ? null : requiredString(req.body.name, 'name', { max: 200 });
+    const requestedLocation = req.body.location === undefined ? null : requiredString(req.body.location, 'location', { max: 300 });
+    const requestedAreaHa = req.body.declaredAreaHa === undefined
+      ? null
+      : finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 });
+    const payload = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Block farm not found.'), { status: 404 });
       const latest = latestSnapshot.data();
       assertBaseVersion(latest.updatedAt, mutationContext, blockFarmId, { id: blockFarmId, ...latest });
-      transaction.set(ref, payload);
+      const managerUserId = managerAssignmentRequested ? requestedManagerUserId : latest.managerUserId;
+      let managerFarms = null;
+      if (managerUserId) {
+        const manager = await transaction.get(db.collection(COLLECTIONS.USERS).doc(managerUserId));
+        if (!manager.exists
+          || canonicalRole(manager.data().role) !== ROLES.FARM_MANAGER
+          || String(manager.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+          throw new Error('managerUserId must reference an ACTIVE Farm Manager.');
+        }
+        managerFarms = await transaction.get(
+          db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', managerUserId)
+        );
+      }
+      const updatedAt = nowIso();
+      const nextPayload = {
+        code: latest.code || blockFarmId,
+        name: requestedName === null ? latest.name : requestedName,
+        location: requestedLocation === null ? latest.location : requestedLocation,
+        declaredAreaHa: requestedAreaHa === null ? latest.declaredAreaHa : requestedAreaHa,
+        managerUserId,
+        status: latest.status,
+        createdAt: latest.createdAt,
+        updatedAt,
+        archivedAt: latest.archivedAt || null
+      };
+      managerFarms?.docs
+        .filter(doc => doc.id !== blockFarmId)
+        .forEach(doc => transaction.update(doc.ref, { managerUserId: null, updatedAt }));
+      transaction.set(ref, nextPayload);
       queueAuditEvent(transaction, db, {
         eventType: 'BLOCK_FARM_UPDATED',
         actorUserId: req.session.user.employeeId || req.session.user.userId,
         entityType: 'BLOCK_FARM',
         entityId: blockFarmId,
         blockFarmId,
-        details: `Updated block farm ${payload.name}.`,
-        createdAt: payload.updatedAt
+        details: `Updated block farm ${nextPayload.name}${managerUserId ? ` and assigned Farm Manager ${managerUserId}` : ' and left it unassigned'}.`,
+        createdAt: updatedAt
       });
+      return nextPayload;
     });
     return res.json({ success: true, data: { id: blockFarmId, ...payload } });
   } catch (error) {

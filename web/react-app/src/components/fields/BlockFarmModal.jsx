@@ -189,6 +189,9 @@ export default function BlockFarmModal({
               <option key={mgr.id || mgr.employeeId} value={mgr.id || mgr.employeeId}>
                 {mgr.displayName || mgr.name || mgr.employeeId} ({mgr.employeeId || mgr.id})
                 {mgr.phone ? ` · ${mgr.phone}` : ''}
+                {mgr.assignment?.blockFarmName && mgr.assignment.blockFarmId !== farm?.id
+                  ? ` — currently ${mgr.assignment.blockFarmName}`
+                  : ''}
               </option>
             ))}
           </Select>

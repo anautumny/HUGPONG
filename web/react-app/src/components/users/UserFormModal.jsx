@@ -52,7 +52,17 @@ export default function UserFormModal({
     { value: '', label: 'Not assigned yet' },
     ...(Array.isArray(blockFarms) ? blockFarms : [])
       .filter(farm => farm && typeof farm === 'object' && farm.id && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-      .map(farm => ({ value: String(farm.id), label: String(farm.name || farm.id) }))
+      .map(farm => {
+        const assignedManagerId = String(farm.managerUserId || '').trim();
+        const isAssignedToAnotherManager = selectedRole === 'FARM_MANAGER'
+          && assignedManagerId
+          && assignedManagerId !== String(initialUser?.id || '').trim();
+        return {
+          value: String(farm.id),
+          label: `${String(farm.name || farm.id)}${isAssignedToAnotherManager ? ' (already assigned)' : ''}`,
+          disabled: Boolean(isAssignedToAnotherManager)
+        };
+      })
   ];
 
   useEffect(() => {
@@ -122,7 +132,8 @@ export default function UserFormModal({
           lastName: cleanLastName,
           suffix: cleanSuffix,
           phone: cleanPhone,
-          role: selectedRole
+          role: selectedRole,
+          ...(selectedRole === 'FARM_MANAGER' ? { blockFarmId } : {})
         };
         const res = await updateUser(initialUser.id, payload);
         if (res.success) {

@@ -1129,21 +1129,23 @@ const s = StyleSheet.create({
   fieldLabelRow: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 2 
+    alignItems: 'baseline', 
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4 
   },
   label: { 
     fontSize: 11.5, 
     fontWeight: '700', 
     color: COLORS.textSecondary, 
     textTransform: 'uppercase', 
-    letterSpacing: 0.5 
+    letterSpacing: 0.5,
+    flexShrink: 1,
   },
   subLabel: { 
     fontSize: 11, 
     color: COLORS.primary, 
     fontWeight: '600', 
-    flexShrink: 1, 
     textAlign: 'right' 
   },
   inputWrap: { 
