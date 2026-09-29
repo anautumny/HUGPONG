@@ -21,7 +21,7 @@ $env:DEVELOPMENT_TEST_PASSWORD = '<choose-a-unique-local-password>'
 npm.cmd run start
 ```
 
-`SMS_PROVIDER=console` is rejected when `NODE_ENV=production`. For production, set `SMS_PROVIDER=semaphore` and configure `SEMAPHORE_API_KEY` and `SEMAPHORE_SENDER_NAME` only in the server environment. There is no Semaphore-to-console fallback.
+`SMS_PROVIDER=console` is rejected when `NODE_ENV=production`. HUGPONG's active production configuration uses `SMS_PROVIDER=iprog` with `IPROG_SMS_API_TOKEN` stored only in the server environment. There is no provider-to-console fallback. Semaphore remains an optional explicitly configured rollback provider and is not the default production path.
 
 ## Create the minimal test topology
 

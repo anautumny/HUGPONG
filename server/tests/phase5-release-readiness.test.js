@@ -62,6 +62,23 @@ test('server, web, and mobile Firebase identities are deployment configuration',
   assert.doesNotMatch(mobile, /firebase\/firestore|\bdb\b/);
 });
 
+test('repository hygiene excludes generated mobile exports and client-side admin bootstrap scripts', () => {
+  const forbiddenPaths = [
+    'mobile/.expo-verification-output',
+    'mobile/.tmp-expo-field-fixes',
+    'mobile/cleanAndInitAdmin.js'
+  ];
+
+  for (const relativePath of forbiddenPaths) {
+    assert.equal(
+      fs.existsSync(path.join(root, relativePath)),
+      false,
+      `${relativePath} must not be committed or used as a privileged runtime entry point.`
+    );
+  }
+  assert.equal(fs.existsSync(path.join(root, 'server/scripts/bootstrapProductionSuperAdmin.js')), true);
+});
+
 test('one release command covers authority, server, web, and Android verification', () => {
   const rootPackage = JSON.parse(read('package.json'));
   const serverPackage = JSON.parse(read('server/package.json'));

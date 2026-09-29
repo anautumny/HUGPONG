@@ -38,6 +38,10 @@ out/
 # ------------------------------------------------------------------------------
 .expo/
 **/.expo/
+.expo-verification-output/
+**/.expo-verification-output/
+.tmp-expo-*/
+**/.tmp-expo-*/
 expo-env.d.ts
 .metro-health-check*
 .kotlin/

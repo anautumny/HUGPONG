@@ -120,7 +120,7 @@ Accounts created before this invariant are handled by the dry-run-first Phase 4 
 
 ### `server_sessions/{sessionId}` — server only
 
-Production browser sessions are stored here by Express. Records contain the serialized HttpOnly session, an expiry timestamp/epoch, and an update timestamp. Firestore client access is always denied; production should enable Firestore TTL cleanup on `expiresAt`.
+Production browser sessions are stored here by Express. Records contain the serialized HttpOnly session, an expiry timestamp/epoch, and an update timestamp. Firestore client access is always denied. The production server's bounded operational cleanup removes records whose `expiresAt` has passed.
 
 ### `security_rate_limits/{limitId}` — server only
 
@@ -136,9 +136,13 @@ remaining lock duration. High-volume generic request limits are deliberately
 kept in a bounded in-memory gateway store so rejected bot traffic does not
 produce a Firestore read/write for every request.
 
+Each persistent limiter record has a server-owned `deleteAfter` value. The
+production cleanup removes it after the enforcement window and one-day
+retention period have elapsed.
+
 ### `password_recovery_challenges/{challengeId}` — server only
 
-Forgot-password codes and reset grants are persisted here so recovery remains authoritative across API instances and restarts. Raw SMS codes and reset tokens are never stored; the server stores HMAC digests, expiry/attempt state, the account's issuance-time `authVersion`, and one-time-use status. Successful recovery atomically updates `user_credentials`, increments the user's `authVersion`, consumes the challenge, and writes an audit event. Firestore client access is always denied. Production should enable Firestore TTL cleanup on `deleteAfter`.
+Forgot-password codes and reset grants are persisted here so recovery remains authoritative across API instances and restarts. Raw SMS codes and reset tokens are never stored; the server stores HMAC digests, expiry/attempt state, the account's issuance-time `authVersion`, and one-time-use status. Successful recovery atomically updates `user_credentials`, increments the user's `authVersion`, consumes the challenge, and writes an audit event. Firestore client access is always denied. The production cleanup removes challenges after their server-owned `deleteAfter` value has passed.
 
 ### `block_farms/{blockFarmId}`
 
@@ -468,6 +472,7 @@ For new publications, `sugarPriceChange` and `molassesPriceChange` are calculate
   connectionState: "ONLINE" | "OFFLINE" | "UNKNOWN",
   syncReportedAt: string | null,
   telemetryReportedAt: string | null,
+  deleteAfter: timestamp,             // 14 days after the latest report
   createdAt: string,
   updatedAt: string
 }
@@ -499,7 +504,8 @@ device-history metadata and never promoted to a successful canonical sync.
   statusCode: number,
   errorCode: string,
   source: "SERVER" | "CLIENT" | "CLIENT_TELEMETRY",
-  technicalError: string            // sanitized; no stack trace or secrets
+  technicalError: string,           // sanitized; no stack trace or secrets
+  deleteAfter: timestamp            // 14 days after the event
 }
 ```
 
@@ -508,6 +514,11 @@ business and security actions, while Diagnostics records technical failures, syn
 issues, database/API problems, and QR failures. Only Firebase Admin writes it and
 only the Super Admin web API may read it. Passwords, keys, tokens, credentials,
 session secrets, private keys, and unnecessary personal data are prohibited.
+
+Expired sessions, recovery challenges, persistent rate limits, device telemetry,
+and diagnostic events are removed by the production server every six hours in
+bounded pages. This free-tier cleanup is the active retention mechanism; managed
+Firestore TTL is not required.
 
 ### `backup_operations/{backupOperationId}` — server only
 

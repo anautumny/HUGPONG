@@ -35,9 +35,8 @@ HOST=0.0.0.0
 PORT=<provider-assigned port>
 CORS_ORIGINS=https://app.your-hugpong-domain.example
 SESSION_SECRET=<random value of at least 32 characters>
-SMS_PROVIDER=semaphore
-SEMAPHORE_API_KEY=<secret>
-SEMAPHORE_SENDER_NAME=<approved sender>
+SMS_PROVIDER=iprog
+IPROG_SMS_API_TOKEN=<server-only secret>
 GOOGLE_APPLICATION_CREDENTIALS=<provider-managed credential path, when workload identity is unavailable>
 ```
 
