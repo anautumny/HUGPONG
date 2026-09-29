@@ -43,6 +43,16 @@ const mobileAppConfig = read('mobile/app.json');
 const stages = JSON.parse(read('mobile/src/constants/cropStages.json'));
 const { buildOperationLog } = require('../schema/firestoreSchema');
 
+test('Android launcher icon uses a dedicated safe-area foreground without changing splash branding', () => {
+  const expoConfig = JSON.parse(mobileAppConfig).expo;
+  assert.equal(expoConfig.icon, './assets/icon-foreground.png');
+  assert.equal(expoConfig.android.adaptiveIcon.foregroundImage, './assets/icon-foreground.png');
+  assert.equal(expoConfig.android.adaptiveIcon.backgroundColor, '#F7F9F4');
+  assert.equal(fs.existsSync(path.join(root, 'mobile/assets/icon-foreground.png')), true);
+  const splashPlugin = expoConfig.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen');
+  assert.equal(splashPlugin[1].image, './assets/HUGPONG LOGO.png');
+});
+
 test('manual, automatic, and status UI share the canonical durable outbox', () => {
   assert.match(read('mobile/src/services/storageService.js'), /OUTBOX:\s*'@hugpong_outbox'/);
   assert.match(read('mobile/src/services/storageService.js'), /localOutboxStorageKey/);

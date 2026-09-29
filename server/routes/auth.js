@@ -170,7 +170,7 @@ async function findUser(identifier) {
 async function buildSessionUser(userId, user) {
   const role = canonicalRole(user.role);
   if (!role) throw new Error('Account has an invalid role.');
-  const assignments = await resolveAccountAssignments(db, userId, role);
+  const assignments = await resolveAccountAssignments(db, userId, role, user);
   const requiresPasswordChange = user.requiresPasswordChange === true;
   return {
     employeeId: userId,

@@ -29,10 +29,15 @@ router.get('/', requireAuth, async (req, res) => {
       query = query.where('managerUserId', '==', actorId);
     } else if (role === ROLES.MEMBER_FARMER) {
       const fields = await db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', actorId).get();
-      const farmIds = Array.from(new Set(fields.docs.map(doc => doc.data().blockFarmId).filter(Boolean)));
+      const farmIds = Array.from(new Set([
+        req.session.user.blockFarmId,
+        ...fields.docs.map(doc => doc.data().blockFarmId)
+      ].filter(Boolean)));
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
-      const data = farms.filter(doc => doc.exists).map(doc => ({ ...doc.data(), id: doc.id }))
+      const data = farms
+        .filter(doc => doc.exists && String(doc.data().status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+        .map(doc => ({ ...doc.data(), id: doc.id }))
         .sort((left, right) => String(left.id).localeCompare(String(right.id)));
       return res.json({ success: true, count: data.length, data });
     } else if (role !== ROLES.SRA_ADMIN) {

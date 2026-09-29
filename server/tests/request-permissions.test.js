@@ -128,8 +128,40 @@ test('active database assignments replace stale session assignment claims', asyn
   const assignments = await resolveAccountAssignments(database, '03000001', ROLES.FARM_MANAGER);
   assert.deepEqual(assignments, { blockFarmId: 'BF-NEW', fieldId: '' });
   const middleware = fs.readFileSync(path.join(root, 'server', 'middleware', 'auth.js'), 'utf8');
-  assert.match(middleware, /resolveAccountAssignments\(db, userId, currentRole\)/);
+  assert.match(middleware, /resolveAccountAssignments\(db, userId, currentRole, account\)/);
   assert.doesNotMatch(middleware, /blockFarmId: presented\.blockFarmId/);
+});
+
+test('an active member affiliation remains authoritative before plot allocation', async () => {
+  const database = {
+    collection(name) {
+      return {
+        where() {
+          return { async get() { return { docs: [] }; } };
+        },
+        doc(id) {
+          return {
+            async get() {
+              const activeFarm = name === 'block_farms' && id === 'BF-AFFILIATED';
+              return {
+                id,
+                exists: activeFarm,
+                data: () => activeFarm ? { status: 'ACTIVE' } : undefined
+              };
+            }
+          };
+        }
+      };
+    }
+  };
+
+  const assignments = await resolveAccountAssignments(
+    database,
+    '04000001',
+    ROLES.MEMBER_FARMER,
+    { affiliatedBlockFarmId: 'BF-AFFILIATED' }
+  );
+  assert.deepEqual(assignments, { blockFarmId: 'BF-AFFILIATED', fieldId: '' });
 });
 
 test('every authentication route is either protected or explicitly public and throttled', () => {

@@ -46,6 +46,22 @@ test('member registration is optional-farm while approval requires an SRA-confir
   assert.match(pendingQueue, /onApproveUser\(user, selectedFarmId\)/);
 });
 
+test('approved affiliation is visible on Web and Mobile before a field is allocated', () => {
+  const authorization = read('server/services/accountAuthorization.js');
+  const blockFarmRoute = read('server/routes/blockFarms.js');
+  const directory = read('server/services/userDirectoryService.js');
+  const webDirectory = read('web/react-app/src/components/users/UserTable.jsx');
+  const mobileProfile = read('mobile/src/screens/ProfileScreen.js');
+
+  assert.match(authorization, /activeAffiliatedBlockFarmId/);
+  assert.match(blockFarmRoute, /req\.session\.user\.blockFarmId/);
+  assert.match(directory, /MEMBER_AFFILIATION/);
+  assert.match(directory, /Awaiting plot allocation/);
+  assert.match(webDirectory, /assignment\?\.displayLabel/);
+  assert.match(mobileProfile, /session\?\.blockFarmId \|\| session\?\.affiliatedBlockFarmId/);
+  assert.match(mobileProfile, /memberFarm \|\| sessionFarm/);
+});
+
 test('web and mobile onboarding both submit structured names', () => {
   const webForm = read('web/react-app/src/components/users/UserFormModal.jsx');
   const mobileStore = read('mobile/src/data/dataStore.js');

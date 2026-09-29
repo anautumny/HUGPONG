@@ -48,7 +48,10 @@ export default function ProfileScreen({ navigation }) {
   const memberFields = fields.filter(field => field.memberUserId === sessionUserId);
   const managedFarm = blockFarms.find(farm => farm.managerUserId === sessionUserId);
   const memberFarm = blockFarms.find(farm => farm.id === memberFields[0]?.blockFarmId);
-  const assignedFarm = session?.role === 'Farm Manager' ? managedFarm : memberFarm;
+  const sessionFarm = blockFarms.find(farm => farm.id === (session?.blockFarmId || session?.affiliatedBlockFarmId));
+  const assignedFarm = session?.role === 'Farm Manager'
+    ? (managedFarm || sessionFarm)
+    : (memberFarm || sessionFarm);
   const ticketCreationAllowed = canCreateSupportTicket(session?.canonicalRole || session?.role || session?.roleKey);
   const activeTickets = ticketsList.filter(ticket => ['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));
   const ticketHistory = ticketsList.filter(ticket => ['RESOLVED', 'CLOSED'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));

@@ -123,6 +123,29 @@ test('new members resolve after a canonical Field assignment and orphaned refere
   assert.doesNotMatch(orphaned.assignment.displayLabel, /^Unassigned$/);
 });
 
+test('approved member affiliation is displayed while plot allocation is pending', async () => {
+  const affiliatedUser = {
+    id: '04000003',
+    displayName: 'Affiliated Member',
+    role: 'MEMBER_FARMER',
+    status: 'ACTIVE',
+    affiliatedBlockFarmId: 'DEV-BF-001'
+  };
+  const local = resolveDirectoryAssignments([affiliatedUser], farms, [])[0];
+  assert.equal(local.assignment.status, ASSIGNMENT_STATUS.RESOLVED);
+  assert.equal(local.assignment.type, 'MEMBER_AFFILIATION');
+  assert.equal(local.assignment.blockFarmId, 'DEV-BF-001');
+  assert.match(local.assignment.displayLabel, /Development Test Block Farm/);
+  assert.match(local.assignment.displayLabel, /Awaiting plot allocation/);
+
+  const database = fakeDatabase({
+    block_farms: Object.fromEntries(farms.map(record => [record.id, record])),
+    fields: {}
+  });
+  const remote = (await resolveDirectoryAssignmentsFromDatabase(database, [affiliatedUser]))[0];
+  assert.deepEqual(remote.assignment, local.assignment);
+});
+
 test('the API owns assignment resolution and clients consume the same response metadata', () => {
   const route = read('server/routes/users.js');
   const webTable = read('web/react-app/src/components/users/UserTable.jsx');

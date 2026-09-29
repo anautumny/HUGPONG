@@ -66,7 +66,28 @@ function resolveAssignment(user, blockFarms, fields) {
       .filter(field => active(field) && String(field.memberUserId || '').trim() === userId)
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     if (memberFields.length === 0) {
-      return assignment(ASSIGNMENT_STATUS.UNASSIGNED, 'MEMBER_FIELD', 'Unassigned');
+      const affiliatedBlockFarmId = String(user.affiliatedBlockFarmId || '').trim();
+      if (!affiliatedBlockFarmId) {
+        return assignment(ASSIGNMENT_STATUS.UNASSIGNED, 'MEMBER_FIELD', 'Unassigned');
+      }
+      const affiliatedFarm = farmMap.get(affiliatedBlockFarmId);
+      if (!affiliatedFarm || !active(affiliatedFarm)) {
+        return assignment(
+          ASSIGNMENT_STATUS.ORPHANED,
+          'MEMBER_AFFILIATION',
+          'Affiliated Block Farm unavailable',
+          { blockFarmId: affiliatedBlockFarmId }
+        );
+      }
+      return assignment(
+        ASSIGNMENT_STATUS.RESOLVED,
+        'MEMBER_AFFILIATION',
+        `${affiliatedFarm.name || affiliatedFarm.id} · Awaiting plot allocation`,
+        {
+          blockFarmId: affiliatedFarm.id,
+          blockFarmName: affiliatedFarm.name || affiliatedFarm.id
+        }
+      );
     }
 
     const fieldIds = sortedUnique(memberFields.map(field => field.id));
@@ -150,7 +171,10 @@ async function resolveDirectoryAssignmentsFromDatabase(database, users = []) {
   const referencedFarms = await getDocumentsById(
     database,
     COLLECTIONS.BLOCK_FARMS,
-    memberFields.map(field => field.blockFarmId)
+    [
+      ...memberFields.map(field => field.blockFarmId),
+      ...users.map(user => user.affiliatedBlockFarmId)
+    ]
   );
   const farmsById = new Map([...managerFarms, ...referencedFarms].map(farm => [farm.id, farm]));
   return resolveDirectoryAssignments(users, Array.from(farmsById.values()), memberFields);

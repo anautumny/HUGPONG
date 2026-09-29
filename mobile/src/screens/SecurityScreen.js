@@ -11,7 +11,8 @@ import {
   requestUserMobileNumberChange,
   confirmUserMobileNumberChange,
   updateUserPassword, 
-  subscribe 
+  subscribe,
+  blockFarms
 } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { PASSWORD_POLICY_HINT, passwordPolicy, passwordPolicyError } from '../domain/passwordPolicy';
@@ -181,6 +182,8 @@ export default function SecurityScreen({ navigation }) {
 
   const userEmployeeId = session?.employeeId || session?.userId || session?.contact || '—';
   const userMobile = session?.mobile || session?.contact || '—';
+  const assignedBlockFarm = blockFarms.find(farm => farm.id === (session?.blockFarmId || session?.affiliatedBlockFarmId));
+  const assignedBlockFarmName = assignedBlockFarm?.name || session?.farm || session?.blockFarm || 'No block farm assigned';
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -203,7 +206,7 @@ export default function SecurityScreen({ navigation }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.userName}>{session?.name || 'HUGPONG User'}</Text>
-              <Text style={s.userRole}>{session?.role || 'Farm Member'} · {session?.farm || session?.blockFarm || 'No block farm assigned'}</Text>
+              <Text style={s.userRole}>{session?.role || 'Farm Member'} · {assignedBlockFarmName}</Text>
             </View>
           </View>
 

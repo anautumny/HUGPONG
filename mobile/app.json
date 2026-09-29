@@ -4,11 +4,11 @@
     "slug": "hugpong",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/HUGPONG LOGO.png",
+    "icon": "./assets/icon-foreground.png",
     "userInterfaceStyle": "light",
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/HUGPONG LOGO.png",
+        "foregroundImage": "./assets/icon-foreground.png",
         "backgroundColor": "#F7F9F4"
       },
       "package": "com.hugpong.app",

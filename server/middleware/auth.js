@@ -70,7 +70,7 @@ async function requireAuth(req, res, next) {
     if ((sessionPlatform && sessionPlatform !== requestPlatform) || !isRoleAllowedOnPlatform(currentRole, requestPlatform)) {
       return res.status(403).json({ success: false, error: 'This account is not authorized for the requested platform.', code: 'PLATFORM_FORBIDDEN' });
     }
-    const assignments = await resolveAccountAssignments(db, userId, currentRole);
+    const assignments = await resolveAccountAssignments(db, userId, currentRole, account);
 
     const user = {
       employeeId: userId,
