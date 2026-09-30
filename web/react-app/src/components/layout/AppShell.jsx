@@ -111,7 +111,7 @@ export default function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg text-hug-text font-sans print:h-auto print:overflow-visible print:bg-white print:block">
+    <div className="app-shell flex h-screen min-h-0 overflow-hidden bg-bg text-hug-text font-sans print:h-auto print:overflow-visible print:bg-white print:block">
       {/* Desktop Persistent Sidebar */}
       <div className="hidden lg:block h-full flex-shrink-0 print:hidden no-print">
         <Sidebar
@@ -147,7 +147,7 @@ export default function AppShell() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden print:h-auto print:overflow-visible print:block">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden print:h-auto print:overflow-visible print:block">
         <div className="print:hidden no-print">
           <Topbar onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
         </div>
@@ -166,7 +166,7 @@ export default function AppShell() {
         {/* Page Content Outlet without forced card wrapping */}
         <main
           id="page-content"
-          className="flex-1 min-w-0 w-full overflow-y-auto p-4 sm:p-6 pb-20 lg:pb-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
+          className="flex-1 min-w-0 min-h-0 w-full overflow-y-auto p-4 sm:p-6 pb-20 lg:pb-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
           tabIndex={-1}
         >
           <Outlet />

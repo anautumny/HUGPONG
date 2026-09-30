@@ -104,8 +104,8 @@ export default function RegisterScreen({ navigation }) {
   const [verificationCode, setVerificationCode] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
-  const [staffVerificationToken, setStaffVerificationToken] = useState('');
-  const [staffVerificationRequested, setStaffVerificationRequested] = useState(false);
+  const [phoneVerificationRequestToken, setPhoneVerificationRequestToken] = useState('');
+  const [phoneVerificationRequested, setPhoneVerificationRequested] = useState(false);
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -147,8 +147,8 @@ export default function RegisterScreen({ navigation }) {
     { title: t('reg_step_farm', 'Block Farm'), sub: t('reg_step_farm_sub', 'Select it if known, or continue unassigned') },
     { 
       title: t('reg_step_contact', 'Contact Number'), 
-      sub: staffVerificationRequested
-        ? t('reg_staff_verification_pending_sub', 'Your phone will be checked by authorized staff')
+      sub: phoneVerificationRequested
+        ? t('reg_phone_verification_pending_sub', 'Your phone will be checked by an authorized reviewer')
         : (codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : t('reg_contact_sub'))
     },
     { title: t('reg_step_password', 'Set Password'), sub: t('reg_step_password_sub', 'Secure your HUGPONG account') },
@@ -175,7 +175,7 @@ export default function RegisterScreen({ navigation }) {
       setLoading(false);
 
       if (smsResult.success) {
-        setStaffVerificationToken(String(smsResult.data?.staffVerificationToken || ''));
+        setPhoneVerificationRequestToken(String(smsResult.data?.phoneVerificationRequestToken || ''));
         setCodeSent(true);
         setCountdown(Math.max(0, Number(smsResult.resendAfterSeconds || 0)));
         setCodeRequestsRemaining(Math.max(0, Number(smsResult.codeRequestsRemaining ?? 0)));
@@ -189,8 +189,8 @@ export default function RegisterScreen({ navigation }) {
       }
     } catch (err) {
       setLoading(false);
-      const fallbackToken = String(err.data?.staffVerificationToken || '');
-      if (fallbackToken) setStaffVerificationToken(fallbackToken);
+      const fallbackToken = String(err.data?.phoneVerificationRequestToken || '');
+      if (fallbackToken) setPhoneVerificationRequestToken(fallbackToken);
       if (err.data?.retryAfterSeconds) {
         setCountdown(Math.max(0, Number(err.data.retryAfterSeconds)));
         setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));
@@ -201,9 +201,9 @@ export default function RegisterScreen({ navigation }) {
         fallbackToken ? [
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
           {
-            text: t('reg_staff_verification_action', 'Request Staff Verification'),
+            text: t('reg_phone_verification_action', 'Request Phone Verification Review'),
             onPress: () => {
-              setStaffVerificationRequested(true);
+              setPhoneVerificationRequested(true);
               setCodeSent(false);
               setVerificationCode('');
               setStep(4);
@@ -214,12 +214,12 @@ export default function RegisterScreen({ navigation }) {
     }
   };
 
-  const continueWithStaffVerification = () => {
-    if (!staffVerificationToken) {
-      Alert.alert(t('reg_sms_unavailable_title'), t('reg_staff_verification_retry', 'Try sending the SMS first so the server can authorize a staff-verification request.'));
+  const continueWithPhoneVerificationReview = () => {
+    if (!phoneVerificationRequestToken) {
+      Alert.alert(t('reg_sms_unavailable_title'), t('reg_phone_verification_retry', 'Try sending the SMS first so the server can authorize a phone-verification review request.'));
       return;
     }
-    setStaffVerificationRequested(true);
+    setPhoneVerificationRequested(true);
     setCodeSent(false);
     setVerificationCode('');
     setErrors(p => ({ ...p, contactNumber: null, verificationCode: null }));
@@ -255,8 +255,8 @@ export default function RegisterScreen({ navigation }) {
       const cleaned = form.contactNumber.replace(/[^0-9]/g, '');
       if (!cleaned.startsWith('09') || cleaned.length !== 11) {
         e.contactNumber = t('auth_enter_valid_phone', 'Enter a valid 11-digit PH mobile number (09XXXXXXXXX)');
-      } else if (!codeVerified && !staffVerificationRequested) {
-        e.contactNumber = t('reg_verify_needed', 'Please verify your mobile number with SMS or request staff verification');
+      } else if (!codeVerified && !phoneVerificationRequested) {
+        e.contactNumber = t('reg_verify_needed', 'Please verify your mobile number with SMS or request a phone verification review');
       }
     }
     if (step === 4) {
@@ -286,7 +286,7 @@ export default function RegisterScreen({ navigation }) {
     try {
       const res = await registerUser({
         ...form,
-        staffVerificationToken: staffVerificationRequested ? staffVerificationToken : ''
+        phoneVerificationRequestToken: phoneVerificationRequested ? phoneVerificationRequestToken : ''
       });
       setLoading(false);
       if (!res?.success) {
@@ -312,11 +312,11 @@ export default function RegisterScreen({ navigation }) {
 
   const handleMainButtonPress = () => {
     if (step === 3) {
-      if (!codeSent && !staffVerificationRequested) {
+      if (!codeSent && !phoneVerificationRequested) {
         handleSendCode();
         return;
       }
-      if (!codeVerified && !staffVerificationRequested) {
+      if (!codeVerified && !phoneVerificationRequested) {
         handleVerifyCode();
         return;
       }
@@ -327,7 +327,7 @@ export default function RegisterScreen({ navigation }) {
   const getMainButtonInfo = () => {
     if (loading) return { text: 'Creating account...', icon: null };
     if (step === 3) {
-      if (staffVerificationRequested) return { text: t('reg_btn_continue', 'Continue'), icon: 'arrow-forward' };
+      if (phoneVerificationRequested) return { text: t('reg_btn_continue', 'Continue'), icon: 'arrow-forward' };
       if (!codeSent) return { text: t('reg_btn_send_code', 'Send Code via SMS'), icon: 'chatbubble-ellipses-outline' };
       if (!codeVerified) return { text: t('reg_btn_verify_continue', 'Verify & Continue'), icon: 'shield-checkmark-outline' };
     }
@@ -336,7 +336,7 @@ export default function RegisterScreen({ navigation }) {
   };
 
   const back = () => {
-    if (step === 3 && codeSent && !codeVerified && !staffVerificationRequested) {
+    if (step === 3 && codeSent && !codeVerified && !phoneVerificationRequested) {
       setCodeSent(false);
       setVerificationCode('');
       return;
@@ -449,18 +449,18 @@ export default function RegisterScreen({ navigation }) {
 
             {/* STEP 3: CONTACT NUMBER */}
             {step === 3 && <>
-              {staffVerificationRequested ? (
+              {phoneVerificationRequested ? (
                 <View style={s.verifiedCard}>
                   <Ionicons name="people-circle-outline" size={24} color={COLORS.primary} />
                   <View style={{ flex: 1 }}>
-                    <Text style={s.verifiedTitle}>{t('reg_staff_verification_pending', 'Staff Verification Requested')}</Text>
+                    <Text style={s.verifiedTitle}>{t('reg_phone_verification_pending', 'Phone Verification Review Requested')}</Text>
                     <Text style={s.verifiedPhone}>+63 {form.contactNumber.slice(1)}</Text>
-                    <Text style={s.staffVerificationText}>{t('reg_staff_verification_pending_help', 'Your account will remain pending until an SRA Admin or Super Admin checks your identity and SIM ownership.')}</Text>
+                    <Text style={s.phoneVerificationText}>{t('reg_phone_verification_pending_help', 'Your selected Farm Manager can verify you. Without a selected Block Farm, an SRA Admin or Super Admin must review your number.')}</Text>
                   </View>
                   <TouchableOpacity
                     onPress={() => {
-                      setStaffVerificationRequested(false);
-                      setStaffVerificationToken('');
+                      setPhoneVerificationRequested(false);
+                      setPhoneVerificationRequestToken('');
                     }}
                     style={{ padding: 4 }}
                   >
@@ -475,8 +475,8 @@ export default function RegisterScreen({ navigation }) {
                       value={form.contactNumber} 
                       onChangeText={v => {
                         set('contactNumber', v);
-                        setStaffVerificationToken('');
-                        setStaffVerificationRequested(false);
+                        setPhoneVerificationRequestToken('');
+                        setPhoneVerificationRequested(false);
                         setErrors(p => ({ ...p, contactNumber: null }));
                       }}
                       placeholder="09XX XXX XXXX" 
@@ -540,15 +540,15 @@ export default function RegisterScreen({ navigation }) {
                       </Text>
                     </TouchableOpacity>
                   </View>
-                  {staffVerificationToken ? (
+                  {phoneVerificationRequestToken ? (
                     <TouchableOpacity
-                      onPress={continueWithStaffVerification}
-                      style={s.staffVerificationBtn}
+                      onPress={continueWithPhoneVerificationReview}
+                      style={s.phoneVerificationBtn}
                     >
                       <Ionicons name="people-outline" size={16} color={COLORS.primary} />
                       <View style={{ flex: 1 }}>
-                        <Text style={s.staffVerificationTitle}>{t('reg_staff_verification_action', 'Request Staff Verification')}</Text>
-                        <Text style={s.staffVerificationText}>{t('reg_staff_verification_help', 'Use this if Smart/TNT or another network did not deliver the code. An SRA Admin or Super Admin must verify you before activation.')}</Text>
+                        <Text style={s.phoneVerificationTitle}>{t('reg_phone_verification_action', 'Request Phone Verification Review')}</Text>
+                        <Text style={s.phoneVerificationText}>{t('reg_phone_verification_help', 'Use this if Smart/TNT or another network did not deliver the code. A reviewer authorized for your selected Block Farm can verify it.')}</Text>
                       </View>
                     </TouchableOpacity>
                   ) : null}
@@ -808,9 +808,9 @@ const s = StyleSheet.create({
   btn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   btnDisabled: { opacity: 0.6 },
   btnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  staffVerificationBtn: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primaryBg, marginTop: 8 },
-  staffVerificationTitle: { fontSize: 12.5, fontWeight: '800', color: COLORS.primary },
-  staffVerificationText: { fontSize: 11, lineHeight: 16, color: COLORS.textSecondary, marginTop: 2 },
+  phoneVerificationBtn: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primaryBg, marginTop: 8 },
+  phoneVerificationTitle: { fontSize: 12.5, fontWeight: '800', color: COLORS.primary },
+  phoneVerificationText: { fontSize: 11, lineHeight: 16, color: COLORS.textSecondary, marginTop: 2 },
   otpSentBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.primaryBg, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primary + '30' },
   otpSentLabel: { fontSize: 11, color: COLORS.textMuted, fontWeight: '500' },
   otpSentPhone: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginTop: 2 },

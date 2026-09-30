@@ -13,7 +13,7 @@ import * as Sharing from 'expo-sharing';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { SearchableSelect, ScreenHeader } from '../components/ui';
-import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, getSraCertifiedAuditHistory, getSraOfflineSnapshotStatus, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, rejectPendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
+import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, archiveFieldCropCycle, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, getSraCertifiedAuditHistory, getSraOfflineSnapshotStatus, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
 import { getItem, saveItem, STORAGE_KEYS, lastScannedAuditStorageKey, pendingAuditReferenceStorageKey } from '../services/storageService';
 import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
@@ -23,6 +23,7 @@ import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import OfflineQRCode from '../components/OfflineQRCode';
 import LiveQRScanner from '../components/LiveQRScanner';
+import ProvisionUserModal from '../components/ProvisionUserModal';
 import {
   AUDIT_STATUS, AUDIT_QR_SCHEMA_VERSION, canonicalAuditStatus, createAuditQrPayload, createLegacyAuditQrPayload,
   decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts,
@@ -52,6 +53,11 @@ import {
   writeArchiveClearViewPreference
 } from '../services/archiveViewService';
 import { exportAuditReportPdf } from '../services/auditPdfService';
+import {
+  DEFAULT_PHONE_VERIFICATION_REASON,
+  PHONE_VERIFICATION_REASONS,
+  isOtherPhoneVerificationReason
+} from '../domain/phoneVerification';
 
 const { height, width } = Dimensions.get('window');
 const INITIAL_STAGES = INITIAL_CROP_STAGES;
@@ -1305,9 +1311,12 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [requests, setRequests] = useState(assignmentRequests);
   const [pendingUsersList, setPendingUsersList] = useState(pendingUsers);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  const [showProvisionUserModal, setShowProvisionUserModal] = useState(false);
   const [pendingActionLoading, setPendingActionLoading] = useState(false);
   const [pendingFarmSelections, setPendingFarmSelections] = useState({});
-  const [pendingVerificationReasons, setPendingVerificationReasons] = useState({});
+  const [pendingVerificationReasonCodes, setPendingVerificationReasonCodes] = useState({});
+  const [pendingVerificationReasonDetails, setPendingVerificationReasonDetails] = useState({});
+  const [pendingVerificationDecisions, setPendingVerificationDecisions] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date(2026, 4, 21));
   const [showAddField, setShowAddField] = useState(false);
@@ -7171,17 +7180,17 @@ export default function FieldOpsScreen({ navigation, route }) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScreenHeader
-          title="Pending Registrations"
-          subtitle={`${pendingUsersList.length} applicant(s) awaiting allocation`}
+          title="Pending Users"
+          subtitle={`${pendingUsersList.length} account(s) awaiting approval or phone verification`}
           onBackPress={() => setShowPendingModal(false)}
         />
         <ScrollView style={{ paddingHorizontal: SPACING.lg, paddingBottom: 20 }}>
             {pendingUsersList.length === 0 ? (
               <View style={{ padding: 28, alignItems: 'center', justifyContent: 'center' }}>
                 <Ionicons name="checkmark-circle-outline" size={44} color={COLORS.success} />
-                <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text, marginTop: 8 }}>All Registrations Processed</Text>
+                <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.text, marginTop: 8 }}>All Pending Users Processed</Text>
                 <Text style={{ fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4 }}>
-                  No pending Farm Member applications in queue.
+                  No account approvals or phone-verification reviews are waiting in your scope.
                 </Text>
               </View>
             ) : (
@@ -7191,9 +7200,21 @@ export default function FieldOpsScreen({ navigation, route }) {
                   || blockFarms.find(farm => farm.name === u.blockFarm)?.id
                   || '';
                 const selectedPendingFarmId = pendingFarmSelections[pendingKey] ?? requestedFarmId;
-                const requiresStaffVerification = u.phoneVerified !== true;
-                const canStaffVerify = canonicalRole(session?.role) === 'SRA_ADMIN';
-                const staffVerificationReason = pendingVerificationReasons[pendingKey] || '';
+                const isPendingRegistration = String(u.status || '').toUpperCase() === 'PENDING';
+                const requiresPhoneVerification = u.phoneVerified !== true;
+                const actorRole = canonicalRole(session?.role || session?.roleKey);
+                const targetRole = canonicalRole(u.canonicalRole || u.role) || 'MEMBER_FARMER';
+                const reviewFarmId = requestedFarmId || u.affiliatedBlockFarmId || u.assignment?.blockFarmId || '';
+                const managerOwnsReviewFarm = blockFarms.some(farm => (
+                  String(farm.id) === String(reviewFarmId)
+                  && String(farm.managerUserId || '').trim() === String(session?.employeeId || session?.id || '').trim()
+                ));
+                const canVerifyPhone = actorRole === 'SUPER_ADMIN'
+                  || (actorRole === 'SRA_ADMIN' && ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole))
+                  || (actorRole === 'FARM_MANAGER' && targetRole === 'MEMBER_FARMER' && managerOwnsReviewFarm);
+                const verificationReasonCode = pendingVerificationReasonCodes[pendingKey] || DEFAULT_PHONE_VERIFICATION_REASON;
+                const verificationReasonDetails = pendingVerificationReasonDetails[pendingKey] || '';
+                const verificationDecision = pendingVerificationDecisions[pendingKey] || 'NOW';
                 return (
                 <View key={u.contact} style={{
                   backgroundColor: '#fff',
@@ -7228,6 +7249,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     </Text>
                   </View>
 
+                  {isPendingRegistration && <>
                   <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text, marginTop: 4, marginBottom: 6 }}>Assign Block Farm</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                     {blockFarms.filter(farm => String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE').map(farm => {
@@ -7256,26 +7278,75 @@ export default function FieldOpsScreen({ navigation, route }) {
                   {!selectedPendingFarmId && (
                     <Text style={{ color: '#B45309', fontSize: 10.5, marginBottom: 8 }}>Select the member's Block Farm before approval.</Text>
                   )}
+                  </>}
 
-                  {requiresStaffVerification && (
+                  {requiresPhoneVerification && (
                     <View style={{ backgroundColor: '#FFF7E6', borderWidth: 1, borderColor: '#F3C969', borderRadius: RADIUS.md, padding: 10, marginTop: 4 }}>
                       <Text style={{ color: '#92400E', fontSize: 11.5, fontWeight: '800' }}>Phone not verified by SMS</Text>
-                      {canStaffVerify ? (
+                      {canVerifyPhone ? (
                         <>
-                          <TextInput
-                            value={staffVerificationReason}
-                            onChangeText={value => setPendingVerificationReasons(current => ({ ...current, [pendingKey]: value }))}
-                            editable={!pendingActionLoading}
-                            maxLength={500}
-                            multiline
-                            placeholder="Describe how the applicant's identity and SIM ownership were checked."
-                            placeholderTextColor={COLORS.textMuted}
-                            style={{ marginTop: 7, minHeight: 64, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: RADIUS.md, padding: 9, fontSize: 11.5, color: COLORS.text, textAlignVertical: 'top' }}
-                          />
-                          <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 5 }}>This verification and reason will be recorded in the audit trail.</Text>
+                          <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800', marginTop: 7, marginBottom: 5 }}>Verification reason</Text>
+                          <View style={{ gap: 5 }}>
+                            {PHONE_VERIFICATION_REASONS.map(reason => {
+                              const selected = verificationReasonCode === reason.value;
+                              return (
+                                <TouchableOpacity
+                                  key={reason.value}
+                                  disabled={pendingActionLoading}
+                                  onPress={() => setPendingVerificationReasonCodes(current => ({ ...current, [pendingKey]: reason.value }))}
+                                  style={{
+                                    borderWidth: 1,
+                                    borderColor: selected ? COLORS.primary : COLORS.border,
+                                    backgroundColor: selected ? COLORS.primaryBg : '#fff',
+                                    borderRadius: RADIUS.md,
+                                    paddingHorizontal: 9,
+                                    paddingVertical: 7
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 10.5, fontWeight: selected ? '800' : '600', color: selected ? COLORS.primary : COLORS.textSecondary }}>
+                                    {reason.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          {isOtherPhoneVerificationReason(verificationReasonCode) && (
+                            <TextInput
+                              value={verificationReasonDetails}
+                              onChangeText={value => setPendingVerificationReasonDetails(current => ({ ...current, [pendingKey]: value }))}
+                              editable={!pendingActionLoading}
+                              maxLength={500}
+                              multiline
+                              placeholder="Describe the evidence checked."
+                              placeholderTextColor={COLORS.textMuted}
+                              style={{ marginTop: 7, minHeight: 64, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: RADIUS.md, padding: 9, fontSize: 11.5, color: COLORS.text, textAlignVertical: 'top' }}
+                            />
+                          )}
+                          {isPendingRegistration && (
+                            <View style={{ marginTop: 9, gap: 5 }}>
+                              <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800' }}>After verifying the number</Text>
+                              {[
+                                { value: 'NOW', label: 'Verify and accept now' },
+                                { value: 'LATER', label: 'Verify number only—accept later' }
+                              ].map(option => {
+                                const selected = verificationDecision === option.value;
+                                return (
+                                  <TouchableOpacity
+                                    key={option.value}
+                                    disabled={pendingActionLoading}
+                                    onPress={() => setPendingVerificationDecisions(current => ({ ...current, [pendingKey]: option.value }))}
+                                    style={{ borderWidth: 1, borderColor: selected ? COLORS.primary : COLORS.border, backgroundColor: selected ? COLORS.primaryBg : '#fff', borderRadius: RADIUS.md, paddingHorizontal: 9, paddingVertical: 8 }}
+                                  >
+                                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: selected ? COLORS.primary : COLORS.textSecondary }}>{option.label}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          )}
+                          <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 5 }}>Confirm identity and SIM ownership. This action is recorded in the audit trail.</Text>
                         </>
                       ) : (
-                        <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 4 }}>Awaiting verification by an SRA Admin or Super Admin.</Text>
+                        <Text style={{ color: '#92400E', fontSize: 10.5, marginTop: 4 }}>Your role or Block Farm assignment does not authorize this verification.</Text>
                       )}
                     </View>
                   )}
@@ -7283,21 +7354,28 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <TouchableOpacity
                       disabled={pendingActionLoading
-                        || !selectedPendingFarmId
-                        || (requiresStaffVerification && (!canStaffVerify || staffVerificationReason.trim().length < 10))}
+                        || (isPendingRegistration && verificationDecision !== 'LATER' && !selectedPendingFarmId)
+                        || (requiresPhoneVerification && (!canVerifyPhone
+                          || (isOtherPhoneVerificationReason(verificationReasonCode) && verificationReasonDetails.trim().length < 10)))}
                       onPress={async () => {
                         setPendingActionLoading(true);
                         try {
                           const res = await approvePendingRegistration(u.contact, {
                             area: u.area,
                             blockFarmId: selectedPendingFarmId,
-                            staffVerificationReason
+                            verificationReasonCode,
+                            verificationReasonDetails,
+                            acceptUserNow: verificationDecision !== 'LATER'
                           });
                           setPendingActionLoading(false);
                           if (res.success) {
                             Alert.alert(
-                              'Registration Approved',
-                              res.fieldId
+                              res.pendingApproval ? 'Phone Verified' : (isPendingRegistration ? 'Registration Approved' : 'Phone Verified'),
+                              res.pendingApproval
+                                ? `${u.name}'s phone number is verified. The account remains pending and can be accepted later.`
+                                : !isPendingRegistration
+                                ? `${u.name}'s phone number is now verified.`
+                                : res.fieldId
                                 ? `Farm Member ${u.name} activated. Login ID: ${res.accountId}. Assigned field: ${res.fieldId}. Share the Login ID with the account owner.`
                                 : `Farm Member ${u.name} activated under ${blockFarms.find(farm => farm.id === res.blockFarmId)?.name || res.blockFarmId}. The Farm Manager can now assign the field plot. Login ID: ${res.accountId}.`
                             );
@@ -7312,8 +7390,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                       }}
                       style={{
                         flex: 1.4,
-                        backgroundColor: selectedPendingFarmId
-                          && (!requiresStaffVerification || (canStaffVerify && staffVerificationReason.trim().length >= 10))
+                        backgroundColor: (!isPendingRegistration || verificationDecision === 'LATER' || selectedPendingFarmId)
+                          && (!requiresPhoneVerification || (canVerifyPhone
+                            && (!isOtherPhoneVerificationReason(verificationReasonCode) || verificationReasonDetails.trim().length >= 10)))
                           ? COLORS.primary
                           : COLORS.border,
                         paddingVertical: 10,
@@ -7335,48 +7414,18 @@ export default function FieldOpsScreen({ navigation, route }) {
                         <>
                           <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
                           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
-                            {requiresStaffVerification
-                              ? (canStaffVerify ? 'Verify & Approve' : 'Awaiting SRA Verification')
+                            {requiresPhoneVerification
+                              ? (canVerifyPhone
+                                ? (isPendingRegistration
+                                  ? (verificationDecision === 'LATER' ? 'Verify Phone Only' : 'Verify & Approve')
+                                  : 'Verify Phone')
+                                : 'Awaiting Authorized Review')
                               : (canonicalRole(session?.role) === 'SRA_ADMIN' ? 'Approve & Assign Farm' : 'Approve & Assign Plot')}
                           </Text>
                         </>
                       )}
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                      disabled={pendingActionLoading}
-                      onPress={() => {
-                        Alert.alert(
-                          'Decline Application',
-                          `Are you sure you want to decline registration for ${u.name}?`,
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Decline',
-                              style: 'destructive',
-                              onPress: async () => {
-                                setPendingActionLoading(true);
-                                await rejectPendingRegistration(u.contact);
-                                setPendingActionLoading(false);
-                                setPendingUsersList([...pendingUsers]);
-                              }
-                            }
-                          ]
-                        );
-                      }}
-                      style={{
-                        flex: 0.8,
-                        backgroundColor: '#fff',
-                        borderWidth: 1,
-                        borderColor: '#E5E7EB',
-                        paddingVertical: 10,
-                        borderRadius: RADIUS.md,
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      <Text style={{ color: '#6B7280', fontSize: 12, fontWeight: '700' }}>Decline</Text>
-                    </TouchableOpacity>
                   </View>
                 </View>
                 );
@@ -8018,6 +8067,21 @@ export default function FieldOpsScreen({ navigation, route }) {
               );
             })()}
 
+            {deviceOnline && ['Farm Manager', 'SRA Admin'].includes(activeRole) && (
+              <TouchableOpacity
+                onPress={() => setShowProvisionUserModal(true)}
+                style={{
+                  backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.primary,
+                  borderRadius: RADIUS.lg, paddingVertical: 12, paddingHorizontal: 16,
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  marginBottom: 12, minHeight: 48, ...SHADOW.xs
+                }}
+              >
+                <Ionicons name="person-add-outline" size={19} color={COLORS.primary} />
+                <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>Add User</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Big Prominent Register Plot Button (Under Audit Card) */}
             {deviceOnline && activeRole === 'Farm Manager' && (
               <TouchableOpacity
@@ -8046,7 +8110,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
             )}
 
-            {/* Pending Member Registrations Alert Banner */}
+            {/* Pending account approvals and phone-verification reviews. */}
             {pendingUsersList && pendingUsersList.length > 0 && (
               <View style={{
                 backgroundColor: '#FFFBEB',
@@ -8068,7 +8132,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <Text style={{ fontSize: 12.5, fontWeight: '800', color: '#92400E' }}>
-                        {pendingUsersList.length} Pending Registration{pendingUsersList.length !== 1 ? 's' : ''}
+                        {pendingUsersList.length} Pending User{pendingUsersList.length !== 1 ? 's' : ''}
                       </Text>
                       <View style={{ backgroundColor: '#B45309', paddingHorizontal: 5, paddingVertical: 1, borderRadius: RADIUS.full }}>
                         <Text style={{ fontSize: 9, fontWeight: '900', color: '#fff' }}>ACTION</Text>
@@ -8289,6 +8353,20 @@ export default function FieldOpsScreen({ navigation, route }) {
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeRole === 'SRA Admin' && (
           <>
+            {deviceOnline && (
+              <TouchableOpacity
+                onPress={() => setShowProvisionUserModal(true)}
+                style={{
+                  backgroundColor: '#fff', borderWidth: 1.5, borderColor: COLORS.primary,
+                  borderRadius: RADIUS.lg, paddingVertical: 12, paddingHorizontal: 16,
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  marginBottom: 12, minHeight: 48, ...SHADOW.xs
+                }}
+              >
+                <Ionicons name="person-add-outline" size={19} color={COLORS.primary} />
+                <Text style={{ fontSize: 14, fontWeight: '900', color: COLORS.primary }}>Add User</Text>
+              </TouchableOpacity>
+            )}
             {!deviceOnline && (() => {
               const snapshotStatus = getSraOfflineSnapshotStatus();
               return (
@@ -8560,6 +8638,14 @@ export default function FieldOpsScreen({ navigation, route }) {
       
 
       {/* ── QR Code Display Modal ── */}
+      <ProvisionUserModal
+        visible={showProvisionUserModal}
+        onClose={() => setShowProvisionUserModal(false)}
+        session={session}
+        blockFarms={blockFarms}
+        onCreated={() => setPendingUsersList([...pendingUsers])}
+      />
+
       <Modal visible={showQR} transparent animationType="fade">
         <View style={s.qrOverlay}>
           <View style={s.qrModal}>

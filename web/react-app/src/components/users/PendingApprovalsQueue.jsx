@@ -1,24 +1,41 @@
 import React, { useState, useMemo } from 'react';
-import { UserCheck, CheckCircle2, Clock, Phone, MapPin, AlertCircle, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { UserCheck, CheckCircle2, Clock, Phone, MapPin, AlertCircle, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import Button from '../ui/Button';
+import {
+  DEFAULT_PHONE_VERIFICATION_REASON,
+  PHONE_VERIFICATION_REASONS,
+  isOtherPhoneVerificationReason
+} from '../../domain/phoneVerification';
 
 export default function PendingApprovalsQueue({
   pendingUsers = [],
   blockFarms = [],
   onApproveUser,
-  onRejectUser,
-  canStaffVerify = false,
+  currentUser = null,
   className = ''
 }) {
   const [processingId, setProcessingId] = useState(null);
   const [processingAction, setProcessingAction] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [farmSelections, setFarmSelections] = useState({});
-  const [verificationReasons, setVerificationReasons] = useState({});
+  const [verificationReasonCodes, setVerificationReasonCodes] = useState({});
+  const [verificationReasonDetails, setVerificationReasonDetails] = useState({});
+  const [verificationDecisions, setVerificationDecisions] = useState({});
   const [actionError, setActionError] = useState(null);
   const pageSize = 8;
 
   const farmMap = new Map(blockFarms.map(f => [f.id, f.name || f.id]));
+  const actorRole = String(currentUser?.canonicalRole || currentUser?.roleKey || currentUser?.role || '')
+    .trim().toUpperCase().replace(/ /g, '_');
+
+  const canVerifyUser = (target) => {
+    const targetRole = String(target?.canonicalRole || target?.role || 'MEMBER_FARMER').trim().toUpperCase().replace(/ /g, '_');
+    if (String(target?.id || '') === String(currentUser?.id || currentUser?.employeeId || '')) return false;
+    if (actorRole === 'SUPER_ADMIN') return true;
+    if (actorRole === 'SRA_ADMIN') return ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole);
+    if (actorRole !== 'FARM_MANAGER' || targetRole !== 'MEMBER_FARMER') return false;
+    return Boolean(target?.requestedBlockFarmId || target?.affiliatedBlockFarmId || target?.assignment?.blockFarmId);
+  };
 
   const totalPages = Math.max(1, Math.ceil(pendingUsers.length / pageSize));
   const validPage = Math.min(currentPage, totalPages);
@@ -31,49 +48,46 @@ export default function PendingApprovalsQueue({
     return (
       <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-6 shadow-xs text-center text-xs text-hug-muted ${className}`}>
         <CheckCircle2 className="w-8 h-8 text-success mx-auto mb-2 opacity-80" />
-        <h4 className="text-sm font-bold text-hug-text">No Pending Registrations</h4>
-        <p className="mt-0.5">All cooperative member and personnel onboarding requests have been reviewed.</p>
+        <h4 className="text-sm font-bold text-hug-text">No Pending Users</h4>
+        <p className="mt-0.5">All account approvals and phone-verification requests in your scope have been reviewed.</p>
       </div>
     );
   }
 
   const handleApprove = async (user) => {
     const selectedFarmId = farmSelections[user.id] ?? user.requestedBlockFarmId ?? '';
-    if ((user.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId) {
-      setActionError('Select a Block Farm before approving this Farm Member.');
+    const isPendingRegistration = user.status === 'PENDING';
+    const targetRole = user.canonicalRole || 'MEMBER_FARMER';
+    const acceptUserNow = verificationDecisions[user.id] !== 'LATER';
+    if (isPendingRegistration && acceptUserNow && ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole) && !selectedFarmId) {
+      setActionError(`Select a Block Farm before approving this ${targetRole === 'FARM_MANAGER' ? 'Farm Manager' : 'Farm Member'}.`);
       return;
     }
-    const requiresStaffVerification = !user.phoneVerified;
-    const staffVerificationReason = String(verificationReasons[user.id] || '').trim();
-    if (requiresStaffVerification && !canStaffVerify) {
-      setActionError('This application requires phone verification by an SRA Admin or Super Admin.');
+    const requiresPhoneVerification = !user.phoneVerified;
+    const verificationReasonCode = verificationReasonCodes[user.id] || DEFAULT_PHONE_VERIFICATION_REASON;
+    const verificationReasonDetail = String(verificationReasonDetails[user.id] || '').trim();
+    if (requiresPhoneVerification && !canVerifyUser(user)) {
+      setActionError('Your role or Block Farm assignment does not authorize this phone verification.');
       return;
     }
-    if (requiresStaffVerification && staffVerificationReason.length < 10) {
-      setActionError('Enter a staff-verification reason of at least 10 characters.');
+    if (requiresPhoneVerification && isOtherPhoneVerificationReason(verificationReasonCode) && verificationReasonDetail.length < 10) {
+      setActionError('Describe the other documented verification check using at least 10 characters.');
       return;
     }
     setProcessingId(user.id);
     setProcessingAction('approve');
     setActionError(null);
     try {
-      const result = requiresStaffVerification
-        ? await onApproveUser(user, selectedFarmId, staffVerificationReason)
+      const result = requiresPhoneVerification
+        ? await onApproveUser(user, selectedFarmId, {
+          verificationReasonCode,
+          verificationReasonDetails: verificationReasonDetail || undefined,
+          acceptUserNow
+        })
         : await onApproveUser(user, selectedFarmId);
       if (!result?.success) setActionError(result?.error || 'The registration could not be approved.');
     } catch (error) {
       setActionError(error.message || 'The registration could not be approved.');
-    } finally {
-      setProcessingId(null);
-      setProcessingAction(null);
-    }
-  };
-
-  const handleReject = async (user) => {
-    setProcessingId(user.id);
-    setProcessingAction('reject');
-    try {
-      await onRejectUser(user);
     } finally {
       setProcessingId(null);
       setProcessingAction(null);
@@ -85,13 +99,13 @@ export default function PendingApprovalsQueue({
       <div className="p-4 sm:p-5 border-b border-border/80 flex items-center justify-between">
         <div>
           <h3 className="text-base font-bold text-hug-text flex items-center gap-2">
-            <span>Pending Registration Queue</span>
+            <span>Pending Users</span>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
               {pendingUsers.length} awaiting review
             </span>
           </h3>
           <p className="text-xs text-hug-muted mt-0.5">
-            Review onboarding applicant credentials before granting cooperative database access.
+            Review account approvals and phone numbers that could not be verified by SMS.
           </p>
         </div>
       </div>
@@ -107,8 +121,14 @@ export default function PendingApprovalsQueue({
           const farmName = farmMap.get(p.requestedBlockFarmId) || p.requestedBlockFarmId || 'Unassigned Farm';
           const isProcessing = processingId === p.id;
           const selectedFarmId = farmSelections[p.id] ?? p.requestedBlockFarmId ?? '';
-          const requiresStaffVerification = !p.phoneVerified;
-          const verificationReason = verificationReasons[p.id] || '';
+          const requiresPhoneVerification = !p.phoneVerified;
+          const isPendingRegistration = p.status === 'PENDING';
+          const verificationReasonCode = verificationReasonCodes[p.id] || DEFAULT_PHONE_VERIFICATION_REASON;
+          const verificationDetail = verificationReasonDetails[p.id] || '';
+          const verificationDecision = verificationDecisions[p.id] || 'NOW';
+          const canVerify = canVerifyUser(p);
+          const targetRole = p.canonicalRole || 'MEMBER_FARMER';
+          const requiresFarmAssignment = isPendingRegistration && ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole);
 
           return (
             <div
@@ -128,9 +148,9 @@ export default function PendingApprovalsQueue({
                   </span>
                 </div>
 
-                {(p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && (
+                {requiresFarmAssignment && (
                   <label className="mt-3 block max-w-sm text-xs font-semibold text-hug-text">
-                    Assign Block Farm
+                    Assign Block Farm {targetRole === 'FARM_MANAGER' ? 'for Management' : ''}
                     <select
                       value={selectedFarmId}
                       onChange={(event) => {
@@ -145,7 +165,7 @@ export default function PendingApprovalsQueue({
                         <option key={farm.id} value={farm.id}>{farm.name || farm.id}</option>
                       ))}
                     </select>
-                    {!p.requestedBlockFarmId && (
+                    {targetRole === 'MEMBER_FARMER' && !p.requestedBlockFarmId && (
                       <span className="mt-1 block font-normal text-amber-700">
                         The member registered without a Block Farm. Confirm the correct assignment before approval.
                       </span>
@@ -170,33 +190,73 @@ export default function PendingApprovalsQueue({
                   </span>
                 </div>
 
-                {requiresStaffVerification && (
+                {requiresPhoneVerification && (
                   <div className="mt-3 max-w-xl rounded-xl border border-amber-300/70 bg-amber-50/80 dark:bg-amber-950/20 p-3">
                     <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
                       Phone not verified by SMS
                     </p>
-                    {canStaffVerify ? (
-                      <label className="mt-2 block text-xs font-semibold text-hug-text">
-                        Verification reason
-                        <textarea
-                          value={verificationReason}
-                          onChange={(event) => {
-                            setVerificationReasons(current => ({ ...current, [p.id]: event.target.value }));
-                            setActionError(null);
-                          }}
-                          disabled={isProcessing}
-                          maxLength={500}
-                          rows={2}
-                          placeholder="Example: Applicant presented a registered SIM and valid government ID in person."
-                          className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
-                        />
+                    {canVerify ? (
+                      <div className="mt-2 text-xs font-semibold text-hug-text">
+                        <label className="block">
+                          Verification reason
+                          <select
+                            value={verificationReasonCode}
+                            onChange={(event) => {
+                              setVerificationReasonCodes(current => ({ ...current, [p.id]: event.target.value }));
+                              setActionError(null);
+                            }}
+                            disabled={isProcessing}
+                            className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
+                          >
+                            {PHONE_VERIFICATION_REASONS.map(reason => (
+                              <option key={reason.value} value={reason.value}>{reason.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        {isOtherPhoneVerificationReason(verificationReasonCode) && (
+                          <textarea
+                            value={verificationDetail}
+                            onChange={(event) => {
+                              setVerificationReasonDetails(current => ({ ...current, [p.id]: event.target.value }));
+                              setActionError(null);
+                            }}
+                            disabled={isProcessing}
+                            maxLength={500}
+                            rows={2}
+                            placeholder="Describe the evidence checked."
+                            className="mt-2 w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
+                          />
+                        )}
+                        {isPendingRegistration && (
+                          <div className="mt-3">
+                            <span className="block text-xs font-semibold text-hug-text">After verifying the number</span>
+                            <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                              {[
+                                { value: 'NOW', label: 'Verify and accept now' },
+                                { value: 'LATER', label: 'Verify number only—accept later' }
+                              ].map(option => (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  disabled={isProcessing}
+                                  onClick={() => setVerificationDecisions(current => ({ ...current, [p.id]: option.value }))}
+                                  className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors ${verificationDecision === option.value
+                                    ? 'border-primary bg-primary-bg text-primary'
+                                    : 'border-border bg-surface text-hug-muted'}`}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <span className="mt-1 block font-normal text-hug-muted">
-                          Confirm identity and SIM ownership before approving. This action is audited.
+                          Confirm identity and SIM ownership before verifying. This action is audited.
                         </span>
-                      </label>
+                      </div>
                     ) : (
                       <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
-                        Awaiting verification by an SRA Admin or Super Admin.
+                        Awaiting an authorized reviewer for this role and Block Farm.
                       </p>
                     )}
                   </div>
@@ -205,28 +265,21 @@ export default function PendingApprovalsQueue({
 
               <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleReject(p)}
-                  disabled={isProcessing}
-                  isLoading={isProcessing && processingAction === 'reject'}
-                  loadingText="Declining..."
-                  icon={X}
-                >
-                  Decline
-                </Button>
-
-                <Button
                   variant="primary"
                   size="sm"
                   onClick={() => handleApprove(p)}
                   isLoading={isProcessing && processingAction === 'approve'}
                   disabled={isProcessing
-                    || ((p.canonicalRole || 'MEMBER_FARMER') === 'MEMBER_FARMER' && !selectedFarmId)
-                    || (requiresStaffVerification && (!canStaffVerify || verificationReason.trim().length < 10))}
+                    || (requiresFarmAssignment && verificationDecision !== 'LATER' && !selectedFarmId)
+                    || (requiresPhoneVerification && (!canVerify
+                      || (isOtherPhoneVerificationReason(verificationReasonCode) && verificationDetail.trim().length < 10)))}
                   icon={Check}
                 >
-                  {requiresStaffVerification ? 'Verify & Approve' : 'Approve Application'}
+                  {requiresPhoneVerification
+                    ? (isPendingRegistration
+                      ? (verificationDecision === 'LATER' ? 'Verify Phone Only' : 'Verify & Approve')
+                      : 'Verify Phone')
+                    : 'Approve Application'}
                 </Button>
               </div>
             </div>

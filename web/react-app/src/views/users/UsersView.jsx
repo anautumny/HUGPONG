@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Users, UserPlus, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { subscribeToUsersData, toggleUserStatus, approveOrProvisionUser, updateUser } from '../../services/usersService';
+import { subscribeToUsersData, toggleUserStatus, approveOrProvisionUser, updateUser, verifyUserPhone } from '../../services/usersService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import UserTable from '../../components/users/UserTable';
 import PendingApprovalsQueue from '../../components/users/PendingApprovalsQueue';
@@ -103,14 +103,24 @@ export default function UsersView() {
   };
 
   // Handle Approve Pending User
-  const handleApprovePending = async (pendingUser, blockFarmId, staffVerificationReason = '') => {
-    const result = await approveOrProvisionUser({
-      id: pendingUser.id,
-      role: pendingUser.canonicalRole || 'MEMBER_FARMER',
-      blockFarmId,
-      ...(pendingUser.phoneVerified ? {} : { staffVerificationReason })
-    });
-    if (result.success) {
+  const handleApprovePending = async (pendingUser, blockFarmId, verification = {}) => {
+    const { acceptUserNow = true, ...reasonPayload } = verification;
+    const verificationPayload = pendingUser.phoneVerified ? {} : reasonPayload;
+    const shouldApproveNow = pendingUser.status === 'PENDING' && acceptUserNow;
+    const result = shouldApproveNow
+      ? await approveOrProvisionUser({
+        id: pendingUser.id,
+        role: pendingUser.canonicalRole || 'MEMBER_FARMER',
+        blockFarmId,
+        ...verificationPayload
+      })
+      : await verifyUserPhone(pendingUser.id, verificationPayload);
+    if (result.success && result.pendingApproval && result.data) {
+      setPendingUsers(current => current.map(candidate => candidate.id === pendingUser.id
+        ? { ...candidate, ...result.data, phoneVerified: Boolean(result.data.phoneVerifiedAt) }
+        : candidate));
+    }
+    if (result.success && !result.pendingApproval) {
       setAccountIdNotice({
         ...pendingUser,
         ...result.data,
@@ -118,11 +128,6 @@ export default function UsersView() {
       });
     }
     return result;
-  };
-
-  // Handle Reject Pending User
-  const handleRejectPending = async (pendingUser) => {
-    return toggleUserStatus(pendingUser.id, 'ACTIVE'); // Disables or dismisses
   };
 
   // Dynamic titles based on role
@@ -216,7 +221,7 @@ export default function UsersView() {
               : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'
           }`}
         >
-          <span>Pending Applications</span>
+          <span>Pending Users</span>
           {pendingUsers.length > 0 && (
             <span className={`px-2 py-0.5 rounded-full text-xs font-black ${
               activeTab === 'pending'
@@ -243,8 +248,7 @@ export default function UsersView() {
           pendingUsers={pendingUsers}
           blockFarms={blockFarms}
           onApproveUser={handleApprovePending}
-          onRejectUser={handleRejectPending}
-          canStaffVerify={isSraAdmin || isSuperAdmin}
+          currentUser={user}
         />
       )}
 

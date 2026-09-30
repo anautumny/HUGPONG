@@ -104,8 +104,14 @@ html.dark {
   --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
 }
 
+html,
+#root {
+  overscroll-behavior: none;
+}
+
 /* Base Typography optimized for 40+ demographic readability */
 body {
+  overscroll-behavior: none;
   font-family: var(--font-sans);
   font-size: 1rem; /* 16px default */
   line-height: 1.5;
@@ -116,6 +122,18 @@ body {
 html.dark body {
   background-color: var(--background);
   color: var(--foreground);
+}
+
+.app-shell {
+  min-width: 0;
+  min-height: 0;
+  overscroll-behavior: none;
+}
+
+#page-content {
+  min-height: 0;
+  overscroll-behavior: none;
+  scroll-behavior: auto;
 }
 
 /* Always keep logo container pure white across light & dark mode */

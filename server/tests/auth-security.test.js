@@ -421,20 +421,21 @@ test('official SRA price publication remains SRA-admin-only and writes the audit
   assert.match(service, /queueAuditEvent\(transaction/);
 });
 
-test('administrator-provisioned accounts verify their own phone and replace the temporary password on first login', () => {
+test('administrator-provisioned accounts support pending or authorized phone verification and temporary-password replacement', () => {
   const userRoute = fs.readFileSync(path.resolve(__dirname, '../routes/users.js'), 'utf8');
   const webForm = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/users/UserFormModal.jsx'), 'utf8');
   const webUsersService = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/services/usersService.js'), 'utf8');
   const webLogin = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/LoginView.jsx'), 'utf8');
   const mobileLogin = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/auth/LoginScreen.js'), 'utf8');
 
-  assert.match(userRoute, /phoneVerifiedAt: null/);
+  assert.match(userRoute, /phoneVerificationMode === 'VERIFIED' \? now : null/);
+  assert.match(userRoute, /assertPhoneVerificationAuthority/);
   assert.match(userRoute, /requiresPasswordChange: true/);
   assert.match(userRoute, /passwordChangedAt: null/);
   assert.doesNotMatch(userRoute, /req\.body\.phoneVerified|personnel-phone|\/phone-verification\/request|\/phone-verification\/verify/);
   assert.doesNotMatch(webForm, /Verify SIM|phoneVerified:|verifyPhoneOtp|requestPhoneVerification/);
-  assert.doesNotMatch(webUsersService, /\/api\/users\/phone-verification/);
-  assert.match(webForm, /account owner will receive and enter the verification code on first login/i);
+  assert.match(webUsersService, /verify-phone/);
+  assert.match(webForm, /Already verified by authorized reviewer/);
   assert.ok(webLogin.indexOf('result.needsVerification') < webLogin.indexOf('result.needsPasswordChange'));
   assert.ok(mobileLogin.indexOf('pendingFirstLoginVerification') < mobileLogin.indexOf('res.requiresPasswordChange'));
 });

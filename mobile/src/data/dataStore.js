@@ -345,26 +345,64 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   if (idx === -1) return { success: false, message: 'Applicant not found in pending list.' };
 
   const applicant = pendingUsers[idx];
-  const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
-  if (!assignedFarm) return { success: false, message: 'Select an existing block farm before approving this registration.' };
-
   const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
-  const requiresStaffVerification = applicant.phoneVerified !== true;
-  const staffVerificationReason = String(options.staffVerificationReason || '').trim();
-  if (requiresStaffVerification && activeRole !== ROLES.SRA_ADMIN) {
-    return { success: false, message: 'An SRA Admin or Super Admin must verify this applicant phone before activation.' };
+  const targetRole = canonicalRole(applicant.canonicalRole || applicant.role) || ROLES.MEMBER_FARMER;
+  const isPendingRegistration = String(applicant.status || '').toUpperCase() === 'PENDING';
+  const acceptUserNow = options.acceptUserNow !== false;
+  const requiresPhoneVerification = applicant.phoneVerified !== true;
+  const verificationReasonCode = String(options.verificationReasonCode || '').trim().toUpperCase();
+  const verificationReasonDetails = String(options.verificationReasonDetails || '').trim();
+  if (requiresPhoneVerification && !verificationReasonCode) {
+    return { success: false, message: 'Select how the identity and SIM ownership were verified.' };
   }
-  if (requiresStaffVerification && staffVerificationReason.length < 10) {
-    return { success: false, message: 'Enter a staff-verification reason of at least 10 characters.' };
+  if (verificationReasonCode === 'OTHER_DOCUMENTED_CHECK' && verificationReasonDetails.length < 10) {
+    return { success: false, message: 'Describe the other documented verification check using at least 10 characters.' };
   }
   const empId = applicant.employeeId || applicant.id || ('04' + cleanContact.slice(-6).padStart(6, '0'));
-  if (activeRole === ROLES.SRA_ADMIN) {
+  const verificationPayload = requiresPhoneVerification ? {
+    verificationReasonCode,
+    ...(verificationReasonDetails ? { verificationReasonDetails } : {})
+  } : {};
+
+  if (!isPendingRegistration || !acceptUserNow) {
+    try {
+      const verified = await authenticatedRequest(`/api/users/${encodeURIComponent(empId)}/verify-phone`, {
+        method: 'POST',
+        body: verificationPayload
+      });
+      const publicAccount = fromUserDocument(empId, verified?.data || applicant);
+      const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
+      if (existingIndex >= 0) users[existingIndex] = publicAccount;
+      else users.push(publicAccount);
+      if (isPendingRegistration) pendingUsers[idx] = publicAccount;
+      else pendingUsers.splice(idx, 1);
+      await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+      await saveItem(STORAGE_KEYS.USERS, users);
+      notifyDataUpdate();
+      return {
+        success: true,
+        accepted: !isPendingRegistration,
+        pendingApproval: isPendingRegistration,
+        applicant,
+        accountId: verified?.data?.id || empId,
+        blockFarmId: publicAccount.affiliatedBlockFarmId || publicAccount.assignment?.blockFarmId || null,
+        fieldId: null
+      };
+    } catch (error) {
+      return { success: false, message: error.message || 'Phone verification failed.' };
+    }
+  }
+
+  const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
+  if (!assignedFarm) return { success: false, message: 'Select an existing Block Farm before approving this registration.' };
+
+  if ([ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole) || targetRole !== ROLES.MEMBER_FARMER) {
     try {
       const approvalOutcome = await commitExplicitMutation('user_approve', {
         id: empId,
-        role: 'MEMBER_FARMER',
+        role: targetRole,
         blockFarmId: assignedFarm.id,
-        ...(requiresStaffVerification ? { staffVerificationReason } : {})
+        ...verificationPayload
       }, { baseVersion: applicant.updatedAt || null });
       const approved = approvalOutcome.response;
       const publicAccount = fromUserDocument(empId, approved?.data || applicant);
@@ -404,7 +442,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
       id: empId,
       role: 'MEMBER_FARMER',
       blockFarmId: assignedFarm.id,
-      ...(requiresStaffVerification ? { staffVerificationReason } : {})
+      ...verificationPayload
     }, { baseVersion: applicant.updatedAt || null });
     const approved = approvalOutcome.response;
     approvedAccountId = approved?.accountId || approved?.data?.id || empId;
@@ -437,6 +475,30 @@ export const approvePendingRegistration = async (contact, options = {}) => {
     fieldId: fieldResult.success ? fieldResult.field.id : null,
     warning: fieldResult.success ? null : (fieldResult.message || 'The account was approved, but its field plot still needs to be assigned.')
   };
+};
+
+export const provisionUserAccount = async payload => {
+  if (!getNetworkStatus()) throw new Error('Adding a user requires a live HUGPONG connection.');
+  const response = await authenticatedRequest('/api/users/approve', {
+    method: 'POST',
+    body: payload
+  });
+  const accountId = response?.accountId || response?.data?.id;
+  if (response?.data && accountId) {
+    const account = fromUserDocument(accountId, response.data);
+    const existingIndex = users.findIndex(user => String(user.id || user.employeeId) === String(accountId));
+    if (existingIndex >= 0) users[existingIndex] = account;
+    else users.push(account);
+    if (account.phoneVerified !== true) {
+      const pendingIndex = pendingUsers.findIndex(user => String(user.id || user.employeeId) === String(accountId));
+      if (pendingIndex >= 0) pendingUsers[pendingIndex] = account;
+      else pendingUsers.push(account);
+    }
+    await saveItem(STORAGE_KEYS.USERS, users);
+    await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+    notifyDataUpdate();
+  }
+  return response;
 };
 
 export const rejectPendingRegistration = async (contact) => {
@@ -1160,7 +1222,7 @@ export const registerUser = async (userData) => {
       password: userData.password,
       role: 'MEMBER_FARMER',
       blockFarmId: selectedFarm?.id || '',
-      staffVerificationToken: String(userData.staffVerificationToken || '')
+      phoneVerificationRequestToken: String(userData.phoneVerificationRequestToken || '')
     });
     if (result.user) {
       const publicAccount = fromUserDocument(result.user.id, result.user);
@@ -2694,6 +2756,8 @@ export const listenToCloudSync = () => {
       if (canReadUserDirectory) {
         users.length = 0;
         users.push(...remoteUsers);
+        pendingUsers.length = 0;
+        pendingUsers.push(...remoteUsers.filter(user => user.status === 'PENDING' || user.phoneVerified !== true));
       }
       if (canReadAuditReports) {
         auditReports.length = 0;
@@ -2764,7 +2828,10 @@ export const listenToCloudSync = () => {
           [STORAGE_KEYS.TICKETS, supportTickets],
           [STORAGE_KEYS.SESSION, CURRENT_SESSION]
         ];
-        if (canReadUserDirectory) cacheEntries.push([STORAGE_KEYS.USERS, users]);
+        if (canReadUserDirectory) {
+          cacheEntries.push([STORAGE_KEYS.USERS, users]);
+          cacheEntries.push([STORAGE_KEYS.PENDING_USERS, pendingUsers]);
+        }
         if (canReadAuditReports) cacheEntries.push([STORAGE_KEYS.AUDIT_REPORTS, auditReports]);
         if (canReadAuditEvents) cacheEntries.push([STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]);
         await multiSave(cacheEntries);

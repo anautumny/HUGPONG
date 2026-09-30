@@ -7,6 +7,7 @@ const PRIVATE_USER_FIELDS = new Set([
   'salt',
   'resetToken',
   'resetTokenHash',
+  'phoneVerificationReasonCode',
   'phoneVerificationReason'
 ]);
 

@@ -23,6 +23,10 @@ const { createUserAccount, phoneIdentifierId } = require('../services/accountPro
 const { queueAuditEvent } = require('../services/auditWriter');
 const { normalizeStructuredName, hasStructuredNameInput } = require('../domain/personName');
 const { pageLimit, decodeCursor, encodeCursor } = require('../services/cursorPagination');
+const {
+  resolvePhoneVerificationReason,
+  assertPhoneVerificationAuthority
+} = require('../domain/phoneVerificationPolicy');
 
 const accountCreationLimit = createRateLimit({ name: 'users-account-create', max: 30, windowMs: 60 * 60 * 1000 });
 
@@ -76,6 +80,17 @@ function queueManagerFarmAssignment(writer, database, farmSnapshot, managerUserI
     blockFarmId: farmSnapshot.id,
     details: `Assigned Farm Manager ${managerUserId} to block farm ${farmSnapshot.id}.`,
     createdAt: updatedAt
+  });
+}
+
+function queuePhoneVerificationAudit(writer, database, targetUserId, actorUserId, createdAt) {
+  queueAuditEvent(writer, database, {
+    eventType: 'USER_PHONE_VERIFIED_BY_AUTHORITY',
+    actorUserId,
+    entityType: 'USER',
+    entityId: targetUserId,
+    details: `Authorized phone verification completed for account ${targetUserId}; confidential evidence remains on the user record.`,
+    createdAt
   });
 }
 
@@ -169,20 +184,8 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       }
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
-      const needsStaffPhoneVerification = !current.phoneVerifiedAt;
-      let staffVerificationReason = null;
-      if (needsStaffPhoneVerification) {
-        if (![ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(actorRole)) {
-          return res.status(403).json({ success: false, error: 'Only an SRA Admin or Super Admin may verify an applicant phone on behalf of the account owner.' });
-        }
-        if (actorId === userId) {
-          return res.status(403).json({ success: false, error: 'Administrators cannot staff-verify their own account.' });
-        }
-        staffVerificationReason = requiredString(req.body.staffVerificationReason, 'staffVerificationReason', { max: 500 });
-        if (staffVerificationReason.length < 10) {
-          return res.status(400).json({ success: false, error: 'staffVerificationReason must contain at least 10 characters.' });
-        }
-      }
+      const needsPhoneVerification = !current.phoneVerifiedAt;
+      const verificationReason = needsPhoneVerification ? resolvePhoneVerificationReason(req.body) : null;
       assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
       let affiliatedBlockFarmId = current.affiliatedBlockFarmId || null;
       let managerFarmSnapshot = null;
@@ -196,20 +199,39 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
           return res.status(400).json({ success: false, error: 'The selected Block Farm is not available.' });
         }
         if (actorRole === ROLES.FARM_MANAGER) {
+          const requestedFarmId = String(current.requestedBlockFarmId || '').trim().toUpperCase();
+          if (!requestedFarmId || requestedFarmId !== affiliatedBlockFarmId) {
+            return res.status(403).json({
+              success: false,
+              error: 'A Farm Manager may approve only a member who selected that manager\'s Block Farm during registration.'
+            });
+          }
           await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), userId, affiliatedBlockFarmId);
         }
       } else if (role === ROLES.FARM_MANAGER) {
         managerFarmSnapshot = await loadManagerFarmForAssignment(req.body.blockFarmId, userId);
       }
+      if (needsPhoneVerification) {
+        await assertPhoneVerificationAuthority(db, {
+          actorId,
+          actorRole,
+          targetUserId: userId,
+          targetRole: current.role,
+          requestedBlockFarmId: current.requestedBlockFarmId,
+          affiliatedBlockFarmId: current.affiliatedBlockFarmId,
+          selectedBlockFarmId: affiliatedBlockFarmId
+        });
+      }
       const approved = {
         ...current,
         status: 'ACTIVE',
         affiliatedBlockFarmId,
-        phoneVerifiedAt: needsStaffPhoneVerification ? now : current.phoneVerifiedAt,
+        phoneVerifiedAt: needsPhoneVerification ? now : current.phoneVerifiedAt,
         phoneVerificationStatus: 'VERIFIED',
-        phoneVerificationMethod: needsStaffPhoneVerification ? 'STAFF' : (current.phoneVerificationMethod || 'SMS_OTP'),
-        phoneVerifiedByUserId: needsStaffPhoneVerification ? actorId : (current.phoneVerifiedByUserId || null),
-        phoneVerificationReason: needsStaffPhoneVerification ? staffVerificationReason : (current.phoneVerificationReason || null),
+        phoneVerificationMethod: needsPhoneVerification ? 'AUTHORIZED_REVIEW' : (current.phoneVerificationMethod || 'SMS_OTP'),
+        phoneVerifiedByUserId: needsPhoneVerification ? actorId : (current.phoneVerifiedByUserId || null),
+        phoneVerificationReasonCode: needsPhoneVerification ? verificationReason.code : (current.phoneVerificationReasonCode || null),
+        phoneVerificationReason: needsPhoneVerification ? verificationReason.summary : (current.phoneVerificationReason || null),
         authVersion: authVersionOf(current),
         disabledAt: null,
         approvedByUserId: String(req.session.user.employeeId || '').trim(),
@@ -226,6 +248,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         phoneVerificationStatus: approved.phoneVerificationStatus,
         phoneVerificationMethod: approved.phoneVerificationMethod,
         phoneVerifiedByUserId: approved.phoneVerifiedByUserId,
+        phoneVerificationReasonCode: approved.phoneVerificationReasonCode,
         phoneVerificationReason: approved.phoneVerificationReason,
         authVersion: approved.authVersion,
         disabledAt: approved.disabledAt,
@@ -247,16 +270,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         details: `Approved ${role} account ${userId}.`,
         createdAt: now
       });
-      if (needsStaffPhoneVerification) {
-        queueAuditEvent(batch, db, {
-          eventType: 'USER_PHONE_STAFF_VERIFIED',
-          actorUserId: actorId,
-          entityType: 'USER',
-          entityId: userId,
-          details: `Staff-verified the registered phone for account ${userId}; the confidential verification reason is retained on the user record.`,
-          createdAt: now
-        });
-      }
+      if (needsPhoneVerification) queuePhoneVerificationAudit(batch, db, userId, actorId, now);
       await batch.commit();
       const approvedUser = publicUser(approved, userId);
       const data = managerFarmSnapshot
@@ -292,20 +306,36 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       if (!requestedBlockFarmId) throw new Error('Farm Managers must assign a Block Farm when creating a Farm Member.');
       await assertManagerUserScope(String(req.session.user.employeeId || '').trim(), requestedUserId || '', requestedBlockFarmId);
     }
+    const phoneVerificationMode = String(req.body.phoneVerificationMode || 'REQUIRED').trim().toUpperCase();
+    if (!['REQUIRED', 'VERIFIED'].includes(phoneVerificationMode)) {
+      return res.status(400).json({ success: false, error: 'phoneVerificationMode must be REQUIRED or VERIFIED.' });
+    }
+    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const verificationReason = phoneVerificationMode === 'VERIFIED'
+      ? resolvePhoneVerificationReason(req.body)
+      : null;
+    if (phoneVerificationMode === 'VERIFIED') {
+      await assertPhoneVerificationAuthority(db, {
+        actorId,
+        actorRole,
+        targetRole: role,
+        affiliatedBlockFarmId,
+        selectedBlockFarmId: requestedBlockFarmId
+      });
+    }
     const payload = {
       ...identity,
       phone,
       role,
       status: 'ACTIVE',
       affiliatedBlockFarmId,
-      // The account owner, never the provisioning administrator, verifies the
-      // registered phone and replaces the temporary password on first login.
-      phoneVerifiedAt: null,
-      phoneVerificationStatus: 'PENDING_OWNER',
-      phoneVerificationMethod: null,
-      phoneVerificationRequestedAt: null,
-      phoneVerifiedByUserId: null,
-      phoneVerificationReason: null,
+      phoneVerifiedAt: phoneVerificationMode === 'VERIFIED' ? now : null,
+      phoneVerificationStatus: phoneVerificationMode === 'VERIFIED' ? 'VERIFIED' : 'PENDING_VERIFICATION',
+      phoneVerificationMethod: phoneVerificationMode === 'VERIFIED' ? 'AUTHORIZED_REVIEW' : null,
+      phoneVerificationRequestedAt: phoneVerificationMode === 'VERIFIED' ? null : now,
+      phoneVerifiedByUserId: phoneVerificationMode === 'VERIFIED' ? actorId : null,
+      phoneVerificationReasonCode: verificationReason?.code || null,
+      phoneVerificationReason: verificationReason?.summary || null,
       requiresPasswordChange: true,
       passwordChangedAt: null,
       authVersion: 1,
@@ -317,7 +347,6 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       updatedAt: now
     };
     const passwordHash = await hashPassword(req.body.password);
-    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const userId = await createUserAccount(db, {
       requestedUserId: developmentSeedId,
       user: payload,
@@ -325,16 +354,12 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       actorUserId: actorId,
       eventType: 'USER_ACCOUNT_CREATED',
       details: `Created ${role} account ${payload.displayName}.`,
-      queueRelatedWrites: managerFarmSnapshot
-        ? (writer, database, createdUserId) => queueManagerFarmAssignment(
-          writer,
-          database,
-          managerFarmSnapshot,
-          createdUserId,
-          actorId,
-          now
-        )
-        : null
+      queueRelatedWrites: (writer, database, createdUserId) => {
+        queueManagerFarmAssignment(writer, database, managerFarmSnapshot, createdUserId, actorId, now);
+        if (phoneVerificationMode === 'VERIFIED') {
+          queuePhoneVerificationAudit(writer, database, createdUserId, actorId, now);
+        }
+      }
     });
     const createdUser = publicUser(payload, userId);
     const data = managerFarmSnapshot
@@ -353,6 +378,64 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       ? 'The selected Block Farm changed while the account was being created. Reload and try again.'
       : error.message;
     return res.status(status).json({ success: false, error: message });
+  }
+});
+
+router.post('/:userId/verify-phone', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const userId = requiredString(req.params.userId, 'userId', { max: 80 });
+    const targetRef = db.collection(COLLECTIONS.USERS).doc(userId);
+    const targetSnapshot = await targetRef.get();
+    if (!targetSnapshot.exists) return res.status(404).json({ success: false, error: 'User was not found.' });
+    const current = targetSnapshot.data();
+    if (current.phoneVerifiedAt) {
+      const currentStatus = String(current.status || '').toUpperCase();
+      return res.json({
+        success: true,
+        replayed: true,
+        accepted: currentStatus === 'ACTIVE',
+        pendingApproval: currentStatus === 'PENDING',
+        data: publicUser(current, userId)
+      });
+    }
+    const targetStatus = String(current.status || '').toUpperCase();
+    if (!['ACTIVE', 'PENDING'].includes(targetStatus)) {
+      return res.status(409).json({ success: false, error: 'Only active or pending accounts can receive phone verification.' });
+    }
+    const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
+    const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    const verificationReason = resolvePhoneVerificationReason(req.body);
+    await assertPhoneVerificationAuthority(db, {
+      actorId,
+      actorRole,
+      targetUserId: userId,
+      targetRole: current.role,
+      requestedBlockFarmId: current.requestedBlockFarmId,
+      affiliatedBlockFarmId: current.affiliatedBlockFarmId
+    });
+    const verifiedAt = nowIso();
+    const update = {
+      phoneVerifiedAt: verifiedAt,
+      phoneVerificationStatus: 'VERIFIED',
+      phoneVerificationMethod: 'AUTHORIZED_REVIEW',
+      phoneVerifiedByUserId: actorId,
+      phoneVerificationReasonCode: verificationReason.code,
+      phoneVerificationReason: verificationReason.summary,
+      updatedAt: verifiedAt
+    };
+    const batch = db.batch();
+    batch.update(targetRef, update);
+    queuePhoneVerificationAudit(batch, db, userId, actorId, verifiedAt);
+    await batch.commit();
+    return res.json({
+      success: true,
+      accepted: targetStatus === 'ACTIVE',
+      pendingApproval: targetStatus === 'PENDING',
+      data: publicUser({ ...current, ...update }, userId)
+    });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message });
   }
 });
 
@@ -412,10 +495,11 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       role: targetRole,
       status: req.body.status == null ? current.status : String(req.body.status).trim().toUpperCase(),
       phoneVerifiedAt,
-      phoneVerificationStatus: phoneChanged ? 'PENDING_OWNER' : (current.phoneVerificationStatus || (phoneVerifiedAt ? 'VERIFIED' : 'PENDING_OWNER')),
+      phoneVerificationStatus: phoneChanged ? 'PENDING_VERIFICATION' : (current.phoneVerificationStatus || (phoneVerifiedAt ? 'VERIFIED' : 'PENDING_VERIFICATION')),
       phoneVerificationMethod: phoneChanged ? null : (current.phoneVerificationMethod || null),
       phoneVerificationRequestedAt: phoneChanged ? null : (current.phoneVerificationRequestedAt || null),
       phoneVerifiedByUserId: phoneChanged ? null : (current.phoneVerifiedByUserId || null),
+      phoneVerificationReasonCode: phoneChanged ? null : (current.phoneVerificationReasonCode || null),
       phoneVerificationReason: phoneChanged ? null : (current.phoneVerificationReason || null),
       updatedAt: nowIso()
     };

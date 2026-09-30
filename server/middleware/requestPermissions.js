@@ -12,6 +12,7 @@ const API_PERMISSION_POLICIES = Object.freeze([
   { methods: ['POST'], path: /^\/api\/prices$/, roles: [ROLES.SRA_ADMIN] },
   { methods: ['GET'], path: /^\/api\/users$/, roles: [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN] },
   { methods: ['POST'], path: /^\/api\/users\/approve$/, roles: [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN] },
+  { methods: ['POST'], path: /^\/api\/users\/[^/]+\/verify-phone$/, roles: [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN] },
   { methods: ['PATCH'], path: /^\/api\/users\/[^/]+$/, roles: [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN] },
   { methods: ['GET'], path: /^\/api\/block-farms$/, roles: OPERATIONAL_READ_ROLES },
   { methods: ['POST'], path: /^\/api\/block-farms$/, roles: [ROLES.SRA_ADMIN] },

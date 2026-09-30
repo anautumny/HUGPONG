@@ -13,7 +13,10 @@ const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
 const { issueTakeoverGrant, TAKEOVER_GRANT_TTL_MS, TAKEOVER_GRANT_PURPOSE } = require('../security/takeoverGrant');
 const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp, discardOtp } = require('../security/otp');
-const { createStaffVerificationToken, verifyStaffVerificationToken } = require('../security/staffVerificationToken');
+const {
+  createPhoneVerificationRequestToken,
+  verifyPhoneVerificationRequestToken
+} = require('../security/phoneVerificationRequestToken');
 const { sendSms } = require('../services/smsGateway');
 const { assertManagerFieldAssignment } = require('../services/takeoverAuthorizationService');
 const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel, nowIso, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
@@ -458,7 +461,7 @@ router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) =
   try {
     const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
-    const staffVerification = createStaffVerificationToken(phone);
+    const phoneVerificationRequest = createPhoneVerificationRequestToken(phone);
     const challenge = issueOtp('registration', phone, phone);
     try {
       await sendVerificationCode(phone, challenge.code, String(req.body?.displayName || '').trim(), 'registration');
@@ -471,23 +474,23 @@ router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) =
       expiresAt: challenge.expiresAt,
       ...verificationSendPolicy(req, OTP_REQUEST_LIMITER),
       data: {
-        staffVerificationAvailable: true,
-        staffVerificationToken: staffVerification.token,
-        staffVerificationExpiresAt: staffVerification.expiresAt
+        pendingPhoneVerificationAvailable: true,
+        phoneVerificationRequestToken: phoneVerificationRequest.token,
+        phoneVerificationRequestExpiresAt: phoneVerificationRequest.expiresAt
       },
       message: 'Verification code sent.'
     });
   } catch (error) {
     const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
-    const staffVerification = status === 429 ? null : createStaffVerificationToken(phone);
+    const phoneVerificationRequest = status === 429 ? null : createPhoneVerificationRequestToken(phone);
     return res.status(status).json({
       success: false,
       error: error.message || 'Verification code could not be sent.',
       code: error.code || 'SMS_DELIVERY_FAILED',
-      data: staffVerification ? {
-        staffVerificationAvailable: true,
-        staffVerificationToken: staffVerification.token,
-        staffVerificationExpiresAt: staffVerification.expiresAt
+      data: phoneVerificationRequest ? {
+        pendingPhoneVerificationAvailable: true,
+        phoneVerificationRequestToken: phoneVerificationRequest.token,
+        phoneVerificationRequestExpiresAt: phoneVerificationRequest.expiresAt
       } : undefined
     });
   }
@@ -526,10 +529,13 @@ router.post('/register', registrationRateLimit, async (req, res) => {
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
     const now = nowIso();
     const smsVerified = consumeVerifiedOtp('registration', phone, phone);
-    const staffVerificationRequested = !smsVerified
-      && verifyStaffVerificationToken(req.body?.staffVerificationToken, phone);
-    if (!smsVerified && !staffVerificationRequested) {
-      return res.status(403).json({ success: false, error: 'SMS confirmation or a valid staff-verification request is required before registration.' });
+    const phoneVerificationRequested = !smsVerified
+      && verifyPhoneVerificationRequestToken(
+        req.body?.phoneVerificationRequestToken,
+        phone
+      );
+    if (!smsVerified && !phoneVerificationRequested) {
+      return res.status(403).json({ success: false, error: 'SMS confirmation or a valid pending phone-verification request is required before registration.' });
     }
     const user = {
       ...identity,
@@ -539,10 +545,11 @@ router.post('/register', registrationRateLimit, async (req, res) => {
       status: 'PENDING',
       requestedBlockFarmId: blockFarmId || null,
       phoneVerifiedAt: smsVerified ? now : null,
-      phoneVerificationStatus: smsVerified ? 'VERIFIED' : 'PENDING_STAFF',
+      phoneVerificationStatus: smsVerified ? 'VERIFIED' : 'PENDING_VERIFICATION',
       phoneVerificationMethod: smsVerified ? 'SMS_OTP' : null,
-      phoneVerificationRequestedAt: staffVerificationRequested ? now : null,
+      phoneVerificationRequestedAt: phoneVerificationRequested ? now : null,
       phoneVerifiedByUserId: null,
+      phoneVerificationReasonCode: null,
       phoneVerificationReason: null,
       requiresPasswordChange: false,
       passwordChangedAt: now,
@@ -562,15 +569,15 @@ router.post('/register', registrationRateLimit, async (req, res) => {
         createdAt: now,
         updatedAt: now
       },
-      eventType: staffVerificationRequested ? 'USER_STAFF_VERIFICATION_REQUESTED' : 'USER_SELF_REGISTERED',
-      details: staffVerificationRequested
-        ? `Registered pending Farm Member account for ${displayName}; staff phone verification is required.`
+      eventType: phoneVerificationRequested ? 'USER_PHONE_VERIFICATION_REVIEW_REQUESTED' : 'USER_SELF_REGISTERED',
+      details: phoneVerificationRequested
+        ? `Registered pending Farm Member account for ${displayName}; authorized phone verification is required.`
         : `Registered pending Farm Member account for ${displayName}.`
     });
     return res.status(201).json({
       success: true,
       pendingApproval: true, accountId: userId,
-      pendingStaffVerification: staffVerificationRequested,
+      pendingPhoneVerification: phoneVerificationRequested,
       user: publicUser(user, userId)
     });
   } catch (error) {
@@ -624,6 +631,7 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
       phoneVerificationStatus: 'VERIFIED',
       phoneVerificationMethod: 'SMS_OTP',
       phoneVerifiedByUserId: employeeId,
+      phoneVerificationReasonCode: null,
       phoneVerificationReason: null,
       updatedAt: phoneVerifiedAt
     });
@@ -815,6 +823,7 @@ router.post('/change-phone/verify', requireAuth, otpVerifyRateLimit, async (req,
         phoneVerificationStatus: 'VERIFIED',
         phoneVerificationMethod: 'SMS_OTP',
         phoneVerifiedByUserId: employeeId,
+        phoneVerificationReasonCode: null,
         phoneVerificationReason: null,
         credentialsUpdatedAt: now,
         authVersion,

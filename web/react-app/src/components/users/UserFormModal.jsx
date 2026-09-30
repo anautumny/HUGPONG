@@ -8,6 +8,11 @@ import Select from '../ui/Select';
 import Button from '../ui/Button';
 import { approveOrProvisionUser, updateUser } from '../../services/usersService';
 import { PASSWORD_POLICY_HINT, passwordPolicyError } from '../../domain/passwordPolicy';
+import {
+  DEFAULT_PHONE_VERIFICATION_REASON,
+  PHONE_VERIFICATION_REASONS,
+  isOtherPhoneVerificationReason
+} from '../../domain/phoneVerification';
 
 export default function UserFormModal({
   isOpen = false,
@@ -34,6 +39,9 @@ export default function UserFormModal({
   const [selectedRole, setSelectedRole] = useState('MEMBER_FARMER');
   const [blockFarmId, setBlockFarmId] = useState('');
   const [password, setPassword] = useState('');
+  const [phoneVerificationMode, setPhoneVerificationMode] = useState('REQUIRED');
+  const [verificationReasonCode, setVerificationReasonCode] = useState(DEFAULT_PHONE_VERIFICATION_REASON);
+  const [verificationReasonDetails, setVerificationReasonDetails] = useState('');
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -76,6 +84,9 @@ export default function UserFormModal({
         setSelectedRole(initialUser.canonicalRole || 'MEMBER_FARMER');
         setBlockFarmId(initialUser.assignment?.blockFarmId || '');
         setPassword('');
+        setPhoneVerificationMode('REQUIRED');
+        setVerificationReasonCode(DEFAULT_PHONE_VERIFICATION_REASON);
+        setVerificationReasonDetails('');
       } else {
         setFirstName('');
         setMiddleName('');
@@ -85,6 +96,9 @@ export default function UserFormModal({
         setSelectedRole(isFarmManager ? 'MEMBER_FARMER' : 'FARM_MANAGER');
         setBlockFarmId(currentUser?.blockFarmId || '');
         setPassword('');
+        setPhoneVerificationMode('REQUIRED');
+        setVerificationReasonCode(DEFAULT_PHONE_VERIFICATION_REASON);
+        setVerificationReasonDetails('');
       }
       setFormError(null);
       setIsSubmitting(false);
@@ -120,6 +134,12 @@ export default function UserFormModal({
         setFormError(`Initial temporary password: ${policyError}`);
         return;
       }
+      if (phoneVerificationMode === 'VERIFIED'
+        && isOtherPhoneVerificationReason(verificationReasonCode)
+        && verificationReasonDetails.trim().length < 10) {
+        setFormError('Describe the other verification check using at least 10 characters.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -152,7 +172,12 @@ export default function UserFormModal({
           role: selectedRole,
           password,
           blockFarmId: blockFarmId || undefined,
-          requiresPasswordChange: true
+          requiresPasswordChange: true,
+          phoneVerificationMode,
+          ...(phoneVerificationMode === 'VERIFIED' ? {
+            verificationReasonCode,
+            verificationReasonDetails: verificationReasonDetails.trim() || undefined
+          } : {})
         };
         const res = await approveOrProvisionUser(payload);
         if (res.success) {
@@ -285,10 +310,62 @@ export default function UserFormModal({
           {!isEditing && (
             <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary-bg/50 p-3 text-xs leading-relaxed text-hug-text2">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>The account owner will receive and enter the verification code on first login. Administrators cannot verify a phone on another user&apos;s behalf.</span>
+              <span>Choose whether this number still needs verification or was already checked by an authorized reviewer. Every manual verification is recorded in the audit log.</span>
             </div>
           )}
         </div>
+
+        {!isEditing && (
+          <div className="space-y-3 rounded-xl border border-border bg-bg/30 p-3">
+            <FormField
+              id="user-form-phone-verification"
+              label="Phone Verification"
+              required
+              helperText="Use Already verified only after confirming the person's identity and SIM ownership."
+            >
+              <Select
+                id="user-form-phone-verification"
+                value={phoneVerificationMode}
+                onChange={(event) => setPhoneVerificationMode(event.target.value)}
+                options={[
+                  { value: 'REQUIRED', label: 'Requires verification' },
+                  { value: 'VERIFIED', label: 'Already verified by authorized reviewer' }
+                ]}
+                disabled={isSubmitting}
+              />
+            </FormField>
+
+            {phoneVerificationMode === 'VERIFIED' && (
+              <>
+                <FormField id="user-form-verification-reason" label="Verification Reason" required>
+                  <Select
+                    id="user-form-verification-reason"
+                    value={verificationReasonCode}
+                    onChange={(event) => setVerificationReasonCode(event.target.value)}
+                    options={PHONE_VERIFICATION_REASONS}
+                    disabled={isSubmitting}
+                  />
+                </FormField>
+                {isOtherPhoneVerificationReason(verificationReasonCode) && (
+                  <FormField
+                    id="user-form-verification-details"
+                    label="Verification Details"
+                    required
+                    helperText="Briefly describe the evidence checked."
+                  >
+                    <Input
+                      id="user-form-verification-details"
+                      value={verificationReasonDetails}
+                      onChange={(event) => setVerificationReasonDetails(event.target.value)}
+                      maxLength={500}
+                      disabled={isSubmitting}
+                    />
+                  </FormField>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* Role & Block Farm */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

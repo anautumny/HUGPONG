@@ -165,6 +165,23 @@ function loadPatchHandler(database) {
   return router.stack.find(layer => layer.route?.path === '/:userId' && layer.route.methods.patch).route.stack.at(-1).handle;
 }
 
+function loadVerifyPhoneHandler(database) {
+  const firebasePath = require.resolve('../firebase-admin');
+  const routePath = require.resolve('../routes/users');
+  const previousFirebase = require.cache[firebasePath];
+  delete require.cache[routePath];
+  require.cache[firebasePath] = {
+    id: firebasePath,
+    filename: firebasePath,
+    loaded: true,
+    exports: { admin: {}, db: database }
+  };
+  const router = require('../routes/users');
+  if (previousFirebase) require.cache[firebasePath] = previousFirebase;
+  else delete require.cache[firebasePath];
+  return router.stack.find(layer => layer.route?.path === '/:userId/verify-phone' && layer.route.methods.post).route.stack.at(-1).handle;
+}
+
 function loadBlockFarmPutHandler(database) {
   const firebasePath = require.resolve('../firebase-admin');
   const routePath = require.resolve('../routes/blockFarms');
@@ -235,13 +252,13 @@ test('provisioning refuses to replace a Block Farm existing manager', async () =
   assert.equal(database.records.get('block_farms').get('BF-001').managerUserId, '03000001');
 });
 
-test('only SRA or Super Admin can staff-verify an unverified pending registration', async () => {
+test('assigned Farm Manager or district administrators can verify an unverified pending member', async () => {
   const seed = () => ({
     users: {
       '04000077': {
         firstName: 'Juan', lastName: 'Farmer', displayName: 'Juan Farmer', phone: '09181234567',
         role: 'MEMBER_FARMER', status: 'PENDING', requestedBlockFarmId: 'BF-001',
-        phoneVerifiedAt: null, phoneVerificationStatus: 'PENDING_STAFF',
+        phoneVerifiedAt: null, phoneVerificationStatus: 'PENDING_VERIFICATION',
         updatedAt: '2026-09-29T00:00:00.000Z'
       }
     },
@@ -251,21 +268,21 @@ test('only SRA or Super Admin can staff-verify an unverified pending registratio
   });
 
   const managerDatabase = new MemoryDb(seed());
-  const denied = responseCapture();
+  const managerApproved = responseCapture();
   await loadApproveHandler(managerDatabase)({
-    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', staffVerificationReason: 'Checked in person.' },
+    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', verificationReasonCode: 'ID_AND_SIM_IN_PERSON' },
     session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } },
     get: () => ''
-  }, denied);
-  assert.equal(denied.statusCode, 403);
-  assert.equal(managerDatabase.records.get('users').get('04000077').status, 'PENDING');
+  }, managerApproved);
+  assert.equal(managerApproved.statusCode, 200);
+  assert.equal(managerDatabase.records.get('users').get('04000077').status, 'ACTIVE');
 
   const sraDatabase = new MemoryDb(seed());
   const approved = responseCapture();
   await loadApproveHandler(sraDatabase)({
     body: {
       id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001',
-      staffVerificationReason: 'Applicant presented a valid ID and registered SIM in person.'
+      verificationReasonCode: 'OFFICIAL_RECORD_MATCH'
     },
     session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } },
     get: () => ''
@@ -274,11 +291,47 @@ test('only SRA or Super Admin can staff-verify an unverified pending registratio
   assert.equal(approved.statusCode, 200);
   const user = sraDatabase.records.get('users').get('04000077');
   assert.equal(user.status, 'ACTIVE');
-  assert.equal(user.phoneVerificationMethod, 'STAFF');
+  assert.equal(user.phoneVerificationMethod, 'AUTHORIZED_REVIEW');
   assert.equal(user.phoneVerifiedByUserId, '02000001');
   assert.ok(user.phoneVerifiedAt);
   const auditTypes = [...sraDatabase.records.get('audit_logs').values()].map(record => record.eventType);
-  assert.ok(auditTypes.includes('USER_PHONE_STAFF_VERIFIED'));
+  assert.ok(auditTypes.includes('USER_PHONE_VERIFIED_BY_AUTHORITY'));
+});
+
+test('phone verification can leave a registration pending for explicit acceptance later', async () => {
+  const database = new MemoryDb({
+    users: {
+      '04000088': {
+        firstName: 'Ana', lastName: 'Farmer', displayName: 'Ana Farmer', phone: '09181234568',
+        role: 'MEMBER_FARMER', status: 'PENDING', requestedBlockFarmId: 'BF-001',
+        phoneVerifiedAt: null, phoneVerificationStatus: 'PENDING_VERIFICATION',
+        updatedAt: '2026-09-29T00:00:00.000Z'
+      }
+    },
+    block_farms: {
+      'BF-001': { name: 'North Block Farm', managerUserId: '03000001', status: 'ACTIVE' }
+    }
+  });
+  const verified = responseCapture();
+  await loadVerifyPhoneHandler(database)({
+    body: { verificationReasonCode: 'ID_AND_SIM_IN_PERSON' },
+    params: { userId: '04000088' },
+    session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } }
+  }, verified);
+
+  assert.equal(verified.statusCode, 200);
+  assert.equal(verified.payload.pendingApproval, true);
+  assert.equal(database.records.get('users').get('04000088').status, 'PENDING');
+  assert.ok(database.records.get('users').get('04000088').phoneVerifiedAt);
+
+  const approved = responseCapture();
+  await loadApproveHandler(database)({
+    body: { id: '04000088', role: 'MEMBER_FARMER', blockFarmId: 'BF-001' },
+    session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } },
+    get: () => ''
+  }, approved);
+  assert.equal(approved.statusCode, 200);
+  assert.equal(database.records.get('users').get('04000088').status, 'ACTIVE');
 });
 
 test('editing a Farm Manager moves the canonical assignment to the selected Block Farm', async () => {
@@ -350,11 +403,12 @@ test('editing a Block Farm can replace its manager and moves the selected manage
   assert.equal(response.payload.data.managerUserId, '03000022');
 });
 
-test('web and mobile consume the server assignment while only the web provisioning form chooses it', () => {
+test('web and mobile both choose the server-authoritative assignment during provisioning', () => {
   const root = path.resolve(__dirname, '..', '..');
   const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
   const webForm = read('web/react-app/src/components/users/UserFormModal.jsx');
   const mobileSchema = read('mobile/src/data/firestoreSchema.js');
+  const mobileProvisioning = read('mobile/src/components/ProvisionUserModal.js');
   const route = read('server/routes/users.js');
   const blockFarmRoute = read('server/routes/blockFarms.js');
   const blockFarmForm = read('web/react-app/src/components/fields/BlockFarmModal.jsx');
@@ -363,10 +417,12 @@ test('web and mobile consume the server assignment while only the web provisioni
   assert.match(webForm, /blockFarmId: blockFarmId \|\| undefined/);
   assert.match(webForm, /selectedRole === 'FARM_MANAGER' \? \{ blockFarmId \} : \{\}/);
   assert.match(webForm, /already assigned/);
-  assert.match(route, /queueRelatedWrites: managerFarmSnapshot/);
+  assert.match(route, /queueManagerFarmAssignment\(writer, database, managerFarmSnapshot/);
   assert.match(route, /BLOCK_FARM_MANAGER_ASSIGNED/);
   assert.match(blockFarmRoute, /managerFarms\?\.docs/);
   assert.match(blockFarmForm, /currently \$\{mgr\.assignment\.blockFarmName\}/);
   assert.match(blockFarmService, /canonicalRole === 'FARM_MANAGER'.*status.*ACTIVE/);
   assert.match(mobileSchema, /assignment: value\.assignment \|\| null/);
+  assert.match(mobileProvisioning, /blockFarmId: form\.blockFarmId \|\| undefined/);
+  assert.match(mobileProvisioning, /phoneVerificationMode/);
 });

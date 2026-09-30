@@ -29,7 +29,7 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
       .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
     onUpdate({
       users: mapped.filter(record => record.status !== 'PENDING'),
-      pendingUsers: mapped.filter(record => record.status === 'PENDING'),
+      pendingUsers: mapped.filter(record => record.status === 'PENDING' || !record.phoneVerified),
       hasMore,
       isLoadingMore: loadingMore,
       isLoading: false,
@@ -84,6 +84,14 @@ export async function fetchUsers({ cursor = null, limit = 50 } = {}) {
  */
 export async function approveOrProvisionUser(payload) {
   return authenticatedRequest('/api/users/approve', {
+    method: 'POST',
+    body: payload
+  });
+}
+
+/** Verify an active account whose phone could not be verified by SMS. */
+export async function verifyUserPhone(userId, payload) {
+  return authenticatedRequest(`/api/users/${encodeURIComponent(userId)}/verify-phone`, {
     method: 'POST',
     body: payload
   });
