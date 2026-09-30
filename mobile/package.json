@@ -4,6 +4,8 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "presentation:hotspot": "node scripts/startHotspotPresentation.mjs",
+    "presentation:usb": "node scripts/startUsbPresentation.mjs",
     "android": "expo run:android",
     "web": "expo start --web"
   },
