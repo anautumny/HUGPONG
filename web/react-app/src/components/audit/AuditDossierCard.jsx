@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileText,
   Printer,
@@ -15,7 +15,10 @@ import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import Textarea from '../ui/Textarea';
+import { PaginationFooter } from '../ui/Table';
 import { AUDIT_STATUS, auditStatusLabel, canonicalAuditStatus } from '../../domain/auditWorkflow';
+
+const OPERATION_PAGE_SIZE = 10;
 
 export default function AuditDossierCard({
   report = null,
@@ -33,6 +36,11 @@ export default function AuditDossierCard({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [certificationNotes, setCertificationNotes] = useState('');
   const [returnReason, setReturnReason] = useState('');
+  const [operationPage, setOperationPage] = useState(1);
+
+  useEffect(() => {
+    setOperationPage(1);
+  }, [report?.id, report?.reportId]);
 
   // Check role authorization: ONLY SRA_ADMIN has certification authority
   const userRole = (currentUser?.canonicalRole || currentUser?.role || '').toUpperCase().replace(/[\s-]+/g, '_');
@@ -67,6 +75,10 @@ export default function AuditDossierCard({
   const operationLogs = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
     : (Array.isArray(report.operations) ? report.operations : []);
+  const operationTotalPages = Math.max(1, Math.ceil(operationLogs.length / OPERATION_PAGE_SIZE));
+  const validOperationPage = Math.min(operationPage, operationTotalPages);
+  const operationPageStart = (validOperationPage - 1) * OPERATION_PAGE_SIZE;
+  const pagedOperationLogs = operationLogs.slice(operationPageStart, operationPageStart + OPERATION_PAGE_SIZE);
 
   // Compute metrics from actual snapshots
   const totalLogs = operationLogs.length;
@@ -265,7 +277,8 @@ export default function AuditDossierCard({
                   </td>
                 </tr>
               ) : (
-                operationLogs.map((log, idx) => {
+                pagedOperationLogs.map((log, pageIndex) => {
+                  const idx = operationPageStart + pageIndex;
                   const logCost = Number(log.totalCost != null ? log.totalCost : (log.cost || 0));
                   const opName = log.operationName || `Operation ${idx + 1}`;
                   const operationLabel = (
@@ -362,6 +375,16 @@ export default function AuditDossierCard({
             )}
           </table>
         </div>
+        {operationLogs.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-border">
+            <PaginationFooter
+              currentPage={validOperationPage}
+              totalPages={operationTotalPages}
+              totalItems={operationLogs.length}
+              onPageChange={setOperationPage}
+            />
+          </div>
+        )}
       </div>
 
       {/* Footer & Actions */}

@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Search, Users } from 'lucide-react';
 import Input from '../ui/Input';
+import { PaginationFooter } from '../ui/Table';
 import { activityAttentionPresentation, formatActivity, formatPhilippineTime, syncStatusPresentation } from '../../services/telemetryService';
+
+const PAGE_SIZE = 10;
 
 export default function SyncTelemetryTable({
   subjects = [],
@@ -14,10 +17,17 @@ export default function SyncTelemetryTable({
   statusMode = 'sync'
 }) {
   const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return query ? subjects.filter(subject => subject.displayName.toLowerCase().includes(query)) : subjects;
   }, [subjects, search]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const validPage = Math.min(currentPage, totalPages);
+  const pagedSubjects = useMemo(() => {
+    const start = (validPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, validPage]);
 
   return (
     <section className="rounded-2xl border border-border bg-white dark:bg-surface shadow-xs overflow-hidden">
@@ -27,7 +37,15 @@ export default function SyncTelemetryTable({
           <p className="text-xs text-hug-muted mt-0.5">{description}</p>
         </div>
         <div className="w-full sm:w-64">
-          <Input value={search} onChange={event => setSearch(event.target.value)} placeholder={searchPlaceholder} icon={showIcons ? Search : undefined} />
+          <Input
+            value={search}
+            onChange={event => {
+              setSearch(event.target.value);
+              setCurrentPage(1);
+            }}
+            placeholder={searchPlaceholder}
+            icon={showIcons ? Search : undefined}
+          />
         </div>
       </div>
 
@@ -39,7 +57,7 @@ export default function SyncTelemetryTable({
             {showIcons && <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />}
             <p className="text-sm font-bold text-hug-text">{emptyTitle}</p>
           </div>
-        ) : filtered.map(subject => {
+        ) : pagedSubjects.map(subject => {
           const status = statusMode === 'activity'
             ? activityAttentionPresentation(subject.activity)
             : syncStatusPresentation(subject.sync?.state, subject.sync?.pendingMutationCount, subject.sync?.failedMutationCount);
@@ -69,6 +87,14 @@ export default function SyncTelemetryTable({
           );
         })}
       </div>
+      {!isLoading && filtered.length > 0 && (
+        <PaginationFooter
+          currentPage={validPage}
+          totalPages={totalPages}
+          totalItems={filtered.length}
+          onPageChange={setCurrentPage}
+        />
+      )}
     </section>
   );
 }

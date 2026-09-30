@@ -255,6 +255,7 @@ export default function OperationsView() {
     loadMoreError: null
   });
   const [archiveReloadKey, setArchiveReloadKey] = useState(0);
+  const [archiveCurrentPage, setArchiveCurrentPage] = useState(1);
   const archiveRequestIdRef = useRef(0);
   const archiveLoadMoreLockRef = useRef(false);
   const archivePreferenceKey = useMemo(
@@ -362,6 +363,7 @@ export default function OperationsView() {
   const loadArchivePage = useCallback(async ({ append = false } = {}) => {
     if (append && archiveLoadMoreLockRef.current) return;
     if (append) archiveLoadMoreLockRef.current = true;
+    if (!append) setArchiveCurrentPage(1);
     const requestId = ++archiveRequestIdRef.current;
     setArchiveState(previous => ({
       ...previous,
@@ -417,6 +419,7 @@ export default function OperationsView() {
     writeArchiveClearViewPreference(archivePreferenceKey, true);
     archiveRequestIdRef.current += 1;
     archiveLoadMoreLockRef.current = false;
+    setArchiveCurrentPage(1);
     setArchiveState(previous => ({
       ...previous,
       records: [],
@@ -437,6 +440,7 @@ export default function OperationsView() {
   };
 
   const updateArchiveFilter = (key, value) => {
+    setArchiveCurrentPage(1);
     setArchiveFilters(previous => ({ ...previous, [key]: value }));
   };
 
@@ -666,6 +670,12 @@ export default function OperationsView() {
   }, [filteredOperations, currentPage]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOperations.length / pageSize));
+  const archiveTotalPages = Math.max(1, Math.ceil(archiveState.records.length / pageSize));
+  const validArchivePage = Math.min(archiveCurrentPage, archiveTotalPages);
+  const paginatedArchiveRecords = useMemo(() => {
+    const start = (validArchivePage - 1) * pageSize;
+    return archiveState.records.slice(start, start + pageSize);
+  }, [archiveState.records, validArchivePage]);
   const authorizedArchiveCycles = useMemo(() => {
     const fieldIds = new Set((fieldsData.fields || []).map(field => field.id));
     return (fieldsData.cropCycles || []).filter(cycle => fieldIds.has(cycle.fieldId));
@@ -1407,7 +1417,7 @@ export default function OperationsView() {
             <>
               <Table
                 columns={historyColumns}
-                data={statusFilter === 'ARCHIVED' ? archiveState.records : paginatedOperations}
+                data={statusFilter === 'ARCHIVED' ? paginatedArchiveRecords : paginatedOperations}
                 isLoading={statusFilter === 'ARCHIVED' ? archiveState.isLoading : opsData.isLoading}
                 error={statusFilter === 'ARCHIVED' ? archiveState.error : opsData.error}
                 onRetry={statusFilter === 'ARCHIVED' ? () => loadArchivePage({ append: false }) : undefined}
@@ -1415,12 +1425,10 @@ export default function OperationsView() {
                 emptySubtext={statusFilter === 'ARCHIVED'
                   ? 'Try another Crop Year Cycle, field, operation, or record ID.'
                   : 'Field activities recorded for your assigned plots will appear in this ledger.'}
-                {...(statusFilter === 'ACTIVE' ? {
-                  currentPage,
-                  totalPages,
-                  totalItems: filteredOperations.length,
-                  onPageChange: setCurrentPage
-                } : {})}
+                currentPage={statusFilter === 'ARCHIVED' ? validArchivePage : currentPage}
+                totalPages={statusFilter === 'ARCHIVED' ? archiveTotalPages : totalPages}
+                totalItems={statusFilter === 'ARCHIVED' ? archiveState.records.length : filteredOperations.length}
+                onPageChange={statusFilter === 'ARCHIVED' ? setArchiveCurrentPage : setCurrentPage}
               />
 
               {statusFilter === 'ARCHIVED' && !archiveState.isLoading && !archiveState.error && (

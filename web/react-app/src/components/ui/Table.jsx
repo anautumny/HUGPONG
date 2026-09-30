@@ -167,7 +167,7 @@ export default function Table({
 }
 
 /** Internal pagination footer — rendered inside the Table card */
-function PaginationFooter({ currentPage = 1, totalPages = 1, totalItems, onPageChange }) {
+export function PaginationFooter({ currentPage = 1, totalPages = 1, totalItems, onPageChange }) {
   // Always render so the card footer is always present when pagination is requested
   return (
     <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-xs">

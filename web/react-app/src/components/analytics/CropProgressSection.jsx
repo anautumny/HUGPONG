@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { Sprout, ChevronRight, Layers, MapPin, CheckCircle2, User, Info } from 'lucide-react';
+import { PaginationFooter } from '../ui/Table';
+
+const FIELD_PAGE_SIZE = 10;
 
 export default function CropProgressSection({
   progressData = null,
@@ -7,6 +10,7 @@ export default function CropProgressSection({
   className = ''
 }) {
   const [selectedStageNumber, setSelectedStageNumber] = useState(null);
+  const [fieldPage, setFieldPage] = useState(1);
 
   if (isLoading) {
     return (
@@ -36,6 +40,12 @@ export default function CropProgressSection({
     : null;
 
   const displayedFields = displayedStage ? displayedStage.fields : [];
+  const fieldTotalPages = Math.max(1, Math.ceil(displayedFields.length / FIELD_PAGE_SIZE));
+  const validFieldPage = Math.min(fieldPage, fieldTotalPages);
+  const pagedFields = displayedFields.slice(
+    (validFieldPage - 1) * FIELD_PAGE_SIZE,
+    validFieldPage * FIELD_PAGE_SIZE
+  );
 
   return (
     <div className={`bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs ${className}`}>
@@ -87,7 +97,10 @@ export default function CropProgressSection({
                 <button
                   key={stage.stageNumber}
                   type="button"
-                  onClick={() => setSelectedStageNumber(isSelected ? null : stage.stageNumber)}
+                  onClick={() => {
+                    setSelectedStageNumber(isSelected ? null : stage.stageNumber);
+                    setFieldPage(1);
+                  }}
                   className={`text-left p-3.5 rounded-xl border transition-all relative flex flex-col justify-between ${
                     isSelected
                       ? 'border-primary bg-primary-bg/20 dark:bg-primary/10 shadow-xs ring-2 ring-primary/20'
@@ -154,7 +167,10 @@ export default function CropProgressSection({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedStageNumber(null)}
+                  onClick={() => {
+                    setSelectedStageNumber(null);
+                    setFieldPage(1);
+                  }}
                   className="text-xs text-hug-muted hover:text-hug-text underline self-start sm:self-auto"
                 >
                   Clear Selection
@@ -176,7 +192,7 @@ export default function CropProgressSection({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50 text-hug-text">
-                      {displayedFields.map((f) => (
+                      {pagedFields.map((f) => (
                         <tr key={f.id} className="hover:bg-bg/40">
                           <td className="py-2 px-3 font-mono font-bold text-primary dark:text-primary-light">
                             {f.id}
@@ -197,6 +213,12 @@ export default function CropProgressSection({
                       ))}
                     </tbody>
                   </table>
+                  <PaginationFooter
+                    currentPage={validFieldPage}
+                    totalPages={fieldTotalPages}
+                    totalItems={displayedFields.length}
+                    onPageChange={setFieldPage}
+                  />
                 </div>
               )}
             </div>

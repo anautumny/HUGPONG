@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,8 +18,10 @@ import {
   restoreMissingBackupRecords,
   validateBackup
 } from '../../services/backupService';
+import { PaginationFooter } from '../../components/ui/Table';
 
 const RESTORE_CONFIRMATION = 'RECOVER MISSING RECORDS';
+const ACTIVITY_PAGE_SIZE = 10;
 
 function formatTimestamp(value) {
   if (!value) return 'Not available';
@@ -45,6 +47,13 @@ export default function BackupManagementView() {
   const [archiveBase64, setArchiveBase64] = useState('');
   const [validating, setValidating] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [activityPage, setActivityPage] = useState(1);
+  const activityTotalPages = Math.max(1, Math.ceil(status.data.length / ACTIVITY_PAGE_SIZE));
+  const validActivityPage = Math.min(activityPage, activityTotalPages);
+  const pagedActivity = useMemo(() => {
+    const start = (validActivityPage - 1) * ACTIVITY_PAGE_SIZE;
+    return status.data.slice(start, start + ACTIVITY_PAGE_SIZE);
+  }, [status.data, validActivityPage]);
 
   const refreshStatus = useCallback(async () => {
     setLoadingStatus(true);
@@ -250,12 +259,22 @@ export default function BackupManagementView() {
             <thead className="border-b border-border text-xs uppercase tracking-wide text-hug-muted"><tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Operation</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Records</th><th className="px-3 py-2">Reference ID</th></tr></thead>
             <tbody className="divide-y divide-border/70">
               {!loadingStatus && status.data.length === 0 && <tr><td colSpan="5" className="px-3 py-8 text-center text-hug-muted">No backup activity has been recorded.</td></tr>}
-              {status.data.map(item => (
+              {pagedActivity.map(item => (
                 <tr key={item.id}><td className="px-3 py-3 text-hug-muted">{formatTimestamp(item.completedAt || item.createdAt)}</td><td className="px-3 py-3 font-semibold text-hug-text">{item.operation.replaceAll('_', ' ')}</td><td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusClass(item.status)}`}>{item.status}</span></td><td className="px-3 py-3 text-hug-text">{item.result?.restoredCount ?? item.documentCount ?? 0}</td><td className="px-3 py-3 font-mono text-xs text-hug-muted">{item.referenceId}</td></tr>
               ))}
             </tbody>
           </table>
         </div>
+        {!loadingStatus && status.data.length > 0 && (
+          <div className="-mx-5 -mb-5 mt-4 overflow-hidden rounded-b-2xl">
+            <PaginationFooter
+              currentPage={validActivityPage}
+              totalPages={activityTotalPages}
+              totalItems={status.data.length}
+              onPageChange={setActivityPage}
+            />
+          </div>
+        )}
       </section>
 
       <section className="rounded-2xl border border-border bg-surface-subtle p-5 text-sm text-hug-muted">

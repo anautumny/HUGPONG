@@ -9,6 +9,8 @@ import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
 
+const MEMBER_PAGE_SIZE = 10;
+
 function formatTime(value, t, language, fallback = t('sync_not_reported')) {
   if (!value) return fallback;
   const date = new Date(value);
@@ -84,6 +86,7 @@ export default function SyncMonitorScreen({ navigation }) {
   const [error, setError] = React.useState('');
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [localRevision, setLocalRevision] = React.useState(0);
+  const [memberPage, setMemberPage] = React.useState(1);
   const role = session?.role;
   const allowed = role === 'Farm Manager' || role === 'Farm Member';
 
@@ -134,6 +137,12 @@ export default function SyncMonitorScreen({ navigation }) {
   const localFailed = outbox.filter(item => !['queued', 'retryable', 'syncing'].includes(item.status)).length;
   const own = monitor?.subjects?.find(subject => subject.isSelf) || null;
   const members = monitor?.subjects?.filter(subject => !subject.isSelf) || [];
+  const memberTotalPages = Math.max(1, Math.ceil(members.length / MEMBER_PAGE_SIZE));
+  const validMemberPage = Math.min(memberPage, memberTotalPages);
+  const pagedMembers = members.slice(
+    (validMemberPage - 1) * MEMBER_PAGE_SIZE,
+    validMemberPage * MEMBER_PAGE_SIZE
+  );
   const ownSync = {
     ...(own?.sync || {}),
     pendingMutationCount: localPending,
@@ -225,7 +234,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <View>
                 <Text style={s.sectionTitle}>{t('sync_member_activity')}</Text>
                 <Text style={s.sectionSub}>{t('sync_member_activity_sub')}</Text>
-                {members.length === 0 ? <Text style={s.emptyText}>{t('sync_no_members')}</Text> : members.map(member => (
+                {members.length === 0 ? <Text style={s.emptyText}>{t('sync_no_members')}</Text> : pagedMembers.map(member => (
                   <View key={member.userId} style={s.memberCard}>
                     <View style={s.cardHeading}>
                       <Text style={s.memberName}>{member.displayName}</Text>
@@ -239,6 +248,31 @@ export default function SyncMonitorScreen({ navigation }) {
                     <StatusRow label={t('sync_last_reported')} value={formatTime(member.sync?.lastReportedAt, t, language)} />
                   </View>
                 ))}
+                {members.length > 0 ? (
+                  <View style={s.pagination}>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('btn_prev')}
+                      disabled={validMemberPage <= 1}
+                      onPress={() => setMemberPage(Math.max(1, validMemberPage - 1))}
+                      style={[s.pageButton, validMemberPage <= 1 && s.pageButtonDisabled]}
+                    >
+                      <Ionicons name="chevron-back" size={16} color={COLORS.text} />
+                      <Text style={s.pageButtonText}>{t('btn_prev')}</Text>
+                    </TouchableOpacity>
+                    <Text style={s.pageCount}>{validMemberPage} / {memberTotalPages} · {members.length}</Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('btn_next')}
+                      disabled={validMemberPage >= memberTotalPages}
+                      onPress={() => setMemberPage(Math.min(memberTotalPages, validMemberPage + 1))}
+                      style={[s.pageButton, validMemberPage >= memberTotalPages && s.pageButtonDisabled]}
+                    >
+                      <Text style={s.pageButtonText}>{t('btn_next')}</Text>
+                      <Ionicons name="chevron-forward" size={16} color={COLORS.text} />
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
               </View>
             ) : null}
           </>
@@ -284,6 +318,11 @@ const s = StyleSheet.create({
   sectionSub: { fontSize: 11.5, lineHeight: 17, color: COLORS.textMuted, marginTop: 3, marginBottom: 4 },
   emptyTitle: { textAlign: 'center', fontSize: 15, fontWeight: '800', color: COLORS.text },
   emptyText: { textAlign: 'center', fontSize: 12, color: COLORS.textMuted, padding: 24 },
+  pagination: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  pageButton: { minHeight: 40, minWidth: 88, paddingHorizontal: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  pageButtonDisabled: { opacity: 0.4 },
+  pageButtonText: { fontSize: 12, fontWeight: '800', color: COLORS.text },
+  pageCount: { flex: 1, textAlign: 'center', fontSize: 11.5, fontWeight: '800', color: COLORS.textMuted },
   error: { padding: 12, borderRadius: RADIUS.md, backgroundColor: '#FDECEC' },
   errorText: { color: '#B42318', fontSize: 12, fontWeight: '700' }
 });

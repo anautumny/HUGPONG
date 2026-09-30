@@ -1,10 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { BookOpen, History, Search, Calendar, FileText, CheckCircle2, Clock } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Badge from '../ui/Badge';
+import { PaginationFooter } from '../ui/Table';
 import { canonicalAuditStatus, auditStatusLabel, AUDIT_STATUS } from '../../domain/auditWorkflow';
+
+const PAGE_SIZE = 10;
 
 export default function AuditHistoryModal({
   isOpen = false,
@@ -19,6 +22,7 @@ export default function AuditHistoryModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Extract unique periods
   const periods = useMemo(() => {
@@ -47,6 +51,16 @@ export default function AuditHistoryModal({
       return hash.includes(term) || farm.includes(term) || p.toLowerCase().includes(term) || statusStr.includes(term);
     });
   }, [reports, selectedPeriod, selectedStatus, searchTerm, blockFarms]);
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / PAGE_SIZE));
+  const validPage = Math.min(currentPage, totalPages);
+  const pagedReports = useMemo(() => {
+    const start = (validPage - 1) * PAGE_SIZE;
+    return filteredReports.slice(start, start + PAGE_SIZE);
+  }, [filteredReports, validPage]);
+
+  useEffect(() => {
+    if (!isOpen) setCurrentPage(1);
+  }, [isOpen]);
 
   const summaryMetrics = useMemo(() => {
     let totalLogs = 0;
@@ -112,7 +126,10 @@ export default function AuditHistoryModal({
                 <button
                   key={st.id}
                   type="button"
-                  onClick={() => setSelectedStatus(st.id)}
+                  onClick={() => {
+                    setSelectedStatus(st.id);
+                    setCurrentPage(1);
+                  }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                     selectedStatus === st.id
                       ? 'bg-primary text-white shadow-2xs'
@@ -128,7 +145,10 @@ export default function AuditHistoryModal({
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
               <button
                 type="button"
-                onClick={() => setSelectedPeriod('ALL')}
+                onClick={() => {
+                  setSelectedPeriod('ALL');
+                  setCurrentPage(1);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                   selectedPeriod === 'ALL'
                     ? 'bg-primary text-white shadow-2xs'
@@ -141,7 +161,10 @@ export default function AuditHistoryModal({
                 <button
                   key={p}
                   type="button"
-                  onClick={() => setSelectedPeriod(p)}
+                  onClick={() => {
+                    setSelectedPeriod(p);
+                    setCurrentPage(1);
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                     selectedPeriod === p
                       ? 'bg-primary text-white shadow-2xs'
@@ -160,7 +183,10 @@ export default function AuditHistoryModal({
               type="search"
               placeholder="Search farm, hash, status..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="text-xs"
             />
           </div>
@@ -218,7 +244,7 @@ export default function AuditHistoryModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60 text-hug-text">
-                {filteredReports.map(report => {
+                {pagedReports.map(report => {
                   const statusCanonical = canonicalAuditStatus(report.status);
                   const isCert = statusCanonical === AUDIT_STATUS.CERTIFIED;
                   const isAwaiting = statusCanonical === AUDIT_STATUS.PENDING_REVIEW;
@@ -270,6 +296,16 @@ export default function AuditHistoryModal({
             </table>
           )}
         </div>
+        {filteredReports.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-border">
+            <PaginationFooter
+              currentPage={validPage}
+              totalPages={totalPages}
+              totalItems={filteredReports.length}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        )}
         {hasMore && <Button variant="secondary" size="md" onClick={onLoadMore} isLoading={isLoading} loadingText="Loading...">Load More</Button>}
       </div>
     </Modal>

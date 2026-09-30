@@ -276,6 +276,27 @@ export default function Sidebar({
       } bg-surface border-r border-border flex-shrink-0 flex flex-col h-full overflow-visible transition-all duration-200 z-30 select-none relative`}
       aria-label="Main Navigation"
     >
+      {/* Semi-Circle Tab Toggle: Right half when collapsed (protruding into canvas), Left half when expanded (flush inside sidebar) */}
+      {!isMobileDrawer && (
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className={`absolute top-5 ${
+            collapsed
+              ? 'left-full -ml-px w-5 h-7 rounded-r-full border border-l-0 pl-0.5'
+              : '-right-px w-5 h-7 rounded-l-full border border-r-0 pr-0.5'
+          } border-border bg-surface flex items-center justify-center text-hug-muted hover:text-primary dark:hover:text-primary-light hover:bg-primary-bg dark:hover:bg-primary/20 hover:border-primary/40 shadow-2xs hover:shadow-xs transition-all z-40 cursor-pointer group`}
+          title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? (
+            <ChevronRight className="w-3.5 h-3.5 text-hug-muted group-hover:text-primary dark:group-hover:text-primary-light group-hover:translate-x-0.5 transition-transform" />
+          ) : (
+            <ChevronLeft className="w-3.5 h-3.5 text-hug-muted group-hover:text-primary dark:group-hover:text-primary-light group-hover:-translate-x-0.5 transition-transform" />
+          )}
+        </button>
+      )}
+
       {/* Brand Header (Aligned to h-16 shared header height, centered when collapsed) */}
       <div
         className={`h-16 flex items-center border-b border-border flex-shrink-0 ${
@@ -301,8 +322,8 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Mobile close button OR desktop collapse toggle */}
-        {isMobileDrawer ? (
+        {/* Mobile close button (only displayed in mobile drawer mode) */}
+        {isMobileDrawer && (
           <button
             type="button"
             onClick={onCloseMobileDrawer}
@@ -311,18 +332,6 @@ export default function Sidebar({
           >
             <X className="w-5 h-5" />
           </button>
-        ) : (
-          !collapsed && (
-            <button
-              type="button"
-              onClick={onToggleCollapse}
-              className="p-1.5 rounded-lg text-hug-muted hover:text-primary hover:bg-surface-subtle transition-colors"
-              title="Collapse sidebar (Ctrl+B)"
-              aria-label="Collapse sidebar"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )
         )}
       </div>
 
@@ -357,40 +366,42 @@ export default function Sidebar({
                   title={collapsed ? item.label : undefined}
                   className={({ isActive }) => {
                     const active = isItemActive(isActive);
-                    return `nav-item flex items-center ${
+                    return `nav-item group relative flex items-center ${
                       collapsed
                         ? 'w-10 h-10 mx-auto justify-center'
                         : 'gap-2.5 px-3 py-2.5 w-full'
-                    } rounded-xl text-sm transition-colors text-left cursor-pointer ${
+                    } rounded-xl text-sm transition-all text-left cursor-pointer ${
                       active
-                        ? 'bg-surface-subtle dark:bg-surface-elevated text-hug-text font-semibold border border-border/80 shadow-2xs'
+                        ? 'bg-primary-bg text-primary dark:bg-primary/20 dark:text-primary-light font-bold border border-primary/25 dark:border-primary/40 shadow-2xs'
                         : 'text-hug-muted hover:text-hug-text hover:bg-surface-subtle/80 font-medium border border-transparent'
                     }`;
                   }}
                   end={item.to === '/dashboard'}
                 >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {({ isActive }) => {
+                    const active = isItemActive(isActive);
+                    return (
+                      <>
+                        {active && !collapsed && (
+                          <span
+                            className="w-1 h-3.5 rounded-full bg-primary dark:bg-primary-light -ml-0.5 flex-shrink-0"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <Icon
+                          className={`w-4 h-4 flex-shrink-0 transition-colors ${
+                            active ? 'text-primary dark:text-primary-light' : 'text-hug-muted group-hover:text-hug-text'
+                          }`}
+                        />
+                        {!collapsed && <span className="truncate">{item.label}</span>}
+                      </>
+                    );
+                  }}
                 </NavLink>
               );
             })}
           </div>
         ))}
-
-        {/* Collapsed Expand Trigger if collapsed */}
-        {collapsed && (
-          <div className="pt-2 flex justify-center">
-            <button
-              type="button"
-              onClick={onToggleCollapse}
-              className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl text-hug-muted hover:text-hug-text hover:bg-surface-subtle transition-colors cursor-pointer border border-transparent hover:border-border/60"
-              title="Expand sidebar"
-              aria-label="Expand sidebar"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
       </nav>
 
       {/* User Profile Area (Clean Popover + Trigger Card) */}
