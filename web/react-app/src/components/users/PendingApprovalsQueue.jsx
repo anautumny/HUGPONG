@@ -71,7 +71,7 @@ export default function PendingApprovalsQueue({
       return;
     }
     if (requiresPhoneVerification && isOtherPhoneVerificationReason(verificationReasonCode) && verificationReasonDetail.length < 10) {
-      setActionError('Describe the other documented verification check using at least 10 characters.');
+      setActionError('Add a reviewer comment of at least 10 characters when using another verification method.');
       return;
     }
     setProcessingId(user.id);
@@ -198,22 +198,7 @@ export default function PendingApprovalsQueue({
                     {canVerify ? (
                       <div className="mt-2 text-xs font-semibold text-hug-text">
                         <label className="block">
-                          Verification reason
-                          <select
-                            value={verificationReasonCode}
-                            onChange={(event) => {
-                              setVerificationReasonCodes(current => ({ ...current, [p.id]: event.target.value }));
-                              setActionError(null);
-                            }}
-                            disabled={isProcessing}
-                            className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
-                          >
-                            {PHONE_VERIFICATION_REASONS.map(reason => (
-                              <option key={reason.value} value={reason.value}>{reason.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        {isOtherPhoneVerificationReason(verificationReasonCode) && (
+                          Reviewer comment {isOtherPhoneVerificationReason(verificationReasonCode) ? '(required)' : '(optional)'}
                           <textarea
                             value={verificationDetail}
                             onChange={(event) => {
@@ -222,11 +207,36 @@ export default function PendingApprovalsQueue({
                             }}
                             disabled={isProcessing}
                             maxLength={500}
-                            rows={2}
-                            placeholder="Describe the evidence checked."
-                            className="mt-2 w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary"
+                            rows={3}
+                            placeholder="Add a short note about how you confirmed this number."
+                            className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-normal text-hug-text outline-none focus:border-primary"
                           />
-                        )}
+                        </label>
+                        <fieldset className="mt-3">
+                          <legend className="text-xs font-semibold text-hug-text">How did you verify the number?</legend>
+                          <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                            {PHONE_VERIFICATION_REASONS.map(reason => {
+                              const selected = verificationReasonCode === reason.value;
+                              return (
+                                <button
+                                  key={reason.value}
+                                  type="button"
+                                  disabled={isProcessing}
+                                  onClick={() => {
+                                    setVerificationReasonCodes(current => ({ ...current, [p.id]: reason.value }));
+                                    setActionError(null);
+                                  }}
+                                  aria-pressed={selected}
+                                  className={`rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition-colors ${selected
+                                    ? 'border-primary bg-primary-bg text-primary'
+                                    : 'border-border bg-surface text-hug-muted hover:border-primary/50'}`}
+                                >
+                                  {reason.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </fieldset>
                         {isPendingRegistration && (
                           <div className="mt-3">
                             <span className="block text-xs font-semibold text-hug-text">After verifying the number</span>

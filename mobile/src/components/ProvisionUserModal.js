@@ -53,7 +53,7 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
     if (form.phoneVerificationMode === 'VERIFIED'
       && isOtherPhoneVerificationReason(form.verificationReasonCode)
       && form.verificationReasonDetails.trim().length < 10) {
-      return Alert.alert('Verification Details Required', 'Describe the other documented check using at least 10 characters.');
+      return Alert.alert('Reviewer Comment Required', 'Add a reviewer comment of at least 10 characters when using another verification method.');
     }
     setSaving(true);
     try {
@@ -127,9 +127,22 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
             {[{ value: 'REQUIRED', label: 'Requires verification' }, { value: 'VERIFIED', label: 'Already verified by authorized reviewer' }].map(mode => <TouchableOpacity key={mode.value} disabled={saving} onPress={() => set('phoneVerificationMode', mode.value)} style={{ padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: form.phoneVerificationMode === mode.value ? COLORS.primary : COLORS.border, backgroundColor: form.phoneVerificationMode === mode.value ? COLORS.primaryBg : '#fff' }}><Text style={{ fontSize: 11, fontWeight: '800', color: form.phoneVerificationMode === mode.value ? COLORS.primary : COLORS.textSecondary }}>{mode.label}</Text></TouchableOpacity>)}
           </View>
 
-          {form.phoneVerificationMode === 'VERIFIED' && <View style={{ gap: 6 }}><Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>Verification Reason *</Text>
+          {form.phoneVerificationMode === 'VERIFIED' && <View style={{ gap: 6 }}>
+            <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>
+              Reviewer Comment {isOtherPhoneVerificationReason(form.verificationReasonCode) ? '*' : '(Optional)'}
+            </Text>
+            <TextInput
+              value={form.verificationReasonDetails}
+              onChangeText={value => set('verificationReasonDetails', value)}
+              editable={!saving}
+              maxLength={500}
+              multiline
+              placeholder="Add a short note about how you confirmed this number."
+              placeholderTextColor={COLORS.textMuted}
+              style={{ minHeight: 72, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 11, color: COLORS.text, backgroundColor: '#fff', textAlignVertical: 'top' }}
+            />
+            <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text, marginTop: 4 }}>How did you verify the number? *</Text>
             {PHONE_VERIFICATION_REASONS.map(reason => <TouchableOpacity key={reason.value} disabled={saving} onPress={() => set('verificationReasonCode', reason.value)} style={{ padding: 9, borderRadius: RADIUS.md, borderWidth: 1, borderColor: form.verificationReasonCode === reason.value ? COLORS.primary : COLORS.border, backgroundColor: form.verificationReasonCode === reason.value ? COLORS.primaryBg : '#fff' }}><Text style={{ fontSize: 10.5, fontWeight: '700', color: form.verificationReasonCode === reason.value ? COLORS.primary : COLORS.textSecondary }}>{reason.label}</Text></TouchableOpacity>)}
-            {isOtherPhoneVerificationReason(form.verificationReasonCode) && input('Verification Details *', 'verificationReasonDetails')}
           </View>}
 
           <TouchableOpacity disabled={saving} onPress={submit} style={{ marginTop: 4, minHeight: 48, borderRadius: RADIUS.md, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: saving ? 0.7 : 1 }}>

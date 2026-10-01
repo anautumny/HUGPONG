@@ -26,8 +26,11 @@ test('authorized phone verification is represented in server, Web, and Mobile fl
   const authRoute = read('server/routes/auth.js');
   const usersRoute = read('server/routes/users.js');
   const webQueue = read('web/react-app/src/components/users/PendingApprovalsQueue.jsx');
+  const webReasons = read('web/react-app/src/domain/phoneVerification.js');
   const mobileRegistration = read('mobile/src/screens/auth/RegisterScreen.js');
   const mobileApproval = read('mobile/src/screens/FieldOpsScreen.js');
+  const mobileReasons = read('mobile/src/domain/phoneVerification.js');
+  const verificationPolicy = read('server/domain/phoneVerificationPolicy.js');
 
   assert.match(authRoute, /verifyPhoneVerificationRequestToken/);
   assert.match(authRoute, /phoneVerificationStatus: smsVerified \? 'VERIFIED' : 'PENDING_VERIFICATION'/);
@@ -39,4 +42,24 @@ test('authorized phone verification is represented in server, Web, and Mobile fl
   assert.match(mobileRegistration, /Request Phone Verification Review/);
   assert.match(mobileApproval, /Awaiting Authorized Review/);
   assert.match(mobileApproval, /Verify Phone Only/);
+
+  const webPhoneReview = webQueue.slice(
+    webQueue.indexOf('Phone not verified by SMS'),
+    webQueue.indexOf('After verifying the number')
+  );
+  assert.ok(webPhoneReview.indexOf('Reviewer comment') < webPhoneReview.indexOf('How did you verify the number?'));
+  assert.doesNotMatch(webPhoneReview, /<select/);
+
+  const mobilePhoneReview = mobileApproval.slice(
+    mobileApproval.indexOf('Phone not verified by SMS'),
+    mobileApproval.indexOf('After verifying the number')
+  );
+  assert.ok(mobilePhoneReview.indexOf('Reviewer comment') < mobilePhoneReview.indexOf('How did you verify the number?'));
+
+  for (const source of [webReasons, mobileReasons]) {
+    assert.match(source, /Called the registered number and confirmed it with the user/);
+    assert.match(source, /I know the user and can confirm this is their number/);
+    assert.match(source, /Met the user face to face and confirmed the number/);
+  }
+  assert.match(verificationPolicy, /called the registered mobile number and confirmed it with the applicant/);
 });

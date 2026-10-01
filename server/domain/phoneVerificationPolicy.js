@@ -3,11 +3,11 @@
 const { COLLECTIONS, ROLES, canonicalRole, requiredString, optionalString } = require('../schema/firestoreSchema');
 
 const PHONE_VERIFICATION_REASONS = Object.freeze({
-  ID_AND_SIM_IN_PERSON: 'Applicant presented a valid government ID and active SIM in person.',
-  ASSIGNED_MANAGER_CONFIRMED: 'Assigned Farm Manager confirmed the applicant identity and active mobile number.',
+  ID_AND_SIM_IN_PERSON: 'The reviewer met the applicant face to face and confirmed the registered mobile number.',
+  ASSIGNED_MANAGER_CONFIRMED: 'The authorized reviewer knows the applicant and confirmed the registered mobile number.',
   OFFICIAL_RECORD_MATCH: 'Applicant identity and mobile number matched existing official organization records.',
-  LIVE_CALL_CONFIRMATION: 'Applicant identity and SIM ownership were confirmed during a live video call.',
-  OTHER_DOCUMENTED_CHECK: 'Another documented identity and SIM ownership check was completed.'
+  LIVE_CALL_CONFIRMATION: 'The reviewer called the registered mobile number and confirmed it with the applicant.',
+  OTHER_DOCUMENTED_CHECK: 'The reviewer used another documented phone-verification method.'
 });
 
 function verificationError(message, status = 403) {

@@ -137,7 +137,7 @@ export default function UserFormModal({
       if (phoneVerificationMode === 'VERIFIED'
         && isOtherPhoneVerificationReason(verificationReasonCode)
         && verificationReasonDetails.trim().length < 10) {
-        setFormError('Describe the other verification check using at least 10 characters.');
+        setFormError('Add a reviewer comment of at least 10 characters when using another verification method.');
         return;
       }
     }
@@ -337,31 +337,45 @@ export default function UserFormModal({
 
             {phoneVerificationMode === 'VERIFIED' && (
               <>
-                <FormField id="user-form-verification-reason" label="Verification Reason" required>
-                  <Select
-                    id="user-form-verification-reason"
-                    value={verificationReasonCode}
-                    onChange={(event) => setVerificationReasonCode(event.target.value)}
-                    options={PHONE_VERIFICATION_REASONS}
+                <FormField
+                  id="user-form-verification-details"
+                  label={`Reviewer Comment ${isOtherPhoneVerificationReason(verificationReasonCode) ? '' : '(Optional)'}`}
+                  required={isOtherPhoneVerificationReason(verificationReasonCode)}
+                  helperText="Add a short note about how you confirmed this number."
+                >
+                  <textarea
+                    id="user-form-verification-details"
+                    value={verificationReasonDetails}
+                    onChange={(event) => setVerificationReasonDetails(event.target.value)}
+                    maxLength={500}
+                    rows={3}
                     disabled={isSubmitting}
+                    placeholder="Add a short note about how you confirmed this number."
+                    className="w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text outline-none focus:border-primary disabled:opacity-60"
                   />
                 </FormField>
-                {isOtherPhoneVerificationReason(verificationReasonCode) && (
-                  <FormField
-                    id="user-form-verification-details"
-                    label="Verification Details"
-                    required
-                    helperText="Briefly describe the evidence checked."
-                  >
-                    <Input
-                      id="user-form-verification-details"
-                      value={verificationReasonDetails}
-                      onChange={(event) => setVerificationReasonDetails(event.target.value)}
-                      maxLength={500}
-                      disabled={isSubmitting}
-                    />
-                  </FormField>
-                )}
+                <fieldset>
+                  <legend className="mb-2 text-sm font-semibold text-hug-text">How did you verify the number?</legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {PHONE_VERIFICATION_REASONS.map(reason => {
+                      const selected = verificationReasonCode === reason.value;
+                      return (
+                        <button
+                          key={reason.value}
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => setVerificationReasonCode(reason.value)}
+                          aria-pressed={selected}
+                          className={`rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition-colors ${selected
+                            ? 'border-primary bg-primary-bg text-primary'
+                            : 'border-border bg-surface text-hug-muted hover:border-primary/50'}`}
+                        >
+                          {reason.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
               </>
             )}
           </div>

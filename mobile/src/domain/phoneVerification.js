@@ -1,9 +1,8 @@
 export const PHONE_VERIFICATION_REASONS = Object.freeze([
-  { value: 'ID_AND_SIM_IN_PERSON', label: 'Valid government ID and active SIM checked in person' },
-  { value: 'ASSIGNED_MANAGER_CONFIRMED', label: 'Assigned Farm Manager confirmed the member and number' },
-  { value: 'OFFICIAL_RECORD_MATCH', label: 'Identity and number matched official organization records' },
-  { value: 'LIVE_CALL_CONFIRMATION', label: 'Identity and SIM ownership confirmed on a live video call' },
-  { value: 'OTHER_DOCUMENTED_CHECK', label: 'Other documented identity and SIM check' }
+  { value: 'LIVE_CALL_CONFIRMATION', label: 'Called the registered number and confirmed it with the user' },
+  { value: 'ASSIGNED_MANAGER_CONFIRMED', label: 'I know the user and can confirm this is their number' },
+  { value: 'ID_AND_SIM_IN_PERSON', label: 'Met the user face to face and confirmed the number' },
+  { value: 'OTHER_DOCUMENTED_CHECK', label: 'Used another verification method' }
 ]);
 
 export const DEFAULT_PHONE_VERIFICATION_REASON = PHONE_VERIFICATION_REASONS[0].value;

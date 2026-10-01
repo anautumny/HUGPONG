@@ -35,10 +35,13 @@ export default function OnboardingScreen({ navigation }) {
     },
   ];
 
-  const handleFinish = async () => {
+  const completeOnboarding = async (destination) => {
     await setItem('@hugpong_onboarded', 'true');
-    navigation.replace('Login');
+    navigation.replace(destination);
   };
+
+  const handleFinish = () => completeOnboarding('Login');
+  const handleRegister = () => completeOnboarding('Register');
 
   const goNext = () => {
     if (current < slides.length - 1) {
@@ -98,7 +101,7 @@ export default function OnboardingScreen({ navigation }) {
           <Ionicons name="arrow-forward" size={18} color="#fff" />
         </TouchableOpacity>
         {current === slides.length - 1 && (
-          <TouchableOpacity style={s.loginLink} onPress={() => navigation.replace('Login')}>
+          <TouchableOpacity style={s.loginLink} onPress={handleRegister}>
             <Text style={s.loginLinkText}>{t('auth_no_account', "Don't have an account?")} <Text style={s.loginLinkBold}>{t('auth_register_now', 'Create Account')}</Text></Text>
           </TouchableOpacity>
         )}

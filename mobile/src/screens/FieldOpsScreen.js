@@ -7285,7 +7285,20 @@ export default function FieldOpsScreen({ navigation, route }) {
                       <Text style={{ color: '#92400E', fontSize: 11.5, fontWeight: '800' }}>Phone not verified by SMS</Text>
                       {canVerifyPhone ? (
                         <>
-                          <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800', marginTop: 7, marginBottom: 5 }}>Verification reason</Text>
+                          <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800', marginTop: 7, marginBottom: 5 }}>
+                            Reviewer comment {isOtherPhoneVerificationReason(verificationReasonCode) ? '(required)' : '(optional)'}
+                          </Text>
+                          <TextInput
+                            value={verificationReasonDetails}
+                            onChangeText={value => setPendingVerificationReasonDetails(current => ({ ...current, [pendingKey]: value }))}
+                            editable={!pendingActionLoading}
+                            maxLength={500}
+                            multiline
+                            placeholder="Add a short note about how you confirmed this number."
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{ minHeight: 72, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: RADIUS.md, padding: 9, fontSize: 11.5, color: COLORS.text, textAlignVertical: 'top' }}
+                          />
+                          <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800', marginTop: 9, marginBottom: 5 }}>How did you verify the number?</Text>
                           <View style={{ gap: 5 }}>
                             {PHONE_VERIFICATION_REASONS.map(reason => {
                               const selected = verificationReasonCode === reason.value;
@@ -7310,18 +7323,6 @@ export default function FieldOpsScreen({ navigation, route }) {
                               );
                             })}
                           </View>
-                          {isOtherPhoneVerificationReason(verificationReasonCode) && (
-                            <TextInput
-                              value={verificationReasonDetails}
-                              onChangeText={value => setPendingVerificationReasonDetails(current => ({ ...current, [pendingKey]: value }))}
-                              editable={!pendingActionLoading}
-                              maxLength={500}
-                              multiline
-                              placeholder="Describe the evidence checked."
-                              placeholderTextColor={COLORS.textMuted}
-                              style={{ marginTop: 7, minHeight: 64, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: RADIUS.md, padding: 9, fontSize: 11.5, color: COLORS.text, textAlignVertical: 'top' }}
-                            />
-                          )}
                           {isPendingRegistration && (
                             <View style={{ marginTop: 9, gap: 5 }}>
                               <Text style={{ color: COLORS.text, fontSize: 10.5, fontWeight: '800' }}>After verifying the number</Text>
