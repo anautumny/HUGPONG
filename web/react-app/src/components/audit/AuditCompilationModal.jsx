@@ -13,7 +13,7 @@ import QRCode from 'qrcode';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { compileAuditReport, fetchNextAuditPeriod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
+import { compileAuditReport, fetchNextAuditPeriod, selectAuditDeliveryMethod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
 import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, reportedOperationIds } from '../../domain/auditWorkflow';
 
 export default function AuditCompilationModal({
@@ -59,7 +59,18 @@ export default function AuditCompilationModal({
       setCompiledResult(initialReport);
       setCompileError(null);
       setDeliveryMessage('');
-      setStep(2);
+      if (String(initialReport.deliveryMethod || '').toLowerCase() === 'qr') {
+        try {
+          setQrPayload(createAuditQrPayload(initialReport));
+          setQrActionMessage('QR Transfer is selected. Show this code to SRA, copy the report ID, or switch to Cloud delivery.');
+          setStep(3);
+        } catch (error) {
+          setCompileError(error.message || 'Unable to reopen the saved QR transfer.');
+          setStep(2);
+        }
+      } else {
+        setStep(2);
+      }
       setIsLoadingPeriod(false);
       return;
     }
@@ -82,11 +93,11 @@ export default function AuditCompilationModal({
     return new Set(fields.filter(f => f.blockFarmId === blockFarm.id).map(f => f.id));
   }, [blockFarm, fields]);
 
-  // Active logs belonging to this block farm and matching the selected period
+  // Submitted logs remain audit-eligible after their production cycle is archived.
   const matchingMonthLogs = useMemo(() => {
     return operations.filter(log => {
       if (!farmFieldIds.has(log.fieldId)) return false;
-      if (log.status !== 'ACTIVE') return false;
+      if (!['ACTIVE', 'ARCHIVED'].includes(String(log.status || '').toUpperCase())) return false;
       const performed = String(log.performedOn || log.isoDate || log.date || '');
       return performed.startsWith(`${selectedPeriod}-`);
     });
@@ -108,6 +119,8 @@ export default function AuditCompilationModal({
     AUDIT_STATUS.PENDING_SUBMISSION,
     AUDIT_STATUS.PENDING_REVIEW
   ].includes(latestStatus);
+  const incompleteFields = Array.isArray(periodInfo?.incompleteFields) ? periodInfo.incompleteFields : [];
+  const compilationBlockedByIncompleteFields = incompleteFields.length > 0;
 
   useEffect(() => {
     const periodReady = periodInfo?.periodKey === selectedPeriod
@@ -117,7 +130,18 @@ export default function AuditCompilationModal({
       setCompiledResult(latestReport);
       setCompileError(null);
       setDeliveryMessage('');
-      setStep(2);
+      if (String(latestReport.deliveryMethod || '').toLowerCase() === 'qr') {
+        try {
+          setQrPayload(createAuditQrPayload(latestReport));
+          setQrActionMessage('QR Transfer is selected. Show this code to SRA, copy the report ID, or switch to Cloud delivery.');
+          setStep(3);
+        } catch (error) {
+          setCompileError(error.message || 'Unable to reopen the saved QR transfer.');
+          setStep(2);
+        }
+      } else {
+        setStep(2);
+      }
     }
   }, [isOpen, isLoadingPeriod, periodInfo, selectedPeriod, blockFarm?.id, latestReport, latestStatus]);
 
@@ -163,8 +187,12 @@ export default function AuditCompilationModal({
         : 'Submit the existing compiled report before creating another version.');
       return;
     }
+    if (compilationBlockedByIncompleteFields) {
+      setCompileError(`Cannot compile: ${incompleteFields.length} active field${incompleteFields.length === 1 ? '' : 's'} still need a submitted operation. Contact the listed members first.`);
+      return;
+    }
     if (eligibleLogs.length === 0) {
-      setCompileError(`Cannot compile: No uncompiled ACTIVE operations found for ${selectedPeriod}.`);
+      setCompileError(`Cannot compile: No uncompiled submitted operations found for ${selectedPeriod}.`);
       return;
     }
 
@@ -187,6 +215,9 @@ export default function AuditCompilationModal({
       }
     } catch (err) {
       console.warn('[AuditCompilation] Compilation failed; see the displayed reference ID.');
+      if (Array.isArray(err.data?.incompleteFields)) {
+        setPeriodInfo(current => ({ ...(current || {}), ...err.data }));
+      }
       setCompileError(err.message || 'Failed to compile audit report. Please try again.');
     } finally {
       setIsCompiling(false);
@@ -207,14 +238,16 @@ export default function AuditCompilationModal({
   };
 
   const handleCloudSubmission = async () => {
-    if (!compiledResult?.id || isSubmitting) return;
+    const reportId = compiledResult?.id || compiledResult?.reportId;
+    if (!reportId || isSubmitting) return;
     setIsSubmitting(true);
     setCompileError(null);
     try {
-      const response = await submitAuditReport(compiledResult.id);
+      const response = await submitAuditReport(reportId);
       if (!response.success || !response.data) throw new Error(response.error || 'Cloud submission failed.');
       setCompiledResult(response.data);
       setDeliveryMessage('Submitted through Cloud. The report is now visible in the SRA Audit Inbox.');
+      setQrActionMessage('Sent through Cloud instead. The report is now awaiting SRA review.');
       if (onSuccess) onSuccess(response.data);
     } catch (error) {
       setCompileError(error.message || 'Unable to submit the compiled report through Cloud.');
@@ -223,21 +256,25 @@ export default function AuditCompilationModal({
     }
   };
 
-  const handleGenerateQr = () => {
+  const handleGenerateQr = async () => {
     if (isPreparingQr) return;
     setIsPreparingQr(true);
     setCompileError(null);
-    setTimeout(() => {
-      try {
-        setQrPayload(createAuditQrPayload(compiledResult));
-        setQrActionMessage('');
-        setStep(3);
-      } catch (error) {
-        setCompileError(error.message || 'Unable to build the complete QR transfer package.');
-      } finally {
-        setIsPreparingQr(false);
-      }
-    }, 0);
+    try {
+      const reportId = compiledResult?.id || compiledResult?.reportId;
+      if (!reportId) throw new Error('The compiled report has no canonical report ID.');
+      const response = await selectAuditDeliveryMethod(reportId, 'QR', compiledResult?.updatedAt || null);
+      if (!response.success || !response.data) throw new Error(response.error || 'QR Transfer could not be selected.');
+      setCompiledResult(response.data);
+      setQrPayload(createAuditQrPayload(response.data));
+      setQrActionMessage('QR Transfer selected. If scanning is unavailable, copy the report ID or send through Cloud instead.');
+      setStep(3);
+      if (onSuccess) onSuccess(response.data);
+    } catch (error) {
+      setCompileError(error.message || 'Unable to build the QR transfer.');
+    } finally {
+      setIsPreparingQr(false);
+    }
   };
 
   const downloadCurrentQr = async () => {
@@ -246,12 +283,74 @@ export default function AuditCompilationModal({
     setIsSavingQr(true);
     setCompileError(null);
     try {
-      const dataUrl = await QRCode.toDataURL(value, {
-        width: 1200,
+      const qrDataUrl = await QRCode.toDataURL(value, {
+        width: 820,
         margin: 4,
         errorCorrectionLevel: 'M',
         color: { dark: '#000000', light: '#FFFFFF' }
       });
+      const qrImage = new Image();
+      await new Promise((resolve, reject) => {
+        qrImage.onload = resolve;
+        qrImage.onerror = reject;
+        qrImage.src = qrDataUrl;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = 1200;
+      canvas.height = 1580;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('The browser could not prepare the QR card.');
+
+      context.fillStyle = '#F7FBF5';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#173D24';
+      context.fillRect(0, 0, canvas.width, 230);
+      context.fillStyle = '#9EE493';
+      context.beginPath();
+      context.arc(112, 115, 48, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = '#173D24';
+      context.font = '900 52px sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText('H', 112, 118);
+      context.textAlign = 'left';
+      context.fillStyle = '#FFFFFF';
+      context.font = '900 58px sans-serif';
+      context.fillText('HUGPONG', 190, 100);
+      context.fillStyle = '#BFE5B9';
+      context.font = '800 22px sans-serif';
+      context.fillText('OFFICIAL AUDIT TRANSFER', 193, 150);
+
+      const managerName = compiledResult?.compiledByName || compiledResult?.compiledByUserId || 'Farm Manager';
+      const farmName = compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId || 'Not specified';
+      const reportPeriod = compiledResult?.periodKey || selectedPeriod || 'Not specified';
+      const cropYear = compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Not specified';
+      const drawField = (label, fieldValue, x, y, maxWidth) => {
+        context.fillStyle = '#718076';
+        context.font = '900 18px sans-serif';
+        context.fillText(label, x, y);
+        context.fillStyle = '#173D24';
+        context.font = '800 29px sans-serif';
+        context.fillText(String(fieldValue), x, y + 39, maxWidth);
+      };
+      drawField('FARM MANAGER', managerName, 90, 290, 1020);
+      drawField('BLOCK FARM', farmName, 90, 390, 1020);
+      drawField('REPORTING MONTH', reportPeriod, 90, 490, 470);
+      drawField('CROP YEAR CYCLE', cropYear, 640, 490, 470);
+
+      context.fillStyle = '#FFFFFF';
+      context.fillRect(160, 570, 880, 880);
+      context.drawImage(qrImage, 190, 600, 820, 820);
+      context.fillStyle = '#2F6B3B';
+      context.textAlign = 'center';
+      context.font = '900 18px sans-serif';
+      context.fillText('SECURE SERVER-VERIFIED REFERENCE', 600, 1490);
+      context.fillStyle = '#526158';
+      context.font = '700 18px monospace';
+      context.fillText(String(compiledResult?.reportId || compiledResult?.id || ''), 600, 1530, 1020);
+
+      const dataUrl = canvas.toDataURL('image/png');
       const reportId = String(compiledResult?.reportId || compiledResult?.id || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
       const link = document.createElement('a');
       link.href = dataUrl;
@@ -285,7 +384,7 @@ export default function AuditCompilationModal({
         variant="primary"
         size="md"
         onClick={handleCompile}
-        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0 || compilationBlockedByActiveReport}
+        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0 || compilationBlockedByActiveReport || compilationBlockedByIncompleteFields}
         isLoading={isCompiling}
         loadingText="Compiling report..."
         icon={FileCheck2}
@@ -388,6 +487,40 @@ export default function AuditCompilationModal({
               {blockFarm?.name || blockFarm?.id || 'Assigned Farm'}
             </span>
           </div>
+
+          {compilationBlockedByIncompleteFields && (
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-3">
+              <div className="mb-2 flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
+                <div>
+                  <p className="font-black text-hug-text">Member submissions still needed</p>
+                  <p className="mt-0.5 text-[11px] text-hug-muted">
+                    Contact these members and ask them to submit and synchronize their {selectedPeriod} operation before compiling.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {incompleteFields.map(item => (
+                  <div key={item.fieldId} className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-black text-hug-text">{item.memberName || 'Unassigned member'}</p>
+                      <p className="text-[11px] text-hug-muted">Field {item.fieldId} · {item.contactNumber || 'No contact number available'}</p>
+                    </div>
+                    {item.contactNumber ? (
+                      <a
+                        href={`tel:${String(item.contactNumber).replace(/[^+\d]/g, '')}`}
+                        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary-bg px-3 py-2 text-[11px] font-black text-primary hover:bg-primary/15 dark:text-primary-light"
+                      >
+                        Contact Member
+                      </a>
+                    ) : (
+                      <span className="shrink-0 text-[10px] font-bold text-amber-700 dark:text-amber-400">Update member contact</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Summary Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -529,17 +662,49 @@ export default function AuditCompilationModal({
             </p>
           </div>
           <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-sm">
-            <QRCodeView value={qrPayload} size={260} color="#000000" bgColor="#FFFFFF" className="p-2" />
-            <strong className="text-xs text-hug-text">Single secure report reference</strong>
-            <div className="w-full rounded-lg border border-border bg-white dark:bg-surface p-2 text-left text-[10px] text-hug-muted">
-              <p><strong className="text-hug-text">Report:</strong> {compiledResult?.reportId || compiledResult?.id}</p>
-              <p><strong className="text-hug-text">Block Farm:</strong> {compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId}</p>
-              <p><strong className="text-hug-text">Period:</strong> {compiledResult?.periodKey || selectedPeriod}</p>
-              <p><strong className="text-hug-text">Operations:</strong> {compiledResult?.operationCount || compiledResult?.operationSnapshots?.length || 0}</p>
+            <div className="w-full overflow-hidden rounded-2xl border border-[#BCD5C0] bg-[#F8FBF6] shadow-sm">
+              <div className="flex items-center gap-3 bg-[#173D24] px-4 py-3 text-left">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#9EE493] text-lg font-black text-[#173D24]">H</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-lg font-black tracking-[0.18em] text-white">HUGPONG</p>
+                  <p className="text-[9px] font-extrabold tracking-[0.14em] text-[#BFE5B9]">OFFICIAL AUDIT TRANSFER</p>
+                </div>
+                <FileCheck2 className="h-6 w-6 text-[#9EE493]" aria-hidden="true" />
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 px-4 pt-3 text-left">
+                <div className="col-span-2">
+                  <p className="text-[8px] font-black tracking-wider text-hug-muted">FARM MANAGER</p>
+                  <p className="truncate text-xs font-extrabold text-hug-text">{compiledResult?.compiledByName || compiledResult?.compiledByUserId || 'Farm Manager'}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-[8px] font-black tracking-wider text-hug-muted">BLOCK FARM</p>
+                  <p className="truncate text-xs font-extrabold text-hug-text">{compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId || 'Not specified'}</p>
+                </div>
+                <div>
+                  <p className="text-[8px] font-black tracking-wider text-hug-muted">REPORTING MONTH</p>
+                  <p className="truncate text-[11px] font-bold text-hug-text">{compiledResult?.periodKey || selectedPeriod}</p>
+                </div>
+                <div>
+                  <p className="text-[8px] font-black tracking-wider text-hug-muted">CROP YEAR CYCLE</p>
+                  <p className="truncate text-[11px] font-bold text-hug-text">{compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Not specified'}</p>
+                </div>
+              </div>
+              <div className="mx-auto mt-3 w-fit rounded-2xl border border-[#DCE7DA] bg-white p-1">
+                <QRCodeView value={qrPayload} size={238} color="#000000" bgColor="#FFFFFF" className="border-0 p-0 shadow-none" />
+              </div>
+              <div className="px-4 pb-3 pt-2 text-center">
+                <strong className="inline-flex rounded-full bg-[#EAF5E7] px-3 py-1 text-[8px] font-black tracking-wider text-[#2F6B3B]">SECURE SERVER-VERIFIED REFERENCE</strong>
+                <p className="mt-1.5 break-all font-mono text-[9px] font-bold text-hug-muted">{compiledResult?.reportId || compiledResult?.id}</p>
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
               <Button variant="secondary" size="sm" icon={Download} onClick={downloadCurrentQr} isLoading={isSavingQr} loadingText="Saving QR image...">Save QR Image</Button>
               <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference} disabled={isSavingQr}>Copy Report ID</Button>
+              {canonicalAuditStatus(compiledResult?.status) === AUDIT_STATUS.COMPILED && (
+                <Button className="sm:col-span-2" variant="primary" size="sm" icon={CloudUpload} onClick={handleCloudSubmission} isLoading={isSubmitting} loadingText="Sending through Cloud..." disabled={isPreparingQr || isSavingQr}>
+                  Send Through Cloud Instead
+                </Button>
+              )}
             </div>
             {qrActionMessage && <p className="text-[10px] text-success">{qrActionMessage}</p>}
             {compileError && <p className="text-[10px] text-danger">{compileError}</p>}

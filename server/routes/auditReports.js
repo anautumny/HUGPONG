@@ -14,7 +14,7 @@ const { readMutationContext, assertBaseVersion } = require('../services/mutation
 const { queueAuditEvent } = require('../services/auditWriter');
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
-  rootAuditReportId, versionedAuditReportId, summarizeSnapshots,
+  rootAuditReportId, versionedAuditReportId, summarizeSnapshots, monthlyAuditReadiness,
   buildFieldSnapshots, auditCropYearCycles, nextCropYearCycle, validateCanonicalAuditReport,
   AUDIT_DELIVERY_METHOD, AUDIT_DELIVERY_STATUS,
   encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
@@ -23,6 +23,11 @@ const {
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 let missingIndexFallbackLogged = false;
+
+function isAuditEligibleOperation(log) {
+  return ['ACTIVE', 'ARCHIVED'].includes(String(log?.status || '').toUpperCase())
+    && Boolean(log?.cycleId);
+}
 
 function identity(req) {
   const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
@@ -81,16 +86,32 @@ async function loadFarmAuditData(blockFarmId, period) {
       const memberDocuments = typeof db.getAll === 'function'
         ? await db.getAll(...memberIds.map(id => db.collection(COLLECTIONS.USERS).doc(id)))
         : await Promise.all(memberIds.map(id => db.collection(COLLECTIONS.USERS).doc(id).get()));
-      const memberNames = new Map(memberDocuments.filter(document => document.exists).map(document => [
+      const memberDirectory = new Map(memberDocuments.filter(document => document.exists).map(document => [
         document.id,
-        document.data().displayName || document.data().name || document.id
+        {
+          name: document.data().displayName || document.data().name || '',
+          phone: document.data().phone || document.data().contact || ''
+        }
       ]));
-      activeFields.forEach(field => { field.memberName = memberNames.get(field.memberUserId) || field.memberUserId || null; });
+      activeFields.forEach(field => {
+        const member = memberDirectory.get(field.memberUserId);
+        field.memberName = member?.name || 'Member name unavailable';
+        field.memberPhone = member?.phone || null;
+      });
     } catch (error) {
       console.warn('[Audit Reports] Member names could not be embedded in the snapshot:', cleanText(error.message));
-      activeFields.forEach(field => { field.memberName = field.memberName || field.memberUserId || null; });
+      activeFields.forEach(field => {
+        field.memberName = field.memberName || 'Member name unavailable';
+        field.memberPhone = null;
+      });
     }
   }
+  activeFields.forEach(field => {
+    if (!field.memberUserId) {
+      field.memberName = 'Unassigned member';
+      field.memberPhone = null;
+    }
+  });
 
   const logDocuments = [];
   for (let index = 0; index < activeFields.length; index += 10) {
@@ -100,8 +121,7 @@ async function loadFarmAuditData(blockFarmId, period) {
   }
   const eligibleLogDocuments = logDocuments.filter(document => {
     const log = document.data();
-    return String(log.status || '').toUpperCase() === 'ACTIVE'
-      && Boolean(log.cycleId)
+    return isAuditEligibleOperation(log)
       && String(log.performedOn || '').startsWith(`${period}-`);
   });
   return { activeFields, eligibleLogDocuments };
@@ -283,35 +303,60 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       logDocuments.push(...snapshot.docs);
     }
     const periods = Array.from(new Set(logDocuments
-      .filter(document => String(document.data().status || '').toUpperCase() === 'ACTIVE' && Boolean(document.data().cycleId))
+      .filter(document => isAuditEligibleOperation(document.data()))
       .map(document => String(document.data().performedOn || '').slice(0, 7))
       .filter(period => /^\d{4}-(0[1-9]|1[0-2])$/.test(period) && period <= currentPeriod)))
       .sort();
     const reportsSnapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).where('blockFarmId', '==', farm.id).get();
     const reports = reportsSnapshot.docs.map(normalizedReport);
     const unresolvedPeriod = periods.find(period => {
-      const eligibleForPeriod = logDocuments.filter(document => String(document.data().status || '').toUpperCase() === 'ACTIVE'
-        && Boolean(document.data().cycleId)
+      const eligibleForPeriod = logDocuments.filter(document => isAuditEligibleOperation(document.data())
         && String(document.data().performedOn || '').startsWith(`${period}-`));
       const matching = reports.filter(report => report.periodKey === period);
       const batch = selectAuditCompilationBatch(eligibleForPeriod, matching);
       return !matching.length || (!batch.replay && batch.operations.length > 0);
     });
     const periodKey = unresolvedPeriod || currentPeriod;
-    const eligible = logDocuments.filter(document => String(document.data().status || '').toUpperCase() === 'ACTIVE'
-      && Boolean(document.data().cycleId)
-      && String(document.data().performedOn || '').startsWith(`${periodKey}-`));
-    const snapshots = eligible.map(document => buildOperationSnapshot(document.id, document.data()));
+    const {
+      activeFields: readinessFields,
+      eligibleLogDocuments: readinessLogDocuments
+    } = await loadFarmAuditData(farm.id, periodKey);
+    const snapshots = readinessLogDocuments.map(document => buildOperationSnapshot(document.id, document.data()));
+    const readiness = monthlyAuditReadiness(snapshots, readinessFields);
     return res.json({ success: true, data: {
       blockFarmId: farm.id,
       blockFarmName: farm.name || farm.code || farm.id,
       periodKey,
       currentPeriod,
       isCarryover: periodKey < currentPeriod,
-      ...summarizeSnapshots(snapshots, activeFields)
+      ...readiness,
+      ...summarizeSnapshots(snapshots, readinessFields)
     } });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/readiness', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const farm = await resolveAssignedFarm(req);
+    const periodKey = reportPeriod(req.query.periodKey || businessPeriod());
+    if (periodKey > businessPeriod()) throw new Error('A future reporting period cannot be checked.');
+    const { activeFields, eligibleLogDocuments } = await loadFarmAuditData(farm.id, periodKey);
+    const operationSnapshots = eligibleLogDocuments.map(document => buildOperationSnapshot(document.id, document.data()));
+    return res.json({
+      success: true,
+      data: {
+        blockFarmId: farm.id,
+        blockFarmName: farm.name || farm.code || farm.id,
+        periodKey,
+        ...monthlyAuditReadiness(operationSnapshots, activeFields),
+        ...summarizeSnapshots(operationSnapshots, activeFields)
+      }
+    });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
 
@@ -340,6 +385,19 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     if (period > businessPeriod()) throw new Error('A future reporting period cannot be compiled.');
     const { actorId, actorName } = identity(req);
     const { activeFields, eligibleLogDocuments } = await loadFarmAuditData(farm.id, period);
+    const readiness = monthlyAuditReadiness(
+      eligibleLogDocuments.map(document => buildOperationSnapshot(document.id, document.data())),
+      activeFields
+    );
+    if (!readiness.isComplete) {
+      throw Object.assign(
+        new Error(`${readiness.incompleteFieldCount} active field${readiness.incompleteFieldCount === 1 ? '' : 's'} still need a submitted operation for ${period}. Contact the listed members before compiling.`),
+        {
+          status: 409,
+          data: { code: 'AUDIT_MONTH_INCOMPLETE', periodKey: period, ...readiness }
+        }
+      );
+    }
     if (!eligibleLogDocuments.length) throw new Error(`No synchronized eligible operation logs were found for ${period} in the assigned Block Farm.`);
     const existing = await reportsForFarmPeriod(farm.id, period);
     const batch = selectAuditCompilationBatch(eligibleLogDocuments, existing);
@@ -371,6 +429,7 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       compiledByUserId: actorId, compiledByName: actorName, compiledAt: now,
       qrSchemaVersion: QR_SCHEMA_VERSION, integrityHash, qrHash: integrityHash, integrityAlgorithm: 'SHA-256',
       deliveryMethod: null, deliveryStatus: AUDIT_DELIVERY_STATUS.READY,
+      deliverySelectedAt: null, deliverySelectedByUserId: null,
       submittedAt: null, submittedByUserId: null, submissionMethod: null, submissionMethods: [],
       returnReason: '', returnedByUserId: null, returnedAt: null,
       certificationNotes: '', certifiedByUserId: null, certifiedByName: '', certifiedAt: null,
@@ -394,7 +453,12 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     }
     return res.status(201).json({ success: true, data: { id: reportId, ...report, qrPayload: encodeQrPayload({ id: reportId, ...report }) } });
   } catch (error) {
-    return res.status(error.status || (/already exists/i.test(error.message) ? 409 : 400)).json({ success: false, error: error.message });
+    return res.status(error.status || (/already exists/i.test(error.message) ? 409 : 400)).json({
+      success: false,
+      error: error.message,
+      code: error.data?.code,
+      data: error.data
+    });
   }
 });
 
@@ -476,6 +540,53 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
   }
 });
 
+router.post('/:id/delivery-selection', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
+  try {
+    const { actorId } = identity(req);
+    const method = String(req.body.deliveryMethod || '').trim().toLowerCase();
+    if (method !== AUDIT_DELIVERY_METHOD.QR) {
+      throw new Error('Choose QR Transfer here. Cloud delivery is completed through Submit to SRA.');
+    }
+    const mutationContext = readMutationContext(req);
+    const now = nowIso();
+    const result = await db.runTransaction(async transaction => {
+      const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.params.id || ''));
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw Object.assign(new Error('Audit report not found.'), { status: 404 });
+      const report = normalizedReport(snapshot);
+      const farm = await transaction.get(db.collection(COLLECTIONS.BLOCK_FARMS).doc(report.blockFarmId));
+      if (!farm.exists || farm.data().managerUserId !== actorId) {
+        throw Object.assign(new Error('Only the assigned Farm Manager may choose this audit delivery method.'), { status: 403 });
+      }
+      if (report.status !== AUDIT_STATUS.COMPILED) {
+        if (report.deliveryMethod === method) return { ...report, replayed: true };
+        throw new Error('Only a compiled audit awaiting delivery can use QR Transfer.');
+      }
+      if (report.deliveryMethod === method && report.deliveryStatus === AUDIT_DELIVERY_STATUS.READY) {
+        return { ...report, replayed: true };
+      }
+      assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
+      const update = {
+        deliveryMethod: method,
+        deliveryStatus: AUDIT_DELIVERY_STATUS.READY,
+        deliverySelectedAt: now,
+        deliverySelectedByUserId: actorId,
+        updatedAt: now
+      };
+      transaction.update(ref, update);
+      queueAuditEvent(transaction, db, {
+        eventType: 'AUDIT_REPORT_DELIVERY_SELECTED', actorUserId: actorId,
+        entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId,
+        details: `Selected QR Transfer for audit report ${snapshot.id}.`, createdAt: now
+      });
+      return { ...report, ...update };
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
+  }
+});
+
 router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     const { actorId } = identity(req);
@@ -492,7 +603,7 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       if ([AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(report.status)) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.COMPILED) throw new Error('Only a compiled audit can be submitted to SRA.');
       validateCanonicalAuditReport(report);
-      const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, updatedAt: now };
+      const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, deliverySelectedAt: now, deliverySelectedByUserId: actorId, updatedAt: now };
       transaction.update(ref, update);
       queueAuditEvent(transaction, db, {
         eventType: 'AUDIT_REPORT_SUBMITTED', actorUserId: actorId,

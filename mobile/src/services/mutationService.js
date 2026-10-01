@@ -22,7 +22,9 @@ export const updateField = (id, payload, mutation) => {
 export const archiveField = (id, mutation) => api(`/api/fields/${encodeURIComponent(id)}/archive`, 'POST', {}, mutation);
 export const updateCycleStage = (cycleId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, 'PATCH', payload, mutation, takeoverGrant);
 export const startCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/start`, 'POST', payload, mutation, takeoverGrant);
-export const rolloverCycle = (fieldId, payload, mutation, takeoverGrant) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, 'POST', payload, mutation, takeoverGrant);
+export const rolloverCycle = (fieldId, payload, mutation) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover-request`, 'POST', payload, mutation);
+export const approveCycleRollover = (fieldId, payload, mutation) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover/approve`, 'POST', payload, mutation);
+export const rejectCycleRollover = (fieldId, payload, mutation) => api(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover/reject`, 'POST', payload, mutation);
 export const saveCustomStages = (fieldId, customStages, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-stages`, 'PUT', { customStages }, mutation);
 export const saveCustomOperations = (fieldId, customOperations, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/custom-operations`, 'PUT', { customOperations }, mutation);
 export const saveOperationSchedule = (fieldId, operationSchedule, mutation) => api(`/api/fields/${encodeURIComponent(fieldId)}/operation-schedule`, 'PUT', { operationSchedule }, mutation);
@@ -35,6 +37,12 @@ export const publishPrice = (payload, mutation) => api('/api/prices', 'POST', pa
 export const createTicket = (payload, mutation) => api('/api/tickets', 'POST', payload, mutation);
 export const addTicketMessage = (payload, mutation) => api(`/api/tickets/${encodeURIComponent(payload.id)}/messages`, 'POST', payload, mutation);
 export const compileAuditReport = (payload, mutation) => api('/api/audit-reports', 'POST', payload, mutation);
+export const fetchAuditReadiness = (blockFarmId, periodKey) => api(
+  `/api/audit-reports/readiness?blockFarmId=${encodeURIComponent(blockFarmId)}&periodKey=${encodeURIComponent(periodKey)}`,
+  'GET'
+);
+export const fetchAuditReport = id => api(`/api/audit-reports/${encodeURIComponent(id)}`, 'GET');
+export const selectAuditDeliveryMethod = (id, deliveryMethod = 'QR', mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/delivery-selection`, 'POST', { deliveryMethod }, mutation);
 export const submitAuditReport = (id, submissionMethod = 'CLOUD', mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/submit`, 'POST', { submissionMethod }, mutation);
 export const returnAuditReport = (id, returnReason, mutation) => api(`/api/audit-reports/${encodeURIComponent(id)}/return`, 'POST', { returnReason }, mutation);
 export const verifyAuditQr = (payload) => api('/api/audit-reports/qr/verify', 'POST', { payload });

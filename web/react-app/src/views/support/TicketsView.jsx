@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LifeBuoy, PlusCircle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { addTicketMessage, fetchTicketPage, subscribeToTicketsData } from '../../services/ticketsService';
@@ -26,6 +26,7 @@ export default function TicketsView() {
   const [notice, setNotice] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [ticketToResolve, setTicketToResolve] = useState(null);
+  const [activeCounts, setActiveCounts] = useState({ open: 0, inProgress: 0, pending: 0 });
 
   useEffect(() => {
     setIsLoading(true);
@@ -35,7 +36,15 @@ export default function TicketsView() {
       view,
       category: categoryFilter === 'ALL' ? null : categoryFilter,
       onUpdate: data => {
-        setTickets(data.tickets || []);
+        const nextTickets = data.tickets || [];
+        setTickets(nextTickets);
+        if (view === 'active') {
+          setActiveCounts({
+            open: nextTickets.filter(ticket => ticket.status === 'OPEN').length,
+            inProgress: nextTickets.filter(ticket => ticket.status === 'IN_PROGRESS').length,
+            pending: nextTickets.filter(ticket => ticket.status === 'PENDING_SUBMISSION').length
+          });
+        }
         setNextCursor(data.nextCursor || null);
         setHasMore(data.hasMore === true);
         setIsLoading(false);
@@ -54,12 +63,6 @@ export default function TicketsView() {
     const unsubscribe = subscribeToFieldsData({ user, onUpdate: data => setFields(data.fields || []) });
     return () => unsubscribe?.();
   }, [user, canCreate]);
-
-  const counts = useMemo(() => ({
-    open: tickets.filter(ticket => ticket.status === 'OPEN').length,
-    inProgress: tickets.filter(ticket => ticket.status === 'IN_PROGRESS').length,
-    pending: tickets.filter(ticket => ticket.status === 'PENDING_SUBMISSION').length
-  }), [tickets]);
 
   const handleLoadMore = async () => {
     if (!nextCursor || isLoadingMore) return;
@@ -85,7 +88,7 @@ export default function TicketsView() {
             <LifeBuoy className="w-4 h-4" /> Support
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
-            {isSuperAdmin ? 'Support Inbox' : 'My Tickets'}
+            {isSuperAdmin ? 'Support Inbox' : 'Help & Support Desk'}
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1">
             {isSuperAdmin ? 'Review, respond to, and resolve user support requests.' : 'Ask for help and check responses from Super Admin.'}
@@ -98,16 +101,16 @@ export default function TicketsView() {
         )}
       </div>
 
-      {isSuperAdmin && view === 'active' && (
+      {isSuperAdmin && (
         <div className="grid grid-cols-2 gap-3 max-w-md">
-          <div className="rounded-2xl border border-border bg-white p-4"><div className="text-2xl font-black text-hug-text">{counts.open}</div><div className="text-xs text-hug-muted">Open</div></div>
-          <div className="rounded-2xl border border-primary/20 bg-primary-bg/40 p-4"><div className="text-2xl font-black text-primary">{counts.inProgress}</div><div className="text-xs text-hug-muted">In Progress</div></div>
+          <div className="rounded-2xl border border-border bg-white dark:bg-surface p-4"><div className="text-2xl font-black text-slate-900 dark:text-white">{activeCounts.open}</div><div className="text-xs text-slate-600 dark:text-slate-300">Open</div></div>
+          <div className="rounded-2xl border border-primary/20 bg-primary-bg/40 dark:bg-primary/10 p-4"><div className="text-2xl font-black text-primary dark:text-primary-light">{activeCounts.inProgress}</div><div className="text-xs text-slate-600 dark:text-slate-300">In Progress</div></div>
         </div>
       )}
 
       <div className="inline-flex rounded-xl border border-border bg-bg p-1 gap-1">
         <button type="button" onClick={() => setView('active')} className={`px-4 py-2 rounded-lg text-xs font-bold ${view === 'active' ? 'bg-white text-primary shadow-sm' : 'text-hug-muted'}`}>
-          {isSuperAdmin ? 'Inbox' : 'Active'}{!isSuperAdmin && counts.pending > 0 ? ` (${counts.pending} queued)` : ''}
+          {isSuperAdmin ? 'Inbox' : 'Active'}{!isSuperAdmin && activeCounts.pending > 0 ? ` (${activeCounts.pending} queued)` : ''}
         </button>
         <button type="button" onClick={() => setView('history')} className={`px-4 py-2 rounded-lg text-xs font-bold ${view === 'history' ? 'bg-white text-primary shadow-sm' : 'text-hug-muted'}`}>
           Ticket History

@@ -1,5 +1,13 @@
 import { authenticatedRequest } from './apiClient';
 
+export const CLIENT_DIAGNOSTIC_MESSAGE_LIMIT = 1000;
+
+export function boundedDiagnosticMessage(message) {
+  const normalized = String(message || 'Client failure without an error message.').trim();
+  if (normalized.length <= CLIENT_DIAGNOSTIC_MESSAGE_LIMIT) return normalized;
+  return `${normalized.slice(0, CLIENT_DIAGNOSTIC_MESSAGE_LIMIT - 16).trimEnd()} [TRUNCATED]`;
+}
+
 export function createClientReference(module = 'WEB') {
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const random = globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
@@ -10,7 +18,14 @@ export async function reportClientDiagnostic({ referenceId, module = 'WEB', leve
   try {
     return await authenticatedRequest('/api/diagnostics/client', {
       method: 'POST',
-      body: { referenceId, module, level, message, errorCode, syncStatus }
+      body: {
+        referenceId,
+        module,
+        level,
+        message: boundedDiagnosticMessage(message),
+        errorCode,
+        syncStatus
+      }
     });
   } catch {
     return null;

@@ -205,7 +205,10 @@ export function toCycleDocument(field = {}, cycle = {}) {
     startedAt: cycle.startedAt || field.createdAt || new Date().toISOString(),
     updatedAt: cycle.updatedAt || new Date().toISOString(),
     archivedAt,
-    archivedByUserId
+    archivedByUserId,
+    closureRequest: cycle.closureRequest && typeof cycle.closureRequest === 'object'
+      ? { ...cycle.closureRequest }
+      : null
   };
 }
 
@@ -361,6 +364,14 @@ export function toOperationLogDocument(value = {}, context = {}) {
     childOperationName: String(value.childOperationName || '').trim(),
     operationName: String(value.operationName || value.activity || '').trim(),
     category: String(value.category || '').trim(),
+    plannedOperationId: String(value.plannedOperationId || '').trim() || null,
+    plannedDate: String(value.plannedDate || '').trim() || null,
+    estimatedCost: value.estimatedCost && typeof value.estimatedCost === 'object' ? {
+      labor: Number(value.estimatedCost.labor || 0),
+      materials: Number(value.estimatedCost.materials || 0),
+      other: Number(value.estimatedCost.other || 0),
+      total: Number(value.estimatedCost.labor || 0) + Number(value.estimatedCost.materials || 0) + Number(value.estimatedCost.other || 0)
+    } : null,
     variety: String(value.variety || '').trim(),
     stageNumber: Number(value.stageNumber || 1),
     performedOn: value.performedOn || value.isoDate || String(value.date || '').slice(0, 10),
@@ -442,6 +453,9 @@ export function operationSnapshot(id, value) {
     childOperationName: log.childOperationName || '',
     operationName: log.operationName,
     category: log.category,
+    plannedOperationId: log.plannedOperationId || null,
+    plannedDate: log.plannedDate || null,
+    estimatedCost: log.estimatedCost || null,
     variety: log.variety,
     stageNumber: log.stageNumber,
     performedOn: log.performedOn,
@@ -489,6 +503,9 @@ export function toAuditReportDocument(value = {}, context = {}) {
       operationDefinitionId: item.operationDefinitionId || 'CUSTOM',
       operationName: String(item.operationName || '').trim(),
       category: String(item.category || '').trim(),
+      plannedOperationId: item.plannedOperationId || null,
+      plannedDate: item.plannedDate || null,
+      estimatedCost: item.estimatedCost || null,
       variety: String(item.variety || '').trim(),
       stageNumber: Number(item.stageNumber || 1),
       performedOn: item.performedOn,
@@ -555,6 +572,8 @@ export function toAuditReportDocument(value = {}, context = {}) {
     submissionMethods: Array.isArray(value.submissionMethods) ? value.submissionMethods : [],
     deliveryMethod: value.deliveryMethod ? String(value.deliveryMethod).toLowerCase() : null,
     deliveryStatus: value.deliveryStatus ? String(value.deliveryStatus).toLowerCase() : 'ready',
+    deliverySelectedAt: value.deliverySelectedAt || null,
+    deliverySelectedByUserId: value.deliverySelectedByUserId || null,
     reviewStatus: value.reviewStatus || (status === 'PENDING_REVIEW' ? 'pending_review' : status === 'CERTIFIED' ? 'complete' : status === 'RETURNED' ? 'returned' : 'not_submitted'),
     certificationStatus: value.certificationStatus || (status === 'CERTIFIED' ? 'certified' : 'not_certified'),
     returnReason: value.returnReason || ''

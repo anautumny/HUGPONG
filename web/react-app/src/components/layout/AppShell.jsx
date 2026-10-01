@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { RefreshCw, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSync } from '../../context/SyncContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
@@ -11,7 +12,7 @@ const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
 export default function AppShell() {
   const { user, roleKey, isAuthenticated, isLoading, logout } = useAuth();
-  const { isOnline, networkOnline } = useSync();
+  const { isOnline, networkOnline, reconnectNotice, dismissReconnectNotice } = useSync();
   const navigate = useNavigate();
   const [isReturningToLogin, setIsReturningToLogin] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -175,6 +176,74 @@ export default function AppShell() {
         {/* Responsive Mobile Bottom Navigation Bar (<= 1024px) */}
         <MobileBottomNav onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)} />
       </div>
+
+      {reconnectNotice && (
+        <aside
+          className="fixed bottom-5 right-5 z-[70] w-[min(92vw,380px)] rounded-2xl border border-border bg-surface p-4 shadow-xl print:hidden"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3">
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+              reconnectNotice.phase === 'restored'
+                ? 'bg-success/10 text-success'
+                : reconnectNotice.phase === 'reconnecting'
+                  ? 'bg-farm-blue-bg text-farm-blue'
+                  : 'bg-warning-bg text-warning'
+            }`}>
+              {reconnectNotice.phase === 'restored' ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : reconnectNotice.phase === 'reconnecting' ? (
+                <RefreshCw className="h-5 w-5 animate-spin" />
+              ) : (
+                <AlertCircle className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-black text-hug-text">
+                {reconnectNotice.phase === 'reconnecting'
+                  ? 'Restoring connection'
+                  : reconnectNotice.phase === 'restored'
+                    ? 'Connection restored'
+                    : reconnectNotice.phase === 'attention'
+                      ? 'Connection restored — sync needs attention'
+                      : 'HUGPONG server still unavailable'}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-hug-muted">
+                {reconnectNotice.phase === 'reconnecting'
+                  ? 'Checking HUGPONG and synchronizing saved changes…'
+                  : reconnectNotice.phase === 'restored'
+                    ? 'Automatic synchronization is complete and live data has been refreshed.'
+                    : reconnectNotice.phase === 'attention'
+                      ? `${reconnectNotice.remainingCount || 1} saved stage update(s) still need review. Open Field Operations to retry or resolve them.`
+                      : 'Your internet is back, but HUGPONG cannot be reached yet. The connection check will retry automatically.'}
+              </p>
+              {reconnectNotice.phase === 'attention' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissReconnectNotice();
+                    navigate('/operations');
+                  }}
+                  className="mt-3 rounded-xl bg-primary px-3 py-2 text-xs font-bold text-white"
+                >
+                  Open Field Operations
+                </button>
+              )}
+            </div>
+            {reconnectNotice.phase !== 'reconnecting' && (
+              <button
+                type="button"
+                onClick={dismissReconnectNotice}
+                className="rounded-lg p-1 text-hug-muted hover:bg-bg hover:text-hug-text"
+                aria-label="Dismiss connection notice"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

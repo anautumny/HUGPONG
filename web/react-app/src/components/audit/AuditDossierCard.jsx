@@ -422,7 +422,7 @@ export default function AuditDossierCard({
 
           {!isSraAdmin && isCompiled && (
             <Button variant="primary" size="md" onClick={() => onSubmit?.(report.id || report.reportId)} isLoading={isSubmitting} loadingText="Submitting..." icon={ShieldCheck}>
-              Submit to SRA
+              {String(report.deliveryMethod || '').toLowerCase() === 'qr' ? 'Send Through Cloud Instead' : 'Submit to SRA'}
             </Button>
           )}
 

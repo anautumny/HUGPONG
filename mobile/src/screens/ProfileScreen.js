@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Alert, Switch, TextInput, Platform, ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,7 +11,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { ScreenHeader } from '../components/ui';
 import LegalPolicyModal from '../components/LegalPolicyModal';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, refreshSupportTicketsFromServer, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports, getSecurityPreferences, updateSecurityPreferences } from '../data/dataStore';
 import {
   getNetworkStatus,
   getConnectivityDetails,
@@ -56,14 +57,16 @@ export default function ProfileScreen({ navigation }) {
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [lastSync, setLastSync] = useState('Today, 8:05 AM');
   const [langExpanded, setLangExpanded] = useState(false);
-  const [autoSync, setAutoSync] = useState(true);
+  const [autoSync, setAutoSync] = useState(getSecurityPreferences().autoSyncEnabled !== false);
   const [showTicketsModal, setShowTicketsModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [ticketTab, setTicketTab] = useState('active');
   const [ticketForm, setTicketForm] = useState({ title: '', category: 'Synchronization', details: '' });
   const [ticketsList, setTicketsList] = useState(supportTickets);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const [isRefreshingTickets, setIsRefreshingTickets] = useState(false);
   const ticketSubmitLock = useRef(false);
+  const ticketRefreshLock = useRef(false);
   const [ticketReplies, setTicketReplies] = useState({});
   const [sendingTicketReplyId, setSendingTicketReplyId] = useState(null);
 
@@ -101,6 +104,7 @@ export default function ProfileScreen({ navigation }) {
       const sess = getCurrentSession();
       setSessionState({ ...sess });
       setSyncedState(getIsSynced());
+      setAutoSync(getSecurityPreferences().autoSyncEnabled !== false);
       setDataVersion(v => v + 1);
     });
     const unsubscribeNetwork = subscribeToNetwork((online) => {
@@ -117,9 +121,39 @@ export default function ProfileScreen({ navigation }) {
       setSessionState({ ...getCurrentSession() });
       setSyncedState(getIsSynced());
       setIsOnline(getNetworkStatus());
+      setAutoSync(getSecurityPreferences().autoSyncEnabled !== false);
       setDataVersion(v => v + 1);
     }, [])
   );
+
+  const refreshTickets = useCallback(async ({ silent = false } = {}) => {
+    if (ticketRefreshLock.current) return;
+    if (!getNetworkStatus()) {
+      if (!silent) Alert.alert(t('sync_offline_title', 'Offline Mode Active'), t('ticket_refresh_offline', 'Connect to the internet to refresh ticket updates.'));
+      return;
+    }
+    ticketRefreshLock.current = true;
+    setIsRefreshingTickets(true);
+    try {
+      const refreshed = await refreshSupportTicketsFromServer();
+      setTicketsList(refreshed);
+    } catch (error) {
+      if (!silent) Alert.alert(t('ticket_refresh_failed_title', 'Unable to Refresh Tickets'), error.message || t('ticket_refresh_failed_msg', 'Please try again.'));
+    } finally {
+      ticketRefreshLock.current = false;
+      setIsRefreshingTickets(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!showTicketsModal || ticketTab === 'submit' || !isOnline) return;
+    refreshTickets({ silent: true });
+  }, [showTicketsModal, ticketTab, isOnline, refreshTickets]);
+
+  const handleAutoSyncChange = enabled => {
+    setAutoSync(enabled);
+    updateSecurityPreferences({ autoSyncEnabled: enabled });
+  };
 
   const doSync = async () => {
     if (!isOnline) {
@@ -332,7 +366,18 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         {/* Body */}
-        <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md, paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={(
+            <RefreshControl
+              refreshing={isRefreshingTickets}
+              onRefresh={() => refreshTickets({ silent: false })}
+              tintColor={COLORS.primary}
+              colors={[COLORS.primary]}
+            />
+          )}
+        >
               {ticketTab === 'submit' ? (
                 <>
                   <View style={s.ticketNoticeBox}>
@@ -752,7 +797,7 @@ export default function ProfileScreen({ navigation }) {
               </View>
               <Switch
                 value={autoSync}
-                onValueChange={setAutoSync}
+                onValueChange={handleAutoSyncChange}
                 trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
                 thumbColor={autoSync ? COLORS.primary : '#f4f3f4'}
               />

@@ -66,6 +66,31 @@ function summarizeSnapshots(operationSnapshots = [], activeFields = []) {
   };
 }
 
+function monthlyAuditReadiness(operationSnapshots = [], activeFields = []) {
+  const submittedFieldIds = new Set(operationSnapshots
+    .map(operation => String(operation?.fieldId || '').trim())
+    .filter(Boolean));
+  const incompleteFields = activeFields
+    .filter(field => !submittedFieldIds.has(String(field?.id || '').trim()))
+    .map(field => ({
+      fieldId: String(field?.id || '').trim(),
+      memberId: String(field?.memberUserId || field?.memberId || '').trim() || null,
+      memberName: String(field?.memberName || field?.member || '').trim() || 'Unassigned member',
+      contactNumber: String(field?.memberPhone || field?.contactNumber || field?.phone || '').trim() || null,
+      reasonCode: 'NO_SUBMITTED_OPERATION',
+      reason: 'No synchronized submitted operation was found for this reporting month.'
+    }))
+    .sort((left, right) => left.memberName.localeCompare(right.memberName)
+      || left.fieldId.localeCompare(right.fieldId));
+  return {
+    isComplete: incompleteFields.length === 0,
+    activeFieldCount: activeFields.length,
+    submittedFieldCount: submittedFieldIds.size,
+    incompleteFieldCount: incompleteFields.length,
+    incompleteFields
+  };
+}
+
 function buildFieldSnapshots(operationSnapshots = [], activeFields = []) {
   const fieldMap = new Map(activeFields.map(field => [String(field.id || '').trim(), field]));
   const grouped = new Map();
@@ -166,6 +191,8 @@ function canonicalAuditReport(report = {}) {
     ),
     deliveryMethod: report.deliveryMethod ? String(report.deliveryMethod).toLowerCase() : null,
     deliveryStatus: report.deliveryStatus ? String(report.deliveryStatus).toLowerCase() : AUDIT_DELIVERY_STATUS.READY,
+    deliverySelectedAt: report.deliverySelectedAt || null,
+    deliverySelectedByUserId: report.deliverySelectedByUserId || null,
     submittedAt: report.submittedAt || null,
     submittedByUserId: report.submittedByUserId || null,
     submissionMethod: report.submissionMethod || null,
@@ -366,6 +393,7 @@ module.exports = {
   rootAuditReportId,
   versionedAuditReportId,
   summarizeSnapshots,
+  monthlyAuditReadiness,
   buildFieldSnapshots,
   auditCropYearCycles,
   nextCropYearCycle,

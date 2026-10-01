@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react';
+import React, { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -7,26 +7,27 @@ import AppShell from './components/layout/AppShell';
 import { ROLE_KEYS } from './utils/authRouting';
 import UsersView from './views/users/UsersView';
 import { createClientReference, reportClientDiagnostic } from './services/clientDiagnostics';
+import { lazyWithRecovery } from './utils/lazyWithRecovery';
 
-const LandingView = lazy(() => import('./views/LandingView'));
-const LoginView = lazy(() => import('./views/LoginView'));
-const PrivacyPolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })));
-const TermsView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })));
-const ComplianceView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.ComplianceView })));
-const CookiePolicyView = lazy(() => import('./views/LegalViews').then(module => ({ default: module.CookiePolicyView })));
-const DashboardView = lazy(() => import('./views/dashboard/DashboardView'));
-const FarmFieldRegistryView = lazy(() => import('./views/fields/FarmFieldRegistryView'));
-const OperationsView = lazy(() => import('./views/operations/OperationsView'));
-const TakeOverView = lazy(() => import('./views/operations/TakeOverView'));
-const AuditCenterView = lazy(() => import('./views/audit/AuditCenterView'));
-const PricesView = lazy(() => import('./views/prices/PricesView'));
-const AnalyticsView = lazy(() => import('./views/analytics/AnalyticsView'));
-const SyncView = lazy(() => import('./views/sync/SyncView'));
-const TicketsView = lazy(() => import('./views/support/TicketsView'));
-const MaintenanceView = lazy(() => import('./views/maintenance/MaintenanceView'));
-const DiagnosticsConsoleView = lazy(() => import('./views/diagnostics/DiagnosticsConsoleView'));
-const BackupManagementView = lazy(() => import('./views/backups/BackupManagementView'));
-const SettingsView = lazy(() => import('./views/settings/SettingsView'));
+const LandingView = lazyWithRecovery(() => import('./views/LandingView'), 'landing');
+const LoginView = lazyWithRecovery(() => import('./views/LoginView'), 'login');
+const PrivacyPolicyView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })), 'privacy-policy');
+const TermsView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })), 'terms');
+const ComplianceView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.ComplianceView })), 'compliance');
+const CookiePolicyView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.CookiePolicyView })), 'cookie-policy');
+const DashboardView = lazyWithRecovery(() => import('./views/dashboard/DashboardView'), 'dashboard');
+const FarmFieldRegistryView = lazyWithRecovery(() => import('./views/fields/FarmFieldRegistryView'), 'field-registry');
+const OperationsView = lazyWithRecovery(() => import('./views/operations/OperationsView'), 'operations');
+const TakeOverView = lazyWithRecovery(() => import('./views/operations/TakeOverView'), 'takeover');
+const AuditCenterView = lazyWithRecovery(() => import('./views/audit/AuditCenterView'), 'audit-center');
+const PricesView = lazyWithRecovery(() => import('./views/prices/PricesView'), 'prices');
+const AnalyticsView = lazyWithRecovery(() => import('./views/analytics/AnalyticsView'), 'analytics');
+const SyncView = lazyWithRecovery(() => import('./views/sync/SyncView'), 'sync');
+const TicketsView = lazyWithRecovery(() => import('./views/support/TicketsView'), 'support');
+const MaintenanceView = lazyWithRecovery(() => import('./views/maintenance/MaintenanceView'), 'maintenance');
+const DiagnosticsConsoleView = lazyWithRecovery(() => import('./views/diagnostics/DiagnosticsConsoleView'), 'diagnostics');
+const BackupManagementView = lazyWithRecovery(() => import('./views/backups/BackupManagementView'), 'backups');
+const SettingsView = lazyWithRecovery(() => import('./views/settings/SettingsView'), 'settings');
 
 function RouteLoadingState() {
   return (
@@ -59,6 +60,21 @@ function RoleRoute({ allowed, children }) {
   return allowed.includes(roleKey) ? children : <Navigate to="/dashboard" replace />;
 }
 
+function reloadLatestWebApplication() {
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('_hugpong_refresh', Date.now().toString());
+  window.location.replace(nextUrl.toString());
+}
+
+function renderFailureMessage(error, info, fallback) {
+  return [
+    `${error?.name || 'RenderError'}: ${error?.message || fallback}`,
+    error?.stack || '',
+    info?.componentStack || '',
+    `Route: ${window.location.pathname}`
+  ].filter(Boolean).join('\n');
+}
+
 class UsersRouteErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -75,7 +91,7 @@ class UsersRouteErrorBoundary extends React.Component {
     void reportClientDiagnostic({
       referenceId,
       module: 'WEB',
-      message: `${error?.name || 'RenderError'}: ${error?.message || 'User directory render failed.'} ${info?.componentStack || ''}`,
+      message: renderFailureMessage(error, info, 'User directory render failed.'),
       errorCode: 'USER_DIRECTORY_RENDER_FAILURE'
     });
   }
@@ -92,7 +108,7 @@ class UsersRouteErrorBoundary extends React.Component {
         <button
           type="button"
           className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white"
-          onClick={() => window.location.reload()}
+          onClick={reloadLatestWebApplication}
         >
           Reload User Directory
         </button>
@@ -117,7 +133,7 @@ class ApplicationErrorBoundary extends React.Component {
     void reportClientDiagnostic({
       referenceId,
       module: 'WEB',
-      message: `${error?.name || 'RenderError'}: ${error?.message || 'Web application render failed.'} ${info?.componentStack || ''}`,
+      message: renderFailureMessage(error, info, 'Web application render failed.'),
       errorCode: 'WEB_RENDER_FAILURE'
     });
   }
@@ -128,9 +144,9 @@ class ApplicationErrorBoundary extends React.Component {
       <main className="flex min-h-screen items-center justify-center bg-bg p-5 text-hug-text dark:bg-[#0C1015]">
         <section className="w-full max-w-xl rounded-2xl border border-danger/30 bg-surface p-6 shadow-lg">
           <h1 className="text-xl font-black">HUGPONG could not display this page</h1>
-          <p className="mt-2 text-sm text-hug-muted">Reload the application and try again. If the problem continues, contact support with the reference ID.</p>
+          <p className="mt-2 text-sm text-hug-muted">Refresh the application files and try again. If the problem continues, contact support with the reference ID.</p>
           {this.state.referenceId && <p className="mt-3 font-mono text-xs text-hug-muted">Reference ID: {this.state.referenceId}</p>}
-          <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white">Reload HUGPONG</button>
+          <button type="button" onClick={reloadLatestWebApplication} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white">Refresh HUGPONG</button>
         </section>
       </main>
     );

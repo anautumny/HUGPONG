@@ -11,32 +11,29 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/dataStore';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
+import { uniqueRecordsById } from '../../utils/dataHelpers';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
   const safeFields = Array.isArray(fields) ? fields : [];
-  const safeBlockFarms = Array.isArray(blockFarms) ? blockFarms : [];
+  const safeBlockFarms = uniqueRecordsById(blockFarms);
   const safeAuditReports = Array.isArray(auditReports) ? auditReports : [];
 
-  const blockFarmsList = React.useMemo(() => {
-    const list = safeBlockFarms;
-    return list.map(bf => {
-      const bfFields = safeFields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
-      const activeFieldsList = bfFields;
-      const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
-      const resolvedMgr = resolveBlockFarmManager(bf);
-      return {
-        id: bf.id,
-        name: bf.name || (session?.farm || session?.blockFarm || bf.id),
-        manager: resolvedMgr,
-        plots: bfFields.length,
-        ha: totalHa,
-        totalHa,
-        totalFarmHa: totalHa,
-        status: resolvedMgr === 'Unassigned' ? 'Manager Unassigned' : null
-      };
-    });
-  }, [safeFields, safeBlockFarms]);
+  const blockFarmsList = safeBlockFarms.map(bf => {
+    const bfFields = safeFields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
+    const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
+    const resolvedMgr = resolveBlockFarmManager(bf);
+    return {
+      id: bf.id,
+      name: bf.name || (session?.farm || session?.blockFarm || bf.id),
+      manager: resolvedMgr,
+      plots: bfFields.length,
+      ha: totalHa,
+      totalHa,
+      totalFarmHa: totalHa,
+      status: resolvedMgr === 'Unassigned' ? 'Manager Unassigned' : null
+    };
+  });
 
   const totalDistrictHa = React.useMemo(() => {
     return blockFarmsList.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);

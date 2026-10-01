@@ -26,24 +26,43 @@ export function formatDisplayDate(dateStr) {
   return str;
 }
 
+export function normalizeCalendarDate(dateValue) {
+  if (!dateValue) return '';
+  if (dateValue instanceof Date) {
+    if (Number.isNaN(dateValue.getTime())) return '';
+    return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, '0')}-${String(dateValue.getDate()).padStart(2, '0')}`;
+  }
+  const str = String(dateValue).trim();
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const candidate = new Date(year, month - 1, day, 12);
+    if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return '';
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const namedMatch = str.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (namedMatch) {
+    const monthNames = [
+      ['january', 'jan'], ['february', 'feb'], ['march', 'mar'], ['april', 'apr'],
+      ['may', 'may'], ['june', 'jun'], ['july', 'jul'], ['august', 'aug'],
+      ['september', 'sep'], ['october', 'oct'], ['november', 'nov'], ['december', 'dec']
+    ];
+    const token = namedMatch[1].toLowerCase();
+    const monthIndex = monthNames.findIndex(names => names.includes(token));
+    const year = Number(namedMatch[3]);
+    const day = Number(namedMatch[2]);
+    if (monthIndex < 0) return '';
+    const candidate = new Date(year, monthIndex, day, 12);
+    if (candidate.getFullYear() !== year || candidate.getMonth() !== monthIndex || candidate.getDate() !== day) return '';
+    return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return '';
+}
+
 export function toISODateString(dateStr) {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
-  const str = String(dateStr).trim();
-  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const y = m[1];
-    const month = m[2].padStart(2, '0');
-    const day = m[3].padStart(2, '0');
-    return `${y}-${month}-${day}`;
-  }
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  return new Date().toISOString().split('T')[0];
+  return normalizeCalendarDate(dateStr) || normalizeCalendarDate(new Date());
 }
 
 export function timestampMillis(value) {

@@ -9,6 +9,9 @@ const {
   createOperationRecord,
   amendOperationRecord,
   updateCycleStage,
+  requestCycleRollover,
+  approveCycleRollover,
+  rejectCycleRollover,
   archiveFieldWithOperations,
   createInitialFieldCycle
 } = require('../services/cropCycleOperations');
@@ -124,6 +127,7 @@ const FIELD_ID = 'FLD-TEST-001';
 const OLD_CYCLE_ID = 'CYC-FLD-TEST-001-001';
 const NEW_CYCLE_ID = 'CYC-FLD-TEST-001-002';
 const USER = { employeeId: '04000001', role: 'MEMBER_FARMER' };
+const MANAGER = { employeeId: '03000001', role: 'FARM_MANAGER', name: 'Assigned Manager' };
 const NOW = '2026-09-17T08:00:00.000Z';
 
 function operation(overrides = {}) {
@@ -202,6 +206,88 @@ const rolloverInput = {
   elapsedMonths: 9,
   batchNumber: 2
 };
+
+function markCycleCompleted(db) {
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).completedAt = '2026-09-16T10:00:00.000Z';
+}
+
+test('member closure request locks the completed cycle until the manager decides', async () => {
+  const db = database();
+  markCycleCompleted(db);
+  const result = await requestCycleRollover(db, FIELD_ID, { cropType: 'Ratoon' }, USER, NOW);
+
+  assert.equal(result.closureRequest.status, 'PENDING');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).closureRequest.requestedByUserId, USER.employeeId);
+  await assert.rejects(
+    createOperationRecord(db, { id: 'LOG-AFTER-REQUEST', ...operation() }, USER, '2026-09-17T08:01:00.000Z'),
+    error => error.status === 409 && error.data?.code === 'CYCLE_CLOSURE_PENDING'
+  );
+  await assert.rejects(
+    updateCycleStage(db, OLD_CYCLE_ID, { currentStageNumber: 6, elapsedMonths: 12, isCompleted: true }, USER, '2026-09-17T08:02:00.000Z'),
+    error => error.status === 409 && error.data?.code === 'CYCLE_CLOSURE_PENDING'
+  );
+});
+
+test('manager approval is blocked until every submitted cycle operation is compiled', async () => {
+  const db = database();
+  markCycleCompleted(db);
+  await requestCycleRollover(db, FIELD_ID, { cropType: 'Ratoon' }, USER, NOW);
+
+  await assert.rejects(
+    approveCycleRollover(db, FIELD_ID, { previousCycleId: OLD_CYCLE_ID }, MANAGER, '2026-09-17T08:05:00.000Z'),
+    error => error.status === 409
+      && error.data?.code === 'UNCOMPILED_CYCLE_OPERATIONS'
+      && error.data?.uncompiledCount === 3
+  );
+  assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).currentCycleId, OLD_CYCLE_ID);
+});
+
+test('assigned manager approval atomically starts the next annual cycle after compilation', async () => {
+  const db = database();
+  markCycleCompleted(db);
+  await requestCycleRollover(db, FIELD_ID, { cropType: 'Ratoon' }, USER, NOW);
+  db.collections.set(COLLECTIONS.AUDIT_REPORTS, new Map([['AUD-1', {
+    blockFarmId: 'BLK-TEST-001',
+    status: 'COMPILED',
+    sourceLogIds: ['LOG-A', 'LOG-B', 'LOG-ALREADY-ARCHIVED']
+  }]]));
+
+  const result = await approveCycleRollover(
+    db,
+    FIELD_ID,
+    { previousCycleId: OLD_CYCLE_ID },
+    MANAGER,
+    '2026-09-17T08:05:00.000Z'
+  );
+
+  assert.equal(result.newCycleId, NEW_CYCLE_ID);
+  assert.equal(result.newCycle.cropYear, '2026-2027');
+  assert.equal(result.oldCycle.closureRequest.status, 'APPROVED');
+  assert.equal(result.oldCycle.closureRequest.decidedByUserId, MANAGER.employeeId);
+  assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).currentCycleId, NEW_CYCLE_ID);
+});
+
+test('manager rejection unlocks the completed cycle for member corrections', async () => {
+  const db = database();
+  markCycleCompleted(db);
+  await requestCycleRollover(db, FIELD_ID, { cropType: 'Ratoon' }, USER, NOW);
+  const result = await rejectCycleRollover(
+    db,
+    FIELD_ID,
+    { reason: 'Review the harvesting cost before closure.' },
+    MANAGER,
+    '2026-09-17T08:05:00.000Z'
+  );
+
+  assert.equal(result.closureRequest.status, 'REJECTED');
+  const created = await createOperationRecord(
+    db,
+    { id: 'LOG-AFTER-REJECTION', ...operation({ operationDefinitionId: 'SRA-14', operationName: 'Drainage & Post-Harvest Field Clearing', category: 'prep', stageNumber: 6 }) },
+    USER,
+    '2026-09-17T08:06:00.000Z'
+  );
+  assert.equal(created.record.status, 'ACTIVE');
+});
 
 test('crop-cycle renewal atomically archives ACTIVE operations and starts a reset cycle', async () => {
   const db = database();
@@ -531,6 +617,35 @@ test('server rejects invalid stage-operation combinations', async () => {
     error => error.status === 400 && error.data?.code === 'INVALID_STAGE_OPERATION'
   );
   assert.equal(db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-WRONG-STAGE'), undefined);
+});
+
+test('server rejects operation entry for a future Crop Year Cycle stage', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).currentStageNumber = 1;
+
+  await assert.rejects(
+    createOperationRecord(db, {
+      id: 'LOG-FUTURE-STAGE',
+      ...operation({ stageNumber: 3 })
+    }, USER, NOW),
+    error => error.status === 409
+      && error.data?.code === 'FUTURE_STAGE_LOCKED'
+      && /Complete Stages 1 through 2/.test(error.message)
+  );
+  assert.equal(db.get(COLLECTIONS.OPERATION_LOGS, 'LOG-FUTURE-STAGE'), undefined);
+});
+
+test('Mobile explains why future-stage operation entry is locked', () => {
+  const mobileFieldOps = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
+  const webAddOperation = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'components', 'operations', 'AddOperationModal.jsx'), 'utf8');
+  assert.match(mobileFieldOps, /const blockFutureStageEntry = targetTask =>/);
+  assert.match(mobileFieldOps, /Complete Earlier Stages First/);
+  assert.match(mobileFieldOps, /data entry unlocks only when that stage becomes active/);
+  assert.match(mobileFieldOps, /if \(blockFutureStageEntry\(targetTask\)\) return/);
+  assert.match(mobileFieldOps, /isFutureStage \? 'lock-closed-outline'/);
+  assert.match(webAddOperation, /s\.stageNumber > authoritativeCurrentStageNumber \? ' \(Locked\)'/);
+  assert.match(webAddOperation, /disabled: s\.stageNumber > authoritativeCurrentStageNumber/);
+  assert.match(webAddOperation, /Complete \$\{requiredStages\} before recording work for Stage/);
 });
 
 test('Manager Takeover accepts valid historical-stage pairs and rejects mismatches', async () => {

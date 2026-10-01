@@ -8,7 +8,7 @@ const { auditCropYearCycles, canonicalAuditReport, nextCropYearCycle } = require
 
 const read = relativePath => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8');
 
-test('web and mobile PDFs use report actors and show account IDs below names', () => {
+test('web and mobile PDFs show actor names without exposing account IDs', () => {
   const mobilePdf = read('../../mobile/src/services/auditPdfService.js');
   const webPdf = read('../../web/react-app/src/components/audit/PrintableAuditReport.jsx');
 
@@ -17,8 +17,10 @@ test('web and mobile PDFs use report actors and show account IDs below names', (
     assert.match(source, /compiledByName/);
     assert.match(source, /certifiedByName/);
     assert.match(source, /displayName \|\| user\?\.name/);
-    assert.match(source, /printedById/);
-    assert.match(source, /ID:/);
+    assert.doesNotMatch(source, /account-id/);
+    assert.doesNotMatch(source, />ID:\s*\{/);
+    assert.doesNotMatch(source, /ID:\s*\$\{escapeHtml/);
+    assert.doesNotMatch(source, /storedId \|\| fallback/);
     assert.doesNotMatch(source, /Authenticated HUGPONG Account/);
   }
 });

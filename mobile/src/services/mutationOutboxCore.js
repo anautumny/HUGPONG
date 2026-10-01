@@ -45,7 +45,7 @@ function inferEntityKey(type, payload = {}) {
   if (type === 'cycle_rollover') return `fields/${payload.fieldId || ''}`;
   if (type === 'price') return `sra_prices/${id}`;
   if (type === 'ticket' || type === 'ticket_message') return `support_tickets/${id}`;
-  if (['audit_report', 'audit_submission', 'audit_return', 'audit_certification'].includes(type)) return `audit_reports/${id}`;
+  if (['audit_report', 'audit_delivery_selection', 'audit_submission', 'audit_return', 'audit_certification'].includes(type)) return `audit_reports/${id}`;
   if (type === 'audit_qr_import') return `audit_reports/${payload.reportId || payload.id || ''}`;
   if (type === 'user_approve') return `users/${id}`;
   return `${String(type || 'mutation')}/${id}`;
@@ -62,6 +62,7 @@ function inferLogicalMutationKey(type, payload = {}) {
     return `${type}:${payload.id || `${payload.blockFarmId || ''}:${payload.periodKey || payload.period || ''}`}:${ids.join(',')}`;
   }
   if (type === 'audit_submission') return payload.id ? `${type}:${payload.id}` : null;
+  if (type === 'audit_delivery_selection') return payload.id ? `${type}:${payload.id}:${String(payload.deliveryMethod || '').toLowerCase()}` : null;
   if (type === 'ticket_message') return payload.id && payload.messageId ? `${type}:${payload.id}:${payload.messageId}` : null;
   if (type === 'audit_qr_import') return payload.reportId ? `${type}:${payload.reportId}` : null;
   if (type === 'operation_archive') {

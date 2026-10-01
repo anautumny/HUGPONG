@@ -5,10 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
 import { ScreenHeader, SearchableSelect } from '../components/ui';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
-import { draftLogs, fieldsStore, getCurrentSession, saveFieldOperationSchedule, saveLocalOperationDraft, subscribe } from '../data/dataStore';
-import { SRA_OPERATIONS_CATALOGUE } from '../domain/operationCatalogue';
+import { fieldsStore, getCurrentSession, saveFieldOperationSchedule, subscribe } from '../data/dataStore';
+import { getOperationsForStage } from '../domain/operationCatalogue';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
-import { estimatedScheduleTotal, scheduleEntryLabel, scheduleEntryStatus } from '../domain/operationSchedule';
+import { estimatedScheduleTotal, scheduleEntryLabel } from '../domain/operationSchedule';
 import { SUGARCANE_STAGES } from '../constants/cropStages';
 import { createClientRecordId } from '../services/secureId';
 import { syncPlannerDeviceNotifications } from '../services/plannerNotificationService';
@@ -45,7 +45,7 @@ const money = value => `₱${Number(value || 0).toLocaleString('en-PH', { maximu
 const displayDate = (value, withWeekday = false, locale = 'en-PH') => localDate(value).toLocaleDateString(locale, withWeekday
   ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }
   : { month: 'short', day: 'numeric', year: 'numeric' });
-const emptyForm = plannedDate => ({ id: null, plannedDate, customName: '', estimatedLabor: '', estimatedMaterials: '', estimatedOther: '', notes: '' });
+const emptyForm = plannedDate => ({ id: null, plannedDate, operationChoiceId: '', customName: '', estimatedLabor: '', estimatedMaterials: '', estimatedOther: '', notes: '' });
 
 export default function PlannerScreen({ navigation, route }) {
   const { t, language } = useTranslation();
@@ -60,7 +60,6 @@ export default function PlannerScreen({ navigation, route }) {
   const [showEditor, setShowEditor] = useState(false);
   const [form, setForm] = useState(emptyForm(isoDate()));
   const [isSaving, setIsSaving] = useState(false);
-  const [draftingId, setDraftingId] = useState(null);
 
   useEffect(() => subscribe(() => {
     setSession(getCurrentSession());
@@ -89,21 +88,57 @@ export default function PlannerScreen({ navigation, route }) {
   }, [fields, selectedFieldId]);
 
   const field = fields.find(item => item.id === selectedFieldId) || null;
-  const schedule = useMemo(() => Array.isArray(field?.operationSchedule)
+  const allSchedule = useMemo(() => Array.isArray(field?.operationSchedule)
     ? field.operationSchedule.filter(entry => !entry.cycleId || entry.cycleId === field.currentCycleId)
     : [], [field]);
+  const schedule = useMemo(() => allSchedule.filter(entry => !entry.completedOperationLogId), [allSchedule]);
   const days = useMemo(() => calendarDays(anchorDate, viewMode), [anchorDate, viewMode]);
   const today = isoDate();
   const selectedEntries = useMemo(() => schedule.filter(entry => entry.plannedDate === selectedDate), [schedule, selectedDate]);
-  const upcoming = useMemo(() => schedule.filter(entry => scheduleEntryStatus(entry, today) === 'UPCOMING').sort((a, b) => a.plannedDate.localeCompare(b.plannedDate)).slice(0, 5), [schedule, today]);
-  const counts = useMemo(() => schedule.reduce((result, entry) => {
-    result[scheduleEntryStatus(entry, today)] += 1;
-    return result;
-  }, { UPCOMING: 0, COMPLETED: 0, OVERDUE: 0 }), [schedule, today]);
-  const draftedPlanIds = useMemo(() => new Set(draftLogs
-    .filter(draft => draft.status === 'DRAFT' && draft.fieldId === field?.id && draft.plannedOperationId)
-    .map(draft => draft.plannedOperationId)), [allFields, field?.id]);
   const stage = SUGARCANE_STAGES.find(item => item.stageNumber === Number(field?.stageNumber || field?.cropCycle?.currentStageNumber || 1));
+  const currentStageNumber = Number(field?.stageNumber || field?.cropCycle?.currentStageNumber || 1);
+  const operationChoices = useMemo(() => {
+    const fixed = getOperationsForStage(currentStageNumber).flatMap(operation => {
+      if (operation.id !== 'SRA-08') {
+        return [{
+          id: operation.id,
+          label: operation.name,
+          sublabel: operation.stageName,
+          icon: 'construct-outline',
+          operationDefinitionId: operation.id,
+          operationName: operation.name,
+          childOperationDefinitionId: null,
+          childOperationName: '',
+          stageNumber: currentStageNumber,
+          category: operation.category || 'General Care'
+        }];
+      }
+      return (operation.subItems || []).map(item => ({
+        id: `${operation.id}:${item.id}`,
+        label: item.description,
+        sublabel: operation.name,
+        icon: 'construct-outline',
+        operationDefinitionId: operation.id,
+        operationName: operation.name,
+        childOperationDefinitionId: item.id,
+        childOperationName: item.description,
+        stageNumber: currentStageNumber,
+        category: operation.category || 'General Care'
+      }));
+    });
+    return [...fixed, {
+      id: 'CUSTOM',
+      label: t('planner_custom_operation'),
+      sublabel: `${t('stage')} ${currentStageNumber}`,
+      icon: 'create-outline',
+      operationDefinitionId: 'CUSTOM',
+      operationName: '',
+      childOperationDefinitionId: null,
+      childOperationName: '',
+      stageNumber: currentStageNumber,
+      category: 'General Care'
+    }];
+  }, [currentStageNumber, t]);
 
   const movePeriod = direction => {
     const next = localDate(anchorDate);
@@ -121,10 +156,16 @@ export default function PlannerScreen({ navigation, route }) {
     setShowEditor(true);
   };
   const openEdit = entry => {
+    const operationChoiceId = entry.operationDefinitionId === 'CUSTOM'
+      ? 'CUSTOM'
+      : entry.childOperationDefinitionId
+        ? `${entry.operationDefinitionId}:${entry.childOperationDefinitionId}`
+        : entry.operationDefinitionId;
     setForm({
       id: entry.id,
       plannedDate: entry.plannedDate,
-      customName: entry.childOperationName || entry.operationName || '',
+      operationChoiceId,
+      customName: entry.operationDefinitionId === 'CUSTOM' ? entry.operationName || '' : '',
       estimatedLabor: entry.estimatedLabor ? String(entry.estimatedLabor) : '',
       estimatedMaterials: entry.estimatedMaterials ? String(entry.estimatedMaterials) : '',
       estimatedOther: entry.estimatedOther ? String(entry.estimatedOther) : '',
@@ -132,9 +173,11 @@ export default function PlannerScreen({ navigation, route }) {
     });
     setShowEditor(true);
   };
-  const persistSchedule = async nextSchedule => {
+  const persistSchedule = async nextActiveSchedule => {
     if (!field) return;
-    const previousSchedule = schedule.map(entry => ({ ...entry }));
+    const previousSchedule = allSchedule.map(entry => ({ ...entry }));
+    const completedSchedule = allSchedule.filter(entry => entry.completedOperationLogId);
+    const nextSchedule = [...completedSchedule, ...nextActiveSchedule];
     const editorWasOpen = showEditor;
     const optimisticFields = allFields.map(item => item.id === field.id
       ? { ...item, operationSchedule: nextSchedule.map(entry => ({ ...entry })) }
@@ -157,12 +200,12 @@ export default function PlannerScreen({ navigation, route }) {
     }
   };
   const saveEntry = async () => {
+    const selectedChoice = operationChoices.find(choice => choice.id === form.operationChoiceId);
+    if (!selectedChoice) return Alert.alert(t('planner_operation_required'), t('planner_operation_required_msg'));
     const customName = String(form.customName || '').trim();
-    if (!customName) return Alert.alert(t('planner_activity_required'), t('planner_activity_required_msg'));
-    const selectedChoice = {
-      operationDefinitionId: 'CUSTOM', operationName: customName,
-      childOperationDefinitionId: null, childOperationName: '', stageNumber: null, category: 'General Care'
-    };
+    if (selectedChoice.operationDefinitionId === 'CUSTOM' && !customName) {
+      return Alert.alert(t('planner_activity_required'), t('planner_activity_required_msg'));
+    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(form.plannedDate)) return Alert.alert(t('planner_date_required'), t('planner_date_required_msg'));
     const numbers = [form.estimatedLabor, form.estimatedMaterials, form.estimatedOther].map(value => value === '' ? 0 : Number(value));
     if (numbers.some(value => !Number.isFinite(value) || value < 0)) return Alert.alert(t('planner_invalid_estimate'), t('planner_invalid_estimate_msg'));
@@ -170,61 +213,45 @@ export default function PlannerScreen({ navigation, route }) {
     const prior = schedule.find(entry => entry.id === form.id);
     const nextEntry = {
       ...(prior || {}), id: prior?.id || createClientRecordId('PLAN', field.id), cycleId: field.currentCycleId,
-      ...selectedChoice, plannedDate: form.plannedDate, estimatedLabor: numbers[0], estimatedMaterials: numbers[1], estimatedOther: numbers[2],
+      ...selectedChoice,
+      operationName: selectedChoice.operationDefinitionId === 'CUSTOM' ? customName : selectedChoice.operationName,
+      plannedDate: form.plannedDate, estimatedLabor: numbers[0], estimatedMaterials: numbers[1], estimatedOther: numbers[2],
       estimatedTotal: numbers.reduce((sum, value) => sum + value, 0), notes: form.notes.trim(), createdAt: prior?.createdAt || now, updatedAt: now
     };
     await persistSchedule([...schedule.filter(entry => entry.id !== nextEntry.id), nextEntry]);
     setSelectedDate(nextEntry.plannedDate);
     setAnchorDate(localDate(nextEntry.plannedDate));
   };
+
+  const openOperationInputs = entry => {
+    if (!field || entry.completedOperationLogId) return;
+    navigation?.navigate('Field Ops', {
+      screen: 'SchedMain',
+      params: {
+        fieldId: field.id,
+        plannedOperation: {
+          id: entry.id,
+          fieldId: field.id,
+          stageNumber: entry.stageNumber,
+          operationDefinitionId: entry.operationDefinitionId,
+          operationName: entry.operationName,
+          childOperationDefinitionId: entry.childOperationDefinitionId || null,
+          childOperationName: entry.childOperationName || '',
+          plannedDate: entry.plannedDate,
+          estimatedCost: {
+            labor: Number(entry.estimatedLabor || 0),
+            materials: Number(entry.estimatedMaterials || 0),
+            other: Number(entry.estimatedOther || 0),
+            total: estimatedScheduleTotal(entry)
+          }
+        }
+      }
+    });
+  };
   const removeEntry = entry => Alert.alert(t('planner_remove_title'), `${t('planner_remove_prefix')} “${scheduleEntryLabel(entry)}” ${t('planner_remove_suffix')}`, [
     { text: t('btn_cancel'), style: 'cancel' },
     { text: t('btn_delete'), style: 'destructive', onPress: () => persistSchedule(schedule.filter(item => item.id !== entry.id)) }
   ]);
-
-  const addToDraft = async entry => {
-    if (!field || entry.completedOperationLogId) return;
-    if (draftLogs.some(draft => draft.status === 'DRAFT' && draft.plannedOperationId === entry.id)) {
-      return Alert.alert(t('planner_already_draft'), t('planner_already_draft_msg'));
-    }
-    const isCustom = entry.operationDefinitionId === 'CUSTOM';
-    const operation = SRA_OPERATIONS_CATALOGUE.find(item => item.id === entry.operationDefinitionId)
-      || (isCustom ? { id: 'CUSTOM', name: entry.operationName, category: 'General Care', unit: 'ha', isGroup: false } : null);
-    if (!operation) return Alert.alert(t('planner_draft_not_created'), t('planner_definition_missing'));
-    setDraftingId(entry.id);
-    try {
-      const draftStageNumber = Number(field.stageNumber || field.cropCycle?.currentStageNumber || 1);
-      const isChild = Boolean(entry.childOperationDefinitionId);
-      const childLine = isChild ? (operation.subItems || []).find(item => (item.id || item.lineItemId) === entry.childOperationDefinitionId) : null;
-      const isGroup = isChild || Boolean(operation.isGroup);
-      const subItems = isChild ? [{
-        id: entry.childOperationDefinitionId, description: entry.childOperationName, qty: Number(field.ha || field.areaHa || 1),
-        unit: childLine?.unit || 'ha', unitCost: 0, subTotal: 0
-      }] : (isGroup ? (operation.subItems || []).map(item => ({
-        id: item.id || item.lineItemId, description: item.description, qty: 0, unit: item.unit || 'ha', unitCost: 0, subTotal: 0
-      })) : []);
-      const draft = await saveLocalOperationDraft({
-        fieldId: field.id, taskId: `S${draftStageNumber}`, stageNumber: draftStageNumber,
-        stageName: SUGARCANE_STAGES.find(item => item.stageNumber === draftStageNumber)?.name || `Stage ${draftStageNumber}`,
-        sraOperationId: entry.operationDefinitionId, operationDefinitionId: entry.operationDefinitionId, parentOperationDefinitionId: null,
-        childOperationDefinitionId: entry.childOperationDefinitionId || null, childOperationName: entry.childOperationName || '',
-        operationName: entry.operationName, activity: entry.operationName, category: operation.category || 'General Care', isGroup, inputType: isGroup ? 'group' : 'direct',
-        cost: 0, totalCost: 0, hectares: String(field.ha || field.areaHa || ''), people: '0', workers: [], subItems,
-        inputQty: '', inputUnit: operation.unit || 'ha', inputName: '', directRate: '', date: displayDate(entry.plannedDate, false, locale),
-        plannedOperationId: entry.id, plannedDate: entry.plannedDate,
-        estimatedCost: { labor: Number(entry.estimatedLabor || 0), materials: Number(entry.estimatedMaterials || 0), other: Number(entry.estimatedOther || 0), total: estimatedScheduleTotal(entry) },
-        isSupplemental: false
-      });
-      Alert.alert(t('planner_added_draft'), t('planner_added_draft_msg'), [
-        { text: t('planner_keep_planning'), style: 'cancel' },
-        { text: t('planner_open_draft'), onPress: () => navigation?.navigate('Field Ops', { screen: 'SchedMain', params: { openDrafts: true, initialTab: 'drafts', highlightDraftId: draft.id, fieldId: field.id } }) }
-      ]);
-    } catch (error) {
-      Alert.alert(t('planner_draft_not_created'), t('planner_draft_failed_msg'));
-    } finally {
-      setDraftingId(null);
-    }
-  };
 
   const formEstimate = Number(form.estimatedLabor || 0) + Number(form.estimatedMaterials || 0) + Number(form.estimatedOther || 0);
   const headerLabel = viewMode === 'MONTH' ? anchorDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' }) : `${displayDate(startOfWeek(anchorDate), false, locale)} – ${displayDate(addDays(startOfWeek(anchorDate), 6), false, locale)}`;
@@ -245,11 +272,26 @@ export default function PlannerScreen({ navigation, route }) {
           showsVerticalScrollIndicator={false}
         >
           <View style={s.editorCard}>
-            <Text style={s.inputLabel}>{t('planner_planned_date')}</Text>
-            <TextInput style={s.input} value={form.plannedDate} onChangeText={value => setForm(current => ({ ...current, plannedDate: value }))} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
             <Text style={s.inputLabel}>{t('planner_planned_activity')}</Text>
-            <TextInput style={s.input} value={form.customName} onChangeText={value => setForm(current => ({ ...current, customName: value }))} placeholder={t('planner_activity_placeholder')} maxLength={300} />
+            <SearchableSelect
+              options={operationChoices}
+              selectedValue={form.operationChoiceId}
+              onSelect={choice => setForm(current => ({ ...current, operationChoiceId: choice.id, customName: choice.id === 'CUSTOM' ? current.customName : '' }))}
+              placeholder={t('planner_select_operation_placeholder')}
+              modalTitle={t('planner_select_operation')}
+              searchPlaceholder={t('planner_search_operations')}
+              leftIcon="construct"
+            />
+            {form.operationChoiceId === 'CUSTOM' && (
+              <TextInput style={[s.input, s.customActivityInput]} value={form.customName} onChangeText={value => setForm(current => ({ ...current, customName: value }))} placeholder={t('planner_activity_placeholder')} maxLength={300} />
+            )}
             <Text style={s.inputHelp}>{t('planner_stage_later_help')}</Text>
+            <Text style={s.inputLabel}>{t('planner_planned_date')}</Text>
+            <View style={s.plannedDateDisplay} accessibilityRole="text">
+              <Ionicons name="calendar-outline" size={19} color={COLORS.primary} />
+              <Text style={s.plannedDateText}>{displayDate(form.plannedDate, true, locale)}</Text>
+              <Ionicons name="lock-closed-outline" size={16} color={COLORS.textMuted} />
+            </View>
           </View>
 
           <View style={s.estimateBox}>
@@ -295,7 +337,6 @@ export default function PlannerScreen({ navigation, route }) {
           leftIcon="leaf"
         />
         <View style={s.contextCard}><Text style={s.eyebrow}>{t('planner_current_stage')}</Text><Text style={s.contextTitle}>{stage?.name || `${t('stage')} ${field?.stageNumber || 1}`}</Text><Text style={s.contextText}>{t('planner_field_context')} {field?.id} · {t('planner_crop_year_context')} {field?.cropYear || t('planner_current_cycle')}</Text></View>
-        <View style={s.statusRow}><StatusBox label={t('planner_upcoming')} value={counts.UPCOMING} /><StatusBox label={t('status_completed')} value={counts.COMPLETED} blue /><StatusBox label={t('planner_overdue')} value={counts.OVERDUE} red /></View>
         <View style={s.calendarCard}>
           <View style={s.calendarTop}><View style={s.segment}><Segment label={t('planner_month')} active={viewMode === 'MONTH'} onPress={() => setViewMode('MONTH')} /><Segment label={t('planner_week')} active={viewMode === 'WEEK'} onPress={() => setViewMode('WEEK')} /></View><TouchableOpacity style={s.todayButton} onPress={goToday}><Text style={s.todayButtonText}>{t('planner_today')}</Text></TouchableOpacity></View>
           <View style={s.navRow}><TouchableOpacity style={s.navButton} onPress={() => movePeriod(-1)}><Ionicons name="chevron-back" size={22} color={COLORS.text} /></TouchableOpacity><Text style={s.periodTitle}>{headerLabel}</Text><TouchableOpacity style={s.navButton} onPress={() => movePeriod(1)}><Ionicons name="chevron-forward" size={22} color={COLORS.text} /></TouchableOpacity></View>
@@ -304,14 +345,11 @@ export default function PlannerScreen({ navigation, route }) {
             const date = isoDate(day);
             const entries = schedule.filter(entry => entry.plannedDate === date);
             const outside = viewMode === 'MONTH' && day.getMonth() !== anchorDate.getMonth();
-            const hasOverdue = entries.some(entry => scheduleEntryStatus(entry, today) === 'OVERDUE');
-            const hasCompleted = entries.some(entry => scheduleEntryStatus(entry, today) === 'COMPLETED');
-            return <TouchableOpacity key={date} style={[s.dayCell, viewMode === 'WEEK' && s.weekDayCell, date === selectedDate && s.daySelected]} onPress={() => setSelectedDate(date)}><View style={[s.dayNumberWrap, date === today && s.todayNumber]}><Text style={[s.dayNumber, outside && s.outsideText, date === today && s.todayNumberText]}>{day.getDate()}</Text></View>{entries.length > 0 && <View style={s.dotRow}><View style={[s.dot, hasOverdue ? s.dotRed : hasCompleted ? s.dotBlue : s.dotGreen]} />{entries.length > 1 && <Text style={s.dotCount}>{entries.length}</Text>}</View>}</TouchableOpacity>;
+            return <TouchableOpacity key={date} style={[s.dayCell, viewMode === 'WEEK' && s.weekDayCell, date === selectedDate && s.daySelected]} onPress={() => setSelectedDate(date)}><View style={[s.dayNumberWrap, date === today && s.todayNumber]}><Text style={[s.dayNumber, outside && s.outsideText, date === today && s.todayNumberText]}>{day.getDate()}</Text></View>{entries.length > 0 && <View style={s.dotRow}><View style={[s.dot, s.dotGreen]} />{entries.length > 1 && <Text style={s.dotCount}>{entries.length}</Text>}</View>}</TouchableOpacity>;
           })}</View>
         </View>
         <View style={s.sectionHeader}><View style={s.sectionCopy}><Text style={s.sectionTitle}>{displayDate(selectedDate, true, locale)}</Text><Text style={s.sectionHint}>{selectedEntries.length ? `${selectedEntries.length} ${selectedEntries.length === 1 ? t('planner_scheduled_one') : t('planner_scheduled_many')}` : t('planner_no_work_date')}</Text></View><TouchableOpacity style={s.addButton} onPress={openNew}><Ionicons name="add" size={20} color="#fff" /><Text style={s.addButtonText}>{t('planner_schedule_work')}</Text></TouchableOpacity></View>
-        <View style={s.listGap}>{selectedEntries.map(entry => <ScheduleCard key={entry.id} entry={entry} today={today} drafting={draftingId === entry.id} inDraft={draftedPlanIds.has(entry.id)} onDraft={() => addToDraft(entry)} onEdit={() => openEdit(entry)} onRemove={() => removeEntry(entry)} t={t} />)}{!selectedEntries.length && <TouchableOpacity style={s.emptyDate} onPress={openNew}><Text style={s.emptyTitle}>{t('planner_date_open')}</Text><Text style={s.emptyText}>{t('planner_tap_schedule')}</Text></TouchableOpacity>}</View>
-        <View style={s.upcomingCard}><Text style={s.sectionTitle}>{t('planner_upcoming_title')}</Text><Text style={s.sectionHint}>{t('planner_upcoming_sub')}</Text>{upcoming.length ? upcoming.map(entry => <TouchableOpacity key={entry.id} style={s.upcomingRow} onPress={() => { setSelectedDate(entry.plannedDate); setAnchorDate(localDate(entry.plannedDate)); }}><View style={s.upcomingDate}><Text style={s.upcomingMonth}>{localDate(entry.plannedDate).toLocaleDateString(locale, { month: 'short' }).toUpperCase()}</Text><Text style={s.upcomingDay}>{localDate(entry.plannedDate).getDate()}</Text></View><View style={s.upcomingCopy}><Text style={s.upcomingTitle}>{entry.childOperationName || entry.operationName}</Text><Text style={s.upcomingMeta}>{t('planner_flexible_plan')}</Text></View></TouchableOpacity>) : <Text style={s.emptyText}>{t('planner_no_upcoming')}</Text>}</View>
+        <View style={s.listGap}>{selectedEntries.map(entry => <ScheduleCard key={entry.id} entry={entry} canEdit={!entry.stageNumber || Number(entry.stageNumber) === currentStageNumber} onRecord={() => openOperationInputs(entry)} onEdit={() => openEdit(entry)} onRemove={() => removeEntry(entry)} t={t} />)}{!selectedEntries.length && <TouchableOpacity style={s.emptyDate} onPress={openNew}><Text style={s.emptyTitle}>{t('planner_date_open')}</Text><Text style={s.emptyText}>{t('planner_tap_schedule')}</Text></TouchableOpacity>}</View>
       </>}
     </ScrollView>
   </SafeAreaView>;
@@ -319,12 +357,10 @@ export default function PlannerScreen({ navigation, route }) {
 
 function EmptyState({ t }) { return <View style={s.emptyCard}><Text style={s.emptyTitle}>{t('planner_no_field')}</Text><Text style={s.emptyText}>{t('planner_field_required')}</Text></View>; }
 function Segment({ label, active, onPress }) { return <TouchableOpacity style={[s.segmentButton, active && s.segmentActive]} onPress={onPress}><Text style={[s.segmentText, active && s.segmentTextActive]}>{label}</Text></TouchableOpacity>; }
-function StatusBox({ label, value, blue, red }) { return <View style={[s.statusBox, blue && s.statusBlue, red && s.statusRed]}><Text style={s.statusValue}>{value}</Text><Text style={s.statusLabel}>{label}</Text></View>; }
 function EstimateInput({ label, value, onChange }) { return <View style={s.estimateRow}><Text style={s.estimateLabel}>{label}</Text><View style={s.moneyInputWrap}><Text style={s.moneyPrefix}>₱</Text><TextInput style={s.moneyInput} value={value} onChangeText={onChange} keyboardType="decimal-pad" placeholder="0" /></View></View>; }
-function ScheduleCard({ entry, today, drafting, inDraft, onDraft, onEdit, onRemove, t }) {
-  const status = scheduleEntryStatus(entry, today);
+function ScheduleCard({ entry, canEdit, onRecord, onEdit, onRemove, t }) {
   const estimate = estimatedScheduleTotal(entry);
-  return <View style={s.scheduleCard}><View style={s.cardTop}><View style={s.cardCopy}><Text style={s.cardTitle}>{entry.childOperationName || entry.operationName}</Text>{entry.childOperationName && <Text style={s.cardParent}>{entry.operationName}</Text>}<Text style={s.cardMeta}>{t('planner_flexible_plan')}</Text></View><View style={[s.statusPill, status === 'COMPLETED' ? s.completedPill : status === 'OVERDUE' ? s.overduePill : s.upcomingPill]}><Text style={[s.statusPillText, status === 'COMPLETED' ? s.completedText : status === 'OVERDUE' ? s.overdueText : s.upcomingText]}>{status === 'COMPLETED' ? t('status_completed') : status === 'OVERDUE' ? t('planner_overdue') : t('planner_upcoming')}</Text></View></View>{estimate > 0 && <View style={s.costLine}><Text style={s.costLabel}>{t('planner_estimated_cost')}</Text><Text style={s.costValue}>{money(estimate)}</Text></View>}{entry.notes ? <Text style={s.cardNotes}>{entry.notes}</Text> : null}{status !== 'COMPLETED' && <View style={s.cardActions}><TouchableOpacity style={[s.draftButton, inDraft && s.draftButtonDone]} onPress={onDraft} disabled={drafting || inDraft}>{drafting && !inDraft ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[s.draftButtonText, inDraft && s.draftButtonDoneText]}>{inDraft ? t('planner_in_drafts') : t('planner_add_draft')}</Text>}</TouchableOpacity><TouchableOpacity style={s.secondaryButton} onPress={onEdit}><Text style={s.secondaryButtonText}>{t('btn_edit')}</Text></TouchableOpacity><TouchableOpacity style={s.removeButton} onPress={onRemove}><Text style={s.removeButtonText}>{t('btn_delete')}</Text></TouchableOpacity></View>}</View>;
+  return <View style={s.scheduleCard}><View style={s.cardTop}><View style={s.cardCopy}><Text style={s.cardTitle}>{entry.childOperationName || entry.operationName}</Text>{entry.childOperationName && <Text style={s.cardParent}>{entry.operationName}</Text>}<Text style={s.cardMeta}>{t('stage')} {entry.stageNumber || '—'} · {t('planner_todo_label')}</Text></View></View>{estimate > 0 && <View style={s.costLine}><Text style={s.costLabel}>{t('planner_estimated_cost')}</Text><Text style={s.costValue}>{money(estimate)}</Text></View>}{entry.notes ? <Text style={s.cardNotes}>{entry.notes}</Text> : null}<TouchableOpacity style={s.recordButton} onPress={onRecord}><Ionicons name="arrow-forward-circle-outline" size={20} color="#fff" /><Text style={s.recordButtonText}>{t('planner_open_operation_inputs')}</Text></TouchableOpacity><View style={s.cardActions}>{canEdit && <TouchableOpacity style={s.secondaryButton} onPress={onEdit}><Text style={s.secondaryButtonText}>{t('btn_edit')}</Text></TouchableOpacity>}<TouchableOpacity style={s.removeButton} onPress={onRemove}><Text style={s.removeButtonText}>{t('btn_delete')}</Text></TouchableOpacity></View></View>;
 }
 
 const s = StyleSheet.create({
@@ -335,16 +371,14 @@ const s = StyleSheet.create({
   fieldRow: { gap: 8, paddingVertical: 2 }, fieldChip: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 16, borderRadius: RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.surface }, fieldChipActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }, fieldChipText: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary }, fieldChipTextActive: { color: COLORS.primary },
   contextCard: { padding: 16, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, eyebrow: { fontSize: 12, fontWeight: '800', letterSpacing: 0.8, color: COLORS.primary }, contextTitle: { marginTop: 6, fontSize: 18, lineHeight: 24, fontWeight: '800', color: COLORS.text }, contextText: { marginTop: 5, fontSize: 14, color: COLORS.textSecondary },
   savingBanner: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 14, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, savingBannerText: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
-  statusRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 }, statusBox: { flex: 1, minWidth: 0, padding: 12, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, statusRed: { backgroundColor: COLORS.dangerBg, borderColor: '#F2C5C2' }, statusBlue: { backgroundColor: COLORS.blueBg, borderColor: '#B8DAEE' }, statusValue: { fontSize: 22, fontWeight: '900', color: COLORS.text }, statusLabel: { marginTop: 2, fontSize: 12, lineHeight: 16, fontWeight: '700', color: COLORS.textSecondary, flexShrink: 1 },
   calendarCard: { padding: 12, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.card }, calendarTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, segment: { flexDirection: 'row', padding: 3, borderRadius: RADIUS.md, backgroundColor: COLORS.background }, segmentButton: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 16, borderRadius: RADIUS.sm }, segmentActive: { backgroundColor: COLORS.surface, ...SHADOW.card }, segmentText: { fontSize: 14, fontWeight: '700', color: COLORS.textMuted }, segmentTextActive: { color: COLORS.primary },
   todayButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 15, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primary }, todayButtonText: { fontSize: 14, fontWeight: '800', color: COLORS.primary }, navRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, navButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.full, backgroundColor: COLORS.background }, periodTitle: { flex: 1, paddingHorizontal: 6, textAlign: 'center', fontSize: 17, fontWeight: '800', color: COLORS.text },
-  weekLabels: { flexDirection: 'row', marginTop: 10 }, weekLabel: { width: '14.2857%', textAlign: 'center', fontSize: 12, fontWeight: '700', color: COLORS.textMuted }, calendarGrid: { marginTop: 4, flexDirection: 'row', flexWrap: 'wrap' }, dayCell: { width: '14.2857%', minHeight: 55, alignItems: 'center', paddingTop: 5, borderRadius: RADIUS.sm }, weekDayCell: { minHeight: 82, justifyContent: 'center' }, daySelected: { backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, dayNumberWrap: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 }, todayNumber: { backgroundColor: COLORS.primary }, dayNumber: { fontSize: 14, fontWeight: '800', color: COLORS.text }, todayNumberText: { color: '#fff' }, outsideText: { color: COLORS.textDisabled }, dotRow: { marginTop: 3, flexDirection: 'row', alignItems: 'center', gap: 3 }, dot: { width: 7, height: 7, borderRadius: 4 }, dotGreen: { backgroundColor: COLORS.primary }, dotBlue: { backgroundColor: COLORS.blue }, dotRed: { backgroundColor: COLORS.danger }, dotCount: { fontSize: 10, fontWeight: '800', color: COLORS.textMuted },
+  weekLabels: { flexDirection: 'row', marginTop: 10 }, weekLabel: { width: '14.2857%', textAlign: 'center', fontSize: 12, fontWeight: '700', color: COLORS.textMuted }, calendarGrid: { marginTop: 4, flexDirection: 'row', flexWrap: 'wrap' }, dayCell: { width: '14.2857%', minHeight: 55, alignItems: 'center', paddingTop: 5, borderRadius: RADIUS.sm }, weekDayCell: { minHeight: 82, justifyContent: 'center' }, daySelected: { backgroundColor: COLORS.primaryBg, borderWidth: 1, borderColor: COLORS.primaryBorder }, dayNumberWrap: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 }, todayNumber: { backgroundColor: COLORS.primary }, dayNumber: { fontSize: 14, fontWeight: '800', color: COLORS.text }, todayNumberText: { color: '#fff' }, outsideText: { color: COLORS.textDisabled }, dotRow: { marginTop: 3, flexDirection: 'row', alignItems: 'center', gap: 3 }, dot: { width: 7, height: 7, borderRadius: 4 }, dotGreen: { backgroundColor: COLORS.primary }, dotCount: { fontSize: 10, fontWeight: '800', color: COLORS.textMuted },
   sectionHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, sectionCopy: { flex: 1, minWidth: 180 }, sectionTitle: { fontSize: 19, lineHeight: 25, fontWeight: '800', color: COLORS.text }, sectionHint: { marginTop: 2, fontSize: 13, lineHeight: 18, color: COLORS.textMuted }, addButton: { minHeight: 48, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, borderRadius: RADIUS.md, backgroundColor: COLORS.primary }, addButtonText: { flexShrink: 1, textAlign: 'center', fontSize: 14, fontWeight: '800', color: '#fff' }, listGap: { gap: 10 },
-  scheduleCard: { padding: 16, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, ...SHADOW.card }, cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 }, cardCopy: { flex: 1 }, cardTitle: { fontSize: 17, lineHeight: 23, fontWeight: '800', color: COLORS.text }, cardParent: { marginTop: 3, fontSize: 13, lineHeight: 18, color: COLORS.textSecondary }, cardMeta: { marginTop: 5, fontSize: 12, fontWeight: '700', color: COLORS.textMuted }, statusPill: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: RADIUS.full }, upcomingPill: { backgroundColor: COLORS.primaryBg }, completedPill: { backgroundColor: COLORS.blueBg }, overduePill: { backgroundColor: COLORS.dangerBg }, statusPillText: { fontSize: 11, fontWeight: '800' }, upcomingText: { color: COLORS.primary }, completedText: { color: COLORS.blue }, overdueText: { color: COLORS.danger },
-  costLine: { marginTop: 13, padding: 12, flexDirection: 'row', justifyContent: 'space-between', borderRadius: RADIUS.md, backgroundColor: COLORS.background }, costLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }, costValue: { fontSize: 15, fontWeight: '900', color: COLORS.primary }, cardNotes: { marginTop: 10, fontSize: 14, lineHeight: 20, color: COLORS.textSecondary }, cardActions: { marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, draftButton: { minWidth: 118, minHeight: 46, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, borderRadius: RADIUS.md, backgroundColor: COLORS.primary }, draftButtonDone: { backgroundColor: COLORS.primaryBg, borderWidth: 1.5, borderColor: COLORS.primaryBorder }, draftButtonText: { fontSize: 14, fontWeight: '800', color: '#fff' }, draftButtonDoneText: { color: COLORS.primary }, secondaryButton: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 15, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primaryBorder }, secondaryButtonText: { fontSize: 14, fontWeight: '800', color: COLORS.primary }, removeButton: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 12 }, removeButtonText: { fontSize: 14, fontWeight: '700', color: COLORS.danger },
+  scheduleCard: { padding: 16, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, ...SHADOW.card }, cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 }, cardCopy: { flex: 1 }, cardTitle: { fontSize: 17, lineHeight: 23, fontWeight: '800', color: COLORS.text }, cardParent: { marginTop: 3, fontSize: 13, lineHeight: 18, color: COLORS.textSecondary }, cardMeta: { marginTop: 5, fontSize: 12, fontWeight: '700', color: COLORS.textMuted },
+  costLine: { marginTop: 13, padding: 12, flexDirection: 'row', justifyContent: 'space-between', borderRadius: RADIUS.md, backgroundColor: COLORS.background }, costLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }, costValue: { fontSize: 15, fontWeight: '900', color: COLORS.primary }, cardNotes: { marginTop: 10, fontSize: 14, lineHeight: 20, color: COLORS.textSecondary }, recordButton: { minHeight: 48, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 14, borderRadius: RADIUS.md, backgroundColor: COLORS.primary }, recordButtonText: { fontSize: 14, fontWeight: '900', color: '#fff' }, cardActions: { marginTop: 9, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, secondaryButton: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 15, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primaryBorder }, secondaryButtonText: { fontSize: 14, fontWeight: '800', color: COLORS.primary }, removeButton: { minHeight: 46, justifyContent: 'center', paddingHorizontal: 12 }, removeButtonText: { fontSize: 14, fontWeight: '700', color: COLORS.danger },
   emptyCard: { padding: 20, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border }, emptyDate: { minHeight: 100, justifyContent: 'center', padding: 18, borderRadius: RADIUS.lg, borderWidth: 1.5, borderStyle: 'dashed', borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg }, emptyTitle: { fontSize: 17, fontWeight: '800', color: COLORS.text }, emptyText: { marginTop: 4, fontSize: 14, lineHeight: 20, color: COLORS.textSecondary },
-  upcomingCard: { padding: 16, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border }, upcomingRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.divider }, upcomingDate: { width: 50, height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg }, upcomingMonth: { fontSize: 10, fontWeight: '800', color: COLORS.primary }, upcomingDay: { fontSize: 20, fontWeight: '900', color: COLORS.text }, upcomingCopy: { flex: 1 }, upcomingTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text }, upcomingMeta: { marginTop: 3, fontSize: 12, color: COLORS.textMuted },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: COLORS.overlay }, modalSheet: { maxHeight: '93%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: COLORS.surface, ...SHADOW.modal }, modalHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, padding: 18, borderBottomWidth: 1, borderBottomColor: COLORS.divider }, modalHeading: { flex: 1, minWidth: 0 }, modalTitle: { fontSize: 22, lineHeight: 28, fontWeight: '900', color: COLORS.text }, modalSubtitle: { marginTop: 4, fontSize: 13, lineHeight: 19, color: COLORS.textSecondary }, closeButton: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }, modalContent: { padding: 18, paddingBottom: 44 }, inputLabel: { marginTop: 16, marginBottom: 7, fontSize: 14, lineHeight: 20, fontWeight: '800', color: COLORS.text }, input: { minHeight: 50, paddingHorizontal: 14, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.background, fontSize: 16, color: COLORS.text }, inputHelp: { marginTop: 6, fontSize: 12, lineHeight: 18, color: COLORS.textMuted }, notes: { minHeight: 90, paddingTop: 13, textAlignVertical: 'top' },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: COLORS.overlay }, modalSheet: { maxHeight: '93%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: COLORS.surface, ...SHADOW.modal }, modalHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, padding: 18, borderBottomWidth: 1, borderBottomColor: COLORS.divider }, modalHeading: { flex: 1, minWidth: 0 }, modalTitle: { fontSize: 22, lineHeight: 28, fontWeight: '900', color: COLORS.text }, modalSubtitle: { marginTop: 4, fontSize: 13, lineHeight: 19, color: COLORS.textSecondary }, closeButton: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }, modalContent: { padding: 18, paddingBottom: 44 }, inputLabel: { marginTop: 16, marginBottom: 7, fontSize: 14, lineHeight: 20, fontWeight: '800', color: COLORS.text }, input: { minHeight: 50, paddingHorizontal: 14, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.background, fontSize: 16, color: COLORS.text }, customActivityInput: { marginTop: 10 }, inputHelp: { marginTop: 6, fontSize: 12, lineHeight: 18, color: COLORS.textMuted }, notes: { minHeight: 90, paddingTop: 13, textAlignVertical: 'top' }, plannedDateDisplay: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg }, plannedDateText: { flex: 1, fontSize: 15, lineHeight: 20, fontWeight: '800', color: COLORS.text },
   choiceList: { gap: 8 }, choice: { minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border }, choiceActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }, choiceTextWrap: { flex: 1 }, choiceTitle: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: COLORS.text }, choiceTitleActive: { color: COLORS.primary }, choiceParent: { marginTop: 2, fontSize: 12, color: COLORS.textMuted }, stagePill: { fontSize: 11, fontWeight: '800', color: COLORS.textMuted }, stagePillActive: { color: COLORS.primary }, parentNotice: { marginTop: 12, padding: 12, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg }, parentNoticeLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8, color: COLORS.primary }, parentNoticeText: { marginTop: 4, fontSize: 14, fontWeight: '700', color: COLORS.text },
   customBox: { marginTop: 12, padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg }, stageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, stageChoice: { minWidth: '30%', minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface }, stageChoiceActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary }, stageChoiceText: { fontSize: 13, fontWeight: '800', color: COLORS.textSecondary }, stageChoiceTextActive: { color: '#fff' },
   estimateBox: { marginTop: 18, padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.primaryBorder, backgroundColor: COLORS.primaryBg }, estimateTitle: { fontSize: 17, fontWeight: '900', color: COLORS.text }, estimateHint: { marginTop: 3, marginBottom: 8, fontSize: 13, lineHeight: 19, color: COLORS.textSecondary }, estimateRow: { marginTop: 10 }, estimateLabel: { marginBottom: 5, fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }, moneyInputWrap: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface }, moneyPrefix: { paddingLeft: 13, fontSize: 16, fontWeight: '800', color: COLORS.textSecondary }, moneyInput: { flex: 1, paddingHorizontal: 8, fontSize: 16, color: COLORS.text }, estimateTotal: { marginTop: 13, paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: COLORS.primaryBorder }, estimateTotalLabel: { fontSize: 15, fontWeight: '800', color: COLORS.text }, estimateTotalValue: { fontSize: 18, fontWeight: '900', color: COLORS.primary }, saveButton: { minHeight: 54, marginTop: 22, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.md, backgroundColor: COLORS.primary }, saveButtonText: { fontSize: 16, fontWeight: '900', color: '#fff' }, disabled: { opacity: 0.65 }

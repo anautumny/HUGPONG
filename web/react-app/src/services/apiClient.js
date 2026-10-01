@@ -101,6 +101,13 @@ function announceServerMutation(path) {
   }
 }
 
+export function announceConnectionRestored() {
+  clearReadCache();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hugpong:connection-restored'));
+  }
+}
+
 function canRefreshInBackground() {
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
@@ -268,9 +275,11 @@ export function subscribeToAuthenticatedResource(path, {
   const handleMutation = event => {
     if (mutationAffects(event, resources)) refresh({ force: true });
   };
+  const handleConnectionRestored = () => refresh({ force: true });
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleFocus);
     window.addEventListener('hugpong:server-mutation', handleMutation);
+    window.addEventListener('hugpong:connection-restored', handleConnectionRestored);
   }
   return () => {
     active = false;
@@ -278,6 +287,7 @@ export function subscribeToAuthenticatedResource(path, {
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('hugpong:server-mutation', handleMutation);
+      window.removeEventListener('hugpong:connection-restored', handleConnectionRestored);
     }
   };
 }
@@ -316,9 +326,11 @@ export function subscribeToAuthenticatedLoader(load, {
   const handleMutation = event => {
     if (!resources.length || mutationAffects(event, resources)) refresh({ force: true });
   };
+  const handleConnectionRestored = () => refresh({ force: true });
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleFocus);
     window.addEventListener('hugpong:server-mutation', handleMutation);
+    window.addEventListener('hugpong:connection-restored', handleConnectionRestored);
   }
 
   return () => {
@@ -327,6 +339,7 @@ export function subscribeToAuthenticatedLoader(load, {
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('hugpong:server-mutation', handleMutation);
+      window.removeEventListener('hugpong:connection-restored', handleConnectionRestored);
     }
   };
 }
@@ -336,6 +349,7 @@ export default {
   read: authenticatedRead,
   peek: peekAuthenticatedRead,
   createMutationContext,
+  announceConnectionRestored,
   subscribeToAuthenticatedResource,
   subscribeToAuthenticatedLoader
 };

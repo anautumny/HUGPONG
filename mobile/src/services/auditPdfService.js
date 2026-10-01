@@ -29,7 +29,7 @@ const safeFilePart = value => String(value || 'Report')
 const accountId = user => String(user?.employeeId || user?.userId || user?.id || '').trim();
 
 const accountName = user => String(
-  user?.displayName || user?.name || accountId(user) || ''
+  user?.displayName || user?.name || ''
 ).trim();
 
 const accountRole = user => String(
@@ -39,9 +39,10 @@ const accountRole = user => String(
 const reportActorName = (storedName, storedId, currentUser, fallback) => {
   if (String(storedName || '').trim()) return String(storedName).trim();
   if (String(storedId || '').trim() && String(storedId).trim() === accountId(currentUser)) {
-    return accountName(currentUser);
+    const currentName = accountName(currentUser);
+    if (currentName) return currentName;
   }
-  return String(storedId || fallback).trim();
+  return String(fallback || '').trim();
 };
 
 function isMillingOperation(log = {}) {
@@ -230,13 +231,12 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const currentMonthHeaders = CURRENT_CYCLE_MONTHS.map(month => `<th>${month}</th>`).join('');
   const nextMonthHeaders = FOLLOWING_PERIOD_MONTHS.map(month => `<th>${month}</th>`).join('');
   const managerId = String(report.compiledByUserId || '').trim();
-  const managerName = reportActorName(report.compiledByName, managerId, currentUser, managerId);
+  const managerName = reportActorName(report.compiledByName, managerId, currentUser, 'Farm Manager');
   const inspectorId = isCertified ? String(report.certifiedByUserId || '').trim() : '';
   const inspectorName = isCertified
-    ? reportActorName(report.certifiedByName || report.verifiedBy, inspectorId, currentUser, inspectorId)
+    ? reportActorName(report.certifiedByName || report.verifiedBy, inspectorId, currentUser, 'SRA Inspector')
     : 'Awaiting Review';
-  const printedById = accountId(currentUser);
-  const printedByName = accountName(currentUser) || printedById;
+  const printedByName = accountName(currentUser) || 'Authorized HUGPONG User';
   const printedByRole = accountRole(currentUser);
   const reportId = String(report.reportId || report.id || '').trim();
 
@@ -276,7 +276,6 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12mm; margin-top: 8mm; text-align: center; page-break-inside: avoid; }
         .signature { border-top: .5px solid #000; padding-top: 2mm; min-height: 16mm; }
         .signature .name { font-size: 9px; font-weight: 800; text-transform: uppercase; }
-        .signature .account-id { margin-top: 1mm; font-family: 'Courier New', monospace; font-size: 7px; color: #333; }
         .signature .role { margin-top: 4mm; color: #555; font-size: 7.5px; line-height: 1.3; }
         .qr-panel { width: 30mm; text-align: center; page-break-inside: avoid; }
         .qr { border: .5px solid #000; padding: 1mm; width: 27mm; height: 27mm; display: flex; align-items: center; justify-content: center; }
@@ -324,9 +323,9 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         <p class="footnote">* Total recorded expenditure for ${auditedArea} Ha included in this report: <strong>PHP ${formatNumber(grandTotal)}</strong> (Philippine Pesos).</p>
 
         <section class="signatures">
-          <div class="signature"><div class="name">${escapeHtml(managerName)}</div>${managerId ? `<div class="account-id">ID: ${escapeHtml(managerId)}</div>` : ''}<div class="role">Farm Manager / President<br><strong>${escapeHtml(farmName)}</strong></div></div>
-          <div class="signature"><div class="name">${escapeHtml(inspectorName)}</div>${inspectorId ? `<div class="account-id">ID: ${escapeHtml(inspectorId)}</div>` : ''}<div class="role">SRA Agricultural Inspector<br><strong>Field Operations Audit Division</strong></div></div>
-          <div class="signature"><div class="name">${escapeHtml(printedByName)}</div>${printedById ? `<div class="account-id">ID: ${escapeHtml(printedById)}</div>` : ''}<div class="role">Printed by ${escapeHtml(printedByRole)}</div></div>
+          <div class="signature"><div class="name">${escapeHtml(managerName)}</div><div class="role">Farm Manager / President<br><strong>${escapeHtml(farmName)}</strong></div></div>
+          <div class="signature"><div class="name">${escapeHtml(inspectorName)}</div><div class="role">SRA Agricultural Inspector<br><strong>Field Operations Audit Division</strong></div></div>
+          <div class="signature"><div class="name">${escapeHtml(printedByName)}</div><div class="role">Printed by ${escapeHtml(printedByRole)}</div></div>
         </section>
       </main>
     </body>

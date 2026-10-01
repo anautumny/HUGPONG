@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Modal, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Modal, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import CustomBottomTabBar from '../components/CustomBottomTabBar';
 import {
   subscribeToNetwork,
+  subscribeToReconnectStatus,
   getNetworkStatus,
   getConnectivityDetails,
   CONNECTIVITY_STATUS
@@ -106,6 +107,14 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  reconnectLoading: {
+    backgroundColor: '#EEF7FF',
+    borderColor: '#BFDBFE',
+  },
+  reconnectSuccess: {
+    backgroundColor: '#E9F8EC',
+    borderColor: '#BBE4C2',
+  },
   title: {
     fontSize: 18,
     fontWeight: '900',
@@ -138,6 +147,18 @@ const modalStyles = StyleSheet.create({
     color: COLORS.textInverse,
     textAlign: 'center',
   },
+  secondaryBtn: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    marginTop: 8,
+  },
+  secondaryBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.textSecondary,
+  },
 });
 
 function MainTabs({ navigation }) {
@@ -146,8 +167,11 @@ function MainTabs({ navigation }) {
   const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
   const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
   const [showOfflineNotice, setShowOfflineNotice] = React.useState(false);
+  const [reconnectNotice, setReconnectNotice] = React.useState(null);
   const hasShownOfflineNoticeRef = React.useRef(false);
+  const reconnectStartedAtRef = React.useRef(0);
   React.useEffect(() => {
+    let reconnectTimer = null;
     const unsubSession = subscribe(() => {
       setRole(getCurrentSession()?.role || 'Farm Member');
     });
@@ -173,9 +197,29 @@ function MainTabs({ navigation }) {
         }
       }
     });
+    const unsubReconnect = subscribeToReconnectStatus(status => {
+      if (!status || status.phase === 'IDLE') return;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (status.phase === 'RECONNECTING') {
+        reconnectStartedAtRef.current = Date.now();
+        setReconnectNotice(status);
+        return;
+      }
+      const minimumLoadingMs = 700;
+      const elapsed = Date.now() - reconnectStartedAtRef.current;
+      reconnectTimer = setTimeout(() => {
+        setReconnectNotice(status);
+        reconnectTimer = null;
+      }, Math.max(0, minimumLoadingMs - elapsed));
+    });
     return () => {
       unsubSession();
       unsubNet();
+      unsubReconnect();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
     };
   }, [navigation]);
 
@@ -185,6 +229,20 @@ function MainTabs({ navigation }) {
       navigation.navigate('MainTabs', { screen: 'Field Ops' });
     }
   };
+
+  const handleOpenSyncMonitor = () => {
+    setReconnectNotice(null);
+    navigation.navigate('MainTabs', {
+      screen: 'Home',
+      params: { screen: 'SyncMonitor' }
+    });
+  };
+
+  const reconnectPhase = reconnectNotice?.phase || 'IDLE';
+  const reconnectResult = reconnectNotice?.result || {};
+  const reconnectRemaining = Math.max(0, Number(reconnectResult.remainingCount || 0));
+  const reconnectNeedsManualSync = reconnectPhase === 'MANUAL_REQUIRED' && reconnectRemaining > 0;
+  const reconnectIncomplete = reconnectPhase === 'COMPLETE' && reconnectRemaining > 0;
 
   return (
     <>
@@ -282,6 +340,72 @@ function MainTabs({ navigation }) {
               </Text>
               <Ionicons name="arrow-forward" size={16} color="#FFF" />
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(reconnectNotice)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (reconnectPhase !== 'RECONNECTING') setReconnectNotice(null);
+        }}
+      >
+        <View style={modalStyles.overlay}>
+          <View style={modalStyles.card}>
+            <View style={[
+              modalStyles.iconWrap,
+              reconnectPhase === 'RECONNECTING' ? modalStyles.reconnectLoading : modalStyles.reconnectSuccess
+            ]}>
+              {reconnectPhase === 'RECONNECTING' ? (
+                <ActivityIndicator size="large" color={COLORS.primary} />
+              ) : (
+                <Ionicons
+                  name={reconnectPhase === 'FAILED' || reconnectIncomplete ? 'alert-circle' : 'cloud-done'}
+                  size={30}
+                  color={reconnectPhase === 'FAILED' || reconnectIncomplete ? '#D97706' : COLORS.success}
+                />
+              )}
+            </View>
+
+            <Text style={modalStyles.title}>
+              {reconnectPhase === 'RECONNECTING'
+                ? t('reconnect_checking_title', 'Restoring Connection')
+                : reconnectPhase === 'FAILED' || reconnectIncomplete
+                  ? t('reconnect_attention_title', 'Connection Restored — Sync Needs Attention')
+                  : t('connection_restored', 'Connection Restored')}
+            </Text>
+
+            <Text style={modalStyles.desc}>
+              {reconnectPhase === 'RECONNECTING'
+                ? t('reconnect_checking_msg', 'HUGPONG is checking the server and preparing your saved changes.')
+                : reconnectNeedsManualSync
+                  ? t('reconnect_manual_msg', 'Automatic sync is off. Open Sync Monitor and tap Sync Now to upload your saved changes.')
+                  : reconnectPhase === 'MANUAL_REQUIRED'
+                    ? t('reconnect_no_pending_msg', 'Automatic sync is off, and there are no saved changes waiting to sync.')
+                    : reconnectPhase === 'FAILED'
+                      ? t('reconnect_failed_msg', 'The connection is back, but synchronization could not finish. Open Sync Monitor and tap Sync Now to try again.')
+                      : reconnectIncomplete
+                        ? `${reconnectRemaining} ${t('reconnect_waiting_msg', 'saved change(s) are still waiting. Open Sync Monitor to review and retry them.')}`
+                        : t('reconnect_synced_msg', 'Automatic sync is on. Synchronization is complete and your saved changes are up to date.')}
+            </Text>
+
+            {reconnectPhase !== 'RECONNECTING' && (reconnectNeedsManualSync || reconnectIncomplete || reconnectPhase === 'FAILED') ? (
+              <>
+                <TouchableOpacity style={modalStyles.btn} onPress={handleOpenSyncMonitor} activeOpacity={0.85}>
+                  <Ionicons name="sync" size={17} color="#FFF" />
+                  <Text style={modalStyles.btnText}>{t('reconnect_open_sync', 'Open Sync Monitor')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={modalStyles.secondaryBtn} onPress={() => setReconnectNotice(null)} activeOpacity={0.8}>
+                  <Text style={modalStyles.secondaryBtnText}>{t('reconnect_later', 'Later')}</Text>
+                </TouchableOpacity>
+              </>
+            ) : reconnectPhase !== 'RECONNECTING' ? (
+              <TouchableOpacity style={modalStyles.btn} onPress={() => setReconnectNotice(null)} activeOpacity={0.85}>
+                <Text style={modalStyles.btnText}>{t('btn_ok', 'OK')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </Modal>

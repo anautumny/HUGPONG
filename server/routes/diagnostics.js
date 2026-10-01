@@ -64,8 +64,11 @@ router.post('/client', requireAuth, async (req, res) => {
     if (!MODULES.includes(module)) {
       return res.status(400).json({ success: false, error: 'Diagnostic module is invalid.', code: 'INVALID_DIAGNOSTIC_MODULE' });
     }
-    if (typeof req.body?.message !== 'string' || req.body.message.length > 1000) {
-      return res.status(400).json({ success: false, error: 'Diagnostic message must be a string of 1000 characters or fewer.', code: 'INVALID_DIAGNOSTIC_MESSAGE' });
+    // Current clients bound reports to the persisted 1,000-character limit.
+    // Accept a larger envelope from older clients and sanitize it below so a
+    // long React component stack cannot make its own reference ID untraceable.
+    if (typeof req.body?.message !== 'string' || req.body.message.length > 8000) {
+      return res.status(400).json({ success: false, error: 'Diagnostic message must be a string of 8000 characters or fewer.', code: 'INVALID_DIAGNOSTIC_MESSAGE' });
     }
     if (req.body?.errorCode != null && !/^[A-Za-z0-9_-]{1,80}$/.test(String(req.body.errorCode))) {
       return res.status(400).json({ success: false, error: 'Diagnostic error code is invalid.', code: 'INVALID_DIAGNOSTIC_CODE' });

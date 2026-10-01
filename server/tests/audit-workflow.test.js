@@ -12,6 +12,7 @@ const {
   rootAuditReportId,
   versionedAuditReportId,
   summarizeSnapshots,
+  monthlyAuditReadiness,
   selectAuditCompilationBatch,
   encodeQrPayload,
   decodeQrPayload,
@@ -70,6 +71,33 @@ test('snapshot summary counts each operation once and each audited field once', 
     { id: 'FLD-2', areaHa: 2.5 }
   ]);
   assert.deepEqual(summary, { operationCount: 3, fieldCount: 2, hectaresAudited: 3.75, totalCost: 450 });
+});
+
+test('monthly audit readiness identifies incomplete members, fields, and contact numbers', () => {
+  const readiness = monthlyAuditReadiness([
+    { operationLogId: 'LOG-1', fieldId: 'FLD-1' }
+  ], [
+    { id: 'FLD-1', memberUserId: 'MEM-1', memberName: 'Ready Farmer', memberPhone: '09170000001' },
+    { id: 'FLD-2', memberUserId: 'MEM-2', memberName: 'Needs Follow-up', memberPhone: '09170000002' },
+    { id: 'FLD-3', memberUserId: null }
+  ]);
+
+  assert.equal(readiness.isComplete, false);
+  assert.equal(readiness.activeFieldCount, 3);
+  assert.equal(readiness.submittedFieldCount, 1);
+  assert.equal(readiness.incompleteFieldCount, 2);
+  assert.deepEqual(readiness.incompleteFields, [
+    {
+      fieldId: 'FLD-2', memberId: 'MEM-2', memberName: 'Needs Follow-up',
+      contactNumber: '09170000002', reasonCode: 'NO_SUBMITTED_OPERATION',
+      reason: 'No synchronized submitted operation was found for this reporting month.'
+    },
+    {
+      fieldId: 'FLD-3', memberId: null, memberName: 'Unassigned member',
+      contactNumber: null, reasonCode: 'NO_SUBMITTED_OPERATION',
+      reason: 'No synchronized submitted operation was found for this reporting month.'
+    }
+  ]);
 });
 
 test('a certified monthly report starts a new version only for newly eligible logs', () => {
@@ -194,8 +222,9 @@ test('QR decoding rejects unrelated, malformed, and incomplete transfer data', (
   ]), /incomplete/i);
 });
 
-test('audit route exposes separate idempotent submit, QR import, return, and certify transitions', () => {
+test('audit route exposes separate idempotent delivery selection, submit, QR import, return, and certify transitions', () => {
   const source = fs.readFileSync(path.join(repositoryRoot, 'server', 'routes', 'auditReports.js'), 'utf8');
+  assert.match(source, /router\.post\('\/:id\/delivery-selection'/);
   assert.match(source, /router\.post\('\/:id\/submit'/);
   assert.match(source, /router\.post\('\/qr\/import'/);
   assert.match(source, /router\.post\('\/:id\/return'/);
@@ -206,12 +235,29 @@ test('audit route exposes separate idempotent submit, QR import, return, and cer
   assert.match(source, /certificationStatus: 'not_certified'/);
   assert.match(source, /deliveryMethod: AUDIT_DELIVERY_METHOD\.QR/);
   assert.match(source, /deliveryStatus: AUDIT_DELIVERY_STATUS\.RECEIVED/);
+  assert.match(source, /eventType: 'AUDIT_REPORT_DELIVERY_SELECTED'/);
   assert.match(source, /reviewStatus: 'complete', certificationStatus: 'certified'/);
   assert.match(source, /expectedHash !== \(report\.integrityHash \|\| report\.qrHash\)/);
   assert.match(source, /payload\.integrityHash !== authoritative\.integrityHash/);
   assert.match(source, /transaction\.create\(ref, imported\)/);
   assert.match(source, /validateCanonicalAuditReport\(payload\)/);
+  assert.match(source, /router\.get\('\/readiness'/);
+  assert.match(source, /AUDIT_MONTH_INCOMPLETE/);
   assert.doesNotMatch(source, /fields:\s*\[\],\s*operations:\s*\[\]/);
+});
+
+test('Web and Mobile show incomplete members with contact actions before compilation', () => {
+  const webCompiler = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'components', 'audit', 'AuditCompilationModal.jsx'), 'utf8');
+  const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
+  const mobileMutations = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'mutationService.js'), 'utf8');
+
+  assert.match(webCompiler, /Member submissions still needed/);
+  assert.match(webCompiler, /href=\{`tel:/);
+  assert.match(webCompiler, /compilationBlockedByIncompleteFields/);
+  assert.match(mobileMutations, /audit-reports\/readiness/);
+  assert.match(mobileFieldOps, /Member Submissions Needed/);
+  assert.match(mobileFieldOps, /Linking\.openURL\(url\)/);
+  assert.match(mobileFieldOps, /onPress: handleGenerateAudit/);
 });
 
 test('Web and Mobile present one current QR and Mobile queues offline references by SRA account', () => {
@@ -219,7 +265,7 @@ test('Web and Mobile present one current QR and Mobile queues offline references
   const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
   const mobileStorage = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'storageService.js'), 'utf8');
 
-  assert.match(webCompiler, /createAuditQrPayload\(compiledResult\)/);
+  assert.match(webCompiler, /createAuditQrPayload\((?:compiledResult|response\.data|initialReport|latestReport)\)/);
   assert.doesNotMatch(webCompiler, /QR Part|Multi-Part|Multipart/);
   assert.match(mobileFieldOps, /const qrPayload = createAuditQrPayload\(report\)/);
   assert.doesNotMatch(mobileFieldOps, /activeQrPartIndex|setActiveQrPartIndex/);
@@ -229,12 +275,41 @@ test('Web and Mobile present one current QR and Mobile queues offline references
   assert.match(mobileStorage, /pendingAuditReferenceStorageKey\(userId\)/);
 });
 
+test('QR delivery selection is persisted and both clients expose Cloud and report-ID fallbacks', () => {
+  const webCompiler = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'components', 'audit', 'AuditCompilationModal.jsx'), 'utf8');
+  const webService = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'services', 'auditService.js'), 'utf8');
+  const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
+  const mobileSync = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'syncEngine.js'), 'utf8');
+
+  assert.match(webService, /selectAuditDeliveryMethod/);
+  assert.match(webCompiler, /Send Through Cloud Instead/);
+  assert.match(webCompiler, /Copy Report ID/);
+  assert.match(mobileSync, /audit_delivery_selection/);
+  assert.match(mobileFieldOps, /View QR & Delivery Options/);
+  assert.match(mobileFieldOps, /Copy Report ID \(Online Lookup\)/);
+  assert.match(mobileFieldOps, /Send Through Cloud Instead/);
+  assert.doesNotMatch(mobileFieldOps, /checkmark-seal-outline/);
+  assert.match(mobileFieldOps, /Field Summary/);
+  assert.match(mobileFieldOps, /Operation Details/);
+});
+
 test('active SRA reads are bounded server queries and history remains one canonical collection', () => {
   const source = fs.readFileSync(path.join(repositoryRoot, 'server', 'routes', 'auditReports.js'), 'utf8');
   assert.match(source, /where\('status', '==', AUDIT_STATUS\.PENDING_REVIEW\)/);
   assert.match(source, /where\('status', '==', AUDIT_STATUS\.CERTIFIED\)/);
   assert.match(source, /limit\(limit \+ 1\)/);
   assert.doesNotMatch(source, /audit_history|qr_audits|cloud_audits|certified_audits/);
+});
+
+test('audit compilation keeps archived production-cycle operations eligible until covered', () => {
+  const serverRoute = fs.readFileSync(path.join(repositoryRoot, 'server', 'routes', 'auditReports.js'), 'utf8');
+  const webCompiler = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'components', 'audit', 'AuditCompilationModal.jsx'), 'utf8');
+  const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
+
+  assert.match(serverRoute, /\['ACTIVE', 'ARCHIVED'\]\.includes/);
+  assert.match(webCompiler, /\['ACTIVE', 'ARCHIVED'\]\.includes/);
+  assert.match(mobileFieldOps, /\['ACTIVE', 'ARCHIVED'\]\.includes/);
+  assert.match(serverRoute, /selectAuditCompilationBatch/);
 });
 
 test('SRA audit inbox falls back to a status-scoped query while its composite index is unavailable', async () => {

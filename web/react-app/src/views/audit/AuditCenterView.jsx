@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
+import { lazyWithRecovery } from '../../utils/lazyWithRecovery';
 import Button from '../../components/ui/Button';
 import AuditQueue from '../../components/audit/AuditQueue';
 import AuditDossierCard from '../../components/audit/AuditDossierCard';
@@ -24,10 +25,10 @@ import { subscribeToOperationsData } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 
-const QRVerifierPanel = React.lazy(() => import('../../components/audit/QRVerifierPanel'));
-const AuditCompilationModal = React.lazy(() => import('../../components/audit/AuditCompilationModal'));
-const AuditHistoryModal = React.lazy(() => import('../../components/audit/AuditHistoryModal'));
-const PrintableAuditReport = React.lazy(() => import('../../components/audit/PrintableAuditReport'));
+const QRVerifierPanel = lazyWithRecovery(() => import('../../components/audit/QRVerifierPanel'), 'audit-qr-verifier');
+const AuditCompilationModal = lazyWithRecovery(() => import('../../components/audit/AuditCompilationModal'), 'audit-compilation');
+const AuditHistoryModal = lazyWithRecovery(() => import('../../components/audit/AuditHistoryModal'), 'audit-history');
+const PrintableAuditReport = lazyWithRecovery(() => import('../../components/audit/PrintableAuditReport'), 'audit-print');
 
 function DeferredAuditPanel({ label }) {
   return (
@@ -237,7 +238,15 @@ export default function AuditCenterView() {
 
   // Handle compilation success (Farm Manager)
   const handleCompileSuccess = (compiledData) => {
-    showToast(`Audit report ${compiledData.id || compiledData.period} compiled successfully!`, 'success');
+    const status = canonicalAuditStatus(compiledData.status);
+    const deliveryMethod = String(compiledData.deliveryMethod || '').toLowerCase();
+    if (status === AUDIT_STATUS.PENDING_REVIEW) {
+      showToast('Submitted to SRA. The audit is awaiting review.', 'success');
+    } else if (deliveryMethod === 'qr') {
+      showToast('QR Transfer selected. You can also copy the report ID or switch to Cloud delivery.', 'success');
+    } else {
+      showToast(`Audit report ${compiledData.id || compiledData.period} compiled successfully!`, 'success');
+    }
     upsertReport(compiledData);
   };
 
@@ -323,7 +332,9 @@ export default function AuditCenterView() {
                 }}
                 icon={FileCheck2}
               >
-                {pendingDeliveryReport ? 'Compiled Report Available' : 'Compile Monthly Audit'}
+                {pendingDeliveryReport
+                  ? (String(pendingDeliveryReport.deliveryMethod || '').toLowerCase() === 'qr' ? 'QR Ready · Delivery Options' : 'Compiled Report Available')
+                  : 'Compile Monthly Audit'}
               </Button>
             )}
 

@@ -60,6 +60,6 @@ test('web startup excludes the Firestore SDK and lazy-loads role workspaces', ()
   const firebaseClient = webService('firebaseClient.js');
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'App.jsx'), 'utf8');
   assert.doesNotMatch(firebaseClient, /firebase\/firestore|getFirestore|onSnapshot/);
-  assert.match(app, /const DashboardView = lazy\(/);
+  assert.match(app, /const DashboardView = lazyWithRecovery\(/);
   assert.match(app, /<Suspense fallback=\{<RouteLoadingState \/>\}>/);
 });

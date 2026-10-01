@@ -129,3 +129,32 @@ test('web and mobile expose the same categories and pending status distinction',
   assert.match(web, /PENDING_SUBMISSION/);
   assert.match(mobile, /PENDING_SUBMISSION/);
 });
+
+test('Farm Manager and SRA Admin can discover their support tickets from their profile menus', () => {
+  const webSidebar = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/layout/Sidebar.jsx'), 'utf8');
+  const webRoutes = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/App.jsx'), 'utf8');
+  const webTicketsView = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/support/TicketsView.jsx'), 'utf8');
+  const mobileProfile = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/ProfileScreen.js'), 'utf8');
+
+  assert.doesNotMatch(webSidebar, /label: 'Help & Support Desk'/);
+  assert.match(webSidebar, /\[ROLE_KEYS\.FARM_MANAGER, ROLE_KEYS\.SRA_ADMIN\]\.includes\(roleKey\) && \(/);
+  assert.match(webSidebar, /id="popover-support"[\s\S]*?navigate\('\/support'\)[\s\S]*?<span>Help &amp; Support Desk<\/span>/);
+  assert.match(webRoutes, /path="\/support"[\s\S]*?allowed=\{MANAGEMENT_ROLES\}/);
+  assert.match(webTicketsView, /isSuperAdmin \? 'Support Inbox' : 'Help & Support Desk'/);
+  assert.match(mobileProfile, /ticketCreationAllowed = canCreateSupportTicket/);
+  assert.match(mobileProfile, /Help & Support Desk/);
+  assert.match(mobileProfile, /onPress=\{\(\) => setShowTicketsModal\(true\)\}/);
+  assert.match(mobileProfile, /refreshSupportTicketsFromServer/);
+  assert.match(mobileProfile, /RefreshControl/);
+});
+
+test('support summaries remain readable in history and mobile refreshes authoritative ticket status', () => {
+  const webTicketsView = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/support/TicketsView.jsx'), 'utf8');
+  const mobileStore = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/data/dataStore.js'), 'utf8');
+
+  assert.match(webTicketsView, /\{isSuperAdmin && \(/);
+  assert.doesNotMatch(webTicketsView, /isSuperAdmin && view === 'active'/);
+  assert.match(webTicketsView, /text-slate-900 dark:text-white/);
+  assert.match(mobileStore, /export const refreshSupportTicketsFromServer/);
+  assert.match(mobileStore, /api\/tickets\?view=history&limit=50/);
+});

@@ -5,7 +5,12 @@ import {
   subscribeToOperationsData,
   archiveOperations
 } from '../../services/operationsService';
-import { subscribeToFieldsData } from '../../services/fieldsService';
+import {
+  subscribeToFieldsData,
+  approveCropYearCycleRollover,
+  rejectCropYearCycleRollover
+} from '../../services/fieldsService';
+import { fromOperation } from '../../services/firestoreSchema';
 import {
   applyPendingStageUpdate,
   flushCropStageOutbox,
@@ -189,6 +194,8 @@ export default function OperationsView() {
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [completingStageFieldId, setCompletingStageFieldId] = useState(null);
+  const [cycleDecisionFieldId, setCycleDecisionFieldId] = useState(null);
+  const [selectedCycleClosureIds, setSelectedCycleClosureIds] = useState(() => new Set());
   const [updateSuccess, setUpdateSuccess] = useState('');
   const [localDrafts, setLocalDrafts] = useState([]);
   const [activeDraft, setActiveDraft] = useState(null);
@@ -316,12 +323,12 @@ export default function OperationsView() {
       })
       .catch(error => setUpdateSuccess(error.message));
     const unsubscribe = subscribeToCropStageOutbox(refreshPendingStages);
-    window.addEventListener('online', flush);
+    window.addEventListener('hugpong:connection-restored', flush);
     flush();
     refreshPendingStages();
     return () => {
       unsubscribe();
-      window.removeEventListener('online', flush);
+      window.removeEventListener('hugpong:connection-restored', flush);
     };
   }, [user?.id, user?.employeeId]);
 
@@ -680,6 +687,16 @@ export default function OperationsView() {
     const fieldIds = new Set((fieldsData.fields || []).map(field => field.id));
     return (fieldsData.cropCycles || []).filter(cycle => fieldIds.has(cycle.fieldId));
   }, [fieldsData.cropCycles, fieldsData.fields]);
+  const pendingCycleClosures = useMemo(() => {
+    const fieldById = new Map((fieldsData.fields || []).map(field => [field.id, field]));
+    return (fieldsData.cropCycles || [])
+      .filter(cycle => cycle.status === 'ACTIVE' && cycle.closureRequest?.status === 'PENDING')
+      .map(cycle => ({ cycle, field: fieldById.get(cycle.fieldId) }))
+      .filter(item => item.field);
+  }, [fieldsData.cropCycles, fieldsData.fields]);
+  const selectedCycleClosureCount = pendingCycleClosures.filter(item => selectedCycleClosureIds.has(item.cycle.id)).length;
+  const allPendingClosuresSelected = pendingCycleClosures.length > 0
+    && selectedCycleClosureCount === pendingCycleClosures.length;
   const invalidArchiveCycles = useMemo(
     () => authorizedArchiveCycles.filter(cycle => !canonicalStoredCropYear(cycle.cropYear)),
     [authorizedArchiveCycles]
@@ -707,6 +724,64 @@ export default function OperationsView() {
   ], []);
 
   // Handle Archive Confirmation
+  const handleApproveCycleClosure = async ({ field, cycle }) => {
+    if (cycleDecisionFieldId) return;
+    if (!window.confirm(`Approve Field ${field.id} and start its next Crop Year Cycle? The server will first verify that every submitted operation is compiled.`)) return;
+    setCycleDecisionFieldId(field.id);
+    setUpdateSuccess('');
+    try {
+      await approveCropYearCycleRollover(field.id, cycle.id);
+      setUpdateSuccess(`Approved ${field.id}. The next Crop Year Cycle is now active.`);
+    } catch (error) {
+      window.alert(error.message || 'Compile all outstanding operations before approving this request.');
+    } finally {
+      setCycleDecisionFieldId(null);
+    }
+  };
+
+  const handleApproveSelectedClosures = async () => {
+    if (cycleDecisionFieldId) return;
+    const selected = pendingCycleClosures.filter(item => selectedCycleClosureIds.has(item.cycle.id));
+    if (!selected.length) return;
+    if (!window.confirm(`Approve ${selected.length} selected field${selected.length === 1 ? '' : 's'}? Each field will be checked separately for complete audit coverage.`)) return;
+    setCycleDecisionFieldId('BATCH');
+    setUpdateSuccess('');
+    const approved = [];
+    const failed = [];
+    for (const item of selected) {
+      try {
+        await approveCropYearCycleRollover(item.field.id, item.cycle.id);
+        approved.push(item);
+      } catch (error) {
+        failed.push({ fieldId: item.field.id, message: error.message || 'Outstanding operations still need compilation.' });
+      }
+    }
+    setSelectedCycleClosureIds(current => {
+      const next = new Set(current);
+      approved.forEach(item => next.delete(item.cycle.id));
+      return next;
+    });
+    if (approved.length) setUpdateSuccess(`Approved ${approved.length} field${approved.length === 1 ? '' : 's'}: ${approved.map(item => item.field.id).join(', ')}.`);
+    if (failed.length) window.alert(`Some fields were not approved:\n\n${failed.map(item => `${item.fieldId}: ${item.message}`).join('\n')}`);
+    setCycleDecisionFieldId(null);
+  };
+
+  const handleRejectCycleClosure = async ({ field }) => {
+    if (cycleDecisionFieldId) return;
+    const reason = window.prompt('Why should the Farm Member review this cycle before closure?');
+    if (!reason?.trim()) return;
+    setCycleDecisionFieldId(field.id);
+    setUpdateSuccess('');
+    try {
+      await rejectCropYearCycleRollover(field.id, reason.trim());
+      setUpdateSuccess(`Returned ${field.id} to the Farm Member for correction.`);
+    } catch (error) {
+      window.alert(error.message || 'The closure request could not be rejected.');
+    } finally {
+      setCycleDecisionFieldId(null);
+    }
+  };
+
   const handleArchiveConfirm = async () => {
     if (!archiveTarget) return;
     setIsArchiving(true);
@@ -893,6 +968,83 @@ export default function OperationsView() {
         subtitle={`Assigned field operations, Crop Year Cycle stages & supervisory ledger · ${scopedOperations.length} recorded logs`}
         actions={headerActions}
       />
+
+      {isManager && pendingCycleClosures.length > 0 && (
+        <section className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-black text-amber-950 dark:text-amber-200">New Crop Year Cycle Requests</h2>
+              <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+                Compile every outstanding operation before approval. The server performs a final coverage check before closing each cycle.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={Boolean(cycleDecisionFieldId)}
+                onClick={() => setSelectedCycleClosureIds(current => (
+                  allPendingClosuresSelected
+                    ? new Set()
+                    : new Set(pendingCycleClosures.map(item => item.cycle.id))
+                ))}
+              >
+                {allPendingClosuresSelected ? 'Clear selection' : 'Select all'}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => navigate('/audit')} icon={FileCheck2}>
+                Open Audit Center
+              </Button>
+              <Button
+                size="sm"
+                disabled={!selectedCycleClosureCount || Boolean(cycleDecisionFieldId)}
+                onClick={handleApproveSelectedClosures}
+                icon={CheckCircle2}
+              >
+                {cycleDecisionFieldId === 'BATCH' ? 'Checking selected...' : `Approve selected (${selectedCycleClosureCount})`}
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            {pendingCycleClosures.map(item => {
+              const busy = Boolean(cycleDecisionFieldId);
+              const selected = selectedCycleClosureIds.has(item.cycle.id);
+              return (
+                <div key={item.cycle.id} className="rounded-xl border border-amber-200 dark:border-amber-900 bg-white dark:bg-surface p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select Field ${item.field.id}`}
+                      checked={selected}
+                      disabled={busy}
+                      onChange={() => setSelectedCycleClosureIds(current => {
+                        const next = new Set(current);
+                        if (next.has(item.cycle.id)) next.delete(item.cycle.id);
+                        else next.add(item.cycle.id);
+                        return next;
+                      })}
+                      className="w-4 h-4 accent-primary cursor-pointer"
+                    />
+                    <div>
+                    <p className="text-sm font-black text-hug-text">Field {item.field.id}</p>
+                    <p className="text-xs text-hug-muted mt-0.5">
+                      {item.field.memberName || item.cycle.closureRequest.requestedByName || 'Farm Member'} · {formatCropYearDisplay(item.cycle.cropYear)} · Requested {formatDate(item.cycle.closureRequest.requestedAt)}
+                    </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" size="sm" disabled={busy} onClick={() => handleRejectCycleClosure(item)}>
+                      Reject
+                    </Button>
+                    <Button size="sm" disabled={busy} onClick={() => handleApproveCycleClosure(item)} icon={CheckCircle2}>
+                      {busy ? 'Checking...' : 'Approve & Start'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Active Manager Takeover banner */}
       {isManager && activeTakeOverField && (
@@ -1530,7 +1682,16 @@ export default function OperationsView() {
         ).takeover ? takeoverGrant : null}
         isOpen={Boolean(editTarget)}
         onClose={() => setEditTarget(null)}
-        onUpdated={() => {
+        onUpdated={(updatedOperation) => {
+          if (updatedOperation?.id) {
+            const normalizedOperation = fromOperation(updatedOperation.id, updatedOperation);
+            setOpsData(previous => ({
+              ...previous,
+              operations: previous.operations.map(operation => (
+                operation.id === normalizedOperation.id ? normalizedOperation : operation
+              ))
+            }));
+          }
           setEditTarget(null);
           setUpdateSuccess('Operation amended and updated successfully.');
         }}

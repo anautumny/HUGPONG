@@ -16,6 +16,7 @@ import {
   saveCustomOperations,
   saveOperationSchedule,
   compileAuditReport,
+  selectAuditDeliveryMethod,
   submitAuditReport,
   returnAuditReport,
   importAuditQr,
@@ -585,6 +586,8 @@ export async function executeMutationViaApi(item, { includeMutation = true } = {
         return saveOperationSchedule(payload.fieldId, payload.operationSchedule, mutation);
       } else if (type === 'audit_report') {
         return compileAuditReport(payload, mutation);
+      } else if (type === 'audit_delivery_selection') {
+        return selectAuditDeliveryMethod(payload.id, payload.deliveryMethod || 'QR', mutation);
       } else if (type === 'audit_submission') {
         return submitAuditReport(payload.id, payload.submissionMethod || 'CLOUD', mutation);
       } else if (type === 'audit_return') {

@@ -87,6 +87,31 @@ test('individual worker costs are included exactly once in the operation total',
   );
 });
 
+test('operation records preserve their authoritative Planner link and estimate snapshot', () => {
+  const log = buildOperationLog(baseOperation({
+    plannedOperationId: 'PLAN-LAND-PREP',
+    plannedDate: '2026-09-27',
+    estimatedCost: { labor: 500, materials: 1200, other: 300, total: 999999 }
+  }));
+  assert.equal(log.plannedOperationId, 'PLAN-LAND-PREP');
+  assert.equal(log.plannedDate, '2026-09-27');
+  assert.deepEqual(log.estimatedCost, { labor: 500, materials: 1200, other: 300, total: 2000 });
+});
+
+test('server rejects an operation submission with no recorded work details', () => {
+  assert.throws(
+    () => buildOperationLog(baseOperation({
+      peopleCount: 0,
+      quantity: null,
+      baseCost: 0,
+      totalCost: 0,
+      lineItems: [],
+      laborEntries: []
+    })),
+    /Operation details are required before submission/
+  );
+});
+
 test('operation units use one standardized list while normalizing legacy spellings', () => {
   assert.deepEqual(OPERATION_UNITS, ['ha', 'm²', 'bag', 'kg', 'L', 'ton', 'lac', 'pass', 'day', 'worker', 'trip']);
   assert.equal(canonicalOperationUnit('bags'), 'bag');

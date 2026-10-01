@@ -15,12 +15,16 @@ async function loadMobileDataHelpers() {
 }
 
 test('mobile date helpers preserve display and storage date formats', async () => {
-  const { formatDisplayDate, toISODateString } = await loadMobileDataHelpers();
+  const { formatDisplayDate, normalizeCalendarDate, toISODateString } = await loadMobileDataHelpers();
 
   assert.equal(formatDisplayDate('2026-09-03'), 'September 3, 2026');
   assert.equal(formatDisplayDate('September 3, 2026'), 'September 3, 2026');
   assert.equal(formatDisplayDate('not-a-date'), 'not-a-date');
   assert.equal(toISODateString('2026-9-3'), '2026-09-03');
+  assert.equal(normalizeCalendarDate('September 3, 2026'), '2026-09-03');
+  assert.equal(normalizeCalendarDate('Sep 3, 2026'), '2026-09-03');
+  assert.equal(normalizeCalendarDate('2026-02-30'), '');
+  assert.equal(normalizeCalendarDate('not-a-date'), '');
 });
 
 test('mobile log cleanup keeps the newest record for a duplicate id', async () => {

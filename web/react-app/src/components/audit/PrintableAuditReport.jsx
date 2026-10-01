@@ -41,7 +41,7 @@ function accountId(user) {
 }
 
 function accountName(user) {
-  return String(user?.displayName || user?.name || accountId(user) || '').trim();
+  return String(user?.displayName || user?.name || '').trim();
 }
 
 function accountRole(user) {
@@ -53,9 +53,10 @@ function accountRole(user) {
 function reportActorName(storedName, storedId, currentUser, fallback) {
   if (String(storedName || '').trim()) return String(storedName).trim();
   if (String(storedId || '').trim() && String(storedId).trim() === accountId(currentUser)) {
-    return accountName(currentUser);
+    const currentName = accountName(currentUser);
+    if (currentName) return currentName;
   }
-  return String(storedId || fallback).trim();
+  return String(fallback || '').trim();
 }
 
 export default function PrintableAuditReport({
@@ -161,13 +162,12 @@ export default function PrintableAuditReport({
   const hash = String(report.qrHash || report.qrSignature || report.integrityHash || '').trim();
   const isCertified = report.status === 'CERTIFIED';
   const managerId = String(report.compiledByUserId || '').trim();
-  const managerName = reportActorName(report.compiledByName, managerId, currentUser, managerId);
+  const managerName = reportActorName(report.compiledByName, managerId, currentUser, 'Farm Manager');
   const inspectorId = isCertified ? String(report.certifiedByUserId || '').trim() : '';
   const inspectorName = isCertified
-    ? reportActorName(report.certifiedByName || report.verifiedBy, inspectorId, currentUser, inspectorId)
+    ? reportActorName(report.certifiedByName || report.verifiedBy, inspectorId, currentUser, 'SRA Inspector')
     : 'Awaiting Review';
-  const printedById = accountId(currentUser);
-  const printedByName = accountName(currentUser) || printedById;
+  const printedByName = accountName(currentUser) || 'Authorized HUGPONG User';
   const printedByRole = accountRole(currentUser);
   const reportId = String(report.reportId || report.id || '').trim();
 
@@ -435,7 +435,6 @@ export default function PrintableAuditReport({
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <div>
               <p className="font-bold text-[9px] uppercase m-0 text-black">{managerName}</p>
-              {managerId && <p className="font-mono text-[7px] m-0 mt-0.5 text-gray-700">ID: {managerId}</p>}
             </div>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               Farm Manager / President<br />
@@ -446,7 +445,6 @@ export default function PrintableAuditReport({
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <div>
               <p className="font-bold text-[9px] uppercase m-0 text-black">{inspectorName}</p>
-              {inspectorId && <p className="font-mono text-[7px] m-0 mt-0.5 text-gray-700">ID: {inspectorId}</p>}
             </div>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               SRA Agricultural Inspector<br />
@@ -457,7 +455,6 @@ export default function PrintableAuditReport({
           <div className="border-t border-black pt-1.5 flex flex-col justify-between h-16">
             <div>
               <p className="font-bold text-[9px] uppercase m-0 text-black">{printedByName}</p>
-              {printedById && <p className="font-mono text-[7px] m-0 mt-0.5 text-gray-700">ID: {printedById}</p>}
             </div>
             <p className="text-[7.5px] text-gray-600 m-0 leading-tight">
               Printed by {printedByRole}

@@ -62,6 +62,35 @@ test('a custom planner operation keeps its user-entered name without requiring a
   }], context), /operationName is required/i);
 });
 
+test('new and changed plans are limited to the field current stage', () => {
+  const stageOneContext = { ...context, currentStageNumber: 1 };
+  const stageOnePlan = normalizeOperationSchedule([{
+    id: 'PLAN-STAGE-1',
+    operationDefinitionId: 'SRA-02',
+    plannedDate: '2026-10-09'
+  }], stageOneContext);
+  assert.equal(stageOnePlan[0].stageNumber, 1);
+  assert.throws(() => normalizeOperationSchedule([{
+    id: 'PLAN-WRONG-STAGE',
+    operationDefinitionId: 'SRA-03',
+    plannedDate: '2026-10-09'
+  }], stageOneContext), /current Stage 1/i);
+  assert.throws(() => normalizeOperationSchedule([{
+    id: 'PLAN-CUSTOM-NO-STAGE',
+    operationDefinitionId: 'CUSTOM',
+    operationName: 'Repair drainage',
+    plannedDate: '2026-10-09'
+  }], stageOneContext), /current Stage 1/i);
+  const custom = normalizeOperationSchedule([{
+    id: 'PLAN-CUSTOM-STAGE-1',
+    operationDefinitionId: 'CUSTOM',
+    operationName: 'Repair drainage',
+    stageNumber: 1,
+    plannedDate: '2026-10-09'
+  }], stageOneContext);
+  assert.equal(custom[0].stageNumber, 1);
+});
+
 test('a submitted actual operation completes only the nearest matching planned item', () => {
   const schedule = normalizeOperationSchedule([
     { id: 'PLAN-A', operationDefinitionId: 'SRA-08', childOperationDefinitionId: 'SI-08-1', plannedDate: '2026-10-01' },
@@ -76,6 +105,22 @@ test('a submitted actual operation completes only the nearest matching planned i
   assert.equal(result.changed, true);
   assert.equal(result.schedule[0].completedOperationLogId, 'LOG-1');
   assert.equal(result.schedule[1].completedOperationLogId, null);
+});
+
+test('a Planner shortcut completes the exact selected plan instead of a nearer duplicate', () => {
+  const schedule = normalizeOperationSchedule([
+    { id: 'PLAN-NEAR', operationDefinitionId: 'SRA-02', plannedDate: '2026-10-01' },
+    { id: 'PLAN-SELECTED', operationDefinitionId: 'SRA-02', plannedDate: '2026-11-01' }
+  ], context);
+  const result = completeMatchingScheduleEntry(schedule, {
+    cycleId: context.cycleId,
+    operationDefinitionId: 'SRA-02',
+    childOperationDefinitionId: null,
+    plannedOperationId: 'PLAN-SELECTED',
+    performedOn: '2026-10-03'
+  }, 'LOG-SELECTED', '2026-10-03T09:00:00.000Z');
+  assert.equal(result.schedule.find(entry => entry.id === 'PLAN-NEAR').completedOperationLogId, null);
+  assert.equal(result.schedule.find(entry => entry.id === 'PLAN-SELECTED').completedOperationLogId, 'LOG-SELECTED');
 });
 
 test('an actual custom operation completes only the matching custom activity name', () => {

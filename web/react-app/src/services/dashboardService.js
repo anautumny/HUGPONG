@@ -14,7 +14,8 @@ import { ROLE_KEYS } from '../utils/authRouting';
 import {
   sortCropYearsNewestFirst,
   sortNewestFirst,
-  sortOperationsNewestFirst
+  sortOperationsNewestFirst,
+  uniqueRecordsById
 } from '../utils/recordOrdering';
 
 const emptyDashboard = () => ({
@@ -121,8 +122,8 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
     const fields = (fieldsResult.data || [])
       .map(field => fromField(field.id, field))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
-    const blockFarms = (farmsResult.data || [])
-      .map(farm => fromBlockFarm(farm.id, farm))
+    const blockFarms = uniqueRecordsById((farmsResult.data || [])
+      .map(farm => fromBlockFarm(farm.id, farm)))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const operations = sortOperationsNewestFirst(
       (logsResult.data || []).map(operation => fromOperation(operation.id, operation))

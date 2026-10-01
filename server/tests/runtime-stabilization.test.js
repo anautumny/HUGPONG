@@ -31,6 +31,8 @@ const webOperations = read('web/react-app/src/services/operationReadService.js')
 const webSchema = read('web/react-app/src/services/firestoreSchema.js');
 const webFields = read('web/react-app/src/services/fieldsService.js');
 const webAddOperation = read('web/react-app/src/components/operations/AddOperationModal.jsx');
+const webEditOperation = read('web/react-app/src/components/operations/EditOperationModal.jsx');
+const webTakeOver = read('web/react-app/src/views/operations/TakeOverView.jsx');
 const webOperationsView = read('web/react-app/src/views/operations/OperationsView.jsx');
 const webSyncContext = read('web/react-app/src/context/SyncContext.jsx');
 const webSyncIndicator = read('web/react-app/src/components/layout/SyncIndicator.jsx');
@@ -111,17 +113,113 @@ test('mobile Planner saves locally before background synchronization', () => {
   assert.match(syncEngine, /mergeConcurrentItems/);
 });
 
-test('mobile Planner removes schedules and marks drafts optimistically with rollback protection', () => {
+test('mobile Planner updates schedules optimistically without creating operation drafts', () => {
   const planner = read('mobile/src/screens/PlannerScreen.js');
   const draftSaveStart = dataStore.indexOf('export const saveLocalOperationDraft');
   const draftSaveEnd = dataStore.indexOf('export const claimLocalDraftSubmission', draftSaveStart);
   const draftSave = dataStore.slice(draftSaveStart, draftSaveEnd);
   assert.match(planner, /setAllFields\(current => current\.map/);
   assert.match(planner, /previousSchedule/);
-  assert.match(planner, /draftedPlanIds/);
-  assert.match(planner, /inDraft \? t\('planner_in_drafts'\) : t\('planner_add_draft'\)/);
+  assert.doesNotMatch(planner, /draftedPlanIds|saveLocalOperationDraft|planner_add_draft|planner_boundary_title/);
+  assert.match(planner, /getOperationsForStage\(currentStageNumber\)/);
+  assert.match(planner, /plannedOperation:/);
+  assert.match(planner, /allSchedule\.filter\(entry => !entry\.completedOperationLogId\)/);
+  assert.doesNotMatch(planner, /StatusBox|planner_upcoming_title|scheduleEntryStatus/);
+  assert.match(dataStore, /plannedOperationId[\s\S]{0,900}completedOperationLogId: serverRecord\.id/);
+  assert.match(dataStore, /active Planner work disappears immediately/);
   assert.match(draftSave, /draftLogs\.unshift\(draft\);\s*notify\(\);\s*const persisted = await persistCurrentUserDrafts\(\)/);
   assert.match(draftSave, /draftLogs\.splice\(currentIndex, 1\)/);
+});
+
+test('labor day and daily-rate inputs have persistent labels on Mobile and Web', () => {
+  assert.match(fieldOps, /t\('log_work_days'\)/);
+  assert.match(fieldOps, /t\('log_rate_per_day'\)/);
+  assert.match(fieldOps, /accessibilityLabel=\{t\('log_work_days'\)\}/);
+  assert.match(webAddOperation, /<FormField label="Work Days">/);
+  assert.match(webAddOperation, /<FormField label="Rate per Day">/);
+  assert.match(webTakeOver, /<FormField label="Work Days">/);
+  assert.match(webTakeOver, /<FormField label="Rate per Day">/);
+});
+
+test('operation submission and draft saving require explicit confirmation on Mobile and Web', () => {
+  assert.match(fieldOps, /confirm_record_operation_title/);
+  assert.match(fieldOps, /confirm_save_draft_title/);
+  assert.match(fieldOps, /confirm_submit_draft_title/);
+  assert.match(fieldOps, /handleLineItemAction\(asSubmit, item, index, true\)/);
+  assert.match(webAddOperation, /setPendingConfirmation\(\{\s*action: 'submit'/);
+  assert.match(webAddOperation, /setPendingConfirmation\(\{ action: 'draft'/);
+  assert.match(webAddOperation, /<ConfirmDialog[\s\S]*confirmationTitle/);
+  assert.match(webTakeOver, /setPendingSubmission\(\{/);
+  assert.match(webTakeOver, /title=\{pendingSubmission\?\.submissionTarget \? 'Submit This Supervisory Item\?' : 'Record This Supervisory Operation\?'\}/);
+});
+
+test('itemized cost mode starts empty until the user adds a real item', () => {
+  assert.match(fieldOps, /isGroup: true, inputType: 'group', subItems: \[\], cost: '0'/);
+  assert.doesNotMatch(fieldOps, /description: `\$\{logForm\.operationName \|\| 'Operation'\} Material\/Labor`/);
+  assert.match(fieldOps, /No items added yet\. Tap Add Expense \/ Material below\./);
+  assert.match(webAddOperation, /if \(inputMode !== 'group'\) setSubItems\(\[\]\)/);
+  assert.match(webAddOperation, /No items added yet\. Use Add Material \/ Expense below\./);
+  assert.match(webTakeOver, /if \(inputMode !== 'group'\) setSubItems\(\[\]\)/);
+  assert.match(webEditOperation, /inputMode: 'group',\s*lineItems: \[\]/);
+});
+
+test('submitted operation amendments replace the visible record immediately without navigation refresh', () => {
+  const amendmentStart = dataStore.indexOf('export const updateOperationLogWithSecurity');
+  const amendmentEnd = dataStore.indexOf('export const archivePastLogsForField', amendmentStart);
+  const amendmentFlow = dataStore.slice(amendmentStart, amendmentEnd);
+  assert.match(amendmentFlow, /operationLogs\[targetIndex\] = nextLog/);
+  assert.doesNotMatch(amendmentFlow, /Object\.keys\(targetLog\)/);
+  assert.match(fieldOps, /operation\.id === result\.log\?\.id \? \{ \.\.\.result\.log \} : operation/);
+  assert.match(webOperationsView, /onUpdated=\{\(updatedOperation\) => \{/);
+  assert.match(webOperationsView, /fromOperation\(updatedOperation\.id, updatedOperation\)/);
+  assert.match(webOperationsView, /operation\.id === normalizedOperation\.id \? normalizedOperation : operation/);
+});
+
+test('mobile submitted-operation Edit opens amendment authorization before leaving the ledger', () => {
+  const authorizationStart = fieldOps.indexOf('const handleConfirmEditAuth = async');
+  const authorizationEnd = fieldOps.indexOf('const editAuthorizationModal =', authorizationStart);
+  const authorizationFlow = fieldOps.slice(authorizationStart, authorizationEnd);
+  const ledgerStart = fieldOps.indexOf('if (showHistoryModal)', fieldOps.indexOf('const editAuthorizationModal ='));
+  const editorStart = fieldOps.indexOf('if (showLog)', ledgerStart);
+  const ledgerScreen = fieldOps.slice(ledgerStart, editorStart);
+  assert.match(ledgerScreen, /\{editAuthorizationModal\}/);
+  assert.match(fieldOps, /setOperationEditorReturnTarget\(ledgerReturnTarget\(\)\)/);
+  assert.match(authorizationFlow, /operationEditorReturnTarget\?\.screen === 'ledger'/);
+  assert.match(authorizationFlow, /setShowHistoryModal\(false\)/);
+  assert.match(authorizationFlow, /setShowLog\(true\)/);
+  assert.match(fieldOps, /const closeOperationEditor = \(\) => \{[\s\S]{0,400}restoreLedgerTarget\(operationEditorReturnTarget\)/);
+  assert.equal((fieldOps.match(/<Modal visible=\{showEditAuthModal\}/g) || []).length, 1);
+});
+
+test('mobile ledger child screens preserve and restore their exact origin', () => {
+  const draftEditStart = fieldOps.indexOf('const editDraft =');
+  const draftEditEnd = fieldOps.indexOf('const deleteDraft =', draftEditStart);
+  const draftEditFlow = fieldOps.slice(draftEditStart, draftEditEnd);
+  assert.match(draftEditFlow, /setOperationEditorReturnTarget\(ledgerReturnTarget\(\)\)/);
+  assert.match(draftEditFlow, /setShowHistoryModal\(false\)/);
+  assert.match(draftEditFlow, /setShowLog\(true\)/);
+
+  assert.match(fieldOps, /setAuditTrailReturnTarget\(ledgerReturnTarget\(\)\)[\s\S]{0,200}setShowHistoryModal\(false\)/);
+  assert.match(fieldOps, /const closeLogAuditTrail = \(\) => \{[\s\S]{0,400}restoreLedgerTarget\(auditTrailReturnTarget\)/);
+  assert.match(fieldOps, /setQrReturnTarget\(ledgerReturnTarget\(\)\)[\s\S]{0,200}setShowHistoryModal\(false\)/);
+  assert.match(fieldOps, /const closeAuditQr = \(\) => \{[\s\S]{0,400}restoreLedgerTarget\(qrReturnTarget\)/);
+});
+
+test('mobile operation editor exposes its calendar and manager authorization across early-return screens', () => {
+  assert.match(fieldOps, /const openOperationDatePicker = \(\) => \{[\s\S]{0,500}setShowLog\(false\)[\s\S]{0,120}setShowCalendar\(true\)/);
+  assert.match(fieldOps, /const closeOperationDatePicker = \(\) => \{[\s\S]{0,400}setShowLog\(true\)/);
+  assert.match(fieldOps, /<Modal visible=\{showCalendar\}[^>]*onRequestClose=\{closeOperationDatePicker\}/);
+  assert.match(fieldOps, /if \(showHistoryModal\) setShowHistoryModal\(false\);[\s\S]{0,100}setShowTakeOverAuthModal\(true\)/);
+  assert.match(fieldOps, /const closeTakeOverAuthorization = \(\) => \{[\s\S]{0,500}restoreLedgerTarget\(operationEditorReturnTarget\)/);
+});
+
+test('mobile Ledger badge separates submitted records from drafts', () => {
+  assert.match(fieldOps, /function LedgerCountBadges\(\{ submittedCount = 0, draftCount = 0, showDrafts = false \}\)/);
+  assert.match(fieldOps, /topbarSubmittedBadge/);
+  assert.match(fieldOps, /topbarDraftBadge/);
+  assert.match(fieldOps, /submittedCount=\{fieldLogs\.length\}[\s\S]{0,160}draftCount=\{scopedDrafts\.length\}/);
+  assert.match(fieldOps, /accessibilityLabel=\{`Field Ledger, \$\{fieldLogs\.length\} submitted log/);
+  assert.doesNotMatch(fieldOps, /const totalLedgerCount = fieldLogs\.length \+/);
 });
 
 test('sync logging cannot claim completion while queued items remain', () => {
@@ -160,6 +258,30 @@ test('automatic sync requires both NetInfo reachability and the configured gatew
   assert.match(networkService, /setTimeout/);
   assert.doesNotMatch(networkService, /setInterval|clients3\.google/);
   assert.match(networkService, /NETWORK_RESTORED/);
+});
+
+test('reconnection reports progress and honors the persisted automatic-sync preference', () => {
+  const profile = read('mobile/src/screens/ProfileScreen.js');
+  const mobileTranslations = read('mobile/src/services/i18n.js');
+  const webAppShell = read('web/react-app/src/components/layout/AppShell.jsx');
+  const webApiClient = read('web/react-app/src/services/apiClient.js');
+
+  assert.match(networkService, /subscribeToReconnectStatus/);
+  assert.match(networkService, /publishReconnectStatus\('RECONNECTING'\)/);
+  assert.match(networkService, /AUTO_SYNC_DISABLED' \? 'MANUAL_REQUIRED' : 'COMPLETE'/);
+  assert.match(dataStore, /autoSyncEnabled: true/);
+  assert.match(dataStore, /isAutomaticSyncEnabled/);
+  assert.match(dataStore, /userInitiatedTrigger/);
+  assert.match(dataStore, /reason: 'AUTO_SYNC_DISABLED'/);
+  assert.match(profile, /updateSecurityPreferences\(\{ autoSyncEnabled: enabled \}\)/);
+  assert.match(rootNavigator, /Restoring Connection/);
+  assert.match(rootNavigator, /Open Sync Monitor/);
+  assert.match(mobileTranslations, /reconnect_synced_msg/);
+
+  assert.match(webSyncContext, /flushCropStageOutbox/);
+  assert.match(webSyncContext, /announceConnectionRestored/);
+  assert.match(webAppShell, /Automatic synchronization is complete/);
+  assert.match(webApiClient, /hugpong:connection-restored/);
 });
 
 test('mobile startup tolerates an older APK without the NetInfo native module', () => {
@@ -303,14 +425,16 @@ test('Field Ops initializes local logs before evaluating hook dependencies that 
   assert.match(fieldOps, /useState\(\(\) => Array\.isArray\(operationLogs\) \? \[\.\.\.operationLogs\] : \[\]\)/);
 });
 
-test('Android QR scanner keeps overlays outside the live preview and supports native and image fallbacks', () => {
+test('Android QR scanner stays inside HUGPONG and supports camera and image inputs', () => {
   assert.match(liveQrScanner, /CameraView, scanFromURLAsync, useCameraPermissions/);
   assert.match(liveQrScanner, /import \* as ImagePicker from 'expo-image-picker'/);
-  assert.match(liveQrScanner, /CameraView\.launchScanner/);
-  assert.match(liveQrScanner, /CameraView\.onModernBarcodeScanned/);
-  assert.match(liveQrScanner, /CameraView\.isModernBarcodeScannerAvailable/);
+  assert.doesNotMatch(liveQrScanner, /CameraView\.launchScanner|CameraView\.onModernBarcodeScanned|isModernBarcodeScannerAvailable/);
+  assert.match(liveQrScanner, /event\.data \|\| event\.raw/);
   assert.match(liveQrScanner, /onBarcodeScanned=/);
   assert.match(liveQrScanner, /barcodeScannerSettings=\{\{ barcodeTypes: \['qr'\] \}\}/);
+  assert.match(liveQrScanner, /enableTorch=\{torchEnabled\}/);
+  assert.match(liveQrScanner, /HUGPONG SECURE SCANNER/);
+  assert.match(liveQrScanner, /style=\{styles\.scanGuide\}/);
   assert.match(liveQrScanner, /onCameraReady=/);
   assert.match(liveQrScanner, /onMountError=/);
   assert.match(liveQrScanner, /style=\{styles\.cameraPreview\}/);
@@ -321,8 +445,22 @@ test('Android QR scanner keeps overlays outside the live preview and supports na
   assert.match(liveQrScanner, /aspect: \[1, 1\]/);
   assert.match(liveQrScanner, /scanFromURLAsync/);
   assert.match(liveQrScanner, /scanLocked/);
-  assert.doesNotMatch(liveQrScanner, /hardwareAccelerated|StyleSheet\.absoluteFillObject|scanGuide|TextInput|showManualInput|Animated|scanLaser/);
+  assert.doesNotMatch(liveQrScanner, /hardwareAccelerated|TextInput|showManualInput|CameraView\.launchScanner/);
   assert.doesNotMatch(fieldOps, /SRA District Agronomic Benchmark/);
+});
+
+test('audit QR cards show HUGPONG identity and report context without covering the code', () => {
+  const webAuditCompilation = read('web/react-app/src/components/audit/AuditCompilationModal.jsx');
+  assert.match(fieldOps, /OFFICIAL AUDIT TRANSFER/);
+  assert.match(fieldOps, /FARM MANAGER/);
+  assert.match(fieldOps, /BLOCK FARM/);
+  assert.match(fieldOps, /REPORTING MONTH/);
+  assert.match(fieldOps, /CROP YEAR CYCLE/);
+  assert.match(fieldOps, /size=\{Math\.min\(236, width - 124\)\}/);
+  assert.match(webAuditCompilation, /OFFICIAL AUDIT TRANSFER/);
+  assert.match(webAuditCompilation, /SECURE SERVER-VERIFIED REFERENCE/);
+  assert.match(webAuditCompilation, /margin: 4/);
+  assert.match(webAuditCompilation, /canvas\.toDataURL\('image\/png'\)/);
 });
 
 test('SRA receive workflow separates real scanning from online transfer-code lookup', () => {
@@ -332,6 +470,8 @@ test('SRA receive workflow separates real scanning from online transfer-code loo
   assert.match(fieldOps, /source === 'manual'/);
   assert.match(fieldOps, /\^\(AUD\|RPT\|HUG\)-\[A-Z0-9-\]\+\$/);
   assert.match(mutationService, /\/api\/audit-reports\/qr\/verify/);
+  assert.match(fieldOps, /QR scanned, but its audit report is not available on the server yet/);
+  assert.match(webQrVerifier, /The QR was read, but its audit report is not available on the server yet/);
   assert.match(fieldOps, /assembleAuditQrParts/);
   assert.match(fieldOps, /verifyLocalAuditIntegrity\(canonical\)/);
   assert.match(fieldOps, /OFFLINE_DECODED/);
@@ -340,9 +480,11 @@ test('SRA receive workflow separates real scanning from online transfer-code loo
   assert.match(fieldOps, /await importAuditQr\(pendingScannedPayload\)/);
   assert.match(webQrVerifier, /BrowserQRCodeReader/);
   assert.match(webQrVerifier, /decodeFromImageUrl/);
+  assert.match(webQrVerifier, /decodeFromVideoDevice/);
+  assert.match(webQrVerifier, /HUGPONG SECURE SCANNER/);
   assert.match(webQrVerifier, />\s*Upload QR\s*</);
   assert.match(webQrVerifier, />\s*Input Code\s*</);
-  assert.doesNotMatch(webQrVerifier, /decodeFromConstraints|getUserMedia|WebQrCameraScanner|>\s*Scan QR\s*</);
+  assert.match(webQrVerifier, />\s*Scan QR\s*</);
   assert.doesNotMatch(webQrVerifier, /textarea/);
   assert.doesNotMatch(fieldOps, /commitExplicitMutation\('audit_qr_import'/);
   assert.doesNotMatch(fieldOps, /STRUCTURE_VALID_CLOUD_PENDING|CACHED_AUTHORITY_MATCH|offline structural verification/);
@@ -354,6 +496,24 @@ test('SRA mobile exposes one canonical monthly audit history interface', () => {
   assert.match(fieldOps, /onPress=\{openSraAuditHistory\}/);
   const lastScannedHeader = fieldOps.slice(fieldOps.indexOf('{\/\* Last Audit Summary Header \*\/}'), fieldOps.indexOf('const activeReport ='));
   assert.doesNotMatch(lastScannedHeader, /Audit History|setShowAuditHistoryModal/);
+});
+
+test('SRA pending-review inspection uses a full-screen report with authoritative tables', () => {
+  const mutationService = read('mobile/src/services/mutationService.js');
+  const inspectionStart = fieldOps.indexOf('{/* ── SRA Audit Inspection & Certification Modal ── */}');
+  const inspectionEnd = fieldOps.indexOf('{/* ── Fields Search Modal ── */}', inspectionStart);
+  const inspection = fieldOps.slice(inspectionStart, inspectionEnd);
+
+  assert.match(mutationService, /fetchAuditReport = id => api\(`\/api\/audit-reports\/\$\{encodeURIComponent\(id\)\}`, 'GET'\)/);
+  assert.match(fieldOps, /const openPendingAuditInspection = async report/);
+  assert.match(fieldOps, /fromAuditReportDocument\(reportId, response\.data\)/);
+  assert.match(fieldOps, /onPress=\{\(\) => openPendingAuditInspection\(report\)\}/);
+  assert.match(inspection, /<Modal[\s\S]*presentationStyle="fullScreen"/);
+  assert.match(inspection, /style=\{s\.auditInspectionPage\}/);
+  assert.match(inspection, /Field Summary/);
+  assert.match(inspection, /Operation Details/);
+  assert.match(inspection, /Review Decision/);
+  assert.doesNotMatch(inspection, /inAppOverlayPage/);
 });
 
 test('SRA mobile retains the last valid QR scan without replacing it during navigation or Inbox review', () => {
@@ -394,7 +554,8 @@ test('SRA-only mutations bypass and clear the mobile offline outbox', () => {
 
 test('dashboard connectivity reflects API health and reports the failing resource', () => {
   assert.match(webSyncContext, /fetch\('\/health'/);
-  assert.match(webSyncContext, /setApiReachable\(response\.ok && result\.success === true\)/);
+  assert.match(webSyncContext, /const reachable = response\.ok && result\.success === true/);
+  assert.match(webSyncContext, /setApiReachable\(reachable\)/);
   assert.match(webSyncIndicator, /Server Unavailable/);
   assert.match(webDashboardService, /async function dashboardRead/);
   assert.match(webDashboardService, /async function readRecentOperations/);
@@ -540,7 +701,7 @@ test('operation submission has a synchronous duplicate-tap lock and processing U
 
 test('member draft scope is initialized before the Field Operations ledger early return', () => {
   const scopedDraftDeclaration = fieldOps.indexOf('const scopedDrafts = React.useMemo');
-  const ledgerEarlyReturn = fieldOps.indexOf('if (showHistoryModal)');
+  const ledgerEarlyReturn = fieldOps.indexOf('if (showHistoryModal)', scopedDraftDeclaration);
 
   assert.ok(scopedDraftDeclaration >= 0, 'Field Operations must derive a safe member draft array');
   assert.ok(ledgerEarlyReturn >= 0, 'Field Operations must keep its ledger sub-screen');
@@ -555,6 +716,15 @@ test('completed-stage mobile entries require supplemental confirmation and compl
   assert.match(fieldOps, /Rate Required/);
   assert.match(fieldOps, /Incomplete Item/);
   assert.match(fieldOps, /Valid Date Required/);
+});
+
+test('planned work uses an independent canonical actual-operation date on Android', () => {
+  assert.match(fieldOps, /const operationDate = normalizeCalendarDate\(logForm\.period\)/);
+  assert.match(fieldOps, /performedOn: operationDate/);
+  assert.match(fieldOps, /isoDate: operationDate/);
+  assert.match(fieldOps, /if \(asSubmit && parsedDate > today\)/);
+  assert.match(fieldOps, /log_actual_date_help/);
+  assert.doesNotMatch(fieldOps, /const parsedDate = new Date\(logForm\.period\)/);
 });
 
 test('manual sync summaries remain honest when records remain', () => {

@@ -312,8 +312,8 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
   assert.match(syncSource, /enqueueAndFlushMutation/);
   assert.match(syncSource, /idempotencyKey/);
   assert.match(syncSource, /baseVersion/);
-  assert.match(source, /Starting the next Crop Year Cycle requires an active server connection/);
-  assert.match(source, /Please synchronize pending records for this field before starting the next Crop Year Cycle/);
+  assert.match(source, /Requesting the next Crop Year Cycle requires an active server connection/);
+  assert.match(source, /Please synchronize pending records for this field before requesting the next Crop Year Cycle/);
   assert.doesNotMatch(source, /commitExplicitMutation\('cycle_rollover'/);
   assert.match(syncSource, /Queued Crop Year Cycle rollover is not permitted/);
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);

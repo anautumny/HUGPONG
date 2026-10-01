@@ -320,6 +320,7 @@ router.put('/:id/operation-schedule', requireAuth, requireRole([ROLES.FARM_MANAG
         cycleId: field.currentCycleId,
         actorId: actorUserId,
         now: updatedAt,
+        currentStageNumber: Number(field.stageNumber || field.cropCycle?.currentStageNumber || 1),
         existing: field.operationSchedule || []
       });
       if (JSON.stringify(field.operationSchedule || []) === JSON.stringify(operationSchedule)) {

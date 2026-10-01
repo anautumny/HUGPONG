@@ -34,6 +34,9 @@ let onReconnectCallback = null;
 let connectivityCheckPromise = null;
 let connectivityCheckGeneration = 0;
 let gatewayRetryTimer = null;
+let reconnectPending = false;
+let reconnectListeners = [];
+let reconnectStatus = { phase: 'IDLE', result: null };
 
 export const setOnReconnectCallback = (cb) => {
   onReconnectCallback = cb;
@@ -54,6 +57,25 @@ export const subscribeToNetwork = (listener) => {
     listeners = listeners.filter(item => item !== listener);
   };
 };
+
+export const subscribeToReconnectStatus = (listener) => {
+  reconnectListeners.push(listener);
+  listener({ ...reconnectStatus });
+  return () => {
+    reconnectListeners = reconnectListeners.filter(item => item !== listener);
+  };
+};
+
+function publishReconnectStatus(phase, result = null) {
+  reconnectStatus = { phase, result };
+  reconnectListeners.forEach(listener => {
+    try {
+      listener({ ...reconnectStatus });
+    } catch (error) {
+      logApiDiagnostic('A reconnect-status listener failed.', error);
+    }
+  });
+}
 
 export const addNetworkListener = subscribeToNetwork;
 
@@ -91,14 +113,30 @@ function applyConnectivity(next, forceReconnect = false) {
   currentConnectivity = { ...currentConnectivity, ...next };
   const online = getNetworkStatus();
 
+  if (!online && currentConnectivity.status !== CONNECTIVITY_STATUS.CHECKING) {
+    reconnectPending = true;
+  }
+
   if (online) clearGatewayRetry();
   else scheduleGatewayRetry();
 
   if (wasOnline !== online || previousStatus !== currentConnectivity.status) notifyListeners();
-  if (online && (!wasOnline || forceReconnect) && typeof onReconnectCallback === 'function') {
-    Promise.resolve(onReconnectCallback('NETWORK_RESTORED')).catch(error => {
-      logApiDiagnostic('The reconnect synchronization callback failed.', error);
-    });
+  const shouldRunReconnect = online && (reconnectPending || forceReconnect);
+  if (shouldRunReconnect) reconnectPending = false;
+  if (shouldRunReconnect && typeof onReconnectCallback === 'function') {
+    publishReconnectStatus('RECONNECTING');
+    Promise.resolve(onReconnectCallback('NETWORK_RESTORED'))
+      .then(result => {
+        publishReconnectStatus(result?.reason === 'AUTO_SYNC_DISABLED' ? 'MANUAL_REQUIRED' : 'COMPLETE', result);
+      })
+      .catch(error => {
+        publishReconnectStatus('FAILED', {
+          success: false,
+          remainingCount: null,
+          reason: 'RECONNECT_SYNC_FAILED'
+        });
+        logApiDiagnostic('The reconnect synchronization callback failed.', error);
+      });
   }
   return online;
 }

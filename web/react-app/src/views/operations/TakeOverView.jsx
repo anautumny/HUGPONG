@@ -87,6 +87,7 @@ export default function TakeOverView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [serverError, setServerError] = useState(null);
+  const [pendingSubmission, setPendingSubmission] = useState(null);
 
   // Exit confirmation
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
@@ -175,14 +176,7 @@ export default function TakeOverView() {
       setDirectUnit(firstChild?.unit || 'ha');
       setDirectRate(String(firstChild?.rate || '0'));
     } else if (tmpl.isGroup && tmpl.subItems) {
-      setSubItems(tmpl.subItems.map((item, idx) => ({
-        lineItemId: item.lineItemId || `SI-${idx + 1}`,
-        description: item.description,
-        quantity: item.quantity ?? 1,
-        unit: item.unit || 'ha',
-        unitCost: item.unitCost || 0,
-        subtotal: item.subtotal || 0
-      })));
+      setSubItems([]);
     } else {
       setDirectQty(String(tmpl.perHa || tmpl.quantity || '1'));
       setDirectUnit(tmpl.unit || 'ha');
@@ -250,7 +244,7 @@ export default function TakeOverView() {
   }, [totalCost, areaHa]);
 
   // Submit Manager Takeover log
-  const handleSubmit = async (e, submissionTarget = null) => {
+  const handleSubmit = async (e, submissionTarget = null, confirmed = false) => {
     e?.preventDefault?.();
     if (isSubmitting) return;
     const singleLineItem = submissionTarget?.type === 'lineItem' ? subItems[submissionTarget.index] : null;
@@ -289,22 +283,28 @@ export default function TakeOverView() {
       return;
     }
 
+    const cycleId = currentField?.currentCycleId || currentField?.cropCycle?.id;
+    if (!cycleId) {
+      setServerError('No active Crop Year Cycle found for this field plot. An active Crop Year Cycle is required to record operations.');
+      return;
+    }
+
+    const numArea = Number(areaHa);
+    if (!areaHa || isNaN(numArea) || numArea <= 0) {
+      setServerError('Please provide a valid area in hectares (> 0).');
+      return;
+    }
+
+    if (!confirmed) {
+      setPendingSubmission({
+        submissionTarget,
+        itemLabel: singleLineItem?.description || activityName.trim() || 'this operation'
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const cycleId = currentField?.currentCycleId || currentField?.cropCycle?.id;
-      if (!cycleId) {
-        setServerError('No active Crop Year Cycle found for this field plot. An active Crop Year Cycle is required to record operations.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const numArea = Number(areaHa);
-      if (!areaHa || isNaN(numArea) || numArea <= 0) {
-        setServerError('Please provide a valid area in hectares (> 0).');
-        setIsSubmitting(false);
-        return;
-      }
-
       const submittedComponentCost = submittedLineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
         + submittedLaborEntries.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
       const submittedBaseCost = inputMode === 'direct' ? operationCost : 0;
@@ -641,7 +641,10 @@ export default function TakeOverView() {
             <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-surface rounded-xl border border-border">
               <button
                 type="button"
-                onClick={() => setInputMode('group')}
+                onClick={() => {
+                  if (inputMode !== 'group') setSubItems([]);
+                  setInputMode('group');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   inputMode === 'group'
                     ? 'bg-primary text-white shadow-2xs'
@@ -730,8 +733,12 @@ export default function TakeOverView() {
             ))}
             <p className="text-xs text-hug-muted">These labor details are attached to the item you submit.</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="Days" />
-              <Input type="number" min="0" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="Rate / day" />
+              <FormField label="Work Days">
+                <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="1" />
+              </FormField>
+              <FormField label="Rate per Day">
+                <Input type="number" min="0" step="0.01" prefix="₱" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="0.00" />
+              </FormField>
             </div>
           </div>
 
@@ -798,6 +805,11 @@ export default function TakeOverView() {
                     </div>
                   </div>
                 ))}
+                {subItems.length === 0 && (
+                  <div className="rounded-xl border border-primary/20 bg-primary-bg/60 px-3 py-4 text-center text-xs font-semibold text-primary">
+                    No items added yet. Use Add Material / Expense below.
+                  </div>
+                )}
               </div>
 
               {showNewExpense && (
@@ -909,6 +921,22 @@ export default function TakeOverView() {
           setIsAuthorized(true);
           setAuthModalOpen(false);
         }}
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(pendingSubmission)}
+        onCancel={() => setPendingSubmission(null)}
+        onConfirm={() => {
+          const pending = pendingSubmission;
+          if (!pending) return;
+          setPendingSubmission(null);
+          handleSubmit(null, pending.submissionTarget, true);
+        }}
+        title={pendingSubmission?.submissionTarget ? 'Submit This Supervisory Item?' : 'Record This Supervisory Operation?'}
+        message={`"${pendingSubmission?.itemLabel || 'This operation'}" will be permanently recorded in the member field history with your Manager Takeover signature. Continue?`}
+        confirmText="Record Operation"
+        cancelText="Cancel"
+        type="warning"
       />
 
       {/* Exit Confirmation Dialog */}

@@ -44,6 +44,12 @@ const USER_STATUSES = Object.freeze(['PENDING', 'ACTIVE', 'DISABLED']);
 const ENTITY_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const OPERATION_LOG_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
 const CROP_CYCLE_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
+const CYCLE_CLOSURE_STATUS = Object.freeze({
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED'
+});
+const CYCLE_CLOSURE_STATUSES = Object.freeze(Object.values(CYCLE_CLOSURE_STATUS));
 const AUDIT_REPORT_STATUSES = Object.freeze(['COMPILED', 'PENDING_SUBMISSION', 'PENDING_REVIEW', 'RETURNED', 'CERTIFIED']);
 const SUBMISSION_SOURCES = Object.freeze(['MEMBER', 'FIELD_OWNER', 'MANAGER_TAKEOVER']);
 const TICKET_PRIORITIES = Object.freeze(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
@@ -266,6 +272,14 @@ function quantity(value) {
   };
 }
 
+function planningEstimate(value) {
+  if (!value || typeof value !== 'object') return null;
+  const labor = finiteNumber(value.labor || 0, 'estimatedCost.labor', { min: 0, max: 100000000 });
+  const materials = finiteNumber(value.materials || 0, 'estimatedCost.materials', { min: 0, max: 100000000 });
+  const other = finiteNumber(value.other || 0, 'estimatedCost.other', { min: 0, max: 100000000 });
+  return { labor, materials, other, total: labor + materials + other };
+}
+
 function amendments(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item, index) => ({
@@ -316,6 +330,12 @@ function buildOperationLog(input, context = {}) {
   const normalizedLineItems = lineItems(input.lineItems);
   const normalizedLaborEntries = laborEntries(input.laborEntries);
   const requestedTotal = finiteNumber(input.totalCost, 'totalCost', { min: 0 });
+  if (input.quantity == null
+    && normalizedLineItems.length === 0
+    && normalizedLaborEntries.length === 0
+    && requestedTotal === 0) {
+    throw new Error('Operation details are required before submission.');
+  }
   const componentCost = [...normalizedLineItems, ...normalizedLaborEntries].reduce((sum, item) => sum + item.subtotal, 0);
   const baseCost = input.baseCost == null
     ? Math.max(0, requestedTotal - componentCost)
@@ -336,6 +356,9 @@ function buildOperationLog(input, context = {}) {
     childOperationName: optionalString(input.childOperationName, { max: 300 }),
     operationName: requiredString(input.operationName, 'operationName', { max: 300 }),
     category: requiredString(input.category, 'category', { max: 80 }),
+    plannedOperationId: nullableId(input.plannedOperationId),
+    plannedDate: input.plannedDate ? calendarDate(input.plannedDate, 'plannedDate') : null,
+    estimatedCost: planningEstimate(input.estimatedCost),
     variety: optionalString(input.variety, { max: 120 }),
     stageNumber: integer(input.stageNumber, 'stageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
     performedOn: calendarDate(input.performedOn, 'performedOn'),
@@ -379,6 +402,9 @@ function buildOperationSnapshot(logId, log) {
     childOperationName: log.childOperationName || '',
     operationName: log.operationName,
     category: log.category,
+    plannedOperationId: log.plannedOperationId || null,
+    plannedDate: log.plannedDate || null,
+    estimatedCost: log.estimatedCost || null,
     variety: log.variety || '',
     stageNumber: log.stageNumber,
     performedOn: log.performedOn,
@@ -447,6 +473,8 @@ module.exports = {
   ENTITY_STATUSES,
   OPERATION_LOG_STATUSES,
   CROP_CYCLE_STATUSES,
+  CYCLE_CLOSURE_STATUS,
+  CYCLE_CLOSURE_STATUSES,
   AUDIT_REPORT_STATUSES,
   SUBMISSION_SOURCES,
   TICKET_PRIORITIES,

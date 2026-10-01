@@ -102,19 +102,10 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
     if (controlsDisabled || mode === form.inputMode) return;
     setForm(current => {
       if (mode === 'group') {
-        const quantity = Number(current.directQty || 1);
-        const unitCost = Number(current.directRate || 0);
         return {
           ...current,
           inputMode: 'group',
-          lineItems: current.lineItems.length ? current.lineItems : [{
-            ...createLineItem(),
-            description: `${current.operationName || 'Operation'} Material/Labor`,
-            quantity,
-            unit: current.directUnit || 'ha',
-            unitCost,
-            subtotal: quantity * unitCost
-          }]
+          lineItems: []
         };
       }
       const expenseTotal = current.lineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
@@ -295,6 +286,7 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
                   <p className="text-right text-sm font-black text-primary">{formatCurrency(Number(item.quantity || 0) * Number(item.unitCost || 0))}</p>
                 </div>
               ))}
+              {form.lineItems.length === 0 && <div className="rounded-xl border border-primary/20 bg-primary-bg/60 px-3 py-4 text-center text-xs font-semibold text-primary">No items added yet. Use Add Expense / Material below.</div>}
               {showNewExpense && <div className="space-y-3 rounded-xl border border-primary/30 bg-primary-bg/40 p-3"><Input value={pendingExpense.description} onChange={event => setPendingExpense(current => ({ ...current, description: event.target.value }))} placeholder="Material or expense" /><div className="grid grid-cols-1 sm:grid-cols-3 gap-2"><Input type="number" min="0.01" step="0.01" value={pendingExpense.quantity} onChange={event => setPendingExpense(current => ({ ...current, quantity: event.target.value }))} placeholder="Quantity" /><Select value={pendingExpense.unit} onChange={event => setPendingExpense(current => ({ ...current, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} /><Input type="number" min="0" step="0.01" prefix="₱" value={pendingExpense.unitCost} onChange={event => setPendingExpense(current => ({ ...current, unitCost: event.target.value }))} placeholder="Unit cost" /></div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => { setShowNewExpense(false); setPendingExpense(createLineItem()); }}>Cancel</Button><Button type="button" variant="primary" size="sm" onClick={confirmExpense}>Confirm Item</Button></div></div>}
               <Button type="button" variant="outline" size="sm" icon={Plus} onClick={() => setShowNewExpense(true)} disabled={controlsDisabled || showNewExpense} className="w-full border-dashed">Add Expense / Material</Button>
             </div>

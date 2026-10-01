@@ -45,6 +45,24 @@ export function sortNewestFirst(records, selectors = ['createdAt'], tieSelectors
   return [...(records || [])].sort((left, right) => compareNewestFirst(left, right, selectors, tieSelectors));
 }
 
+export function uniqueRecordsById(records) {
+  const byId = new Map();
+  for (const record of Array.isArray(records) ? records : []) {
+    const id = String(record?.id || '').trim();
+    if (!id) continue;
+    const identity = id.toUpperCase();
+    const existing = byId.get(identity);
+    if (!existing) {
+      byId.set(identity, record);
+      continue;
+    }
+    const existingTime = timestampMillis(existing.updatedAt ?? existing.createdAt) ?? 0;
+    const recordTime = timestampMillis(record.updatedAt ?? record.createdAt) ?? 0;
+    if (recordTime >= existingTime) byId.set(identity, record);
+  }
+  return Array.from(byId.values());
+}
+
 export function sortOperationsNewestFirst(records) {
   return sortNewestFirst(
     records,

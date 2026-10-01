@@ -15,6 +15,7 @@ const {
   nowIso
 } = require('../schema/firestoreSchema');
 const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = require('../domain/systemIds');
+const { uniqueRecordsById } = require('../domain/recordIdentity');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { queueAuditEvent } = require('../services/auditWriter');
 
@@ -35,16 +36,16 @@ router.get('/', requireAuth, async (req, res) => {
       ].filter(Boolean)));
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
-      const data = farms
+      const data = uniqueRecordsById(farms
         .filter(doc => doc.exists && String(doc.data().status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-        .map(doc => ({ ...doc.data(), id: doc.id }))
+        .map(doc => ({ ...doc.data(), id: doc.id })))
         .sort((left, right) => String(left.id).localeCompare(String(right.id)));
       return res.json({ success: true, count: data.length, data });
     } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list block farms.' });
     }
     const snapshot = await query.get();
-    const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))
+    const data = uniqueRecordsById(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {

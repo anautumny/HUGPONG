@@ -4,6 +4,7 @@ import {
   authenticatedRequest,
   subscribeToAuthenticatedLoader
 } from './apiClient';
+import { uniqueRecordsById } from '../utils/recordOrdering';
 
 /**
  * Real-time subscription to block farms, registered fields, and candidate farm managers
@@ -24,8 +25,8 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
         ? Promise.resolve({ data: [] })
         : authenticatedRead('/api/users', { force })
     ]);
-    const blockFarms = (farmsResult.data || [])
-      .map(farm => fromBlockFarm(farm.id, farm))
+    const blockFarms = uniqueRecordsById((farmsResult.data || [])
+      .map(farm => fromBlockFarm(farm.id, farm)))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const fields = (fieldsResult.data || [])
       .map(field => ({ id: field.id, ...field }))

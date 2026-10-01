@@ -4,7 +4,7 @@ import {
   authenticatedRequest,
   subscribeToAuthenticatedLoader
 } from './apiClient';
-import { sortCropYearsNewestFirst } from '../utils/recordOrdering';
+import { sortCropYearsNewestFirst, uniqueRecordsById } from '../utils/recordOrdering';
 import { applyPendingStageUpdate } from './cropStageOutbox';
 
 function normalizedRole(user) {
@@ -32,8 +32,8 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
     ];
     const [fieldsResult, cyclesResult, farmsResult, usersResult] = await Promise.all(requests);
     const cropCycles = sortCropYearsNewestFirst(cyclesResult.data || []);
-    const blockFarms = (farmsResult.data || [])
-      .map(farm => fromBlockFarm(farm.id, farm))
+    const blockFarms = uniqueRecordsById((farmsResult.data || [])
+      .map(farm => fromBlockFarm(farm.id, farm)))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const memberUsers = (usersResult.data || [])
       .map(member => fromUser(member.id || member.employeeId, member))
@@ -99,9 +99,22 @@ export async function startCropYearCycle(fieldId, payload = {}, takeoverGrant = 
 
 export async function rolloverCropYearCycle(fieldId, payload, takeoverGrant = null) {
   const { cropYear: _clientCropYear, ...serverOwnedPayload } = payload || {};
-  return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover`, {
+  return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover-request`, {
     method: 'POST',
-    headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {},
     body: serverOwnedPayload
+  });
+}
+
+export async function approveCropYearCycleRollover(fieldId, previousCycleId) {
+  return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover/approve`, {
+    method: 'POST',
+    body: { previousCycleId }
+  });
+}
+
+export async function rejectCropYearCycleRollover(fieldId, reason) {
+  return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover/reject`, {
+    method: 'POST',
+    body: { reason }
   });
 }

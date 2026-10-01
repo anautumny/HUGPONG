@@ -10,6 +10,7 @@ import {
   PHONE_VERIFICATION_REASONS,
   isOtherPhoneVerificationReason
 } from '../domain/phoneVerification';
+import { uniqueRecordsById } from '../utils/dataHelpers';
 
 const emptyForm = {
   firstName: '', middleName: '', lastName: '', suffix: '', phone: '', password: '',
@@ -34,7 +35,7 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
     setSaving(false);
   }, [visible, actorRole, actorId, blockFarms, session?.blockFarmId]);
 
-  const availableFarms = useMemo(() => blockFarms.filter(farm => {
+  const availableFarms = useMemo(() => uniqueRecordsById(blockFarms).filter(farm => {
     if (String(farm.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') return false;
     if (actorRole !== 'FARM_MANAGER') return true;
     return String(farm.managerUserId || '').trim() === actorId;

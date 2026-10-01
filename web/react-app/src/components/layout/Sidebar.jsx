@@ -435,6 +435,23 @@ export default function Sidebar({
               <span>Settings</span>
             </button>
 
+            {[ROLE_KEYS.FARM_MANAGER, ROLE_KEYS.SRA_ADMIN].includes(roleKey) && (
+              <button
+                type="button"
+                id="popover-support"
+                onClick={() => {
+                  setIsUserMenuOpen(false);
+                  handleNavClick();
+                  navigate('/support');
+                }}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-hug-text hover:bg-surface-subtle hover:text-primary transition-colors cursor-pointer text-left group"
+                role="menuitem"
+              >
+                <LifeBuoy className="w-4 h-4 text-hug-muted group-hover:text-primary transition-colors shrink-0" />
+                <span>Help &amp; Support Desk</span>
+              </button>
+            )}
+
             {/* Appearance Segmented Control */}
             <div className="p-1 bg-surface-subtle/70 rounded-xl border border-border/50 my-0.5">
               <div className="grid grid-cols-3 gap-1">

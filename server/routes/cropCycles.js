@@ -10,7 +10,13 @@ const {
   ROLES,
   canonicalRole
 } = require('../schema/firestoreSchema');
-const { updateCycleStage, rolloverFieldCycle, createInitialFieldCycle } = require('../services/cropCycleOperations');
+const {
+  updateCycleStage,
+  requestCycleRollover,
+  approveCycleRollover,
+  rejectCycleRollover,
+  createInitialFieldCycle
+} = require('../services/cropCycleOperations');
 const { readMutationContext } = require('../services/mutationContext');
 const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthorization');
 const { sortCropYearsNewestFirst } = require('../services/recordOrdering');
@@ -76,14 +82,42 @@ router.post('/:fieldId/start', requireAuth, requireRole([ROLES.MEMBER_FARMER, RO
   }
 });
 
-router.post('/:fieldId/rollover', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), attachTakeoverAuthorization, async (req, res) => {
+router.post('/:fieldId/rollover-request', requireAuth, requireRole([ROLES.MEMBER_FARMER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const result = await rolloverFieldCycle(db, req.params.fieldId, req.body, req.session.user, undefined, readMutationContext(req));
+    const result = await requestCycleRollover(db, req.params.fieldId, req.body, req.session.user, undefined, readMutationContext(req));
     return res.status(result.replayed ? 200 : 201).json({ success: true, data: result });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
+
+router.post('/:fieldId/rollover/approve', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const result = await approveCycleRollover(db, req.params.fieldId, req.body, req.session.user, undefined, readMutationContext(req));
+    return res.status(result.replayed ? 200 : 201).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
+  }
+});
+
+router.post('/:fieldId/rollover/reject', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const result = await rejectCycleRollover(db, req.params.fieldId, req.body, req.session.user);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
+  }
+});
+
+router.post('/:fieldId/rollover', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), (req, res) => (
+  res.status(409).json({
+    success: false,
+    error: 'Direct Crop Year Cycle rollover is disabled. The Farm Member must request closure and the assigned Farm Manager must approve it after audit compilation.',
+    data: { code: 'CYCLE_CLOSURE_APPROVAL_REQUIRED' }
+  })
+));
 
 module.exports = router;

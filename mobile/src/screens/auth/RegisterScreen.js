@@ -12,6 +12,7 @@ import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/au
 import { formatToE164 } from '../../services/smsService';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
 import { passwordPolicy, passwordPolicyError } from '../../domain/passwordPolicy';
+import { uniqueRecordsById } from '../../utils/dataHelpers';
 
 const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
 
@@ -22,7 +23,8 @@ const ROLE_DESCRIPTIONS = {
 };
 
 const getAvailableBlockFarms = () => {
-  return blockFarms.filter(farm => farm?.id && farm?.name && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+  return uniqueRecordsById(blockFarms)
+    .filter(farm => farm?.id && farm?.name && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
 };
 
 function ProgressBar({ step, totalSteps, t }) {

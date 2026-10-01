@@ -114,6 +114,11 @@ function normalizeOperationSchedule(value, context = {}) {
     const unchanged = prior && Object.entries(normalizedEntry)
       .every(([key, normalizedValue]) => key === 'updatedAt'
         || JSON.stringify(prior[key]) === JSON.stringify(normalizedValue));
+    const currentStageNumber = Number(context.currentStageNumber);
+    if (!unchanged && Number.isInteger(currentStageNumber) && currentStageNumber >= 1 && currentStageNumber <= 6
+      && normalizedEntry.stageNumber !== currentStageNumber) {
+      invalid(`New or changed plans must use an operation from the field's current Stage ${currentStageNumber}.`, 409);
+    }
     if (unchanged) normalizedEntry.updatedAt = prior.updatedAt || now;
     return normalizedEntry;
   });
@@ -128,9 +133,11 @@ function normalizeOperationSchedule(value, context = {}) {
 function completeMatchingScheduleEntry(schedule, operation, operationLogId, completedAt) {
   if (!Array.isArray(schedule) || !schedule.length) return { changed: false, schedule: schedule || [] };
   const childId = canonicalChildId(operation.childOperationDefinitionId) || null;
+  const plannedOperationId = String(operation.plannedOperationId || '').trim();
   const candidates = schedule
     .map((entry, index) => ({ entry, index }))
     .filter(({ entry }) => !entry.completedOperationLogId
+      && (!plannedOperationId || String(entry.id || '') === plannedOperationId)
       && String(entry.cycleId || '').toUpperCase() === String(operation.cycleId || '').toUpperCase()
       && String(entry.operationDefinitionId || '').toUpperCase() === String(operation.operationDefinitionId || '').toUpperCase()
       && (String(entry.operationDefinitionId || '').toUpperCase() !== 'CUSTOM'

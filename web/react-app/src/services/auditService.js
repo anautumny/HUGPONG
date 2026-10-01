@@ -96,6 +96,12 @@ export async function submitAuditReport(reportId) {
   });
 }
 
+export async function selectAuditDeliveryMethod(reportId, deliveryMethod = 'QR', baseVersion = null) {
+  return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(reportId)}/delivery-selection`, {
+    method: 'POST', body: { deliveryMethod }, baseVersion
+  });
+}
+
 export async function returnAuditReport(reportId, returnReason, baseVersion = null) {
   return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(reportId)}/return`, {
     method: 'POST', body: { returnReason }, baseVersion

@@ -5,7 +5,8 @@ import {
   Input,
   Select,
   Button,
-  Checkbox
+  Checkbox,
+  ConfirmDialog
 } from '../ui';
 import {
   createOperation
@@ -75,6 +76,7 @@ export default function AddOperationModal({
   const [submittingLineItemId, setSubmittingLineItemId] = useState(null);
   const [serverError, setServerError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const submissionLockRef = useRef(false);
 
   const isLineItemSubmitted = (operationId, lineItemId) => {
@@ -103,6 +105,7 @@ export default function AddOperationModal({
     setVariety(String(field.cropCycle?.variety || ''));
     setServerError(null);
     setValidationErrors({});
+    setPendingConfirmation(null);
 
     if (initialDraft?.form) {
       const draft = initialDraft.form;
@@ -158,14 +161,7 @@ export default function AddOperationModal({
       setDirectUnit(firstChild?.unit || 'ha');
       setDirectRate(String(firstChild?.rate || '0'));
     } else if (tmpl.isGroup && tmpl.subItems) {
-      setSubItems(tmpl.subItems.map((item, idx) => ({
-        lineItemId: item.lineItemId || `SI-${idx + 1}`,
-        description: item.description,
-        quantity: item.quantity ?? 1,
-        unit: item.unit || 'ha',
-        unitCost: item.unitCost || 0,
-        subtotal: item.subtotal || 0
-      })).filter(item => !isLineItemSubmitted(tmpl.id, item.lineItemId)));
+      setSubItems([]);
     } else {
       setDirectQty(String(tmpl.perHa || tmpl.quantity || '1'));
       setDirectUnit(tmpl.unit || 'ha');
@@ -280,10 +276,18 @@ export default function AddOperationModal({
   }, [totalCost, areaHa]);
 
   if (!isOpen || !field) return null;
+  const authoritativeCurrentStageNumber = Number(field.cropCycle?.currentStageNumber ?? field.stageNumber) || 1;
 
-  const handleSubmit = async (e, submissionTarget = null) => {
+  const handleSubmit = async (e, submissionTarget = null, confirmed = false) => {
     e?.preventDefault?.();
     if (submissionLockRef.current) return;
+    if (Number(selectedStageNumber) > authoritativeCurrentStageNumber) {
+      const requiredStages = Number(selectedStageNumber) === authoritativeCurrentStageNumber + 1
+        ? `Stage ${authoritativeCurrentStageNumber}`
+        : `Stages ${authoritativeCurrentStageNumber} through ${Number(selectedStageNumber) - 1}`;
+      setServerError(`Complete ${requiredStages} before recording work for Stage ${selectedStageNumber}.`);
+      return;
+    }
     const singleLineItem = submissionTarget?.type === 'lineItem' ? subItems[submissionTarget.index] : null;
     const isSingleItemSubmission = Boolean(singleLineItem);
     const submittedLineItems = singleLineItem ? [singleLineItem] : (inputMode === 'group' && !isSingleItemSubmission ? subItems : []);
@@ -375,7 +379,13 @@ export default function AddOperationModal({
     const currentStageNumber = Number(field.cropCycle?.currentStageNumber ?? field.stageNumber);
     const submittingSupplemental = Number(selectedStageNumber) < currentStageNumber
       || (Number(selectedStageNumber) === currentStageNumber && Boolean(field.cropCycle?.completedAt || field.isCompleted));
-    if (submittingSupplemental && !window.confirm('This stage is already completed. Continue and record this operation as a Supplemental Entry?')) {
+    if (!confirmed) {
+      setPendingConfirmation({
+        action: 'submit',
+        submissionTarget,
+        itemLabel: singleLineItem?.description || activityName.trim() || 'this operation',
+        submittingSupplemental
+      });
       return;
     }
 
@@ -507,8 +517,12 @@ export default function AddOperationModal({
 
   const currentStageObj = SUGARCANE_STAGES.find(s => s.stageNumber === selectedStageNumber) || SUGARCANE_STAGES[0];
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = (confirmed = false) => {
     if (!canSaveDraft || typeof onSaveDraft !== 'function') return;
+    if (!confirmed) {
+      setPendingConfirmation({ action: 'draft', itemLabel: activityName.trim() || 'this operation' });
+      return;
+    }
     const workerCount = Number(workersCount || 0);
     const days = Number(newWorker.days || 0);
     const rate = Number(newWorker.rate || 0);
@@ -525,7 +539,7 @@ export default function AddOperationModal({
     }, initialDraft?.id || null);
   };
 
-  const handleSaveItemDraft = (index) => {
+  const handleSaveItemDraft = (index, confirmed = false) => {
     if (!canSaveDraft || typeof onSaveDraft !== 'function') return;
     const item = subItems[index];
     if (!item?.description?.trim()) {
@@ -538,6 +552,10 @@ export default function AddOperationModal({
     if (!Number.isInteger(workerCount) || workerCount < 0
       || (workerCount > 0 && (!Number.isFinite(days) || days <= 0 || !Number.isFinite(rate) || rate < 0))) {
       setValidationErrors(previous => ({ ...previous, workersCount: 'Enter a valid worker count, work days, and daily rate.' }));
+      return;
+    }
+    if (!confirmed) {
+      setPendingConfirmation({ action: 'itemDraft', index, itemLabel: item.description.trim() });
       return;
     }
     const attachedLabor = workerCount > 0 ? [{
@@ -557,7 +575,30 @@ export default function AddOperationModal({
     setNewWorker({ workerCount: '', days: '1', rate: '' });
   };
 
+  const confirmPendingAction = () => {
+    const pending = pendingConfirmation;
+    if (!pending) return;
+    setPendingConfirmation(null);
+    if (pending.action === 'submit') {
+      handleSubmit(null, pending.submissionTarget, true);
+    } else if (pending.action === 'itemDraft') {
+      handleSaveItemDraft(pending.index, true);
+    } else {
+      handleSaveDraft(true);
+    }
+  };
+
+  const confirmationIsSubmit = pendingConfirmation?.action === 'submit';
+  const confirmationIsItemDraft = pendingConfirmation?.action === 'itemDraft';
+  const confirmationTitle = confirmationIsSubmit
+    ? (pendingConfirmation?.submissionTarget ? 'Submit This Item?' : 'Record This Operation?')
+    : (confirmationIsItemDraft ? 'Save This Item as Draft?' : 'Save as Draft?');
+  const confirmationMessage = confirmationIsSubmit
+    ? `"${pendingConfirmation?.itemLabel || 'This operation'}" will be recorded in field history${pendingConfirmation?.submittingSupplemental ? ' as a Supplemental Entry because this stage is already completed' : ''}. Continue?`
+    : `"${pendingConfirmation?.itemLabel || 'This operation'}" will remain editable and will not be added to field history until it is submitted. Continue?`;
+
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -575,7 +616,7 @@ export default function AddOperationModal({
             Cancel
           </Button>
           {canSaveDraft && inputMode === 'direct' && (
-            <Button variant="outline" onClick={handleSaveDraft} disabled={isSubmitting}>
+            <Button variant="outline" onClick={() => handleSaveDraft()} disabled={isSubmitting}>
               Save Draft
             </Button>
           )}
@@ -613,7 +654,12 @@ export default function AddOperationModal({
 
         {/* Stage & Template Selection */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <FormField id="add-op-stage-select" label="Sugarcane Stage" badge="Phase">
+          <FormField
+            id="add-op-stage-select"
+            label="Sugarcane Stage"
+            badge="Phase"
+            helperText={isTakeOver ? 'Upcoming stages unlock only after the earlier stages are completed.' : 'Operations are recorded against the current active stage.'}
+          >
             <Select
               id="add-op-stage-select"
               value={selectedStageNumber}
@@ -621,7 +667,8 @@ export default function AddOperationModal({
               disabled={!isTakeOver}
               options={SUGARCANE_STAGES.map(s => ({
                 value: s.stageNumber,
-                label: `Stage ${s.stageNumber}: ${s.shortName}`
+                label: `Stage ${s.stageNumber}: ${s.shortName}${s.stageNumber > authoritativeCurrentStageNumber ? ' (Locked)' : ''}`,
+                disabled: s.stageNumber > authoritativeCurrentStageNumber
               }))}
             />
           </FormField>
@@ -762,8 +809,12 @@ export default function AddOperationModal({
           ))}
           <p className="text-xs text-hug-muted">These labor details are attached to the item you submit or save as a draft.</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="Days" />
-            <Input type="number" min="0" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="Rate / day" />
+            <FormField label="Work Days">
+              <Input type="number" min="0.1" step="0.5" value={newWorker.days} onChange={event => setNewWorker(previous => ({ ...previous, days: event.target.value }))} placeholder="1" />
+            </FormField>
+            <FormField label="Rate per Day">
+              <Input type="number" min="0" step="0.01" prefix="₱" value={newWorker.rate} onChange={event => setNewWorker(previous => ({ ...previous, rate: event.target.value }))} placeholder="0.00" />
+            </FormField>
           </div>
         </div>
 
@@ -775,7 +826,10 @@ export default function AddOperationModal({
           <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-surface rounded-xl border border-border">
             <button
               type="button"
-              onClick={() => setInputMode('group')}
+              onClick={() => {
+                if (inputMode !== 'group') setSubItems([]);
+                setInputMode('group');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 inputMode === 'group'
                   ? 'bg-primary text-white shadow-2xs'
@@ -882,7 +936,7 @@ export default function AddOperationModal({
               ))}
               {subItems.length === 0 && (
                 <div className="rounded-xl border border-primary/20 bg-primary-bg/60 px-3 py-4 text-center text-xs font-semibold text-primary">
-                  All child items for this operation have been submitted.
+                  No items added yet. Use Add Material / Expense below.
                 </div>
               )}
             </div>
@@ -982,5 +1036,16 @@ export default function AddOperationModal({
         </div>
       </form>
     </Modal>
+    <ConfirmDialog
+      isOpen={Boolean(pendingConfirmation)}
+      onCancel={() => setPendingConfirmation(null)}
+      onConfirm={confirmPendingAction}
+      title={confirmationTitle}
+      message={confirmationMessage}
+      confirmText={confirmationIsSubmit ? 'Record Operation' : 'Save as Draft'}
+      cancelText="Cancel"
+      type={confirmationIsSubmit ? 'primary' : 'info'}
+    />
+    </>
   );
 }

@@ -82,7 +82,7 @@ test('manager write paths attach optional verified grants and central service di
   const cycles = read('../routes/cropCycles.js');
   const operations = read('../services/cropCycleOperations.js');
   assert.equal((logs.match(/attachTakeoverAuthorization/g) || []).length, 4);
-  assert.equal((cycles.match(/attachTakeoverAuthorization/g) || []).length, 4);
+  assert.equal((cycles.match(/attachTakeoverAuthorization/g) || []).length, 3);
   assert.match(operations, /operationAuthorization\(user/);
   assert.match(operations, /TAKEOVER_AUTHORIZATION_REQUIRED/);
   const middleware = read('../middleware/takeoverAuthorization.js');
@@ -139,7 +139,7 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   assert.match(home, /latest\.molassesPricePerMetricTon/);
   assert.match(home, /latest\.weekLabel/);
   assert.match(home, /latest\.effectiveDate/);
-  assert.doesNotMatch(operationsView, /Pending Verification|status === 'PENDING'/);
+  assert.doesNotMatch(operationsView, /Pending Verification|operation[^\n]*status === 'PENDING'/);
   assert.doesNotMatch(managerDashboard, /pendingOps|Pending Operation Record/);
 });
 

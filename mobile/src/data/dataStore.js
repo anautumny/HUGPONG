@@ -1557,14 +1557,14 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
   }
 };
 
-export const archiveFieldCropCycle = async (fieldId, options = {}) => {
+export const requestFieldCropCycleRollover = async (fieldId, options = {}) => {
   if (!fieldId) return { success: false, message: 'Field ID is required' };
   const cleanId = String(fieldId).trim().toUpperCase();
   if (!getNetworkStatus()) {
-    return { success: false, message: 'Starting the next Crop Year Cycle requires an active server connection.' };
+    return { success: false, message: 'Requesting the next Crop Year Cycle requires an active server connection.' };
   }
   if (!getFieldSyncState(cleanId).isSynced) {
-    return { success: false, message: 'Please synchronize pending records for this field before starting the next Crop Year Cycle.' };
+    return { success: false, message: 'Please synchronize pending records for this field before requesting the next Crop Year Cycle.' };
   }
 
   const targetField = fields.find(f => String(f.id || '').trim().toUpperCase() === cleanId);
@@ -1572,19 +1572,12 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
   const oldCycleId = targetField.currentCycleId;
   const oldCycle = cropCycles.find(c => c.id === oldCycleId);
   const finalCycleType = options.cycleType || targetField.cycleType || 'Plant Cane (New Plant)';
-  const request = {
-    previousCycleId: oldCycleId,
-    cropType: finalCycleType,
-    batchNumber: targetField.batchMonth || 1
-  };
-  let result;
   try {
-    const mutationId = `ROLLOVER-${cleanId}-${oldCycleId}`;
-    const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover`, {
+    const mutationId = `ROLLOVER-REQUEST-${cleanId}-${oldCycleId}`;
+    const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover-request`, {
       method: 'POST',
-      headers: options.takeoverGrant ? { 'X-Hugpong-Takeover-Grant': options.takeoverGrant } : {},
       body: {
-        ...request,
+        cropType: finalCycleType,
         _mutation: {
           mutationId,
           idempotencyKey: mutationId,
@@ -1593,72 +1586,51 @@ export const archiveFieldCropCycle = async (fieldId, options = {}) => {
         }
       }
     });
-    result = response?.data;
-    if (!result) throw new Error('Crop Year Cycle rollover returned no server response.');
+    const result = response?.data;
+    if (!result?.closureRequest) throw new Error('Crop Year Cycle request returned no server response.');
+    if (oldCycle) {
+      oldCycle.closureRequest = result.closureRequest;
+      oldCycle.updatedAt = result.closureRequest.requestedAt || oldCycle.updatedAt;
+      await saveItem(STORAGE_KEYS.CROP_CYCLES, cropCycles);
+    }
+    notify();
+    return { success: true, pending: true, cycleId: oldCycleId, closureRequest: result.closureRequest };
   } catch (err) {
-    return { success: false, message: err.message || 'Crop Year Cycle rollover was rejected by the server.' };
+    return { success: false, message: err.message || 'The new cycle request was rejected by the server.' };
   }
-  if (!result?.newCycleId || !result.newCycle) {
-    return { success: false, message: 'Crop Year Cycle rollover returned an incomplete response.' };
+};
+
+export const approveFieldCropCycleRollover = async (fieldId, options = {}) => {
+  const cleanId = String(fieldId || '').trim().toUpperCase();
+  const targetField = fields.find(field => String(field.id || '').trim().toUpperCase() === cleanId);
+  if (!getNetworkStatus()) return { success: false, message: 'Cycle approval requires an active server connection.' };
+  if (!targetField?.currentCycleId) return { success: false, message: 'Field has no current Crop Year Cycle.' };
+  try {
+    const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover/approve`, {
+      method: 'POST',
+      body: { previousCycleId: targetField.currentCycleId }
+    });
+    if (!response?.data?.newCycleId) throw new Error('Cycle approval returned an incomplete response.');
+    if (options.sync !== false) await performMobileSync('CYCLE_APPROVED');
+    return { success: true, ...response.data };
+  } catch (error) {
+    return { success: false, message: error.message || 'The cycle closure could not be approved.', data: error.data };
   }
-  const targetLogs = operationLogs.filter(l => {
-    return l.cycleId === result.oldCycleId && l.status === 'ACTIVE';
-  });
+};
 
-  targetLogs.forEach(l => {
-    l.status = 'ARCHIVED';
-    l.archivedAt = result.oldCycle?.archivedAt;
-    l.archivedByUserId = result.oldCycle?.archivedByUserId;
-    l.updatedAt = result.oldCycle?.updatedAt;
-  });
-  
-  // Remove drafts belonging to the archived cycle
-  const remainingDrafts = draftLogs.filter(d => String(d.fieldId || '').trim().toUpperCase() !== cleanId);
-  draftLogs.length = 0;
-  remainingDrafts.forEach(d => draftLogs.push(d));
-
-  // Canonical reset of the field plot in dataStore to Stage 1 of the new crop cycle
-  if (targetField) {
-    const stage1Name = options.stage || 'Pre-Planting & Land Preparation';
-    const freshCustomStages = Array.isArray(options.customStages) && options.customStages.length > 0
-      ? options.customStages
-      : [];
-
-    targetField.stage = stage1Name;
-    targetField.stageNumber = result.newCycle.currentStageNumber;
-    targetField.isCompleted = false;
-    targetField.customStages = freshCustomStages;
-    targetField.cycleType = result.newCycle.cropType;
-    targetField.cropYear = result.newCycle.cropYear;
-    targetField.cycleNumber = result.newCycle.sequenceNumber;
-    targetField.currentCycleId = result.newCycleId;
-    targetField.lastUpdated = result.newCycle.updatedAt;
-    targetField.lastSync = 'Just now';
-    targetField.synced = true;
-    await saveItem(STORAGE_KEYS.FIELDS, fields);
+export const rejectFieldCropCycleRollover = async (fieldId, reason) => {
+  const cleanId = String(fieldId || '').trim().toUpperCase();
+  if (!getNetworkStatus()) return { success: false, message: 'Cycle rejection requires an active server connection.' };
+  try {
+    const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover/reject`, {
+      method: 'POST',
+      body: { reason }
+    });
+    await performMobileSync('CYCLE_REJECTED');
+    return { success: true, ...response.data };
+  } catch (error) {
+    return { success: false, message: error.message || 'The cycle closure request could not be rejected.', data: error.data };
   }
-
-  if (oldCycle && result.oldCycle) Object.assign(oldCycle, result.oldCycle);
-  const existingNewCycle = cropCycles.find(cycle => cycle.id === result.newCycleId);
-  if (existingNewCycle) Object.assign(existingNewCycle, fromCycleDocument(result.newCycleId, result.newCycle));
-  else cropCycles.push(fromCycleDocument(result.newCycleId, result.newCycle));
-
-  await saveItem(STORAGE_KEYS.LOGS, operationLogs);
-  await persistCurrentUserDrafts();
-  notify();
-
-  // Record audit history event shared with Web & Cloud
-  const session = getCurrentSession();
-  const actorName = session?.name ? `${session.name} (${session.role || 'Farm Manager'})` : 'Farm Manager';
-  await logSystemEvent(
-    'operation',
-    'Crop Year Cycle Renewal',
-    fieldId,
-    `Archived ${targetLogs.length} current log(s) and reset ${fieldId} to Stage 1: "${options?.stage || 'Pre-Planting & Land Preparation'}" (${formatCropYear(result.newCycle.cropYear)}).`,
-    actorName,
-    'Completed'
-  );
-  return { success: true, archivedCount: result.archivedLogCount, cycleId: result.newCycleId, cropYear: result.newCycle.cropYear, queuedOffline: false };
 };
 
 export const archiveFieldPlot = async (fieldId) => {
@@ -1810,6 +1782,28 @@ export const validateLocalDraftForSubmission = (draft, currentFields = fields) =
   return { valid: true, field };
 };
 
+export const validateLocalDraftContentForSubmission = draft => {
+  const source = draft?.form && typeof draft.form === 'object' ? draft.form : draft;
+  const quantityValue = source?.quantity?.value ?? source?.inputQty ?? source?.directQty;
+  const hasQuantity = String(quantityValue ?? '').trim() !== ''
+    && Number.isFinite(Number(quantityValue))
+    && Number(quantityValue) > 0;
+  const hasLineItems = (Array.isArray(source?.lineItems) && source.lineItems.length > 0)
+    || (Array.isArray(source?.subItems) && source.subItems.length > 0);
+  const hasLabor = (Array.isArray(source?.laborEntries) && source.laborEntries.length > 0)
+    || (Array.isArray(source?.workers) && source.workers.length > 0);
+  const hasRecordedCost = Number.isFinite(Number(source?.totalCost ?? source?.cost ?? source?.baseCost))
+    && Number(source?.totalCost ?? source?.cost ?? source?.baseCost) > 0;
+
+  if (!hasQuantity && !hasLineItems && !hasLabor && !hasRecordedCost) {
+    return {
+      valid: false,
+      error: 'This draft has no operation details. Open Edit and add a quantity and rate, an expense or material item, or labor details before submitting.'
+    };
+  }
+  return { valid: true };
+};
+
 export const inspectLocalDraftIntegrity = (candidateDrafts = draftLogs, currentFields = fields) => {
   const valid = [];
   const invalid = [];
@@ -1867,6 +1861,8 @@ export const claimLocalDraftSubmission = async draftId => {
   const draft = draftLogs.find(item => item.id === draftId);
   const validation = validateLocalDraftForSubmission(draft);
   if (!validation.valid) throw new Error(validation.error);
+  const contentValidation = validateLocalDraftContentForSubmission(draft);
+  if (!contentValidation.valid) throw new Error(contentValidation.error);
   if (draft.submitting) throw new Error('This draft submission is already in progress.');
   draft.submitting = true;
   draft.submissionClaimedAt = new Date().toISOString();
@@ -2005,6 +2001,13 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
 
   const existingHistory = Array.isArray(targetLog.amendments) ? targetLog.amendments : [];
   const originalLog = JSON.parse(JSON.stringify(targetLog));
+  const replaceLocalOperation = replacement => {
+    const targetIndex = operationLogs.findIndex(log => log.id === logId);
+    if (targetIndex < 0) return replacement;
+    const nextLog = { ...replacement };
+    operationLogs[targetIndex] = nextLog;
+    return nextLog;
+  };
   
   const displayDate = formatDisplayDate(updates.date || updates.period || targetLog.date || targetLog.period);
   const costNum = Number(updates.totalCost != null ? updates.totalCost : (updates.cost != null ? updates.cost : (targetLog.totalCost != null ? targetLog.totalCost : targetLog.cost || 0)));
@@ -2031,6 +2034,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   ['fieldId', 'cycleId', 'submittedByUserId', 'submissionSource', 'createdAt', 'status', 'archivedAt', 'archivedByUserId']
     .forEach(key => delete canonicalChanges[key]);
   try {
+    let committedLog;
     const outcome = await commitExplicitMutation('operation_amendment', {
       id: logId,
       changes: canonicalChanges,
@@ -2041,27 +2045,23 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
     });
     if (outcome.response?.data) {
       const authoritative = fromOperationLogDocument(outcome.response.data.id || logId, outcome.response.data);
-      Object.keys(targetLog).forEach(key => delete targetLog[key]);
-      Object.assign(targetLog, authoritative);
+      committedLog = replaceLocalOperation(authoritative);
       await saveItem(STORAGE_KEYS.LOGS, operationLogs);
     } else if (outcome.queued) {
-      Object.keys(targetLog).forEach(key => delete targetLog[key]);
-      Object.assign(targetLog, candidateLog);
+      committedLog = replaceLocalOperation(candidateLog);
       await saveItem(STORAGE_KEYS.LOGS, operationLogs);
     }
+    notify();
+    return { success: true, log: committedLog || operationLogs.find(log => log.id === logId), editRecord };
   } catch (e) {
     const authoritative = e.data?.status === 'ARCHIVED'
       ? fromOperationLogDocument(e.data.id || logId, e.data)
       : originalLog;
-    Object.keys(targetLog).forEach(key => delete targetLog[key]);
-    Object.assign(targetLog, authoritative);
+    replaceLocalOperation(authoritative);
     await saveItem(STORAGE_KEYS.LOGS, operationLogs);
     notify();
     return { success: false, error: e.message || 'The operation amendment was rejected by the server.' };
   }
-
-  notify();
-  return { success: true, log: targetLog, editRecord };
 };
 
 export const archivePastLogsForField = async (fieldId, takeoverGrant = null) => {
@@ -2519,16 +2519,48 @@ export const addSupportTicketMessage = async (ticketId, content) => {
   }
 };
 
+// Refresh only the signed-in user's support inbox and history. This keeps
+// ticket status authoritative without waiting for the broader cloud refresh,
+// which intentionally runs less often because it loads every major resource.
+export const refreshSupportTicketsFromServer = async () => {
+  if (!getNetworkStatus()) {
+    throw new Error('Connect to the internet to refresh support tickets.');
+  }
+
+  const [activeResponse, historyResponse] = await Promise.all([
+    authenticatedRequest('/api/tickets?view=active&limit=50'),
+    authenticatedRequest('/api/tickets?view=history&limit=50')
+  ]);
+  const pendingTicketOverlays = supportTickets.filter(
+    ticket => ticket.status === SUPPORT_TICKET_STATUS.PENDING_SUBMISSION
+  );
+  const canonicalTickets = [...responseRecords(activeResponse), ...responseRecords(historyResponse)]
+    .map(record => fromSupportTicketDocument(record.id, record));
+  const canonicalTicketIds = new Set(canonicalTickets.map(ticket => ticket.id));
+  const refreshedTickets = sortNewestFirst([
+    ...pendingTicketOverlays.filter(ticket => !canonicalTicketIds.has(ticket.id)),
+    ...canonicalTickets
+  ], ['updatedAt', 'createdAt']);
+
+  supportTickets.length = 0;
+  supportTickets.push(...refreshedTickets);
+  await saveItem(STORAGE_KEYS.TICKETS, supportTickets);
+  notify();
+  return [...supportTickets];
+};
+
 // ── Security Preferences State ──────────────────────────────
 export let SECURITY_PREFERENCES = {
   biometrics: false,
   pinEnabled: false,
   twoFactor: false,
   sessionAlert: true,
+  autoSyncEnabled: true,
   lastPasswordChange: '2026-05-01'
 };
 
 export const getSecurityPreferences = () => ({ ...SECURITY_PREFERENCES });
+export const isAutomaticSyncEnabled = () => SECURITY_PREFERENCES.autoSyncEnabled !== false;
 
 export const updateSecurityPreferences = (updates) => {
   SECURITY_PREFERENCES = { ...SECURITY_PREFERENCES, ...updates };
@@ -2927,6 +2959,30 @@ const reconcileSuccessfulMutations = async (queueBefore, responses = {}) => {
       if (existingIndex >= 0) operationLogs[existingIndex] = reconciled;
       else operationLogs.unshift(reconciled);
       logsChanged = true;
+
+      // The server completes the linked plan atomically with operation
+      // creation. Mirror that acknowledgement into the local field cache so
+      // active Planner work disappears immediately, including after an
+      // offline operation is synchronized later.
+      const plannedOperationId = String(serverRecord.plannedOperationId || item.payload?.plannedOperationId || '').trim();
+      const fieldId = String(serverRecord.fieldId || item.payload?.fieldId || '').trim().toUpperCase();
+      const targetField = fields.find(field => String(field.id || '').trim().toUpperCase() === fieldId);
+      const plannedEntryIndex = Array.isArray(targetField?.operationSchedule)
+        ? targetField.operationSchedule.findIndex(entry => String(entry.id || '') === plannedOperationId)
+        : -1;
+      if (plannedOperationId && plannedEntryIndex >= 0) {
+        const completedAt = serverRecord.createdAt || new Date().toISOString();
+        targetField.operationSchedule = targetField.operationSchedule.map((entry, index) => index === plannedEntryIndex
+          ? {
+            ...entry,
+            completedOperationLogId: serverRecord.id,
+            completedAt,
+            updatedAt: completedAt
+          }
+          : entry);
+        fieldsChanged = true;
+        console.info(`[PLANNER] Completed plan acknowledged: ${plannedOperationId}`);
+      }
       console.info(`[OPERATION] Server acknowledged: ${serverRecord.id}`);
     }
 
@@ -3026,6 +3082,21 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
   mobileSyncPromise = (async () => {
     console.info(`[SYNC] Trigger: ${trigger}`);
     const remainingBefore = getOutboxCount();
+    const userInitiatedTrigger = trigger === 'MANUAL_SYNC' || trigger === 'AUDIT_PRECHECK';
+    if (!userInitiatedTrigger && !isAutomaticSyncEnabled()) {
+      return {
+        success: remainingBefore === 0,
+        skipped: true,
+        autoSyncEnabled: false,
+        attemptedCount: 0,
+        processedCount: 0,
+        failedCount: 0,
+        remainingCount: remainingBefore,
+        reason: 'AUTO_SYNC_DISABLED',
+        responses: {},
+        remainingItems: getOutboxQueue()
+      };
+    }
     if (remainingBefore === 0) {
       IS_SYNCED = true;
       if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
@@ -3201,8 +3272,12 @@ export const loadMoreAuditEvents = async ({ limit = 50 } = {}) => {
 // Register automatic sync on network reconnection
 setOnReconnectCallback(async trigger => {
   const result = await performMobileSync(trigger || 'NETWORK_RESTORED');
-  if (typeof activeCloudRefresh === 'function') await activeCloudRefresh({ force: true });
-  return result;
+  // Reconnecting always refreshes authoritative reads. The preference only
+  // controls whether locally queued writes are uploaded automatically.
+  if (typeof activeCloudRefresh === 'function') {
+    await activeCloudRefresh({ force: true });
+  }
+  return { ...result, autoSyncEnabled: isAutomaticSyncEnabled() };
 });
 
 export const initializeOfflineStorage = async () => {
@@ -3311,7 +3386,9 @@ export const initializeOfflineStorage = async () => {
       supportTickets.length = 0;
       supportTickets.push(...sortNewestFirst(stored[STORAGE_KEYS.TICKETS], ['createdAt']));
     }
-    if (stored[STORAGE_KEYS.PREFS]) SECURITY_PREFERENCES = stored[STORAGE_KEYS.PREFS];
+    if (stored[STORAGE_KEYS.PREFS]) {
+      SECURITY_PREFERENCES = { ...SECURITY_PREFERENCES, ...stored[STORAGE_KEYS.PREFS] };
+    }
 
     // Hydrate cached price circulars
     if (Array.isArray(stored[STORAGE_KEYS.PRICES]) && stored[STORAGE_KEYS.PRICES].length > 0) {

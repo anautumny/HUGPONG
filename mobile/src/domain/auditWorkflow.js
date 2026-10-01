@@ -215,6 +215,8 @@ export function canonicalAuditReport(report = {}) {
     ),
     deliveryMethod: report.deliveryMethod ? String(report.deliveryMethod).toLowerCase() : null,
     deliveryStatus: report.deliveryStatus ? String(report.deliveryStatus).toLowerCase() : AUDIT_DELIVERY_STATUS.READY,
+    deliverySelectedAt: report.deliverySelectedAt || null,
+    deliverySelectedByUserId: report.deliverySelectedByUserId || null,
     submittedAt: report.submittedAt || null,
     submittedByUserId: report.submittedByUserId || null,
     submissionMethod: report.submissionMethod || null,
