@@ -229,6 +229,8 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         phoneVerifiedAt: needsPhoneVerification ? now : current.phoneVerifiedAt,
         phoneVerificationStatus: 'VERIFIED',
         phoneVerificationMethod: needsPhoneVerification ? 'AUTHORIZED_REVIEW' : (current.phoneVerificationMethod || 'SMS_OTP'),
+        phoneVerificationRequestedAt: null,
+        phoneVerificationReviewRequestedByUser: false,
         phoneVerifiedByUserId: needsPhoneVerification ? actorId : (current.phoneVerifiedByUserId || null),
         phoneVerificationReasonCode: needsPhoneVerification ? verificationReason.code : (current.phoneVerificationReasonCode || null),
         phoneVerificationReason: needsPhoneVerification ? verificationReason.summary : (current.phoneVerificationReason || null),
@@ -247,6 +249,8 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         phoneVerifiedAt: approved.phoneVerifiedAt,
         phoneVerificationStatus: approved.phoneVerificationStatus,
         phoneVerificationMethod: approved.phoneVerificationMethod,
+        phoneVerificationRequestedAt: approved.phoneVerificationRequestedAt,
+        phoneVerificationReviewRequestedByUser: approved.phoneVerificationReviewRequestedByUser,
         phoneVerifiedByUserId: approved.phoneVerifiedByUserId,
         phoneVerificationReasonCode: approved.phoneVerificationReasonCode,
         phoneVerificationReason: approved.phoneVerificationReason,
@@ -330,9 +334,10 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       status: 'ACTIVE',
       affiliatedBlockFarmId,
       phoneVerifiedAt: phoneVerificationMode === 'VERIFIED' ? now : null,
-      phoneVerificationStatus: phoneVerificationMode === 'VERIFIED' ? 'VERIFIED' : 'PENDING_VERIFICATION',
+      phoneVerificationStatus: phoneVerificationMode === 'VERIFIED' ? 'VERIFIED' : 'AWAITING_SELECTION',
       phoneVerificationMethod: phoneVerificationMode === 'VERIFIED' ? 'AUTHORIZED_REVIEW' : null,
-      phoneVerificationRequestedAt: phoneVerificationMode === 'VERIFIED' ? null : now,
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false,
       phoneVerifiedByUserId: phoneVerificationMode === 'VERIFIED' ? actorId : null,
       phoneVerificationReasonCode: verificationReason?.code || null,
       phoneVerificationReason: verificationReason?.summary || null,
@@ -403,6 +408,15 @@ router.post('/:userId/verify-phone', requireAuth, requireRole([ROLES.FARM_MANAGE
     if (!['ACTIVE', 'PENDING'].includes(targetStatus)) {
       return res.status(409).json({ success: false, error: 'Only active or pending accounts can receive phone verification.' });
     }
+    if (targetStatus === 'ACTIVE'
+      && (String(current.phoneVerificationStatus || '').toUpperCase() !== 'PENDING_VERIFICATION'
+        || !current.phoneVerificationRequestedAt
+        || current.phoneVerificationReviewRequestedByUser !== true)) {
+      return res.status(409).json({
+        success: false,
+        error: 'This user has not requested authorized phone-verification review.'
+      });
+    }
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
     const verificationReason = resolvePhoneVerificationReason(req.body);
@@ -419,6 +433,8 @@ router.post('/:userId/verify-phone', requireAuth, requireRole([ROLES.FARM_MANAGE
       phoneVerifiedAt: verifiedAt,
       phoneVerificationStatus: 'VERIFIED',
       phoneVerificationMethod: 'AUTHORIZED_REVIEW',
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false,
       phoneVerifiedByUserId: actorId,
       phoneVerificationReasonCode: verificationReason.code,
       phoneVerificationReason: verificationReason.summary,
@@ -495,9 +511,10 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       role: targetRole,
       status: req.body.status == null ? current.status : String(req.body.status).trim().toUpperCase(),
       phoneVerifiedAt,
-      phoneVerificationStatus: phoneChanged ? 'PENDING_VERIFICATION' : (current.phoneVerificationStatus || (phoneVerifiedAt ? 'VERIFIED' : 'PENDING_VERIFICATION')),
+      phoneVerificationStatus: phoneChanged ? 'AWAITING_SELECTION' : (current.phoneVerificationStatus || (phoneVerifiedAt ? 'VERIFIED' : (current.phoneVerificationRequestedAt ? 'PENDING_VERIFICATION' : 'AWAITING_SELECTION'))),
       phoneVerificationMethod: phoneChanged ? null : (current.phoneVerificationMethod || null),
       phoneVerificationRequestedAt: phoneChanged ? null : (current.phoneVerificationRequestedAt || null),
+      phoneVerificationReviewRequestedByUser: phoneChanged ? false : current.phoneVerificationReviewRequestedByUser === true,
       phoneVerifiedByUserId: phoneChanged ? null : (current.phoneVerifiedByUserId || null),
       phoneVerificationReasonCode: phoneChanged ? null : (current.phoneVerificationReasonCode || null),
       phoneVerificationReason: phoneChanged ? null : (current.phoneVerificationReason || null),

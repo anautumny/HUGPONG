@@ -84,6 +84,10 @@ async function requireAuth(req, res, next) {
       fieldId: assignments.fieldId,
       phoneVerified: Boolean(account.phoneVerifiedAt),
       pendingFirstLoginVerification: !account.phoneVerifiedAt,
+      phoneVerificationStatus: account.phoneVerificationStatus
+        || (account.phoneVerifiedAt ? 'VERIFIED' : (account.phoneVerificationRequestedAt ? 'PENDING_VERIFICATION' : 'AWAITING_SELECTION')),
+      phoneVerificationRequestedAt: account.phoneVerificationRequestedAt || null,
+      phoneVerificationReviewRequestedByUser: account.phoneVerificationReviewRequestedByUser === true,
       requiresPasswordChange: account.requiresPasswordChange === true,
       passwordChanged: Boolean(account.passwordChangedAt) || account.requiresPasswordChange !== true,
       authVersion: currentVersion,

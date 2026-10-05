@@ -188,6 +188,10 @@ async function buildSessionUser(userId, user) {
     fieldId: assignments.fieldId,
     phoneVerified: Boolean(user.phoneVerifiedAt),
     pendingFirstLoginVerification: !user.phoneVerifiedAt,
+    phoneVerificationStatus: user.phoneVerificationStatus
+      || (user.phoneVerifiedAt ? 'VERIFIED' : (user.phoneVerificationRequestedAt ? 'PENDING_VERIFICATION' : 'AWAITING_SELECTION')),
+    phoneVerificationRequestedAt: user.phoneVerificationRequestedAt || null,
+    phoneVerificationReviewRequestedByUser: user.phoneVerificationReviewRequestedByUser === true,
     requiresPasswordChange,
     passwordChanged: Boolean(user.passwordChangedAt) || !requiresPasswordChange,
     authVersion: authVersionOf(user),
@@ -548,6 +552,7 @@ router.post('/register', registrationRateLimit, async (req, res) => {
       phoneVerificationStatus: smsVerified ? 'VERIFIED' : 'PENDING_VERIFICATION',
       phoneVerificationMethod: smsVerified ? 'SMS_OTP' : null,
       phoneVerificationRequestedAt: phoneVerificationRequested ? now : null,
+      phoneVerificationReviewRequestedByUser: phoneVerificationRequested,
       phoneVerifiedByUserId: null,
       phoneVerificationReasonCode: null,
       phoneVerificationReason: null,
@@ -592,6 +597,16 @@ router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, asy
     const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
     const user = snapshot.data();
+    if (user.phoneVerifiedAt) return res.status(409).json({ success: false, error: 'This phone number is already verified.' });
+    if (String(user.phoneVerificationStatus || '').toUpperCase() === 'PENDING_VERIFICATION'
+      && user.phoneVerificationRequestedAt
+      && user.phoneVerificationReviewRequestedByUser === true) {
+      return res.status(409).json({
+        success: false,
+        error: 'Authorized phone-verification review has already been requested.',
+        code: 'PHONE_VERIFICATION_REVIEW_PENDING'
+      });
+    }
     const phone = normalizeContact(user.phone);
     if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'The account does not have a valid mobile number.' });
     const challenge = issueOtp('first-login', employeeId, phone);
@@ -601,6 +616,25 @@ router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, asy
       discardOtp('first-login', employeeId);
       throw error;
     }
+    const requestedAt = nowIso();
+    const batch = db.batch();
+    batch.update(snapshot.ref, {
+      phoneVerificationStatus: 'SMS_OTP_SENT',
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false,
+      updatedAt: requestedAt
+    });
+    queueAuditEvent(batch, db, {
+      eventType: 'USER_PHONE_VERIFICATION_SMS_REQUESTED', actorUserId: employeeId,
+      entityType: 'USER', entityId: employeeId,
+      details: `Requested an SMS phone-verification code for account ${employeeId}.`, createdAt: requestedAt
+    });
+    await batch.commit();
+    Object.assign(req.session.user, {
+      phoneVerificationStatus: 'SMS_OTP_SENT',
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false
+    });
     return res.json({
       success: true,
       expiresAt: challenge.expiresAt,
@@ -610,6 +644,56 @@ router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, asy
   } catch (error) {
     const status = error.code === 'OTP_RATE_LIMITED' ? 429 : (error.code === 'SMS_NOT_CONFIGURED' ? 503 : 502);
     return res.status(status).json({ success: false, error: error.message || 'Verification code could not be sent.' });
+  }
+});
+
+router.post('/request-phone-verification-review', requireAuth, async (req, res) => {
+  const employeeId = req.session.user.employeeId;
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  try {
+    const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
+    const user = snapshot.data();
+    if (user.phoneVerifiedAt) return res.status(409).json({ success: false, error: 'This phone number is already verified.' });
+    if (String(user.phoneVerificationStatus || '').toUpperCase() === 'PENDING_VERIFICATION'
+      && user.phoneVerificationRequestedAt
+      && user.phoneVerificationReviewRequestedByUser === true) {
+      Object.assign(req.session.user, {
+        phoneVerificationStatus: 'PENDING_VERIFICATION',
+        phoneVerificationRequestedAt: user.phoneVerificationRequestedAt,
+        phoneVerificationReviewRequestedByUser: true
+      });
+      return res.json({ success: true, replayed: true, user: req.session.user });
+    }
+
+    const requestedAt = nowIso();
+    discardOtp('first-login', employeeId);
+    const batch = db.batch();
+    batch.update(snapshot.ref, {
+      phoneVerificationStatus: 'PENDING_VERIFICATION',
+      phoneVerificationRequestedAt: requestedAt,
+      phoneVerificationReviewRequestedByUser: true,
+      updatedAt: requestedAt
+    });
+    queueAuditEvent(batch, db, {
+      eventType: 'USER_PHONE_VERIFICATION_REVIEW_REQUESTED', actorUserId: employeeId,
+      entityType: 'USER', entityId: employeeId,
+      details: `Requested authorized phone-verification review for account ${employeeId}.`, createdAt: requestedAt
+    });
+    await batch.commit();
+    Object.assign(req.session.user, {
+      phoneVerificationStatus: 'PENDING_VERIFICATION',
+      phoneVerificationRequestedAt: requestedAt,
+      phoneVerificationReviewRequestedByUser: true
+    });
+    return res.json({
+      success: true,
+      user: req.session.user,
+      message: 'Phone-verification review requested. An authorized reviewer must verify the number before account setup can continue.'
+    });
+  } catch (error) {
+    res.locals.diagnosticError = error;
+    return res.status(500).json({ success: false, error: 'The phone-verification review request could not be saved.' });
   }
 });
 
@@ -630,6 +714,8 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
       phoneVerifiedAt,
       phoneVerificationStatus: 'VERIFIED',
       phoneVerificationMethod: 'SMS_OTP',
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false,
       phoneVerifiedByUserId: employeeId,
       phoneVerificationReasonCode: null,
       phoneVerificationReason: null,
@@ -641,7 +727,14 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
       details: `Verified the registered phone for account ${employeeId}.`, createdAt: phoneVerifiedAt
     });
     await batch.commit();
-    Object.assign(req.session.user, { phoneVerified: true, pendingFirstLoginVerification: false, phoneVerifiedAt });
+    Object.assign(req.session.user, {
+      phoneVerified: true,
+      pendingFirstLoginVerification: false,
+      phoneVerifiedAt,
+      phoneVerificationStatus: 'VERIFIED',
+      phoneVerificationRequestedAt: null,
+      phoneVerificationReviewRequestedByUser: false
+    });
     return res.json({ success: true, user: req.session.user, ...(await issueCredentials(req.session.user)) });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Phone verification could not be saved.' });
@@ -822,6 +915,8 @@ router.post('/change-phone/verify', requireAuth, otpVerifyRateLimit, async (req,
         phoneVerifiedAt: now,
         phoneVerificationStatus: 'VERIFIED',
         phoneVerificationMethod: 'SMS_OTP',
+        phoneVerificationRequestedAt: null,
+        phoneVerificationReviewRequestedByUser: false,
         phoneVerifiedByUserId: employeeId,
         phoneVerificationReasonCode: null,
         phoneVerificationReason: null,

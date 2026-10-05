@@ -211,6 +211,10 @@ export async function requestPhoneVerificationWithServer() {
   return authenticatedRequest('/auth/request-phone-verification', { method: 'POST', body: {} });
 }
 
+export async function requestPhoneVerificationReviewWithServer() {
+  return authenticatedRequest('/auth/request-phone-verification-review', { method: 'POST', body: {} });
+}
+
 export async function verifyPhoneWithServer(code) {
   const result = await authenticatedRequest('/auth/verify-phone', { method: 'POST', body: { code } });
   await signInToFirebase(result.firebaseCustomToken);

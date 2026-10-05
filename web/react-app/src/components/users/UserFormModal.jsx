@@ -310,7 +310,7 @@ export default function UserFormModal({
           {!isEditing && (
             <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary-bg/50 p-3 text-xs leading-relaxed text-hug-text2">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>Choose whether this number still needs verification or was already checked by an authorized reviewer. Every manual verification is recorded in the audit log.</span>
+              <span>Choose whether this number still needs verification or was already checked by an authorized reviewer. If verification is required, the user chooses SMS or manual review after signing in. The account is not sent to Pending Users until manual review is requested.</span>
             </div>
           )}
         </div>
@@ -321,7 +321,7 @@ export default function UserFormModal({
               id="user-form-phone-verification"
               label="Phone Verification"
               required
-              helperText="Use Already verified only after confirming the person's identity and SIM ownership."
+              helperText="Use Already verified only after confirming the person's identity and SIM ownership. Otherwise, the user chooses a verification method at first login."
             >
               <Select
                 id="user-form-phone-verification"

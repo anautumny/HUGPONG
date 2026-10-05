@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, RefreshCw, AlertCircle } from 'lucide-react';
+import { Smartphone, RefreshCw, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function FirstLoginVerifyModal({
@@ -9,18 +9,20 @@ export default function FirstLoginVerifyModal({
   onVerificationSuccess,
   onCancel
 }) {
-  const { requestPhoneVerification, verifyPhone } = useAuth();
+  const { requestPhoneVerification, requestPhoneVerificationReview, verifyPhone } = useAuth();
 
   const [otpCode, setOtpCode] = useState('');
   const [timeLeft, setTimeLeft] = useState(300); // 5 minutes
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [isRequestingReview, setIsRequestingReview] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(60);
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [error, setError] = useState('');
+  const [verificationStep, setVerificationStep] = useState('choice');
   const inputRef = useRef(null);
 
-  // Focus input and trigger initial SMS OTP dispatch on modal open
+  // The user must explicitly choose SMS or authorized review on first login.
   useEffect(() => {
     if (isOpen) {
       setOtpCode('');
@@ -28,29 +30,23 @@ export default function FirstLoginVerifyModal({
       setTimeLeft(300);
       setResendCooldown(60);
       setCodeRequestsRemaining(3);
-
-      // Request server to send OTP code to registered phone
-      if (pendingToken) {
-        requestPhoneVerification(pendingToken)
-          .then(result => {
-            setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
-            setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
-          })
-          .catch((err) => {
-            console.warn('[FirstLoginVerify] Verification-code delivery was deferred.');
-            if (err.data?.retryAfterSeconds) {
-              setResendCooldown(Math.max(0, Number(err.data.retryAfterSeconds)));
-              setCodeRequestsRemaining(Math.max(0, Number(err.data.remaining ?? 0)));
-            }
-            setError(err.message || 'Unable to dispatch verification SMS.');
-          });
-      }
+      const status = String(pendingUser?.phoneVerificationStatus || '').toUpperCase();
+      setVerificationStep(status === 'PENDING_VERIFICATION'
+        && pendingUser?.phoneVerificationRequestedAt
+        && pendingUser?.phoneVerificationReviewRequestedByUser === true
+        ? 'review'
+        : (status === 'SMS_OTP_SENT' ? 'code' : 'choice'));
 
       setTimeout(() => {
         if (inputRef.current) inputRef.current.focus();
       }, 150);
     }
-  }, [isOpen, pendingToken]);
+  }, [
+    isOpen,
+    pendingUser?.phoneVerificationRequestedAt,
+    pendingUser?.phoneVerificationReviewRequestedByUser,
+    pendingUser?.phoneVerificationStatus
+  ]);
 
   // 5-minute expiry countdown
   useEffect(() => {
@@ -100,6 +96,38 @@ export default function FirstLoginVerifyModal({
     }
   };
 
+  const handleChooseSms = async () => {
+    if (isResending || isRequestingReview) return;
+    setError('');
+    setIsResending(true);
+    try {
+      const result = await requestPhoneVerification(pendingToken);
+      setTimeLeft(300);
+      setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
+      setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      setVerificationStep('code');
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } catch (err) {
+      setError(err.message || 'Unable to dispatch verification SMS. You can request manual review instead.');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleRequestReview = async () => {
+    if (isRequestingReview || isResending || isVerifying) return;
+    setError('');
+    setIsRequestingReview(true);
+    try {
+      await requestPhoneVerificationReview(pendingToken);
+      setVerificationStep('review');
+    } catch (err) {
+      setError(err.message || 'The verification review request could not be submitted.');
+    } finally {
+      setIsRequestingReview(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const cleanCode = otpCode.trim();
@@ -136,9 +164,15 @@ export default function FirstLoginVerifyModal({
             <Smartphone className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <h3 className="text-base font-bold text-hug-text">One-Time Mobile SIM Verification</h3>
+            <h3 className="text-base font-bold text-hug-text">
+              {verificationStep === 'choice' ? 'Choose Phone Verification' : verificationStep === 'review' ? 'Verification Review Requested' : 'Verify Your Phone'}
+            </h3>
             <p className="text-xs text-hug-muted mt-0.5">
-              Please verify ownership of your registered mobile number before accessing your HUGPONG portal.
+              {verificationStep === 'choice'
+                ? 'Choose how you want to verify your registered number before accessing HUGPONG.'
+                : verificationStep === 'review'
+                  ? 'An authorized reviewer must confirm your number before account setup can continue.'
+                  : 'Enter the code sent to your registered mobile number.'}
             </p>
           </div>
         </div>
@@ -149,9 +183,7 @@ export default function FirstLoginVerifyModal({
           <span className="font-mono font-bold text-primary dark:text-primary-light text-sm">
             {maskedPhone}
           </span>
-          <span className="text-[11px] text-hug-muted mt-0.5">
-            A 6-digit SMS verification code was dispatched to this device.
-          </span>
+          {verificationStep === 'code' && <span className="text-[11px] text-hug-muted mt-0.5">A 6-digit SMS verification code was sent to this device.</span>}
         </div>
 
         {error && (
@@ -161,8 +193,35 @@ export default function FirstLoginVerifyModal({
           </div>
         )}
 
+        {verificationStep === 'choice' && (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-amber-300/70 bg-amber-50/80 p-3 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+              <strong>Smart or TNT SIM?</strong> SMS code verification is currently unavailable for Smart and TNT numbers. Request authorized review instead.
+            </div>
+            <button type="button" onClick={handleChooseSms} disabled={isResending || isRequestingReview} className="rounded-xl bg-primary px-4 py-3 text-left text-sm font-bold text-white disabled:opacity-50">
+              {isResending ? 'Sending code...' : 'Verify using an SMS code'}
+              <span className="mt-0.5 block text-[11px] font-normal opacity-90">For supported mobile networks.</span>
+            </button>
+            <button type="button" onClick={handleRequestReview} disabled={isResending || isRequestingReview} className="rounded-xl border border-border bg-surface px-4 py-3 text-left text-sm font-bold text-hug-text disabled:opacity-50">
+              {isRequestingReview ? 'Requesting review...' : 'Request authorized verification review'}
+              <span className="mt-0.5 block text-[11px] font-normal text-hug-muted">Use this for Smart/TNT or when SMS is unavailable.</span>
+            </button>
+            <button type="button" onClick={onCancel} disabled={isResending || isRequestingReview} className="self-end text-xs font-bold text-hug-muted hover:text-hug-text">Sign Out</button>
+          </div>
+        )}
+
+        {verificationStep === 'review' && (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-amber-300/70 bg-amber-50/80 p-4 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+              <div className="flex items-center gap-2 font-bold"><MessageSquareText className="h-4 w-4" />Request sent to Pending Users</div>
+              <p className="mt-1 text-xs">You can sign in again after your Farm Manager or another authorized administrator verifies your number.</p>
+            </div>
+            <button type="button" onClick={onCancel} className="self-end rounded-xl border border-border px-4 py-2 text-xs font-bold text-hug-text2">Sign Out</button>
+          </div>
+        )}
+
         {/* OTP Input Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {verificationStep === 'code' && <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="otp-code-input" className="text-xs font-semibold text-hug-text2">
               Enter 6-Digit SMS Verification Code
@@ -201,6 +260,10 @@ export default function FirstLoginVerifyModal({
             </button>
           </div>
 
+          <button type="button" onClick={handleRequestReview} disabled={isRequestingReview || isVerifying || isResending} className="rounded-xl border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-left text-xs font-semibold text-amber-900 disabled:opacity-50 dark:bg-amber-950/20 dark:text-amber-200">
+            {isRequestingReview ? 'Requesting review...' : 'No SMS available or using Smart/TNT? Request authorized review'}
+          </button>
+
           {/* Action Buttons */}
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
             <button
@@ -220,7 +283,7 @@ export default function FirstLoginVerifyModal({
               <span>{isVerifying ? 'Verifying...' : 'Verify & Continue'}</span>
             </button>
           </div>
-        </form>
+        </form>}
       </div>
     </div>
   );

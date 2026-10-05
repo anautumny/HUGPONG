@@ -8,6 +8,7 @@ import {
   isValidUserIdentifier,
   logoutUser,
   requestCurrentPhoneVerification,
+  requestCurrentPhoneVerificationReview,
   updateUserPassword,
   verifyCurrentPhone
 } from '../../data/dataStore';
@@ -61,6 +62,8 @@ export default function LoginScreen({ navigation, route }) {
   const [phoneVerificationResending, setPhoneVerificationResending] = useState(false);
   const [phoneVerificationResendSeconds, setPhoneVerificationResendSeconds] = useState(0);
   const [phoneVerificationRequestsRemaining, setPhoneVerificationRequestsRemaining] = useState(3);
+  const [phoneVerificationStep, setPhoneVerificationStep] = useState('choice');
+  const [phoneVerificationReviewSaving, setPhoneVerificationReviewSaving] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
   const [setupSigningOut, setSetupSigningOut] = useState(false);
   const [isRetryingOffline, setIsRetryingOffline] = useState(false);
@@ -252,20 +255,12 @@ export default function LoginScreen({ navigation, route }) {
         setPendingPasswordChange(res.requiresPasswordChange === true);
         setPhoneVerificationCode('');
         setPhoneVerificationError('');
-        const request = await requestCurrentPhoneVerification();
-        if (!request.success) {
-          setPhoneVerificationResendSeconds(Math.max(0, Number(request.retryAfterSeconds || 0)));
-          setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.remaining ?? 0)));
-          if (request.code === 'RESEND_COOLDOWN' || request.code === 'HOURLY_CODE_LIMIT') {
-            setPhoneVerificationError(request.error || t('auth_latest_code'));
-            setShowPhoneVerificationModal(true);
-            return;
-          }
-          setAuthError(request.error || t('auth_code_send_failed'));
-          return;
-        }
-        setPhoneVerificationResendSeconds(Math.max(0, Number(request.resendAfterSeconds || 0)));
-        setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.codeRequestsRemaining ?? 0)));
+        const verificationStatus = String(res.user?.phoneVerificationStatus || '').toUpperCase();
+        setPhoneVerificationStep(verificationStatus === 'PENDING_VERIFICATION'
+          && res.user?.phoneVerificationRequestedAt
+          && res.user?.phoneVerificationReviewRequestedByUser === true
+          ? 'review'
+          : (verificationStatus === 'SMS_OTP_SENT' ? 'code' : 'choice'));
         setShowPhoneVerificationModal(true);
         return;
       }
@@ -330,6 +325,42 @@ export default function LoginScreen({ navigation, route }) {
     } finally {
       setPhoneVerificationResending(false);
     }
+  };
+
+  const handleChooseSmsVerification = async () => {
+    if (phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut) return;
+    setPhoneVerificationResending(true);
+    setPhoneVerificationError('');
+    const request = await requestCurrentPhoneVerification();
+    setPhoneVerificationResending(false);
+    if (!request.success) {
+      setPhoneVerificationResendSeconds(Math.max(0, Number(request.retryAfterSeconds || 0)));
+      setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.remaining ?? 0)));
+      if (request.code === 'RESEND_COOLDOWN' || request.code === 'HOURLY_CODE_LIMIT') {
+        setPhoneVerificationStep('code');
+        setPhoneVerificationError(request.error || t('auth_latest_code'));
+        return;
+      }
+      setPhoneVerificationError(request.error || t('auth_code_send_failed'));
+      return;
+    }
+    setPhoneVerificationResendSeconds(Math.max(0, Number(request.resendAfterSeconds || 0)));
+    setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.codeRequestsRemaining ?? 0)));
+    setPhoneVerificationStep('code');
+  };
+
+  const handleRequestPhoneVerificationReview = async () => {
+    if (phoneVerificationReviewSaving || phoneVerificationResending || phoneVerificationSaving || setupSigningOut) return;
+    setPhoneVerificationReviewSaving(true);
+    setPhoneVerificationError('');
+    const result = await requestCurrentPhoneVerificationReview();
+    setPhoneVerificationReviewSaving(false);
+    if (!result.success) {
+      setPhoneVerificationError(result.error || t('first_review_failed'));
+      return;
+    }
+    setAuthenticatedUser(current => ({ ...current, ...(result.user || {}) }));
+    setPhoneVerificationStep('review');
   };
 
   const completeSetupSignOut = async () => {
@@ -706,8 +737,8 @@ export default function LoginScreen({ navigation, route }) {
                   <Ionicons name="phone-portrait-outline" size={22} color="#D97706" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.modalTitle}>{t('first_verify_title')}</Text>
-                  <Text style={s.modalSub}>{t('first_verify_sub')}</Text>
+                  <Text style={s.modalTitle}>{phoneVerificationStep === 'choice' ? t('first_choose_title') : phoneVerificationStep === 'review' ? t('first_review_title') : t('first_verify_title')}</Text>
+                  <Text style={s.modalSub}>{phoneVerificationStep === 'choice' ? t('first_choose_sub') : phoneVerificationStep === 'review' ? t('first_review_sub') : t('first_verify_sub')}</Text>
                 </View>
               </View>
               {phoneVerificationError ? (
@@ -716,7 +747,22 @@ export default function LoginScreen({ navigation, route }) {
                   <Text style={s.firstLoginErrorText}>{phoneVerificationError}</Text>
                 </View>
               ) : null}
-              <View style={s.fieldGroup}>
+              {phoneVerificationStep === 'choice' && <View style={{ gap: 10 }}>
+                <View style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 12 }}>
+                  <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}><Text style={{ fontWeight: '900' }}>{t('first_smart_tnt_title')} </Text>{t('first_smart_tnt_help')}</Text>
+                </View>
+                <TouchableOpacity style={s.modalSaveBtn} onPress={handleChooseSmsVerification} disabled={phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut}>
+                  {phoneVerificationResending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.modalSaveText}>{t('first_choose_sms')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.modalCancelBtn, { paddingVertical: 12 }]} onPress={handleRequestPhoneVerificationReview} disabled={phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut}>
+                  {phoneVerificationReviewSaving ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={s.modalCancelText}>{t('first_choose_review')}</Text>}
+                </TouchableOpacity>
+              </View>}
+              {phoneVerificationStep === 'review' && <View style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 14, gap: 5 }}>
+                <Text style={{ color: '#92400E', fontWeight: '900', fontSize: 13 }}>{t('first_review_sent')}</Text>
+                <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}>{t('first_review_wait')}</Text>
+              </View>}
+              {phoneVerificationStep === 'code' && <View style={s.fieldGroup}>
                 <Text style={s.label}>{t('first_verification_code')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
@@ -730,18 +776,21 @@ export default function LoginScreen({ navigation, route }) {
                     placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
-              </View>
+              </View>}
+              {phoneVerificationStep === 'code' && <TouchableOpacity style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 10 }} onPress={handleRequestPhoneVerificationReview} disabled={phoneVerificationReviewSaving || phoneVerificationSaving || phoneVerificationResending || setupSigningOut}>
+                {phoneVerificationReviewSaving ? <ActivityIndicator size="small" color="#92400E" /> : <Text style={{ color: '#92400E', fontWeight: '800', fontSize: 11, textAlign: 'center' }}>{t('first_sms_unavailable_review')}</Text>}
+              </TouchableOpacity>}
               <TouchableOpacity
                 style={[s.setupSignOutBtn, setupSigningOut && { opacity: 0.65 }]}
                 onPress={confirmSetupSignOut}
-                disabled={setupSigningOut || phoneVerificationSaving || phoneVerificationResending}
+                disabled={setupSigningOut || phoneVerificationSaving || phoneVerificationResending || phoneVerificationReviewSaving}
               >
                 {setupSigningOut
                   ? <ActivityIndicator size="small" color="#DC2626" />
                   : <Ionicons name="log-out-outline" size={16} color="#DC2626" />}
                 <Text style={s.setupSignOutText}>{setupSigningOut ? t('profile_signing_out') : t('first_sign_out')}</Text>
               </TouchableOpacity>
-              <View style={s.modalBtnRow}>
+              {phoneVerificationStep === 'code' && <View style={s.modalBtnRow}>
                 <TouchableOpacity
                   style={s.modalCancelBtn}
                   onPress={handleResendPhoneVerification}
@@ -764,7 +813,7 @@ export default function LoginScreen({ navigation, route }) {
                     ? <ActivityIndicator size="small" color="#fff" />
                     : <Text style={s.modalSaveText}>{t('first_verify_phone')}</Text>}
                 </TouchableOpacity>
-              </View>
+              </View>}
             </View>
           </KeyboardAvoidingView>
         </View>

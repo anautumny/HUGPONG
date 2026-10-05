@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Check, ArrowRight, Download, Github, Sun, Moon, Monitor } from 'lucide-react';
+import { ArrowRight, Download, Github, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
@@ -93,26 +93,6 @@ export default function LandingView() {
             Bridging intermittent field connectivity with regional regulatory oversight. Track the 6-stage SRA agronomic cycle, access weekly sugar price bulletins, and manage block farm allocations with tamper-resistant audit integrity.
           </p>
 
-          {/* Key Feature Pillars */}
-          <div className="pt-1 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm font-semibold text-hug-text">
-            <div className="flex items-center gap-2.5">
-              <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
-              <span>Zero-Loss Offline Sync Engine</span>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
-              <span>Six-Stage Sugarcane Timeline</span>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
-              <span>Weekly SRA Price Indexing</span>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={2.5} />
-              <span>Audited Field Labor Accounting</span>
-            </div>
-          </div>
-
           {/* Action Buttons */}
           <div className="pt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Link
@@ -144,10 +124,10 @@ export default function LandingView() {
                 01
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Offline-First Field Operations
+                Offline-First Farm Operations
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Reliable logging in remote cane plots with queued synchronization once connection is established.
+                Manage block farms and fields, and record six-stage activities, labor, and costs with offline support.
               </p>
             </div>
 
@@ -157,10 +137,10 @@ export default function LandingView() {
                 02
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Source-Referenced Price Monitoring
+                Price Monitoring
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Official millsite circulars for raw sugar and industrial molasses with regulatory verification.
+                View source-referenced SRA prices, historical changes, and market trends.
               </p>
             </div>
 
@@ -170,10 +150,10 @@ export default function LandingView() {
                 03
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Crop &amp; Field Tracking
+                Cloud &amp; QR Audit Reporting
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Chronological agronomic tracking across the 6 SRA sugarcane stages from land prep to harvest.
+                Submit and verify monthly audit reports through cloud delivery or secure QR transfer.
               </p>
             </div>
 
@@ -183,10 +163,10 @@ export default function LandingView() {
                 04
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Audit-Ready Reports
+                Descriptive Farm Analytics
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Tamper-resistant monthly compliance reports verifiable via QR code and printable to A4 standards.
+                Summarize acreage, crop stages, operations, production costs, price trends, and audit status.
               </p>
             </div>
           </div>

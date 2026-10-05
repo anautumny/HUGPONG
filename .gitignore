@@ -143,3 +143,10 @@ scratch/
 *.tmp
 *.bak
 *.hpbak
+
+# ------------------------------------------------------------------------------
+# Generated Paper Revision & Document QA Artifacts
+# ------------------------------------------------------------------------------
+/deliverables/
+/tools/export_word_pdf.ps1
+/tools/revise_hugpong_paper.py

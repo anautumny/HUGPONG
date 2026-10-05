@@ -70,7 +70,7 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
       const accountId = response?.accountId || response?.data?.id;
       onCreated?.(response?.data);
       onClose();
-      Alert.alert('User Added', `Account ID: ${accountId}\nPhone verification: ${form.phoneVerificationMode === 'VERIFIED' ? 'Verified' : 'Pending review'}`);
+      Alert.alert('User Added', `Account ID: ${accountId}\nPhone verification: ${form.phoneVerificationMode === 'VERIFIED' ? 'Verified' : 'User will choose SMS or manual review at first login'}`);
     } catch (error) {
       Alert.alert('User Not Added', error.message || 'The account could not be created.');
     } finally {
@@ -126,6 +126,7 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
 
           <View style={{ gap: 6 }}><Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>Phone Verification *</Text>
             {[{ value: 'REQUIRED', label: 'Requires verification' }, { value: 'VERIFIED', label: 'Already verified by authorized reviewer' }].map(mode => <TouchableOpacity key={mode.value} disabled={saving} onPress={() => set('phoneVerificationMode', mode.value)} style={{ padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: form.phoneVerificationMode === mode.value ? COLORS.primary : COLORS.border, backgroundColor: form.phoneVerificationMode === mode.value ? COLORS.primaryBg : '#fff' }}><Text style={{ fontSize: 11, fontWeight: '800', color: form.phoneVerificationMode === mode.value ? COLORS.primary : COLORS.textSecondary }}>{mode.label}</Text></TouchableOpacity>)}
+            {form.phoneVerificationMode === 'REQUIRED' && <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>The user will choose SMS or manual review after signing in. They will appear in Pending Users only if they request manual review.</Text>}
           </View>
 
           {form.phoneVerificationMode === 'VERIFIED' && <View style={{ gap: 6 }}>

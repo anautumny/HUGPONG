@@ -16,6 +16,13 @@ function publicUser(user = {}, id = null) {
   for (const [key, value] of Object.entries(user || {})) {
     if (!PRIVATE_USER_FIELDS.has(key)) safe[key] = value;
   }
+  const status = String(user?.status || '').toUpperCase();
+  const reviewQueueEligible = status === 'PENDING'
+    || (!user?.phoneVerifiedAt
+      && String(user?.phoneVerificationStatus || '').toUpperCase() === 'PENDING_VERIFICATION'
+      && Boolean(user?.phoneVerificationRequestedAt)
+      && user?.phoneVerificationReviewRequestedByUser === true);
+  if (reviewQueueEligible) safe.reviewQueueEligible = true;
   if (id != null) safe.id = id;
   return safe;
 }

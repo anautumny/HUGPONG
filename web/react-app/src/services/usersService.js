@@ -29,7 +29,7 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
       .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
     onUpdate({
       users: mapped.filter(record => record.status !== 'PENDING'),
-      pendingUsers: mapped.filter(record => record.status === 'PENDING' || !record.phoneVerified),
+      pendingUsers: mapped.filter(record => record.reviewQueueEligible === true),
       hasMore,
       isLoadingMore: loadingMore,
       isLoading: false,

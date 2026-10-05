@@ -97,6 +97,31 @@ test('public user projection never returns credential material', () => {
   assert.deepEqual(projected, { displayName: 'Safe User', id: '04000001' });
 });
 
+test('server projection adds active users to review only after their explicit request', () => {
+  const awaitingChoice = publicUser({
+    status: 'ACTIVE', phoneVerifiedAt: null,
+    phoneVerificationStatus: 'AWAITING_SELECTION', phoneVerificationRequestedAt: null
+  }, '04000002');
+  const smsSelected = publicUser({
+    status: 'ACTIVE', phoneVerifiedAt: null,
+    phoneVerificationStatus: 'SMS_OTP_SENT', phoneVerificationRequestedAt: null
+  }, '04000003');
+  const reviewRequested = publicUser({
+    status: 'ACTIVE', phoneVerifiedAt: null,
+    phoneVerificationStatus: 'PENDING_VERIFICATION', phoneVerificationRequestedAt: '2026-10-05T00:00:00.000Z',
+    phoneVerificationReviewRequestedByUser: true
+  }, '04000004');
+  const legacyAutomaticPending = publicUser({
+    status: 'ACTIVE', phoneVerifiedAt: null,
+    phoneVerificationStatus: 'PENDING_VERIFICATION', phoneVerificationRequestedAt: '2026-09-01T00:00:00.000Z'
+  }, '04000005');
+
+  assert.notEqual(awaitingChoice.reviewQueueEligible, true);
+  assert.notEqual(smsSelected.reviewQueueEligible, true);
+  assert.notEqual(legacyAutomaticPending.reviewQueueEligible, true);
+  assert.equal(reviewRequested.reviewQueueEligible, true);
+});
+
 for (const role of Object.values(ROLES)) {
   test(`${role} receives its canonical Firebase role claim and passes its own API role guard`, () => {
     const user = {

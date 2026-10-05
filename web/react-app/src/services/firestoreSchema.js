@@ -150,9 +150,11 @@ export const toUser = value => {
     role: canonicalRole,
     status: String(value.status || 'PENDING').toUpperCase(),
     phoneVerifiedAt: value.phoneVerifiedAt || null,
-    phoneVerificationStatus: value.phoneVerificationStatus || (value.phoneVerifiedAt ? 'VERIFIED' : 'PENDING_VERIFICATION'),
+    phoneVerificationStatus: value.phoneVerificationStatus
+      || (value.phoneVerifiedAt ? 'VERIFIED' : (value.phoneVerificationRequestedAt ? 'PENDING_VERIFICATION' : 'AWAITING_SELECTION')),
     phoneVerificationMethod: value.phoneVerificationMethod || null,
     phoneVerificationRequestedAt: value.phoneVerificationRequestedAt || null,
+    phoneVerificationReviewRequestedByUser: value.phoneVerificationReviewRequestedByUser === true,
     phoneVerifiedByUserId: value.phoneVerifiedByUserId || null,
     requiresPasswordChange: Boolean(value.requiresPasswordChange),
     passwordChangedAt: value.passwordChangedAt || null,

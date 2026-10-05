@@ -15,6 +15,7 @@ import {
   verifyPhoneChangeWithServer,
   registerWithServer,
   requestPhoneVerificationWithServer,
+  requestPhoneVerificationReviewWithServer,
   verifyPhoneWithServer,
   logoutFromServer,
   authenticatedRequest
@@ -489,10 +490,13 @@ export const provisionUserAccount = async payload => {
     const existingIndex = users.findIndex(user => String(user.id || user.employeeId) === String(accountId));
     if (existingIndex >= 0) users[existingIndex] = account;
     else users.push(account);
-    if (account.phoneVerified !== true) {
+    if (account.reviewQueueEligible === true) {
       const pendingIndex = pendingUsers.findIndex(user => String(user.id || user.employeeId) === String(accountId));
       if (pendingIndex >= 0) pendingUsers[pendingIndex] = account;
       else pendingUsers.push(account);
+    } else {
+      const pendingIndex = pendingUsers.findIndex(user => String(user.id || user.employeeId) === String(accountId));
+      if (pendingIndex >= 0) pendingUsers.splice(pendingIndex, 1);
     }
     await saveItem(STORAGE_KEYS.USERS, users);
     await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
@@ -1597,6 +1601,25 @@ export const requestFieldCropCycleRollover = async (fieldId, options = {}) => {
     return { success: true, pending: true, cycleId: oldCycleId, closureRequest: result.closureRequest };
   } catch (err) {
     return { success: false, message: err.message || 'The new cycle request was rejected by the server.' };
+  }
+};
+
+export const requestCurrentPhoneVerificationReview = async () => {
+  try {
+    const result = await requestPhoneVerificationReviewWithServer();
+    if (result.user) {
+      CURRENT_SESSION = { ...CURRENT_SESSION, ...result.user };
+      await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+      notify();
+    }
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      code: error.code || '',
+      ...(error.data || {})
+    };
   }
 };
 
@@ -2789,7 +2812,7 @@ export const listenToCloudSync = () => {
         users.length = 0;
         users.push(...remoteUsers);
         pendingUsers.length = 0;
-        pendingUsers.push(...remoteUsers.filter(user => user.status === 'PENDING' || user.phoneVerified !== true));
+        pendingUsers.push(...remoteUsers.filter(user => user.reviewQueueEligible === true));
       }
       if (canReadAuditReports) {
         auditReports.length = 0;
@@ -3405,7 +3428,10 @@ export const initializeOfflineStorage = async () => {
     // Hydrate cached pending member registrations
     if (Array.isArray(stored[STORAGE_KEYS.PENDING_USERS]) && stored[STORAGE_KEYS.PENDING_USERS].length > 0) {
       pendingUsers.length = 0;
-      stored[STORAGE_KEYS.PENDING_USERS].forEach(u => pendingUsers.push(u));
+      stored[STORAGE_KEYS.PENDING_USERS]
+        .filter(user => user.status === 'PENDING'
+          || (user.phoneVerificationStatus === 'PENDING_VERIFICATION' && Boolean(user.phoneVerificationRequestedAt)))
+        .forEach(u => pendingUsers.push(u));
     }
 
     // Hydrate cached audit reports

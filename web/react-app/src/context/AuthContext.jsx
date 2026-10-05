@@ -190,6 +190,25 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const requestPhoneVerificationReview = async (authToken) => {
+    const token = authToken || '';
+    const res = await fetch('/auth/request-phone-verification-review', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...webClientHeaders(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      credentials: 'include'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw responseErrorFromPayload(data, res.status, 'The verification review request could not be submitted.');
+    }
+    if (data.user) setUser(prev => ({ ...prev, ...data.user }));
+    return data;
+  };
+
   const verifyPhone = async (code, authToken) => {
     const token = authToken || '';
     const res = await fetch('/auth/verify-phone', {
@@ -260,6 +279,7 @@ export function AuthProvider({ children }) {
         login,
         logout,
         requestPhoneVerification,
+        requestPhoneVerificationReview,
         verifyPhone,
         changePassword,
         refreshSession,
