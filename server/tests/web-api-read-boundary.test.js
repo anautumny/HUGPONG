@@ -28,6 +28,7 @@ test('web agricultural reads use authenticated server scope without direct Fires
 
 test('web API reads coalesce in-flight work and invalidate after authoritative mutations', () => {
   const source = webService('apiClient.js');
+  const authContext = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'context', 'AuthContext.jsx'), 'utf8');
   assert.match(source, /const readCache = new Map\(\)/);
   assert.match(source, /const inFlightReads = new Map\(\)/);
   assert.match(source, /inFlightReads\.has\(path\)/);
@@ -35,9 +36,15 @@ test('web API reads coalesce in-flight work and invalidate after authoritative m
   assert.match(source, /hugpong:server-mutation/);
   assert.match(source, /forcedRefreshQueued/);
   assert.match(source, /void refresh\(\{ force: true \}\)/);
-  assert.match(source, /READ_CACHE_TTL_MS = 60 \* 1000/);
-  assert.match(source, /DEFAULT_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
-  assert.match(source, /const handleFocus = \(\) => \{[\s\S]{0,100}refresh\(\)/);
+  assert.match(source, /READ_CACHE_TTL_MS = 2 \* 60 \* 1000/);
+  assert.match(source, /DEFAULT_REFRESH_INTERVAL_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /FOCUS_REFRESH_MIN_AGE_MS = 10 \* 60 \* 1000/);
+  assert.match(source, /Date\.now\(\) - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS/);
+  assert.match(source, /export function clearAuthenticatedReadState\(\)[\s\S]*authenticatedReadGeneration \+= 1;[\s\S]*readCache\.clear\(\);[\s\S]*inFlightReads\.clear\(\);/);
+  assert.match(source, /requestGeneration !== authenticatedReadGeneration[\s\S]*AUTH_CONTEXT_CHANGED/);
+  assert.match(source, /if \(inFlightReads\.get\(path\) === request\) inFlightReads\.delete\(path\)/);
+  assert.match(authContext, /const clearSession[\s\S]*clearAuthenticatedReadState\(\);/);
+  assert.match(authContext, /const saveSession[\s\S]*clearAuthenticatedReadState\(\);/);
 });
 
 test('high-cost monitoring and mobile hydration use bounded refresh cadences', () => {
@@ -48,12 +55,13 @@ test('high-cost monitoring and mobile hydration use bounded refresh cadences', (
   const mobileStore = fs.readFileSync(path.join(root, 'mobile/src/data/dataStore.js'), 'utf8');
   const mobileMonitor = fs.readFileSync(path.join(root, 'mobile/src/screens/SyncMonitorScreen.js'), 'utf8');
 
-  assert.match(webTelemetry, /intervalMs: 2 \* 60 \* 1000/);
+  assert.match(webTelemetry, /intervalMs: 10 \* 60 \* 1000/);
   assert.doesNotMatch(diagnosticsView, /setInterval/);
   assert.match(maintenanceView, /5 \* 60 \* 1000/);
-  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(mobileStore, /CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 \* 60 \* 60 \* 1000/);
   assert.match(mobileStore, /setInterval\(refresh, CLOUD_REFRESH_INTERVAL_MS\)/);
-  assert.match(mobileMonitor, /setInterval\(refresh, 2 \* 60 \* 1000\)/);
+  assert.match(mobileMonitor, /setInterval\(refresh, 10 \* 60 \* 1000\)/);
 });
 
 test('web startup excludes the Firestore SDK and lazy-loads role workspaces', () => {

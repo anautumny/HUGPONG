@@ -13,7 +13,7 @@ export default function BlockFarmModal({
   const isEditing = Boolean(farm?.id);
 
   const [name, setName] = useState('');
-  const [location, setLocation] = useState('');
+  const [address, setAddress] = useState('');
   const [declaredAreaHa, setDeclaredAreaHa] = useState('');
   const [managerUserId, setManagerUserId] = useState('');
 
@@ -25,12 +25,12 @@ export default function BlockFarmModal({
   useEffect(() => {
     if (farm) {
       setName(farm.name || '');
-      setLocation(farm.location || '');
+      setAddress(farm.address || farm.location || '');
       setDeclaredAreaHa(farm.declaredAreaHa ?? farm.declaredHa ?? '');
       setManagerUserId(farm.managerUserId || farm.farmManagerId || '');
     } else {
       setName('');
-      setLocation('');
+      setAddress('');
       setDeclaredAreaHa('');
       setManagerUserId('');
     }
@@ -44,7 +44,7 @@ export default function BlockFarmModal({
 
     const newErrors = {};
     const cleanName = name.trim();
-    const cleanLocation = location.trim();
+    const cleanAddress = address.trim();
     const parsedArea = parseFloat(declaredAreaHa);
 
     if (!cleanName) {
@@ -53,8 +53,8 @@ export default function BlockFarmModal({
       newErrors.name = 'Name must be at most 200 characters.';
     }
 
-    if (!cleanLocation) {
-      newErrors.location = 'Geographic location is required.';
+    if (!cleanAddress) {
+      newErrors.address = 'Address is required.';
     }
 
     if (!declaredAreaHa || isNaN(parsedArea) || parsedArea <= 0) {
@@ -71,14 +71,14 @@ export default function BlockFarmModal({
       if (isEditing) {
         await updateBlockFarm(farm.id, {
           name: cleanName,
-          location: cleanLocation,
+          address: cleanAddress,
           declaredAreaHa: parsedArea,
           managerUserId: managerUserId.trim() || null
         });
       } else {
         await createBlockFarm({
           name: cleanName,
-          location: cleanLocation,
+          address: cleanAddress,
           declaredAreaHa: parsedArea,
           managerUserId: managerUserId.trim() || null
         });
@@ -153,22 +153,22 @@ export default function BlockFarmModal({
           <Input
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="e.g. La Carlota Pioneer Block Farm Cooperative"
+            placeholder="e.g. Kapitan Ramon Block Farm Cooperative"
             disabled={isSubmitting}
           />
         </FormField>
 
-        {/* Location */}
+        {/* Address */}
         <FormField
-          label="Geographic Location"
+          label="Address"
           required
-          error={errors.location}
-          hint="Barangay, Municipality / City, Province"
+          error={errors.address}
+          hint="Barangay, City, Province"
         >
           <Input
-            value={location}
-            onChange={e => setLocation(e.target.value)}
-            placeholder="e.g. Brgy. RSB, La Carlota City, Negros Occidental"
+            value={address}
+            onChange={e => setAddress(e.target.value)}
+            placeholder="e.g. Brgy. Kapitan Ramon, Silay City, Negros Occidental"
             disabled={isSubmitting}
           />
         </FormField>

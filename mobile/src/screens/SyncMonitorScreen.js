@@ -121,7 +121,7 @@ export default function SyncMonitorScreen({ navigation }) {
     const start = () => {
       stop();
       refresh();
-      timer = setInterval(refresh, 2 * 60 * 1000);
+      timer = setInterval(refresh, 10 * 60 * 1000);
     };
     const unsubscribeFocus = navigation.addListener('focus', start);
     const unsubscribeBlur = navigation.addListener('blur', stop);

@@ -40,8 +40,9 @@ test('parallel API requests share one in-flight Firestore session read', async (
   )));
 
   const sessions = await Promise.all([read(), read(), read(), read(), read()]);
+  await read();
 
-  assert.equal(getCount, 1);
+  assert.equal(getCount, 1, 'the completed session read should be reused during the bounded cache window');
   assert.equal(sessions.length, 5);
   assert.notEqual(sessions[0], sessions[1]);
 });
@@ -78,17 +79,21 @@ test('Firestore-heavy background work is bounded and coalesced across clients an
   const server = source('../server.js');
   const syncContext = source('../../web/react-app/src/context/SyncContext.jsx');
 
-  assert.match(webApi, /READ_CACHE_TTL_MS = 60 \* 1000/);
-  assert.match(webApi, /DEFAULT_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(webApi, /READ_CACHE_TTL_MS = 2 \* 60 \* 1000/);
+  assert.match(webApi, /DEFAULT_REFRESH_INTERVAL_MS = 30 \* 60 \* 1000/);
+  assert.match(webApi, /FOCUS_REFRESH_MIN_AGE_MS = 10 \* 60 \* 1000/);
   assert.match(dashboard, /\/api\/prices\?limit=2/);
-  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 5 \* 60 \* 1000/);
-  assert.match(mobileStore, /CLOUD_REFRESH_FRESHNESS_MS = 2 \* 60 \* 1000/);
+  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(mobileStore, /CLOUD_REFRESH_FRESHNESS_MS = 5 \* 60 \* 1000/);
+  assert.match(mobileStore, /CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 \* 60 \* 60 \* 1000/);
   assert.match(mobileStorage, /serializedCache\.get\(key\) === jsonValue/);
-  assert.match(mobileTelemetry, /UNCHANGED_SYNC_REPORT_MS = 15 \* 60 \* 1000/);
+  assert.match(mobileTelemetry, /UNCHANGED_SYNC_REPORT_MS = 60 \* 60 \* 1000/);
+  assert.match(auth, /ACCOUNT_AUTH_CACHE_TTL_MS = 15 \* 1000/);
+  assert.match(server, /invalidateAuthenticatedAccounts\(\)/);
   assert.match(diagnostics, /collection\(COLLECTIONS\.FIELDS\)\.count\(\)\.get\(\)/);
   assert.match(diagnostics, /collection\(COLLECTIONS\.CROP_CYCLES\)\.count\(\)\.get\(\)/);
   assert.doesNotMatch(diagnostics, /collection\(COLLECTIONS\.FIELDS\)\.get\(\)/);
-  assert.match(prices, /orderBy\('effectiveDate', 'desc'\)\.limit\(requestedLimit\)/);
+  assert.match(prices, /orderBy\('effectiveDate', 'desc'\)[\s\S]{0,40}\.limit\(requestedLimit\)/);
   assert.match(auth, /inFlightAccountReads/);
   assert.doesNotMatch(serverTelemetry, /const current = await ref\.get\(\)/);
   assert.ok(server.indexOf("app.get('/health'") < server.indexOf('app.use(session({'));

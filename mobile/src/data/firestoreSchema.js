@@ -148,6 +148,8 @@ export function fromBlockFarmDocument(id, value = {}) {
   return {
     ...value,
     id,
+    address: String(value.address || value.location || '').trim(),
+    location: String(value.address || value.location || '').trim(),
     declaredHa: Number(value.declaredAreaHa || 0),
     farmManagerId: value.managerUserId || ''
   };
@@ -157,7 +159,7 @@ export function toBlockFarmDocument(value = {}) {
   return {
     code: String(value.code || '').trim().toUpperCase(),
     name: String(value.name || '').trim(),
-    location: String(value.location || '').trim(),
+    address: String(value.address || value.location || '').trim(),
     declaredAreaHa: Number(value.declaredAreaHa ?? value.declaredHa ?? 0),
     managerUserId: value.managerUserId || value.farmManagerId || null,
     status: String(value.status || 'ACTIVE').toUpperCase(),

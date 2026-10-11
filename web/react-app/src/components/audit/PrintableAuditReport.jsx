@@ -71,7 +71,7 @@ export default function PrintableAuditReport({
   // ── 1. Resolve Dynamic Farm & Report Metadata from System ─────────
   const farm = blockFarms.find(f => f.id === report.blockFarmId);
   const farmName = farm?.name || report.blockFarmName || report.blockFarmId || 'Block farm not provided';
-  const farmLocation = farm?.location || farm?.address || report?.blockFarmLocation || 'Location not provided';
+  const farmAddress = farm?.address || farm?.location || report?.blockFarmAddress || report?.blockFarmLocation || 'Address not provided';
 
   // Extract actual operation logs from report
   const operationLogs = Array.isArray(report.operationSnapshots)
@@ -196,8 +196,8 @@ export default function PrintableAuditReport({
           <div className="text-gray-900 font-bold">NAME OF BLOCK FARM</div>
           <div className="font-extrabold tracking-wide">{farmName}</div>
 
-          <div className="text-gray-900 font-bold">LOCATION</div>
-          <div className="font-semibold">{farmLocation}</div>
+          <div className="text-gray-900 font-bold">ADDRESS</div>
+          <div className="font-semibold">{farmAddress}</div>
 
           <div className="text-gray-900 font-bold">TOTAL AREA OF BLOCK FARM (HA)</div>
           <div className="font-mono font-bold">{totalFarmArea}</div>

@@ -290,8 +290,13 @@ export default function TakeOverView() {
     }
 
     const numArea = Number(areaHa);
+    const fieldAreaHa = Number(currentField?.areaHa ?? currentField?.ha);
     if (!areaHa || isNaN(numArea) || numArea <= 0) {
       setServerError('Please provide a valid area in hectares (> 0).');
+      return;
+    }
+    if (Number.isFinite(fieldAreaHa) && fieldAreaHa > 0 && numArea > fieldAreaHa + 0.0001) {
+      setServerError(`Hectares covered cannot exceed this field's registered area (${fieldAreaHa.toFixed(2)} ha).`);
       return;
     }
 
@@ -699,10 +704,17 @@ export default function TakeOverView() {
 
           {/* Hectares & Workers */}
           <div className="grid grid-cols-2 gap-3.5">
-            <FormField id="takeover-ha-input" label="Hectares Covered" required>
+            <FormField
+              id="takeover-ha-input"
+              label="Hectares Covered"
+              required
+              helperText={`Maximum: ${Number(currentField?.areaHa ?? currentField?.ha ?? 0).toFixed(2)} ha registered for this field`}
+            >
               <Input
                 id="takeover-ha-input"
                 type="number"
+                min="0.01"
+                max={Number(currentField?.areaHa ?? currentField?.ha) || undefined}
                 step="0.1"
                 suffix="ha"
                 value={areaHa}

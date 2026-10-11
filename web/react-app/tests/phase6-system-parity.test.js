@@ -210,6 +210,15 @@ test('Farm Manager Field Operations exposes monthly audit compilation directly',
   assert.match(auditCenter, /setShowCompileModal\(true\)/);
 });
 
+test('Audit Center keeps the inspection panel empty until a report is explicitly selected', () => {
+  const auditCenter = fs.readFileSync(path.resolve(testDir, '../src/views/audit/AuditCenterView.jsx'), 'utf8');
+
+  assert.match(auditCenter, /setSelectedReport\(null\);[\s\S]*subscribeToAuditReports/);
+  assert.match(auditCenter, /if \(!current\) return null;/);
+  assert.doesNotMatch(auditCenter, /return updatedReports\.find\([\s\S]{0,160}updatedReports\[0\]/);
+  assert.match(auditCenter, /AuditHistoryModal[\s\S]*onSelectReport=\{\(report\) => setSelectedReport\(report\)\}/);
+});
+
 test('web field operations queues stage completion offline and labels it pending', () => {
   const operations = fs.readFileSync(path.resolve(testDir, '../src/views/operations/OperationsView.jsx'), 'utf8');
   const outbox = fs.readFileSync(path.resolve(testDir, '../src/services/cropStageOutbox.js'), 'utf8');

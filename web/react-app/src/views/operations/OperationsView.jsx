@@ -1675,6 +1675,7 @@ export default function OperationsView() {
       {/* 3. Edit Operation Modal */}
       <EditOperationModal
         operation={editTarget}
+        field={editTarget ? fieldsData.fields.find(field => field.id === editTarget.fieldId) : null}
         takeoverGrant={editTarget && getOperationCapabilities(
           user,
           fieldsData.fields.find(field => field.id === editTarget.fieldId),

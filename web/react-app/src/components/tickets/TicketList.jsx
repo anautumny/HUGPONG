@@ -3,7 +3,7 @@ import { Search, LifeBuoy, Clock, ChevronDown, ChevronUp, ChevronLeft, ChevronRi
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
-import { TICKET_CATEGORIES } from '../../domain/supportTickets';
+import { TICKET_CATEGORIES, nextTicketStatus } from '../../domain/supportTickets';
 
 export default function TicketList({
   tickets = [],
@@ -259,7 +259,7 @@ export default function TicketList({
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                    {isSuperAdmin && (
+                    {isSuperAdmin && nextTicketStatus(t.status) && (
                       <Button
                         variant="outline"
                         size="sm"

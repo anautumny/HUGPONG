@@ -524,7 +524,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             <Card style={s.contentCard}>
               <Text style={s.sectionHeaderTag}>6-STAGE CROP GROWTH DISTRIBUTION</Text>
               <Text style={s.cardDescText}>
-                Active parcel location across the six-stage sugarcane lifecycle (Month 0 to Month 12).
+                Active parcel progress across the six-stage sugarcane lifecycle (Month 0 to Month 12).
               </Text>
               <StageDistributionList
                 stages={cropProgress.stagesDistribution}

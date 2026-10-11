@@ -150,11 +150,17 @@ test('Farm Manager and SRA Admin can discover their support tickets from their p
 
 test('support summaries remain readable in history and mobile refreshes authoritative ticket status', () => {
   const webTicketsView = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/views/support/TicketsView.jsx'), 'utf8');
+  const webTicketList = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/tickets/TicketList.jsx'), 'utf8');
+  const webManageModal = fs.readFileSync(path.resolve(__dirname, '../../web/react-app/src/components/tickets/ResolveTicketModal.jsx'), 'utf8');
+  const mobileProfile = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/ProfileScreen.js'), 'utf8');
   const mobileStore = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/data/dataStore.js'), 'utf8');
 
   assert.match(webTicketsView, /\{isSuperAdmin && \(/);
   assert.doesNotMatch(webTicketsView, /isSuperAdmin && view === 'active'/);
   assert.match(webTicketsView, /text-slate-900 dark:text-white/);
+  assert.match(webTicketList, /isSuperAdmin && nextTicketStatus\(t\.status\) && \(/);
+  assert.match(webManageModal, /if \(!ticket \|\| !nextStatus\) return null/);
+  assert.doesNotMatch(mobileProfile, /Manage (?:Support )?Ticket/);
   assert.match(mobileStore, /export const refreshSupportTicketsFromServer/);
   assert.match(mobileStore, /api\/tickets\?view=history&limit=50/);
 });

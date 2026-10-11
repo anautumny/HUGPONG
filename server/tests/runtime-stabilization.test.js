@@ -322,6 +322,21 @@ test('mobile publishes agricultural sync telemetry only for member and manager s
   assert.match(dataStore, /CURRENT_SESSION\.name && canReportAgriculturalSyncTelemetry\(\)/);
 });
 
+test('web and mobile reset account-scoped caches and telemetry across sign-in changes', () => {
+  const webAuth = read('web/react-app/src/context/AuthContext.jsx');
+  const webApi = read('web/react-app/src/services/apiClient.js');
+  const webTelemetry = read('web/react-app/src/services/telemetryService.js');
+  const mobileStore = read('mobile/src/data/dataStore.js');
+  const mobileTelemetry = read('mobile/src/services/telemetryService.js');
+
+  assert.match(webAuth, /clearAuthenticatedReadState\(\);/);
+  assert.match(webAuth, /resetWebTelemetryState\(\);/);
+  assert.match(webApi, /AUTH_CONTEXT_CHANGED/);
+  assert.match(webTelemetry, /export function resetWebTelemetryState\(\)/);
+  assert.match(mobileStore, /resetMobileTelemetryState\(\);[\s\S]*clearCanonicalRuntimeData\(\);/);
+  assert.match(mobileTelemetry, /export function resetMobileTelemetryState\(\)/);
+});
+
 test('startup migration recovers stale syncing entries as retryable', () => {
   assert.match(outboxCore, /status === 'syncing'.*return 'retryable'/);
   assert.match(syncEngine, /migrateOutbox\(savedOutbox(?:,\s*\{[^}]+\})?\)/);

@@ -31,7 +31,7 @@ export function calculateSRAWeekLabel(dateString) {
  * @param {Function} [options.onError]
  */
 export function subscribeToPrices({ onUpdate, onError }) {
-  return subscribeToAuthenticatedResource('/api/prices', {
+  return subscribeToAuthenticatedResource('/api/prices?limit=52', {
     onData: response => {
       const prices = sortNewestFirst((response.data || []).map(item => fromPrice(item.id, item)), ['effectiveDate']);
       onUpdate({
@@ -52,7 +52,7 @@ export function subscribeToPrices({ onUpdate, onError }) {
  * Fetch historical prices via API
  */
 export async function fetchPrices() {
-  return authenticatedRequest('/api/prices');
+  return authenticatedRequest('/api/prices?limit=100');
 }
 
 /**

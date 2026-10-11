@@ -140,7 +140,7 @@ export function AnalyticsScopeModal({
                   ...farms.map(f => ({
                     id: f.id,
                     label: f.name,
-                    sublabel: f.location || `${f.hectares || 0} Ha`,
+                    sublabel: f.address || f.location || `${f.hectares || 0} Ha`,
                     icon: 'business-outline'
                   }))
                 ]}

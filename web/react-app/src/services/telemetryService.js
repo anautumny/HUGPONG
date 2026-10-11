@@ -1,11 +1,17 @@
 import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
 
 const CLIENT_INSTANCE_KEY = 'hugpong_web_client_instance_id';
-const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
-const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 60 * 60 * 1000;
+const UNCHANGED_SYNC_REPORT_MS = 60 * 60 * 1000;
 let lastHeartbeatAt = 0;
 let lastSyncReportAt = 0;
 let lastSyncSignature = '';
+
+export function resetWebTelemetryState() {
+  lastHeartbeatAt = 0;
+  lastSyncReportAt = 0;
+  lastSyncSignature = '';
+}
 
 export function getWebClientInstanceId() {
   let value = localStorage.getItem(CLIENT_INSTANCE_KEY);
@@ -50,7 +56,7 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
     const connectionState = navigator.onLine === false ? 'OFFLINE' : 'ONLINE';
     signature = JSON.stringify({ pendingMutationCount, failedMutationCount, syncState, connectionState });
     const now = Date.now();
-    if (!syncSucceeded && signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
+    if (signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
       return { throttled: true };
     }
     lastSyncSignature = signature;
@@ -95,7 +101,7 @@ export function subscribeToTerminalDiagnostics({ onUpdate, onError }) {
     error: null
   });
   const unsubscribe = subscribeToAuthenticatedResource('/api/terminal-diagnostics?limit=50', {
-    intervalMs: 2 * 60 * 1000,
+    intervalMs: 10 * 60 * 1000,
     onData: response => {
       subjects = response.data?.subjects || [];
       scope = response.data?.scope || {};

@@ -143,6 +143,11 @@ export default function AuditCenterView() {
 
   // Subscribe to audit reports
   useEffect(() => {
+    // A newly opened Audit Center is an inspection workspace, not a report
+    // viewer. Never reveal the newest (including previously certified) report
+    // until the user explicitly selects one from the active queue, QR tools,
+    // or Audit History.
+    setSelectedReport(null);
     const unsub = subscribeToAuditReports({
       blockFarmId: isFarmManager ? user?.blockFarmId : null,
       view: isSraAdmin ? 'inbox' : 'manager',
@@ -152,12 +157,10 @@ export default function AuditCenterView() {
         setIsLoadingReports(isLoading);
         setReportsError(error);
 
-        // Maintain selection or select first report
+        // Refresh an explicitly selected report, but never manufacture a
+        // selection merely because records were downloaded in the background.
         setSelectedReport(current => {
-          if (!current && updatedReports.length > 0) {
-            // Prefer pending report first
-            return updatedReports.find(r => ['PENDING_REVIEW', 'PENDING'].includes(r.status)) || updatedReports[0];
-          }
+          if (!current) return null;
           if (current) {
             const updated = updatedReports.find(r => r.id === current.id || r.reportId === current.id);
             return updated || current;

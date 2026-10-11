@@ -73,6 +73,30 @@ class MemoryDb {
       }
     };
   }
+  async runTransaction(handler) {
+    const writes = [];
+    const transaction = {
+      get: async target => {
+        if (target instanceof MemoryRef) return target.get();
+        return target.get();
+      },
+      create: (ref, value) => writes.push({ type: 'create', ref, value }),
+      update: (ref, value) => writes.push({ type: 'update', ref, value }),
+      set: (ref, value) => writes.push({ type: 'set', ref, value })
+    };
+    const result = await handler(transaction);
+    for (const write of writes) {
+      if (write.type === 'create') {
+        this.create(write.ref, write.value);
+        continue;
+      }
+      if (!this.records.has(write.ref.collection)) this.records.set(write.ref.collection, new Map());
+      const records = this.records.get(write.ref.collection);
+      if (write.type === 'update') records.set(write.ref.id, { ...(records.get(write.ref.id) || {}), ...write.value });
+      else records.set(write.ref.id, { ...write.value });
+    }
+    return result;
+  }
 }
 
 function responseCapture() {

@@ -163,6 +163,7 @@ function database() {
       [FIELD_ID]: {
         blockFarmId: 'BLK-TEST-001',
         memberUserId: USER.employeeId,
+        areaHa: 1,
         currentCycleId: OLD_CYCLE_ID,
         status: 'ACTIVE',
         updatedAt: '2026-09-16T08:00:00.000Z'
@@ -591,6 +592,28 @@ test('new operations receive server-derived lifecycle snapshots and discard clie
   assert.equal(result.record.cropYearCycle, '2025-2026');
   assert.equal(result.record.stageNumberAtRecord, 1);
   assert.equal(result.record.photoEvidence, null);
+});
+
+test('operation creation and amendments cannot exceed the registered field area', async () => {
+  const createDb = database();
+  await assert.rejects(
+    createOperationRecord(createDb, {
+      id: 'LOG-OVERSIZED-AREA',
+      ...operation({ areaHa: 1.01 })
+    }, USER, NOW),
+    error => error.status === 409 && error.data?.code === 'FIELD_OPERATION_AREA_EXCEEDED'
+  );
+  assert.equal(createDb.get(COLLECTIONS.OPERATION_LOGS, 'LOG-OVERSIZED-AREA'), undefined);
+
+  const amendDb = database();
+  await createOperationRecord(amendDb, { id: 'LOG-AREA-AMEND', ...operation() }, USER, NOW);
+  await assert.rejects(
+    amendOperationRecord(amendDb, 'LOG-AREA-AMEND', { areaHa: 1.01 }, {
+      amendmentId: 'AMD-OVERSIZED-AREA',
+      reason: 'Incorrect field coverage'
+    }, USER, '2026-09-17T08:01:00.000Z'),
+    error => error.status === 409 && error.data?.code === 'FIELD_OPERATION_AREA_EXCEEDED'
+  );
 });
 
 test('operations before and after rollover remain linked to their original Crop Year Cycles', async () => {

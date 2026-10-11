@@ -18,6 +18,7 @@ const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = req
 const { uniqueRecordsById } = require('../domain/recordIdentity');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { queueAuditEvent } = require('../services/auditWriter');
+const { assertDeclaredAreaCoversFields } = require('../domain/landArea');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -71,8 +72,8 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
     const payload = {
       code: blockFarmId,
       name,
-      location: requiredString(req.body.location, 'location', { max: 300 }),
-      declaredAreaHa: finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 }),
+      address: requiredString(req.body.address ?? req.body.location, 'address', { max: 300 }),
+      declaredAreaHa: finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0.01, max: 100000 }),
       managerUserId,
       status: 'ACTIVE',
       createdAt: now,
@@ -110,15 +111,21 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
     const managerAssignmentRequested = req.body.managerUserId !== undefined;
     const requestedManagerUserId = managerAssignmentRequested ? nullableId(req.body.managerUserId) : null;
     const requestedName = req.body.name === undefined ? null : requiredString(req.body.name, 'name', { max: 200 });
-    const requestedLocation = req.body.location === undefined ? null : requiredString(req.body.location, 'location', { max: 300 });
+    const addressRequested = req.body.address !== undefined || req.body.location !== undefined;
+    const requestedAddress = addressRequested
+      ? requiredString(req.body.address ?? req.body.location, 'address', { max: 300 })
+      : null;
     const requestedAreaHa = req.body.declaredAreaHa === undefined
       ? null
-      : finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0, max: 100000 });
+      : finiteNumber(req.body.declaredAreaHa, 'declaredAreaHa', { min: 0.01, max: 100000 });
     const payload = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Block farm not found.'), { status: 404 });
       const latest = latestSnapshot.data();
       assertBaseVersion(latest.updatedAt, mutationContext, blockFarmId, { id: blockFarmId, ...latest });
+      const farmFieldsSnapshot = await transaction.get(
+        db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', blockFarmId)
+      );
       const managerUserId = managerAssignmentRequested ? requestedManagerUserId : latest.managerUserId;
       let managerFarms = null;
       if (managerUserId) {
@@ -133,11 +140,17 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
         );
       }
       const updatedAt = nowIso();
+      const declaredAreaHa = requestedAreaHa === null ? (latest.declaredAreaHa ?? latest.declaredHa) : requestedAreaHa;
+      assertDeclaredAreaCoversFields({
+        declaredAreaHa,
+        fields: farmFieldsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+        blockFarmId
+      });
       const nextPayload = {
         code: latest.code || blockFarmId,
         name: requestedName === null ? latest.name : requestedName,
-        location: requestedLocation === null ? latest.location : requestedLocation,
-        declaredAreaHa: requestedAreaHa === null ? latest.declaredAreaHa : requestedAreaHa,
+        address: requestedAddress === null ? (latest.address || latest.location) : requestedAddress,
+        declaredAreaHa,
         managerUserId,
         status: latest.status,
         createdAt: latest.createdAt,

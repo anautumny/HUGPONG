@@ -136,7 +136,7 @@ export default function FieldDetailModal({
               Farm ID: {field.blockFarmId}
             </p>
             <p className="text-[11px] text-hug-muted">
-              Aggregated under SRA cooperative boundary jurisdiction.
+              Registered under this SRA cooperative Block Farm.
             </p>
           </div>
         </div>

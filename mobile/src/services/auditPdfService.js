@@ -158,7 +158,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
 
   const farm = blockFarms.find(item => item.id === report.blockFarmId) || {};
   const farmName = farm.name || report.blockFarmName || report.blockFarm || report.blockFarmId || 'Block farm not provided';
-  const farmLocation = farm.location || farm.address || report.blockFarmLocation || 'Location not provided';
+  const farmAddress = farm.address || farm.location || report.blockFarmAddress || report.blockFarmLocation || 'Address not provided';
   const operations = Array.isArray(report.operationSnapshots)
     ? report.operationSnapshots
     : (Array.isArray(report.operations) ? report.operations : (Array.isArray(report.logs) ? report.logs : []));
@@ -292,7 +292,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
             <div>REPORTING MONTH</div><div class="value">${escapeHtml(period)}</div>
             <div>CROP YEAR CYCLE</div><div class="value">${escapeHtml(cropYearDisplay)}</div>
             <div>NAME OF BLOCK FARM</div><div class="value">${escapeHtml(farmName)}</div>
-            <div>LOCATION</div><div class="value">${escapeHtml(farmLocation)}</div>
+            <div>ADDRESS</div><div class="value">${escapeHtml(farmAddress)}</div>
             <div>TOTAL AREA OF BLOCK FARM (HA)</div><div class="value">${totalFarmArea}</div>
             <div>TOTAL AREA FOR NEW PLANT (HA)</div><div class="value">${auditedArea}</div>
           </div>

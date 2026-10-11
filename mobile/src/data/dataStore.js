@@ -1,7 +1,7 @@
-import { STORAGE_KEYS, saveItem, getItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
+import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId, removeOutboxItem } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
-import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync } from '../services/telemetryService';
+import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync, resetMobileTelemetryState } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AppState } from 'react-native';
@@ -186,51 +186,11 @@ let sraOfflineSnapshotStatus = {
 export const getSraCertifiedAuditHistory = () => [...sraCertifiedAuditHistory];
 export const getSraOfflineSnapshotStatus = () => ({ ...sraOfflineSnapshotStatus });
 
-export const assignmentRequests = [];
-
 export const supportTickets = [];
 
 export const systemHistory = [];
 let auditEventsNextCursor = null;
 let auditEventsHasMore = false;
-
-export const requestFieldAssignment = (fieldId, memberName, ha, memberId = null) => {
-  const curSession = getCurrentSession();
-  const newReq = {
-    id: createClientRecordId('REQ'),
-    fieldId: String(fieldId || '').trim().toUpperCase(),
-    member: memberName || curSession.name || 'Unassigned',
-    memberUserId: memberId || curSession.employeeId || curSession.id || '',
-    ha: ha == null ? '' : String(ha),
-    status: 'Pending',
-    timestamp: new Date().toISOString(),
-    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  };
-  assignmentRequests.unshift(newReq);
-  notifyDataUpdate();
-  return newReq;
-};
-
-export const resolveAssignmentRequest = (requestId, approved = true) => {
-  const req = assignmentRequests.find(r => r.id === requestId);
-  if (req) {
-    req.status = approved ? 'Approved' : 'Rejected';
-    if (approved) {
-      const f = fields.find(item => item.id === req.fieldId);
-      const member = users.find(user => (user.id || user.employeeId) === req.memberUserId);
-      if (!f || !member || canonicalRole(member.role) !== 'MEMBER_FARMER') {
-        req.status = 'Rejected';
-        req.error = 'Assignment requires an existing field and Farm Member.';
-        notifyDataUpdate();
-        return req;
-      }
-      f.memberUserId = req.memberUserId;
-      if (req.ha) f.ha = parseFloat(req.ha);
-    }
-    notifyDataUpdate();
-  }
-  return req;
-};
 
 // ── Pending Member Registrations ──
 export const pendingUsers = [];
@@ -245,7 +205,6 @@ const clearCanonicalRuntimeData = () => {
     fields,
     operationLogs,
     auditReports,
-    assignmentRequests,
     supportTickets,
     systemHistory,
     pendingUsers
@@ -584,8 +543,26 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   
   const currentF = existingIdx >= 0 ? fields[existingIdx] : {};
   const resolvedBlockFarmId = String(fieldData.blockFarmId || currentF.blockFarmId || '').trim().toUpperCase();
-  if (!resolvedBlockFarmId || !blockFarms.some(farm => farm.id === resolvedBlockFarmId)) {
+  const resolvedBlockFarm = blockFarms.find(farm => farm.id === resolvedBlockFarmId);
+  if (!resolvedBlockFarmId || !resolvedBlockFarm) {
     return { success: false, error: 'BLOCK_FARM_NOT_FOUND', message: 'Select an existing block farm before saving the field.' };
+  }
+  const declaredAreaHa = Number(resolvedBlockFarm.declaredAreaHa ?? resolvedBlockFarm.declaredHa);
+  if (Number.isFinite(declaredAreaHa)) {
+    const allocatedAreaHa = fields
+      .filter(field => field.id !== targetId && field.blockFarmId === resolvedBlockFarmId && String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .reduce((sum, field) => {
+        const area = Number(field.areaHa ?? field.ha ?? 0);
+        return sum + (Number.isFinite(area) && area > 0 ? area : 0);
+      }, 0);
+    const remainingAreaHa = Math.max(0, Number((declaredAreaHa - allocatedAreaHa).toFixed(4)));
+    if (validation.parsedHa > remainingAreaHa + 0.0001) {
+      return {
+        success: false,
+        error: 'BLOCK_FARM_AREA_EXCEEDED',
+        message: `Field area exceeds the Block Farm's remaining declared area (${remainingAreaHa.toFixed(2)} ha available).`
+      };
+    }
   }
 
   if (isNew && !getNetworkStatus()) {
@@ -888,6 +865,7 @@ export const priceAnalytics = {
 // stores opaque tokens only and never creates or validates authentication tokens.
 
 export const clearAuthSessionStorage = async () => {
+  resetMobileTelemetryState();
   try {
     await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
   } catch (e) {
@@ -908,6 +886,7 @@ const clearSharedAccountCache = () => removeItems([
   STORAGE_KEYS.PENDING_USERS,
   STORAGE_KEYS.CUSTOM_STAGES,
   STORAGE_KEYS.LAST_SYNC,
+  STORAGE_KEYS.CLOUD_REFRESH_META,
   STORAGE_KEYS.AUDIT_REPORTS,
   STORAGE_KEYS.SYSTEM_HISTORY,
   STORAGE_KEYS.READ_NOTIF_IDS,
@@ -1035,6 +1014,7 @@ export const authenticateUser = async (contactOrId, password) => {
       await logoutFromServer();
       return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
+    resetMobileTelemetryState();
     clearCanonicalRuntimeData();
     CURRENT_SESSION = { ...normalizeSessionUser(result.user), lastActiveAt: Date.now() };
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
@@ -1446,7 +1426,6 @@ const persistAllToStorage = () => {
         [STORAGE_KEYS.FIELDS, fields],
         [STORAGE_KEYS.TICKETS, supportTickets],
         [STORAGE_KEYS.PREFS, SECURITY_PREFERENCES],
-        [STORAGE_KEYS.PENDING_ASSIGNMENTS, assignmentRequests],
         [STORAGE_KEYS.PENDING_USERS, pendingUsers],
         [STORAGE_KEYS.AUDIT_REPORTS, auditReports],
         [STORAGE_KEYS.SYSTEM_HISTORY, systemHistory],
@@ -2611,8 +2590,9 @@ export const resetLocalCache = async () => {
 // The durable outbox remains responsible for offline mutations; this refresh
 // only replaces canonical read replicas after a successful API response.
 const responseRecords = response => Array.isArray(response?.data) ? response.data : [];
-const CLOUD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const CLOUD_REFRESH_FRESHNESS_MS = 2 * 60 * 1000;
+const CLOUD_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const CLOUD_REFRESH_FRESHNESS_MS = 5 * 60 * 1000;
+const CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 export const listenToCloudSync = () => {
   let active = true;
@@ -2621,6 +2601,11 @@ export const listenToCloudSync = () => {
   let appState = AppState.currentState;
   let appStateSubscription = null;
   let lastSuccessfulRefreshAt = 0;
+  const startingUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+  const cachedRefreshMeta = getCachedItem(STORAGE_KEYS.CLOUD_REFRESH_META, {});
+  let lastExtendedRefreshAt = String(cachedRefreshMeta?.ownerUserId || '').trim() === startingUserId
+    ? Number(cachedRefreshMeta?.refreshedAt) || 0
+    : 0;
 
   const stop = () => {
     active = false;
@@ -2631,7 +2616,7 @@ export const listenToCloudSync = () => {
     if (activeCloudRefresh === refresh) activeCloudRefresh = null;
   };
 
-  const refresh = async ({ force = false } = {}) => {
+  const refresh = async ({ force = false, extended = false } = {}) => {
     if (!active || requestInFlight || (appState && appState !== 'active') || !getNetworkStatus()) return;
     if (!force && Date.now() - lastSuccessfulRefreshAt < CLOUD_REFRESH_FRESHNESS_MS) return true;
 
@@ -2650,6 +2635,8 @@ export const listenToCloudSync = () => {
 
     requestInFlight = true;
     try {
+      const includeExtended = extended
+        || Date.now() - lastExtendedRefreshAt >= CLOUD_EXTENDED_REFRESH_INTERVAL_MS;
       const canReadUserDirectory = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
       const canReadAuditReports = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(activeRole);
       const canReadAuditEvents = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
@@ -2670,13 +2657,13 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/fields'),
         authenticatedRequest('/api/crop-cycles'),
         authenticatedRequest('/api/logs'),
-        authenticatedRequest('/api/prices'),
-        authenticatedRequest('/api/tickets'),
-        authenticatedRequest('/api/tickets?view=history&limit=20'),
-        canReadUserDirectory ? authenticatedRequest('/api/users?limit=50') : Promise.resolve({ data: [] }),
+        authenticatedRequest('/api/prices?limit=52'),
+        includeExtended ? authenticatedRequest('/api/tickets') : Promise.resolve(null),
+        includeExtended ? authenticatedRequest('/api/tickets?view=history&limit=20') : Promise.resolve(null),
+        includeExtended && canReadUserDirectory ? authenticatedRequest('/api/users?limit=50') : Promise.resolve(null),
         canReadAuditReports ? authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
-        activeRole === ROLES.SRA_ADMIN ? authenticatedRequest('/api/audit-reports?view=history&limit=50') : Promise.resolve({ data: [] }),
-        canReadAuditEvents ? authenticatedRequest('/api/audit-events?limit=50') : Promise.resolve({ data: [] })
+        includeExtended && activeRole === ROLES.SRA_ADMIN ? authenticatedRequest('/api/audit-reports?view=history&limit=50') : Promise.resolve(null),
+        includeExtended && canReadAuditEvents ? authenticatedRequest('/api/audit-events?limit=50') : Promise.resolve(null)
       ]);
 
       if (!active) return;
@@ -2720,20 +2707,29 @@ export const listenToCloudSync = () => {
       });
       const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate', 'publishedAt']);
 
-      const pendingTicketOverlays = supportTickets.filter(ticket => ticket.status === SUPPORT_TICKET_STATUS.PENDING_SUBMISSION);
-      const canonicalTickets = [...responseRecords(ticketsResponse), ...responseRecords(ticketHistoryResponse)]
-        .map(record => fromSupportTicketDocument(record.id, record));
+      const pendingTicketOverlays = includeExtended
+        ? supportTickets.filter(ticket => ticket.status === SUPPORT_TICKET_STATUS.PENDING_SUBMISSION)
+        : [];
+      const canonicalTickets = includeExtended
+        ? [...responseRecords(ticketsResponse), ...responseRecords(ticketHistoryResponse)]
+          .map(record => fromSupportTicketDocument(record.id, record))
+        : [];
       const canonicalTicketIds = new Set(canonicalTickets.map(ticket => ticket.id));
-      const remoteTickets = sortNewestFirst([
-        ...pendingTicketOverlays.filter(ticket => !canonicalTicketIds.has(ticket.id)),
-        ...canonicalTickets
-      ], ['updatedAt', 'createdAt']);
-      const remoteUsers = canReadUserDirectory
+      const remoteTickets = includeExtended
+        ? sortNewestFirst([
+          ...pendingTicketOverlays.filter(ticket => !canonicalTicketIds.has(ticket.id)),
+          ...canonicalTickets
+        ], ['updatedAt', 'createdAt'])
+        : [];
+      const remoteUsers = includeExtended && canReadUserDirectory
         ? responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record))
         : [];
-      userDirectoryNextCursor = usersResponse.page?.nextCursor || null;
-      userDirectoryHasMore = Boolean(usersResponse.page?.hasMore && userDirectoryNextCursor);
-      const remoteUserById = new Map(remoteUsers.flatMap(user => {
+      if (includeExtended && canReadUserDirectory) {
+        userDirectoryNextCursor = usersResponse.page?.nextCursor || null;
+        userDirectoryHasMore = Boolean(usersResponse.page?.hasMore && userDirectoryNextCursor);
+      }
+      const directoryUsers = includeExtended ? remoteUsers : users;
+      const remoteUserById = new Map(directoryUsers.flatMap(user => {
         const ids = [user.id, user.employeeId, user.userId].filter(Boolean).map(String);
         return ids.map(id => [id, user]);
       }));
@@ -2747,7 +2743,7 @@ export const listenToCloudSync = () => {
       const remoteReports = canReadAuditReports
         ? sortNewestFirst(responseRecords(reportsResponse).map(record => fromAuditReportDocument(record.id, record)), ['compiledAt', 'createdAt'])
         : [];
-      const remoteCertifiedHistory = activeRole === ROLES.SRA_ADMIN
+      const remoteCertifiedHistory = includeExtended && activeRole === ROLES.SRA_ADMIN
         ? sortNewestFirst(
           responseRecords(certifiedHistoryResponse)
             .map(record => fromAuditReportDocument(record.id, record))
@@ -2788,11 +2784,13 @@ export const listenToCloudSync = () => {
         });
       }
       const reconciledReports = sortNewestFirst(Array.from(reconciledReportsById.values()), ['compiledAt', 'createdAt']);
-      const remoteHistory = canReadAuditEvents
+      const remoteHistory = includeExtended && canReadAuditEvents
         ? sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt'])
         : [];
-      auditEventsNextCursor = auditEventsResponse.page?.nextCursor || null;
-      auditEventsHasMore = Boolean(auditEventsResponse.page?.hasMore && auditEventsNextCursor);
+      if (includeExtended && canReadAuditEvents) {
+        auditEventsNextCursor = auditEventsResponse.page?.nextCursor || null;
+        auditEventsHasMore = Boolean(auditEventsResponse.page?.hasMore && auditEventsNextCursor);
+      }
 
       blockFarms.length = 0;
       blockFarms.push(...remoteBlockFarms);
@@ -2806,9 +2804,11 @@ export const listenToCloudSync = () => {
       operationLogs.push(...reconciledLogs);
       priceHistory.length = 0;
       priceHistory.push(...orderedRemotePrices);
-      supportTickets.length = 0;
-      supportTickets.push(...remoteTickets);
-      if (canReadUserDirectory) {
+      if (includeExtended) {
+        supportTickets.length = 0;
+        supportTickets.push(...remoteTickets);
+      }
+      if (includeExtended && canReadUserDirectory) {
         users.length = 0;
         users.push(...remoteUsers);
         pendingUsers.length = 0;
@@ -2818,13 +2818,14 @@ export const listenToCloudSync = () => {
         auditReports.length = 0;
         auditReports.push(...reconciledReports);
       }
-      if (canReadAuditEvents) {
+      if (includeExtended && canReadAuditEvents) {
         systemHistory.length = 0;
         systemHistory.push(...remoteHistory);
       }
 
-      const snapshotSyncedAt = new Date().toISOString();
-      if (activeRole === ROLES.SRA_ADMIN) {
+      const refreshCompletedAt = Date.now();
+      const snapshotSyncedAt = new Date(refreshCompletedAt).toISOString();
+      if (includeExtended && activeRole === ROLES.SRA_ADMIN) {
         sraCertifiedAuditHistory.length = 0;
         sraCertifiedAuditHistory.push(...remoteCertifiedHistory);
         sraOfflineSnapshotStatus = {
@@ -2839,6 +2840,7 @@ export const listenToCloudSync = () => {
       const pendingCount = getPendingSyncCount(CURRENT_SESSION);
       IS_SYNCED = pendingCount === 0;
       CURRENT_SESSION.pendingLogs = pendingCount;
+      let replicaCacheSaved = false;
 
       if (activeRole === ROLES.SRA_ADMIN) {
         const sraSnapshot = JSON.parse(JSON.stringify({
@@ -2855,6 +2857,7 @@ export const listenToCloudSync = () => {
           certifiedAuditReports: sraCertifiedAuditHistory
         }));
         const snapshotSaved = await saveItem(sraOfflineSnapshotStorageKey(sessionUserId), sraSnapshot);
+        replicaCacheSaved = snapshotSaved;
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
         if (snapshotSaved) {
           await removeItems([
@@ -2883,16 +2886,23 @@ export const listenToCloudSync = () => {
           [STORAGE_KEYS.TICKETS, supportTickets],
           [STORAGE_KEYS.SESSION, CURRENT_SESSION]
         ];
-        if (canReadUserDirectory) {
+        if (includeExtended && canReadUserDirectory) {
           cacheEntries.push([STORAGE_KEYS.USERS, users]);
           cacheEntries.push([STORAGE_KEYS.PENDING_USERS, pendingUsers]);
         }
         if (canReadAuditReports) cacheEntries.push([STORAGE_KEYS.AUDIT_REPORTS, auditReports]);
-        if (canReadAuditEvents) cacheEntries.push([STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]);
-        await multiSave(cacheEntries);
+        if (includeExtended && canReadAuditEvents) cacheEntries.push([STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]);
+        replicaCacheSaved = await multiSave(cacheEntries);
+      }
+      if (includeExtended && replicaCacheSaved) {
+        await saveItem(STORAGE_KEYS.CLOUD_REFRESH_META, {
+          ownerUserId: sessionUserId,
+          refreshedAt: refreshCompletedAt
+        });
       }
       if (active) notify();
-      lastSuccessfulRefreshAt = Date.now();
+      lastSuccessfulRefreshAt = refreshCompletedAt;
+      if (includeExtended) lastExtendedRefreshAt = lastSuccessfulRefreshAt;
       return true;
     } catch (error) {
       if (error.status === 401) {
@@ -2907,6 +2917,8 @@ export const listenToCloudSync = () => {
   };
 
   activeCloudRefresh = refresh;
+  // Cached secondary data survives restarts, so reopening the app within the
+  // extended window performs only the smaller operational refresh.
   stop.initialRefresh = refresh();
   // Foregrounding and explicit sync still refresh immediately. The periodic
   // fallback is intentionally infrequent because one refresh fans out across
@@ -3155,7 +3167,7 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
     }
 
     try {
-      const refreshed = await refreshMobileSessionFromFirebase();
+      const refreshed = await refreshMobileSessionFromFirebase({ forceRefresh: true });
       if (refreshed?.user) {
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);

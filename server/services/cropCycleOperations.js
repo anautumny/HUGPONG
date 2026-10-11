@@ -24,6 +24,7 @@ const { completeMatchingScheduleEntry } = require('../domain/operationSchedule')
 const { assertBaseVersion } = require('./mutationContext');
 const { createSystemId } = require('../domain/systemIds');
 const { queueAuditEvent } = require('./auditWriter');
+const { assertOperationFitsField } = require('../domain/landArea');
 
 const MAX_ATOMIC_ROLLOVER_LOGS = 496;
 function serviceError(message, status = 400, data) {
@@ -226,6 +227,7 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       submissionSource: access.authorization.submissionSource,
       photoEvidence: null
     }, { submittedByUserId: access.actorId, now: timestamp });
+    assertOperationFitsField(payload.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
 
     if (payload.childOperationDefinitionId && payload.childOperationDefinitionId !== 'CUSTOM') {
       const canonicalComponentId = value => String(value || '')
@@ -359,6 +361,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       amendments: existing.amendments || []
     };
     const canonicalUpdate = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    assertOperationFitsField(canonicalUpdate.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
     const amendableFields = [
       'operationName', 'childOperationName', 'variety', 'performedOn', 'areaHa',
       'peopleCount', 'quantity', 'baseCost', 'totalCost', 'lineItems',

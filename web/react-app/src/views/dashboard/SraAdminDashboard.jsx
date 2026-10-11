@@ -72,7 +72,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
       items.push({
         id: 'no-farms',
         title: 'No Block Farms Registered',
-        description: 'Register sugarcane block farms to establish district management boundaries.',
+        description: 'Register sugarcane block farms for district management and reporting.',
         type: 'info',
         to: '/fields',
         actionLabel: 'Register Farm'
@@ -101,7 +101,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
     {
       label: 'Registered Block Farms',
       value: blockFarms.length,
-      subtext: 'District Jurisdiction',
+      subtext: 'District Registry',
       icon: Building2
     },
     {

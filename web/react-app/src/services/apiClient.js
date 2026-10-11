@@ -6,17 +6,18 @@
  * ══════════════════════════════════════════════════════════════
  */
 
-import { signInWithCustomTokenSilently } from './firebaseClient';
 import { friendlyErrorMessage } from '../domain/presentationContract';
 
 // Most HUGPONG records change only after an explicit server mutation. Keep a
 // short shared cache for route changes/focus churn, then revalidate in the
 // background on a deliberately bounded cadence.
-const READ_CACHE_TTL_MS = 60 * 1000;
-const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const READ_CACHE_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const FOCUS_REFRESH_MIN_AGE_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
+let authenticatedReadGeneration = 0;
 const WEB_APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '1.0.0');
 
 function browserOs() {
@@ -89,6 +90,16 @@ function clearReadCache(resources = []) {
   for (const path of readCache.keys()) {
     if (affected.has(resourceName(path))) readCache.delete(path);
   }
+}
+
+// Browser API responses are authorization-scoped even when their URL is the
+// same. Advance the generation at every login/logout boundary so neither a
+// cached response nor an older in-flight request can cross into another
+// account's UI.
+export function clearAuthenticatedReadState() {
+  authenticatedReadGeneration += 1;
+  readCache.clear();
+  inFlightReads.clear();
 }
 
 function announceServerMutation(path) {
@@ -192,10 +203,6 @@ export async function authenticatedRequest(path, options = {}) {
     throw error;
   }
 
-  if (result.firebaseCustomToken) {
-    await signInWithCustomTokenSilently(result.firebaseCustomToken).catch(() => {});
-  }
-
   if (!['GET', 'HEAD'].includes(method)) {
     announceServerMutation(path);
   }
@@ -211,13 +218,19 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
   }
   if (inFlightReads.has(path)) return inFlightReads.get(path);
 
+  const requestGeneration = authenticatedReadGeneration;
   const request = authenticatedRequest(path)
     .then(value => {
+      if (requestGeneration !== authenticatedReadGeneration) {
+        const error = new Error('The authenticated account changed while this request was loading.');
+        error.code = 'AUTH_CONTEXT_CHANGED';
+        throw error;
+      }
       readCache.set(path, { value, createdAt: Date.now() });
       return value;
     })
     .finally(() => {
-      inFlightReads.delete(path);
+      if (inFlightReads.get(path) === request) inFlightReads.delete(path);
     });
   inFlightReads.set(path, request);
   return request;
@@ -235,6 +248,7 @@ export function subscribeToAuthenticatedResource(path, {
   let active = true;
   let inFlight = false;
   let forcedRefreshQueued = false;
+  let lastSuccessfulRefreshAt = 0;
   const resources = affectedResources(path);
 
   const refresh = async ({ force = false } = {}) => {
@@ -249,9 +263,10 @@ export function subscribeToAuthenticatedResource(path, {
     inFlight = true;
     try {
       const result = await authenticatedRead(path, { force });
+      lastSuccessfulRefreshAt = Date.now();
       if (active && !forcedRefreshQueued && typeof onData === 'function') onData(result);
     } catch (error) {
-      if (active && typeof onError === 'function') onError(error);
+      if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
     } finally {
       inFlight = false;
       if (active && forcedRefreshQueued) {
@@ -270,7 +285,7 @@ export function subscribeToAuthenticatedResource(path, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground()) refresh();
+    if (canRefreshInBackground() && Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS) refresh();
   };
   const handleMutation = event => {
     if (mutationAffects(event, resources)) refresh({ force: true });
@@ -300,15 +315,17 @@ export function subscribeToAuthenticatedLoader(load, {
 } = {}) {
   let active = true;
   let inFlight = false;
+  let lastSuccessfulRefreshAt = 0;
 
   const refresh = async ({ force = false } = {}) => {
     if (!active || inFlight) return;
     inFlight = true;
     try {
       const value = await load({ force });
+      lastSuccessfulRefreshAt = Date.now();
       if (active && typeof onData === 'function') onData(value);
     } catch (error) {
-      if (active && typeof onError === 'function') onError(error);
+      if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
     } finally {
       inFlight = false;
     }
@@ -321,7 +338,7 @@ export function subscribeToAuthenticatedLoader(load, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground()) refresh();
+    if (canRefreshInBackground() && Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS) refresh();
   };
   const handleMutation = event => {
     if (!resources.length || mutationAffects(event, resources)) refresh({ force: true });
@@ -349,6 +366,7 @@ export default {
   read: authenticatedRead,
   peek: peekAuthenticatedRead,
   createMutationContext,
+  clearAuthenticatedReadState,
   announceConnectionRestored,
   subscribeToAuthenticatedResource,
   subscribeToAuthenticatedLoader

@@ -10,6 +10,7 @@ const Input = forwardRef(function Input(
     onChange,
     onBlur,
     onFocus,
+    onWheel,
     placeholder,
     disabled = false,
     readOnly = false,
@@ -24,12 +25,22 @@ const Input = forwardRef(function Input(
     min,
     max,
     step,
+    allowWheelChange = false,
     ...props
   },
   ref
 ) {
   const hasLeft = prefix || (Icon && iconPosition === 'left');
   const hasRight = suffix || (Icon && iconPosition === 'right');
+  const handleWheel = (event) => {
+    onWheel?.(event);
+    if (type === 'number' && !allowWheelChange && !event.defaultPrevented) {
+      // A focused number input otherwise changes value during mouse-wheel or
+      // touchpad scrolling. Blurring before the browser default keeps the
+      // value stable while allowing the page to continue scrolling.
+      event.currentTarget.blur();
+    }
+  };
 
   return (
     <div className="relative flex items-center w-full">
@@ -53,6 +64,7 @@ const Input = forwardRef(function Input(
         onChange={onChange}
         onBlur={onBlur}
         onFocus={onFocus}
+        onWheel={handleWheel}
         placeholder={placeholder}
         disabled={disabled}
         readOnly={readOnly}

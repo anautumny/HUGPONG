@@ -29,7 +29,7 @@ const normalizedLineItem = item => ({
   subtotal: Number(item.subtotal ?? item.subTotal ?? 0)
 });
 
-export default function EditOperationModal({ operation, isOpen, onClose, onUpdated, takeoverGrant = null }) {
+export default function EditOperationModal({ operation, field = null, isOpen, onClose, onUpdated, takeoverGrant = null }) {
   const [form, setForm] = useState(null);
   const [reason, setReason] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -149,11 +149,13 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
     setSuccess('');
 
     const areaHa = Number(form.areaHa);
+    const fieldAreaHa = Number(field?.areaHa ?? field?.ha);
     const workersCount = Number(form.workersCount || 0);
     const workDays = Number(form.workDays || 0);
     const workerRate = Number(form.workerRate || 0);
     if (!form.operationName.trim() || !form.performedOn) return setError('Operation and completion date are required.');
     if (!Number.isFinite(areaHa) || areaHa <= 0 || !Number.isInteger(workersCount) || workersCount < 0) return setError('Enter a valid field area and worker count.');
+    if (Number.isFinite(fieldAreaHa) && fieldAreaHa > 0 && areaHa > fieldAreaHa + 0.0001) return setError(`Hectares covered cannot exceed this field's registered area (${fieldAreaHa.toFixed(2)} ha).`);
     if (workersCount > 0 && (!Number.isFinite(workDays) || workDays <= 0 || !Number.isFinite(workerRate) || workerRate < 0)) return setError('Enter valid work days and a daily rate for the crew.');
     if (reason.trim().length < 3) return setError('Enter a reason for this operation amendment.');
     if (form.stageNumber === 2 && !form.variety.trim()) return setError('Sugarcane variety is required for a Planting-stage operation.');
@@ -256,7 +258,7 @@ export default function EditOperationModal({ operation, isOpen, onClose, onUpdat
         <section className="space-y-3 border-t border-border pt-5">
           <h3 className="text-xs font-black uppercase tracking-wider text-hug-muted">Labor &amp; Resources</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormField label="Hectares Covered" required><Input type="number" min="0.01" step="0.01" suffix="Ha" value={form.areaHa} onChange={event => setForm({ ...form, areaHa: event.target.value })} disabled={controlsDisabled} /></FormField>
+            <FormField label="Hectares Covered" required helperText={field ? `Maximum: ${Number(field.areaHa ?? field.ha ?? 0).toFixed(2)} ha registered for this field` : undefined}><Input type="number" min="0.01" max={Number(field?.areaHa ?? field?.ha) || undefined} step="0.01" suffix="Ha" value={form.areaHa} onChange={event => setForm({ ...form, areaHa: event.target.value })} disabled={controlsDisabled} /></FormField>
             <FormField label="Workers / Crew" required><Input type="number" min="0" step="1" suffix="workers" value={form.workersCount} onChange={event => setForm({ ...form, workersCount: event.target.value })} disabled={controlsDisabled} /></FormField>
           </div>
           <div className="rounded-2xl border border-border bg-bg/60 p-3">

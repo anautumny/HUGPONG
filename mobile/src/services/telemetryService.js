@@ -2,11 +2,17 @@ import { Platform } from 'react-native';
 import { authenticatedRequest, getMobileClientInstanceId } from './authService';
 import { STORAGE_KEYS, getItem } from './storageService';
 
-const ACTIVITY_HEARTBEAT_MS = 15 * 60 * 1000;
-const UNCHANGED_SYNC_REPORT_MS = 15 * 60 * 1000;
+const ACTIVITY_HEARTBEAT_MS = 60 * 60 * 1000;
+const UNCHANGED_SYNC_REPORT_MS = 60 * 60 * 1000;
 let lastActivityReportAt = 0;
 let lastSyncReportAt = 0;
 let lastSyncSignature = '';
+
+export function resetMobileTelemetryState() {
+  lastActivityReportAt = 0;
+  lastSyncReportAt = 0;
+  lastSyncSignature = '';
+}
 
 function deviceMetadata() {
   const constants = Platform.constants || {};
@@ -63,7 +69,7 @@ export async function reportMobileSync({
       connectionState: String(connectionState || 'ONLINE').toUpperCase()
     });
     const now = Date.now();
-    if (!syncSucceeded && signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
+    if (signature === lastSyncSignature && now - lastSyncReportAt < UNCHANGED_SYNC_REPORT_MS) {
       return { throttled: true };
     }
     lastSyncSignature = signature;

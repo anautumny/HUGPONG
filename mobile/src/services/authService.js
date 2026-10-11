@@ -157,9 +157,14 @@ export async function verifyPasswordWithServer(password, authorization = {}) {
   });
 }
 
-export async function refreshMobileSessionFromFirebase() {
+export async function refreshMobileSessionFromFirebase({ forceRefresh = false } = {}) {
   if (!auth?.currentUser) throw new Error('Firebase authentication must be restored before synchronization.');
-  const firebaseIdToken = await auth.currentUser.getIdToken(true);
+  // Normal app restoration can reuse Firebase's locally cached, unexpired ID
+  // token. Explicit synchronization still forces a fresh token and revocation
+  // check before it is allowed to write.
+  const firebaseIdToken = forceRefresh
+    ? await auth.currentUser.getIdToken(true)
+    : await auth.currentUser.getIdToken();
   const clientInstanceId = await getMobileClientInstanceId();
   const response = await fetchFromApi('/auth/mobile-session', {
     method: 'POST',

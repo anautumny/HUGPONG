@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   CLIENT_INSTANCE_ID: '@hugpong_client_instance_id',
   LOGIN_LOCKOUT_UNTIL: '@hugpong_login_lockout_until',
   SESSION: '@hugpong_session',
+  CLOUD_REFRESH_META: '@hugpong_cloud_refresh_meta',
   USERS: '@hugpong_users',
   BLOCK_FARMS: '@hugpong_block_farms',
   CROP_CYCLES: '@hugpong_crop_cycles',
@@ -308,10 +309,12 @@ export async function hydrateAllStorage() {
         }
       }
     });
-    for (const key of SECURE_KEYS) {
-      const value = await getItem(key, null);
+    const secureEntries = await Promise.all(
+      Array.from(SECURE_KEYS).map(async key => [key, await getItem(key, null)])
+    );
+    secureEntries.forEach(([key, value]) => {
       if (value !== null) hydrated[key] = value;
-    }
+    });
     return hydrated;
   } catch (error) {
     console.warn('[storageService] Local storage hydration was incomplete.');

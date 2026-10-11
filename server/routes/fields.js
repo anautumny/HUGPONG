@@ -28,6 +28,7 @@ const { queueAuditEvent } = require('../services/auditWriter');
 const { normalizeCustomOperationsPlan } = require('../domain/operationPlan');
 const { normalizeOperationSchedule } = require('../domain/operationSchedule');
 const { normalizeCustomStages } = require('../domain/customStages');
+const { assertFieldFitsBlockFarm } = require('../domain/landArea');
 
 function withoutLegacySoilType(value = {}) {
   const { soilType: _removedSoilType, ...field } = value;
@@ -123,9 +124,6 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const fieldId = developmentSeedId || createFieldId();
     const blockFarmId = requiredString(req.body.blockFarmId, 'blockFarmId', { max: 80 }).toUpperCase();
     await assertManagerScope(blockFarmId, req.session.user);
-    const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
-    if (!farm.exists || farm.data().status !== 'ACTIVE') throw new Error('blockFarmId must reference an ACTIVE block farm.');
-
     const memberUserId = nullableId(req.body.memberUserId);
     if (memberUserId) {
       await assertAssignableFieldOwner(memberUserId, blockFarmId, req.session.user);
@@ -136,10 +134,11 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const cycleId = createCycleId(fieldId, 1);
     const annual = cropYearParts(null, now);
     const cropYearVal = annual.cropYear;
+    const areaHa = finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 });
     const field = {
       blockFarmId,
       memberUserId,
-      areaHa: finiteNumber(req.body.areaHa, 'areaHa', { min: 0.01, max: 500 }),
+      areaHa,
       cropYear: cropYearVal,
       currentCycleId: cycleId,
       status: 'ACTIVE',
@@ -170,19 +169,33 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       archivedByUserId: null,
       completedAt: null
     };
-    const batch = db.batch();
-    batch.create(db.collection(COLLECTIONS.FIELDS).doc(fieldId), field);
-    batch.create(db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId), cycle);
-    queueAuditEvent(batch, db, {
-      eventType: 'FIELD_CREATED',
-      actorUserId: req.session.user.employeeId || req.session.user.userId,
-      entityType: 'FIELD',
-      entityId: fieldId,
-      blockFarmId,
-      details: `Created field ${fieldId} and its first Crop Year Cycle.`,
-      createdAt: now
+    await db.runTransaction(async transaction => {
+      const farmRef = db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId);
+      const [farmSnapshot, farmFieldsSnapshot] = await Promise.all([
+        transaction.get(farmRef),
+        transaction.get(db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', blockFarmId))
+      ]);
+      if (!farmSnapshot.exists || String(farmSnapshot.data().status || '').toUpperCase() !== 'ACTIVE') {
+        throw new Error('blockFarmId must reference an ACTIVE block farm.');
+      }
+      assertFieldFitsBlockFarm({
+        declaredAreaHa: farmSnapshot.data().declaredAreaHa ?? farmSnapshot.data().declaredHa,
+        fields: farmFieldsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+        requestedAreaHa: areaHa,
+        blockFarmId
+      });
+      transaction.create(db.collection(COLLECTIONS.FIELDS).doc(fieldId), field);
+      transaction.create(db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId), cycle);
+      queueAuditEvent(transaction, db, {
+        eventType: 'FIELD_CREATED',
+        actorUserId: req.session.user.employeeId || req.session.user.userId,
+        entityType: 'FIELD',
+        entityId: fieldId,
+        blockFarmId,
+        details: `Created field ${fieldId} and its first Crop Year Cycle.`,
+        createdAt: now
+      });
     });
-    await batch.commit();
     return res.status(201).json({ success: true, data: { field: { id: fieldId, ...field }, cycle: { id: cycleId, ...cycle } } });
   } catch (error) {
     const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
@@ -221,6 +234,21 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
       const latestSnapshot = await transaction.get(scope.snapshot.ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });
       const latest = latestSnapshot.data();
+      const targetFarmRef = db.collection(COLLECTIONS.BLOCK_FARMS).doc(update.blockFarmId);
+      const [targetFarmSnapshot, targetFarmFieldsSnapshot] = await Promise.all([
+        transaction.get(targetFarmRef),
+        transaction.get(db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', update.blockFarmId))
+      ]);
+      if (!targetFarmSnapshot.exists || String(targetFarmSnapshot.data().status || '').toUpperCase() !== 'ACTIVE') {
+        throw new Error('blockFarmId must reference an ACTIVE block farm.');
+      }
+      assertFieldFitsBlockFarm({
+        declaredAreaHa: targetFarmSnapshot.data().declaredAreaHa ?? targetFarmSnapshot.data().declaredHa,
+        fields: targetFarmFieldsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+        requestedAreaHa: update.areaHa,
+        excludedFieldId: scope.fieldId,
+        blockFarmId: update.blockFarmId
+      });
       const alreadyApplied = latest.blockFarmId === update.blockFarmId
         && latest.memberUserId === update.memberUserId
         && latest.areaHa === update.areaHa

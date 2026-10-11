@@ -7,7 +7,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { ScreenHeader } from '../components/ui';
 import LegalPolicyModal from '../components/LegalPolicyModal';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, requestFieldAssignment, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, refreshSupportTicketsFromServer, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports, getSecurityPreferences, updateSecurityPreferences } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, refreshSupportTicketsFromServer, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports, getSecurityPreferences, updateSecurityPreferences } from '../data/dataStore';
 import {
   getNetworkStatus,
   getConnectivityDetails,
@@ -380,7 +380,7 @@ export default function ProfileScreen({ navigation }) {
                   <View style={s.ticketNoticeBox}>
                     <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
                     <Text style={s.ticketNoticeText}>
-                      {t('ticket_intro', 'Need assistance with offline sync, plot boundaries, or app errors? Your ticket will be queued directly to the cooperative dispatch team.')}
+                      {t('ticket_intro', 'Need assistance with offline sync, field records, or app errors? Your ticket will be queued directly to the cooperative dispatch team.')}
                     </Text>
                   </View>
 
@@ -626,7 +626,7 @@ export default function ProfileScreen({ navigation }) {
         {/* ── 2. Farm & Field Context ── */}
         <View style={s.sectionHeaderWrap}>
           <Text style={s.sectionHeaderTitle}>
-            {session?.role === 'SRA Admin' ? t('profile_admin_jurisdiction', 'Administrative Jurisdiction') : t('profile_op_assignment', 'Farm & Field Context')}
+            {session?.role === 'SRA Admin' ? t('profile_admin_scope', 'Administrative Scope') : t('profile_op_assignment', 'Farm & Field Context')}
           </Text>
         </View>
         <View style={s.card}>
@@ -641,7 +641,7 @@ export default function ProfileScreen({ navigation }) {
               key: 'field_scope',
               icon: 'map', 
               label: session?.role === 'SRA Admin'
-                ? t('profile_admin_jurisdiction', 'Jurisdiction') 
+                ? t('profile_admin_scope', 'Administrative Scope')
                 : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
               value: (() => {
                 if (session?.role === 'SRA Admin') {

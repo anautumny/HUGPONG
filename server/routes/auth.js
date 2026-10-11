@@ -220,9 +220,14 @@ async function establishSession(req, user) {
 }
 
 async function issueCredentials(sessionUser) {
+  const credentials = { token: issueToken(sessionUser, sessionUser.roleKey) };
+  // Mobile synchronization uses Firebase Auth. Web data access is exclusively
+  // through the HttpOnly server session, so creating a second web auth session
+  // only adds startup latency and unused client work.
+  if (String(sessionUser?.platform || '').toLowerCase() !== 'mobile') return credentials;
   if (!auth) throw new Error('Firebase Authentication is unavailable.');
   return {
-    token: issueToken(sessionUser, sessionUser.roleKey),
+    ...credentials,
     firebaseCustomToken: await auth.createCustomToken(sessionUser.employeeId, buildFirebaseClaims(sessionUser))
   };
 }
@@ -414,7 +419,7 @@ router.post('/login', (req, res, next) => {
 }, loginIpRateLimit, loginAccountRateLimit, loginRateLimit, async (req, res) => {
   const identifier = req.body?.contactNumber || req.body?.identifier;
   const password = req.body?.password;
-  if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication service is unavailable.' });
+  if (!db) return res.status(503).json({ success: false, error: 'Authentication service is unavailable.' });
   try {
     const matchedUser = await findUser(identifier);
     if (!matchedUser) return rejectedLogin(req, res);
@@ -941,25 +946,10 @@ router.post('/change-phone/verify', requireAuth, otpVerifyRateLimit, async (req,
 
 router.get('/session', requireAuth, async (req, res) => {
   try {
-    const snapshot = await db.collection(COLLECTIONS.USERS).doc(req.session.user.employeeId).get();
-    if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
-      return res.status(401).json({ success: false, authenticated: false, error: 'The account is no longer active.' });
-    }
-    const sessionUser = await buildSessionUser(snapshot.id, snapshot.data());
-    const clientPlatform = String(req.headers['x-client-platform'] || '').trim().toLowerCase();
-    if (!['web', 'mobile'].includes(clientPlatform)) {
-      return res.status(403).json({ success: false, authenticated: false, error: 'A recognized client platform is required.', code: 'CLIENT_PLATFORM_REQUIRED' });
-    }
-    if (!isRoleAllowedOnPlatform(sessionUser.canonicalRole, clientPlatform)) {
-      req.session.user = null;
-      res.clearCookie('hugpong.sid');
-      return res.status(403).json({
-        success: false,
-        authenticated: false,
-        error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
-      });
-    }
-    sessionUser.platform = clientPlatform;
+    // requireAuth already performed the authoritative account, role, platform,
+    // authVersion, and assignment checks for this request. Reuse that result
+    // instead of repeating the same Firestore reads before returning it.
+    const sessionUser = { ...req.authUser };
     req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {

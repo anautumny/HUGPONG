@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Edit3 } from 'lucide-react';
 import { updateField } from '../../services/fieldsService';
@@ -9,6 +9,7 @@ export default function FieldEditModal({
   onClose,
   field = null,
   blockFarms = [],
+  fields = [],
   memberUsers = [],
   onSuccess
 }) {
@@ -19,6 +20,21 @@ export default function FieldEditModal({
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState(null);
+  const selectedFarm = useMemo(
+    () => blockFarms.find(farm => farm.id === blockFarmId) || null,
+    [blockFarms, blockFarmId]
+  );
+  const maximumAreaHa = useMemo(() => {
+    const declared = Number(selectedFarm?.declaredAreaHa ?? selectedFarm?.declaredHa);
+    if (!Number.isFinite(declared)) return null;
+    const allocatedToOtherFields = fields
+      .filter(item => item.id !== field?.id && item.blockFarmId === selectedFarm?.id && String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .reduce((sum, item) => {
+        const area = Number(item.areaHa ?? item.ha ?? 0);
+        return sum + (Number.isFinite(area) && area > 0 ? area : 0);
+      }, 0);
+    return Math.max(0, Number((declared - allocatedToOtherFields).toFixed(4)));
+  }, [selectedFarm, fields, field?.id]);
 
   useEffect(() => {
     if (field) {
@@ -40,6 +56,8 @@ export default function FieldEditModal({
     const numHa = Number(areaHa);
     if (!areaHa || isNaN(numHa) || numHa <= 0) {
       validation.areaHa = 'Enter a valid area in hectares (> 0).';
+    } else if (maximumAreaHa != null && numHa > maximumAreaHa + 0.0001) {
+      validation.areaHa = `This field can use at most ${maximumAreaHa.toFixed(2)} ha within the Block Farm declaration.`;
     }
 
     if (!blockFarmId) {
@@ -164,13 +182,14 @@ export default function FieldEditModal({
             label="Plot Area"
             required
             error={errors.areaHa}
+            helperText={maximumAreaHa == null ? undefined : `Maximum available allocation: ${maximumAreaHa.toFixed(2)} ha`}
           >
             <Input
               id="edit-area-ha"
               type="number"
               step="0.01"
               min="0.01"
-              max="500"
+              max={maximumAreaHa ?? 500}
               suffix="ha"
               value={areaHa}
               onChange={(e) => {

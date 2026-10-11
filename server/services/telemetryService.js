@@ -8,7 +8,10 @@ const { RETENTION_MS, deleteAfter } = require('./retentionPolicy');
 
 const SYNC_STATES = Object.freeze(['UP_TO_DATE', 'PENDING_SYNC', 'SYNCING', 'SYNC_FAILED', 'OFFLINE', 'UNKNOWN']);
 const CONNECTION_STATES = Object.freeze(['ONLINE', 'OFFLINE', 'UNKNOWN']);
-const RECENT_ACTIVITY_MS = 15 * 60 * 1000;
+// Clients intentionally coalesce unchanged heartbeat/sync writes to one per
+// hour. Keep the monitor freshness window slightly wider than that cadence so
+// a healthy client is not mislabeled between quota-aware reports.
+const RECENT_ACTIVITY_MS = 75 * 60 * 1000;
 const STALE_SYNC_REPORT_MS = 72 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ATTENTION_INACTIVITY_MS = 3 * DAY_MS;

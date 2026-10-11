@@ -50,21 +50,22 @@ export default function FarmFieldRegistryView() {
   const isSuperAdmin = roleKey === ROLE_KEYS.SUPER_ADMIN;
 
   // Active view tab resolution:
-  // Farm Manager: strictly 'fields'
+  // Farm Manager: assigned Block Farm registry or fields (defaults to fields)
   // SRA Admin: 'blocks' or 'fields' (defaults to 'blocks')
   // Super Admin: 'blocks' or 'fields' (defaults to 'blocks')
-  const defaultTab = isFarmManager ? 'fields' : (searchParams.get('tab') === 'fields' ? 'fields' : 'blocks');
+  const requestedTab = searchParams.get('tab');
+  const defaultTab = isFarmManager
+    ? (requestedTab === 'blocks' ? 'blocks' : 'fields')
+    : (requestedTab === 'fields' ? 'fields' : 'blocks');
   const [activeTab, setActiveTab] = useState(defaultTab);
 
-  // Sync tab with URL search parameter for Super Admin and SRA Admin
+  // Sync the role-appropriate registry tab with the URL.
   useEffect(() => {
-    if (isSuperAdmin || isSraAdmin) {
+    if (isSuperAdmin || isSraAdmin || isFarmManager) {
       const qTab = searchParams.get('tab');
       if (qTab === 'fields' || qTab === 'blocks') {
         setActiveTab(qTab);
       }
-    } else if (isFarmManager) {
-      setActiveTab('fields');
     }
   }, [isSuperAdmin, isSraAdmin, isFarmManager, searchParams]);
 
@@ -168,6 +169,12 @@ export default function FarmFieldRegistryView() {
     return fieldsState.fields.filter(f => f.blockFarmId === farmId);
   }, [isFarmManager, fieldsState.fields, assignedBlockFarm?.id, user?.blockFarmId]);
 
+  const managerScopedBlockFarms = useMemo(() => {
+    if (!isFarmManager) return blockFarmsState.blockFarms;
+    const farmId = assignedBlockFarm?.id || user?.blockFarmId;
+    return farmId ? blockFarmsState.blockFarms.filter(farm => farm.id === farmId) : [];
+  }, [isFarmManager, blockFarmsState.blockFarms, assignedBlockFarm?.id, user?.blockFarmId]);
+
   // Filtered Field Plots
   const filteredFields = useMemo(() => {
     const sourceFields = isFarmManager ? managerScopedFields : fieldsState.fields;
@@ -200,7 +207,7 @@ export default function FarmFieldRegistryView() {
 
   // Filtered Block Farms
   const filteredBlockFarms = useMemo(() => {
-    return blockFarmsState.blockFarms.filter(bf => {
+    return managerScopedBlockFarms.filter(bf => {
       if (blockStatusFilter !== 'ALL' && (bf.status || 'ACTIVE').toUpperCase() !== blockStatusFilter) {
         return false;
       }
@@ -209,13 +216,13 @@ export default function FarmFieldRegistryView() {
         const idMatch = (bf.id || '').toLowerCase().includes(q);
         const codeMatch = (bf.code || '').toLowerCase().includes(q);
         const nameMatch = (bf.name || '').toLowerCase().includes(q);
-        const locMatch = (bf.location || '').toLowerCase().includes(q);
+        const locMatch = (bf.address || bf.location || '').toLowerCase().includes(q);
         const mgrMatch = (bf.managerUserId || '').toLowerCase().includes(q);
         return idMatch || codeMatch || nameMatch || locMatch || mgrMatch;
       }
       return true;
     });
-  }, [blockFarmsState.blockFarms, blockStatusFilter, blockSearchQuery]);
+  }, [managerScopedBlockFarms, blockStatusFilter, blockSearchQuery]);
 
   const paginatedBlockFarms = useMemo(() => {
     const start = (blockCurrentPage - 1) * pageSize;
@@ -224,9 +231,8 @@ export default function FarmFieldRegistryView() {
 
   const totalBlockPages = Math.max(1, Math.ceil(filteredBlockFarms.length / pageSize));
 
-  // Handle Tab Switch (Super Admin and SRA Admin)
+  // Handle role-aware registry tab switching.
   const handleTabSwitch = (newTab) => {
-    if (isFarmManager) return; // Farm Manager is strictly fields
     setActiveTab(newTab);
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
@@ -254,7 +260,7 @@ export default function FarmFieldRegistryView() {
 
   // Header Actions (Farm Manager gets Add Field, SRA gets Add Block Farm on blocks tab, Super Admin & SRA on fields gets none)
   const headerActions = useMemo(() => {
-    if (isFarmManager) {
+    if (isFarmManager && activeTab === 'fields') {
       return [
         {
           label: 'Add Field',
@@ -516,14 +522,14 @@ export default function FarmFieldRegistryView() {
     },
     {
       key: 'name',
-      header: 'Block Farm Name & Location',
+      header: 'Block Farm Name & Address',
       render: (val, row) => (
         <div>
           <span className="font-bold text-sm text-hug-text block">{val || 'Unnamed Block Farm'}</span>
-          {row.location && (
+          {(row.address || row.location) && (
             <span className="text-xs text-hug-muted flex items-center gap-1 mt-0.5">
               <MapPin className="w-3 h-3 text-hug-muted shrink-0" />
-              <span className="truncate max-w-[280px]">{row.location}</span>
+              <span className="truncate max-w-[280px]">{row.address || row.location}</span>
             </span>
           )}
         </div>
@@ -623,13 +629,13 @@ export default function FarmFieldRegistryView() {
   const pageSubtitle = isFarmManager
     ? 'Manage and review member field parcels within your assigned block farm.'
     : isSraAdmin
-      ? 'Manage and review district cooperative block farms and landholding boundaries.'
+      ? 'Manage and review district cooperative block farms and declared landholdings.'
       : 'System-wide inspection of cooperative block farms and member field parcels.';
 
   const pageBadge = isFarmManager
     ? 'Cooperative Parcels'
     : isSraAdmin
-      ? 'District Jurisdictions'
+      ? 'District Registry'
       : 'Governance Oversight';
 
   if (isSuperAdmin) {
@@ -646,7 +652,7 @@ export default function FarmFieldRegistryView() {
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* 1. Standardized Header (Rule 4) */}
       <CompactDashboardHeader
-        category="Spatial Governance & Oversight"
+        category="Farm Registry & Oversight"
         badge={pageBadge}
         title="Farm & Field Registry"
         subtitle={pageSubtitle}
@@ -655,8 +661,8 @@ export default function FarmFieldRegistryView() {
 
       {/* 2. Role-Aware Tabs matching Active Personnel / Pending Applications style exactly */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border/80 pb-2.5">
-        {/* SRA Admin or Super Admin: Block Farms tab */}
-        {(isSraAdmin || isSuperAdmin) && (
+        {/* Managers see only their assigned Block Farm; SRA sees the district registry. */}
+        {(isFarmManager || isSraAdmin || isSuperAdmin) && (
           <button
             type="button"
             onClick={() => handleTabSwitch('blocks')}
@@ -666,7 +672,7 @@ export default function FarmFieldRegistryView() {
                 : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'
             }`}
           >
-            Block Farms ({blockFarmsState.blockFarms.length})
+            Block Farms ({isFarmManager ? managerScopedBlockFarms.length : blockFarmsState.blockFarms.length})
           </button>
         )}
 
@@ -691,10 +697,10 @@ export default function FarmFieldRegistryView() {
             <ShieldCheck className="w-4 h-4 text-primary" />
             <span>Read-Only Governance Mode</span>
           </div>
-        ) : (isSraAdmin && activeTab === 'fields') ? (
+        ) : ((isSraAdmin && activeTab === 'fields') || (isFarmManager && activeTab === 'blocks')) ? (
           <div className="ml-auto flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-surface border border-border/80 text-xs font-semibold text-hug-muted shadow-2xs">
             <ShieldCheck className="w-4 h-4 text-primary" />
-            <span>Read-Only Plot Registry</span>
+            <span>{isFarmManager ? 'Read-Only Block Farm Registry' : 'Read-Only Plot Registry'}</span>
           </div>
         ) : null}
       </div>
@@ -789,7 +795,7 @@ export default function FarmFieldRegistryView() {
             }
             emptySubtext={
               isFarmManager
-                ? 'Click "Add Field" to enroll Farm Members and field coordinates.'
+                ? 'Click "Add Field" to enroll Farm Members and field details.'
                 : 'Enrolled parcels will display here once registered by farm managers.'
             }
             currentPage={fieldCurrentPage}
@@ -810,7 +816,7 @@ export default function FarmFieldRegistryView() {
                     setBlockSearchQuery(e.target.value);
                     setBlockCurrentPage(1);
                   }}
-                  placeholder="Search by Block Farm Code, Entity Name, Location, or Manager..."
+                  placeholder="Search by Block Farm Code, Entity Name, Address, or Manager..."
                   icon={Search}
                   className="w-full"
                 />
@@ -864,6 +870,7 @@ export default function FarmFieldRegistryView() {
           isOpen={enrollFieldModalOpen}
           onClose={() => setEnrollFieldModalOpen(false)}
           blockFarms={assignedBlockFarm ? [assignedBlockFarm] : fieldsState.blockFarms}
+          fields={managerScopedFields}
           memberUsers={fieldsState.memberUsers}
           defaultBlockFarmId={assignedBlockFarm?.id || user?.blockFarmId || ''}
           onSuccess={() => {}}
@@ -877,6 +884,7 @@ export default function FarmFieldRegistryView() {
           onClose={() => setEditField(null)}
           field={editField}
           blockFarms={assignedBlockFarm ? [assignedBlockFarm] : fieldsState.blockFarms}
+          fields={managerScopedFields}
           memberUsers={fieldsState.memberUsers}
           onSuccess={() => {}}
         />
@@ -922,10 +930,10 @@ export default function FarmFieldRegistryView() {
                 <StatusBadge status={inspectBlockFarm.status || 'ACTIVE'} />
               </div>
               <h3 className="text-base font-black text-hug-text">{inspectBlockFarm.name}</h3>
-              {inspectBlockFarm.location && (
+              {(inspectBlockFarm.address || inspectBlockFarm.location) && (
                 <p className="text-xs text-hug-muted flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 shrink-0 text-hug-muted" />
-                  <span>{inspectBlockFarm.location}</span>
+                  <span>{inspectBlockFarm.address || inspectBlockFarm.location}</span>
                 </p>
               )}
             </div>

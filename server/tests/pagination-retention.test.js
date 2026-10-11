@@ -153,7 +153,7 @@ test('Web and Mobile expose server-authoritative cursor loading', () => {
   assert.match(mobileStore, /export const loadMoreUserDirectory/);
   assert.match(mobileStore, /export const loadMoreAuditEvents/);
   assert.match(mobileTelemetry, /\/api\/terminal-diagnostics\?\$\{query\.toString\(\)\}/);
-  assert.match(webTelemetry, /HEARTBEAT_INTERVAL_MS = 15 \* 60 \* 1000/);
-  assert.match(webAuth, /setInterval\(report, 15 \* 60 \* 1000\)/);
-  assert.match(mobileTelemetry, /ACTIVITY_HEARTBEAT_MS = 15 \* 60 \* 1000/);
+  assert.match(webTelemetry, /HEARTBEAT_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(webAuth, /setInterval\(report, 60 \* 60 \* 1000\)/);
+  assert.match(mobileTelemetry, /ACTIVITY_HEARTBEAT_MS = 60 \* 60 \* 1000/);
 });

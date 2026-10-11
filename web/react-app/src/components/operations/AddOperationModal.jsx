@@ -339,8 +339,11 @@ export default function AddOperationModal({
     }
 
     const numArea = Number(areaHa);
+    const fieldAreaHa = Number(field?.areaHa ?? field?.ha);
     if (!areaHa || isNaN(numArea) || numArea <= 0) {
       errors.areaHa = 'Enter a valid field area (> 0 ha).';
+    } else if (Number.isFinite(fieldAreaHa) && fieldAreaHa > 0 && numArea > fieldAreaHa + 0.0001) {
+      errors.areaHa = `Hectares covered cannot exceed this field's registered area (${fieldAreaHa.toFixed(2)} ha).`;
     }
 
     const numWorkers = submittedLaborEntries.length
@@ -761,12 +764,14 @@ export default function AddOperationModal({
             label="Hectares Covered"
             required
             error={validationErrors.areaHa}
+            helperText={`Maximum: ${Number(field?.areaHa ?? field?.ha ?? 0).toFixed(2)} ha registered for this field`}
           >
             <Input
               id="add-op-area"
               type="number"
               step="0.01"
               min="0.01"
+              max={Number(field?.areaHa ?? field?.ha) || undefined}
               suffix="ha"
               value={areaHa}
               onChange={(e) => {

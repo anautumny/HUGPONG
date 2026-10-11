@@ -235,10 +235,10 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
               {farmName}
             </h3>
 
-            {assignedBlockFarm?.location && (
+            {(assignedBlockFarm?.address || assignedBlockFarm?.location) && (
               <p className="text-xs text-hug-muted mt-1 flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-hug-muted shrink-0" />
-                <span className="truncate">{assignedBlockFarm.location}</span>
+                <span className="truncate">{assignedBlockFarm.address || assignedBlockFarm.location}</span>
               </p>
             )}
 

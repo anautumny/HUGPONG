@@ -10,8 +10,10 @@ const fs = require('fs');
 const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
 const FirestoreSessionStore = require('./services/firestoreSessionStore');
 const { startOperationalCleanup } = require('./services/operationalCleanupService');
+const { invalidateAccountAssignments } = require('./services/accountAuthorization');
+const { createScopedReadCache } = require('./services/scopedReadCache');
 const { COLLECTIONS } = require('./schema/firestoreSchema');
-const { requireAuth } = require('./middleware/auth');
+const { requireAuth, invalidateAuthenticatedAccounts } = require('./middleware/auth');
 const { requireAccountReady, requireApiPermission } = require('./middleware/requestPermissions');
 const { validateRequestInput, malformedJsonHandler } = require('./middleware/requestInputValidation');
 const { safeErrorResponses } = require('./middleware/errorHandling');
@@ -42,6 +44,7 @@ const diagnosticsRoutes = require('./routes/diagnostics');
 const backupRoutes = require('./routes/backups');
 
 const app = express();
+const scopedReadCache = createScopedReadCache();
 app.disable('x-powered-by');
 app.set('query parser', 'simple');
 if (isProduction) app.set('trust proxy', 1);
@@ -145,11 +148,51 @@ app.use((req, res, next) => {
 });
 
 // ── Mount Primary API Routes ────────────────────────────────
+app.use('/auth', (req, res, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(String(req.method || '').toUpperCase())) {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 400) invalidateAuthenticatedAccounts();
+    });
+  }
+  next();
+});
 app.use('/auth', authRoutes);
 // Every application-data request is re-authorized against the live account,
 // onboarding state, client platform, and an explicit method/path role policy.
 // Unknown API routes fail closed until a policy is deliberately added.
 app.use('/api', requireAuth, createAuthenticatedApiRateLimit(), requireAccountReady, requireApiPermission);
+// Successful GET responses are cached only after live account authorization.
+// Mutations always reach their authoritative route and clear this presentation
+// cache after success; database validation and writes are never cached.
+app.use('/api', scopedReadCache.middleware);
+// Assignment projections are a short server-side cache. Any successful
+// mutation that can change ownership or affiliation invalidates the entire
+// bounded cache immediately; the TTL remains a fallback for out-of-process
+// administrative changes.
+app.use('/api', (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  const resource = String(req.path || '').split('/').filter(Boolean)[0] || '';
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)
+    && ['users', 'fields', 'block-farms'].includes(resource)) {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 400) {
+        invalidateAccountAssignments(db);
+        if (resource === 'users') invalidateAuthenticatedAccounts();
+        scopedReadCache.invalidate();
+      }
+    });
+  } else if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    res.once('finish', () => {
+      if (res.statusCode < 200 || res.statusCode >= 400) return;
+      if (['terminal-diagnostics', 'diagnostics'].includes(resource)) {
+        scopedReadCache.invalidate([resource]);
+      } else {
+        scopedReadCache.invalidate();
+      }
+    });
+  }
+  next();
+});
 app.use('/api/prices', priceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/block-farms', blockFarmRoutes);

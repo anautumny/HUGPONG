@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { roleKeyFromUser } from '../utils/authRouting';
-import { signInWithCustomTokenSilently, signOutFirebase } from '../services/firebaseClient';
-import { getWebClientInstanceId, reportWebActivity } from '../services/telemetryService';
-import { responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
+import { getWebClientInstanceId, reportWebActivity, resetWebTelemetryState } from '../services/telemetryService';
+import { clearAuthenticatedReadState, responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -22,16 +21,19 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = useCallback((notice = '') => {
+    clearAuthenticatedReadState();
+    resetWebTelemetryState();
     setUser(null);
     setRoleKey('');
     if (notice) setSessionExpiredNotice(notice);
     localStorage.removeItem('hugpong_auth_token');
     localStorage.removeItem('hugpong_user');
     localStorage.removeItem('hugpong_role');
-    signOutFirebase().catch(() => {});
   }, []);
 
   const saveSession = useCallback((sessionUser, canonicalRoleKey) => {
+    clearAuthenticatedReadState();
+    resetWebTelemetryState();
     setUser(sessionUser);
     setRoleKey(canonicalRoleKey);
     setSessionExpiredNotice('');
@@ -53,9 +55,6 @@ export function AuthProvider({ children }) {
       if (response.ok && data.authenticated && data.user) {
         const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
         saveSession(data.user, resolvedRole);
-        if (data.firebaseCustomToken) {
-          await signInWithCustomTokenSilently(data.firebaseCustomToken).catch(() => {});
-        }
         return { user: data.user, roleKey: resolvedRole, authenticated: true };
       } else if (response.status === 401 || response.status === 403 || response.ok) {
         if (user) {
@@ -103,7 +102,7 @@ export function AuthProvider({ children }) {
       }
     };
     report();
-    const interval = window.setInterval(report, 15 * 60 * 1000);
+    const interval = window.setInterval(report, 60 * 60 * 1000);
     const onVisibility = () => report();
     window.addEventListener('focus', report);
     document.addEventListener('visibilitychange', onVisibility);
@@ -141,10 +140,6 @@ export function AuthProvider({ children }) {
       }
       throw new Error('Farm Member accounts are restricted to the HUGPONG mobile application.');
     }
-    if (data.firebaseCustomToken) {
-      await signInWithCustomTokenSilently(data.firebaseCustomToken).catch(() => {});
-    }
-
     // Check verification and password change requirements
     const isVerified = data.user && data.user.phoneVerified === true;
     const isSuperAdminDefault =

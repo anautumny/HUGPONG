@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Layers } from 'lucide-react';
 import { createField } from '../../services/fieldsService';
@@ -10,6 +10,7 @@ export default function FieldEnrollmentModal({
   isOpen = false,
   onClose,
   blockFarms = [],
+  fields = [],
   memberUsers = [],
   defaultBlockFarmId = '',
   onSuccess
@@ -21,6 +22,21 @@ export default function FieldEnrollmentModal({
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState(null);
+  const selectedFarm = useMemo(
+    () => blockFarms.find(farm => farm.id === (blockFarmId || defaultBlockFarmId)) || null,
+    [blockFarms, blockFarmId, defaultBlockFarmId]
+  );
+  const remainingAreaHa = useMemo(() => {
+    const declared = Number(selectedFarm?.declaredAreaHa ?? selectedFarm?.declaredHa);
+    if (!Number.isFinite(declared)) return null;
+    const allocated = fields
+      .filter(field => field.blockFarmId === selectedFarm?.id && String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .reduce((sum, field) => {
+        const area = Number(field.areaHa ?? field.ha ?? 0);
+        return sum + (Number.isFinite(area) && area > 0 ? area : 0);
+      }, 0);
+    return Math.max(0, Number((declared - allocated).toFixed(4)));
+  }, [selectedFarm, fields]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -48,6 +64,8 @@ export default function FieldEnrollmentModal({
     const numHa = Number(areaHa);
     if (!areaHa || isNaN(numHa) || numHa <= 0) {
       validation.areaHa = 'Enter a valid area in hectares (> 0).';
+    } else if (remainingAreaHa != null && numHa > remainingAreaHa + 0.0001) {
+      validation.areaHa = `Only ${remainingAreaHa.toFixed(2)} ha remains available in this Block Farm.`;
     }
 
     if (Object.keys(validation).length > 0) {
@@ -173,13 +191,14 @@ export default function FieldEnrollmentModal({
             label="Plot Area"
             required
             error={errors.areaHa}
+            helperText={remainingAreaHa == null ? undefined : `${remainingAreaHa.toFixed(2)} ha remaining in the Block Farm`}
           >
             <Input
               id="area-ha-input"
               type="number"
               step="0.01"
               min="0.01"
-              max="500"
+              max={remainingAreaHa ?? 500}
               placeholder="1.50"
               suffix="ha"
               value={areaHa}

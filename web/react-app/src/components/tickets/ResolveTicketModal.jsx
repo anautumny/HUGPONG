@@ -62,7 +62,9 @@ export default function ResolveTicketModal({
     }
   };
 
-  if (!ticket) return null;
+  // CLOSED is terminal. Keep history readable without exposing a no-op or
+  // invalid management form if a stale selection reaches this component.
+  if (!ticket || !nextStatus) return null;
 
   return (
     <Modal

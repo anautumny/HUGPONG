@@ -10,17 +10,51 @@ const { authVersionOf } = require('../security/accountSecurity');
 const { resolveAccountAssignments } = require('../services/accountAuthorization');
 
 // Dashboard/mobile refreshes intentionally fan out across scoped endpoints.
-// Coalesce only overlapping reads of the same authorization document; the
-// entry is removed as soon as Firestore settles, so this is not a stale auth
-// cache and the next request burst revalidates the account.
+// A very short server-side cache prevents each endpoint in the same navigation
+// burst from billing another Firestore read. All requests are still checked by
+// this middleware, account mutations clear the cache immediately, and the TTL
+// bounds staleness if an account is changed outside this server process.
+const ACCOUNT_AUTH_CACHE_TTL_MS = 15 * 1000;
+const ACCOUNT_AUTH_CACHE_MAX_ENTRIES = 1000;
 const inFlightAccountReads = new Map();
+const accountReadCache = new Map();
+let accountCacheGeneration = 0;
+
+function pruneAccountReadCache(now = Date.now()) {
+  for (const [userId, entry] of accountReadCache) {
+    if (entry.expiresAt <= now) accountReadCache.delete(userId);
+  }
+  while (accountReadCache.size >= ACCOUNT_AUTH_CACHE_MAX_ENTRIES) {
+    accountReadCache.delete(accountReadCache.keys().next().value);
+  }
+}
 
 function readAccount(userId) {
+  const now = Date.now();
+  const cached = accountReadCache.get(userId);
+  if (cached && cached.expiresAt > now) return Promise.resolve(cached.snapshot);
+  if (cached) accountReadCache.delete(userId);
   if (inFlightAccountReads.has(userId)) return inFlightAccountReads.get(userId);
+  pruneAccountReadCache(now);
+  const requestGeneration = accountCacheGeneration;
   const request = db.collection(COLLECTIONS.USERS).doc(userId).get()
+    .then(snapshot => {
+      if (requestGeneration === accountCacheGeneration) {
+        accountReadCache.set(userId, {
+          snapshot,
+          expiresAt: Date.now() + ACCOUNT_AUTH_CACHE_TTL_MS
+        });
+      }
+      return snapshot;
+    })
     .finally(() => inFlightAccountReads.delete(userId));
   inFlightAccountReads.set(userId, request);
   return request;
+}
+
+function invalidateAuthenticatedAccounts() {
+  accountCacheGeneration += 1;
+  accountReadCache.clear();
 }
 
 function bearerToken(req) {
@@ -109,6 +143,8 @@ async function requireAuth(req, res, next) {
 }
 
 module.exports = {
+  ACCOUNT_AUTH_CACHE_TTL_MS,
   requireAuth,
-  bearerToken
+  bearerToken,
+  invalidateAuthenticatedAccounts
 };

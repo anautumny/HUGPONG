@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { SearchableSelect, ScreenHeader } from '../components/ui';
-import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, requestFieldCropCycleRollover, approveFieldCropCycleRollover, rejectFieldCropCycleRollover, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, getSraCertifiedAuditHistory, getSraOfflineSnapshotStatus, assignmentRequests, resolveAssignmentRequest, requestFieldAssignment, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, validateLocalDraftContentForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
+import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, requestFieldCropCycleRollover, approveFieldCropCycleRollover, rejectFieldCropCycleRollover, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, getSraCertifiedAuditHistory, getSraOfflineSnapshotStatus, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, validateLocalDraftContentForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
 import { getItem, saveItem, STORAGE_KEYS, lastScannedAuditStorageKey, pendingAuditReferenceStorageKey } from '../services/storageService';
 import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
@@ -1094,7 +1094,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       setSyncedState(getIsSynced());
       setSessionLocal(getCurrentSession() || {});
       setLogs([...operationLogs]);
-      setRequests([...assignmentRequests]);
       setPendingUsersList([...pendingUsers]);
       if (selectedField?.id && selectedField.id !== 'Unassigned') {
         const updatedField = (fields || []).find(f => f && f.id === safeField?.id);
@@ -1222,6 +1221,8 @@ export default function FieldOpsScreen({ navigation, route }) {
     variety: '',
     isSubmit: true
   });
+  const operationFormField = fields.find(field => String(field.id || '').trim().toUpperCase() === String(logForm.fieldId || '').trim().toUpperCase()) || safeField;
+  const operationFieldAreaHa = Number(operationFormField?.areaHa ?? operationFormField?.ha ?? 0);
   const [draftLogs, setDraftLogs] = useState(() => Array.isArray(draftLogsStore) ? [...draftLogsStore] : []);
   const [isSavingLog, setIsSavingLog] = useState(false);
   const submissionLockRef = React.useRef(false);
@@ -1355,7 +1356,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       }
     }
   };
-  const [requests, setRequests] = useState(assignmentRequests);
   const [pendingUsersList, setPendingUsersList] = useState(pendingUsers);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [showProvisionUserModal, setShowProvisionUserModal] = useState(false);
@@ -1366,7 +1366,6 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [pendingVerificationDecisions, setPendingVerificationDecisions] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date());
-  const [showAddField, setShowAddField] = useState(false);
   const [isTakeOver, setIsTakeOver] = useState(false);
   const [takeoverGrant, setTakeoverGrant] = useState(null);
   const [takeoverExpiresAt, setTakeoverExpiresAt] = useState(0);
@@ -1533,6 +1532,24 @@ export default function FieldOpsScreen({ navigation, route }) {
     isEditing: false
   });
   const [isAssigningPlot, setIsAssigningPlot] = useState(false);
+  const managerSelectedFarm = canonicalBlockFarms.find(farm => (
+    farm.id === managerAssignForm.blockFarmId
+    || farm.name === managerAssignForm.blockFarm
+    || farm.code === managerAssignForm.blockFarm
+  ));
+  const managerAvailableAreaHa = (() => {
+    const declared = Number(managerSelectedFarm?.declaredAreaHa ?? managerSelectedFarm?.declaredHa);
+    if (!Number.isFinite(declared)) return null;
+    const allocated = fields
+      .filter(field => field.id !== managerAssignForm.fieldId
+        && field.blockFarmId === managerSelectedFarm?.id
+        && String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .reduce((sum, field) => {
+        const area = Number(field.areaHa ?? field.ha ?? 0);
+        return sum + (Number.isFinite(area) && area > 0 ? area : 0);
+      }, 0);
+    return Math.max(0, Number((declared - allocated).toFixed(4)));
+  })();
 
   const openAssignModal = (fieldToEdit = null) => {
     const session = getCurrentSession();
@@ -2453,8 +2470,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       setIsCertifyingAudit(false);
     }
   };
-  const [reqFieldId, setReqFieldId] = useState('');
-  const [reqFieldHa, setReqFieldHa] = useState('');
   const [cycleTasksByField, setCycleTasksByField] = useState(() => {
     const initial = {};
     fields.forEach(f => {
@@ -3148,7 +3163,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         return found ? { ...found } : (permitted[0] || null);
       });
       setSyncedState(getIsSynced());
-      setRequests([...assignmentRequests]);
       setPendingUsersList([...pendingUsers]);
       setLogs([...operationLogs]);
       setDraftLogs([...draftLogsStore]);
@@ -3163,23 +3177,6 @@ export default function FieldOpsScreen({ navigation, route }) {
     });
     return unsubscribe;
   }, []);
-
-  const handleRequestField = () => {
-    if (!reqFieldId.trim() || !reqFieldHa.trim()) {
-      Alert.alert('Required', 'Please enter a Field ID and Hectares (HA).');
-      return;
-    }
-    const haValue = parseFloat(reqFieldHa);
-    if (isNaN(haValue) || haValue <= 0 || haValue > 100) {
-      Alert.alert('Invalid', 'Please enter a valid hectare size (between 0.1 and 100).');
-      return;
-    }
-    requestFieldAssignment(reqFieldId.trim().toUpperCase(), getCurrentSession().name, haValue.toFixed(1));
-    Alert.alert('Request Sent', `Assignment request for ${reqFieldId.toUpperCase()} (${haValue.toFixed(1)} Ha) has been sent to the Farm Manager for approval.`);
-    setReqFieldId('');
-    setReqFieldHa('');
-    setShowAddField(false);
-  };
 
   const selectSraOperation = (opId, ha = null) => {
     const canonicalOperation = getOperationDefinition(opId);
@@ -3514,7 +3511,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       Alert.alert('Invalid Input', 'Hectares must be greater than 0 and Workers cannot be negative.');
       return;
     }
-    if (ha > 50) { Alert.alert('Invalid Input', 'Hectares cannot exceed 50 per log.'); return; }
     if (ppl > 100) { Alert.alert('Invalid Input', 'Worker count cannot exceed 100 per log.'); return; }
 
     const operationDate = normalizeCalendarDate(logForm.period);
@@ -3539,6 +3535,11 @@ export default function FieldOpsScreen({ navigation, route }) {
 
     const submittedFieldId = logForm.fieldId.trim().toUpperCase();
     const submittedField = fields.find(field => String(field.id || '').trim().toUpperCase() === submittedFieldId) || selectedField;
+    const submittedFieldAreaHa = Number(submittedField?.areaHa ?? submittedField?.ha);
+    if (Number.isFinite(submittedFieldAreaHa) && submittedFieldAreaHa > 0 && ha > submittedFieldAreaHa + 0.0001) {
+      Alert.alert('Area Exceeds Field', `Hectares covered cannot exceed this field's registered area (${submittedFieldAreaHa.toFixed(2)} ha).`);
+      return;
+    }
     const submittedCapabilities = getOperationCapabilities(session, submittedField, takeoverSession);
     if (!asSubmit && !submittedCapabilities.canDraft) {
       Alert.alert('Drafts Unavailable', 'Drafts can only be saved for your own currently assigned field. Manager Takeover entries must be submitted directly.');
@@ -6565,6 +6566,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                     />
                     <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>Ha</Text>
                   </View>
+                  {operationFieldAreaHa > 0 && (
+                    <Text style={{ marginTop: 5, fontSize: 11, color: COLORS.textMuted }}>
+                      Maximum: {operationFieldAreaHa.toFixed(2)} ha registered for this field
+                    </Text>
+                  )}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 6 }}>{t('log_workers_crew', 'Workers / Crew')}</Text>
@@ -7626,7 +7632,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Enter a valid area in hectares (&gt; 0).</Text>
+                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  {managerAvailableAreaHa == null
+                    ? 'Enter a valid area in hectares (> 0).'
+                    : `Maximum available allocation: ${managerAvailableAreaHa.toFixed(2)} ha.`}
+                </Text>
               </View>
 
               <View style={{ gap: 4 }}>
@@ -7680,6 +7690,10 @@ export default function FieldOpsScreen({ navigation, route }) {
                 const parsedHa = parseFloat(rawHa);
                 if (isNaN(parsedHa) || parsedHa <= 0 || parsedHa > 500) {
                   Alert.alert('Invalid Hectares', 'Please enter a valid land area greater than 0 (e.g., 1.5 Ha).');
+                  return;
+                }
+                if (managerAvailableAreaHa != null && parsedHa > managerAvailableAreaHa + 0.0001) {
+                  Alert.alert('Area Exceeds Block Farm', `Only ${managerAvailableAreaHa.toFixed(2)} ha remains available in this Block Farm.`);
                   return;
                 }
 
