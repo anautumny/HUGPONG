@@ -68,7 +68,7 @@ export function SyncProvider({ children }) {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 8000);
       try {
-        const response = await fetch('/health', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
+        const response = await fetch('/health/ready', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         const result = await response.json().catch(() => ({}));
         const reachable = response.ok && result.success === true;
         if (active) setApiReachable(reachable);

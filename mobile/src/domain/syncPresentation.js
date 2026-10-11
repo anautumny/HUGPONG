@@ -1,6 +1,7 @@
 const FRIENDLY_SYNC_REASONS = Object.freeze({
   OFFLINE: 'No connection to the server.',
   SERVER_UNAVAILABLE: 'The HUGPONG server is temporarily unavailable.',
+  RATE_LIMITED: 'The server is busy. Synchronization will resume automatically after the required wait.',
   AUTHENTICATION_REQUIRED: 'Please sign in again before synchronizing.',
   AUTHENTICATION_RECOVERY: 'Your session could not be refreshed. Please sign in again.',
   AUTHORIZATION_FAILURE: 'Your account no longer has permission for one or more changes.',

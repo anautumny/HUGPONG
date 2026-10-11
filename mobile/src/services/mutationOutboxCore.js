@@ -7,6 +7,8 @@ const PENDING_STATUSES = new Set([
 ]);
 const SUCCESS_STATUSES = new Set(['synced', 'success', 'completed', 'acknowledged']);
 const OUTBOX_SCHEMA_VERSION = 2;
+const OUTBOX_WARNING_THRESHOLD = 50;
+const OUTBOX_CRITICAL_THRESHOLD = 100;
 
 function canonicalQueueStatus(value) {
   const status = String(value || 'queued').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -200,9 +202,21 @@ function classifyMutationError(error) {
   if (status === 403) return 'authorization';
   if (status === 409) return 'conflict';
   if (status === 400 || status === 422) return 'validation';
+  if (status === 408 || status === 425 || status === 429) return 'retryable';
   if (status >= 400 && status < 500) return 'rejected';
   if (status >= 500) return 'server_failure';
   return 'retryable';
+}
+
+function queuePressure(count) {
+  const pendingCount = Math.max(0, Number(count || 0));
+  if (pendingCount >= OUTBOX_CRITICAL_THRESHOLD) {
+    return { level: 'critical', pendingCount, threshold: OUTBOX_CRITICAL_THRESHOLD };
+  }
+  if (pendingCount >= OUTBOX_WARNING_THRESHOLD) {
+    return { level: 'warning', pendingCount, threshold: OUTBOX_WARNING_THRESHOLD };
+  }
+  return { level: 'normal', pendingCount, threshold: OUTBOX_WARNING_THRESHOLD };
 }
 
 function isRetryableMutation(item) {
@@ -239,9 +253,13 @@ function responseVersion(response) {
     || null;
 }
 
-function retryDelayMs(retryCount) {
+function retryDelayMs(retryCount, serverRetryAfterMs = 0) {
   const exponent = Math.max(0, Number(retryCount || 1) - 1);
-  return Math.min(5 * 60 * 1000, 5000 * (2 ** exponent));
+  const exponentialDelay = Math.min(5 * 60 * 1000, 5000 * (2 ** exponent));
+  const requestedDelay = Number(serverRetryAfterMs || 0);
+  return Number.isFinite(requestedDelay) && requestedDelay > 0
+    ? Math.max(exponentialDelay, Math.min(60 * 60 * 1000, requestedDelay))
+    : exponentialDelay;
 }
 
 function isRetryEligible(item, now = Date.now()) {
@@ -258,12 +276,19 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
   const batchSize = Number.isInteger(options.batchSize) && options.batchSize > 0
     ? options.batchSize
     : Number.POSITIVE_INFINITY;
-  const candidates = workingQueue
+  const eligible = workingQueue
     .filter(isRetryableMutation)
-    .filter(item => !options.applyBackoff || isRetryEligible(item))
-    .slice(0, batchSize);
+    .filter(item => !options.applyBackoff || isRetryEligible(item));
+  const eligibleIds = new Set(eligible.map(item => item.mutationId));
+  const schedulable = eligible
+    .filter(item => !item.dependsOnMutationId
+      || !workingQueue.some(queued => queued.mutationId === item.dependsOnMutationId)
+      || eligibleIds.has(item.dependsOnMutationId));
+  const candidates = schedulable.slice(0, batchSize);
   let attemptedCount = 0;
-  let dependencyBlockedCount = 0;
+  let dependencyBlockedCount = eligible.length - schedulable.length;
+  let haltedReason = null;
+  let retryAt = null;
 
   for (const item of candidates) {
     if (item.dependsOnMutationId && workingQueue.some(queued => queued.mutationId === item.dependsOnMutationId)) {
@@ -294,13 +319,21 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
       item.lastError = error?.message || 'Sync connection timeout';
       item.conflict = item.status === 'conflict' ? (error?.data || { message: item.lastError }) : null;
       if (options.applyBackoff && ['retryable', 'server_failure', 'authentication'].includes(item.status)) {
-        item.nextAttemptAt = new Date(Date.now() + retryDelayMs(item.retryCount)).toISOString();
+        item.nextAttemptAt = new Date(Date.now() + retryDelayMs(item.retryCount, error?.retryAfterMs)).toISOString();
       } else {
         item.nextAttemptAt = null;
       }
       failedCount += 1;
+      if (Number(error?.status || 0) === 429) {
+        haltedReason = 'RATE_LIMITED';
+        retryAt = item.nextAttemptAt;
+      }
     }
     await onStateChange(workingQueue, responses);
+    // Once the server has throttled this account/network, attempting the rest
+    // of the batch only creates more 429 responses. Preserve the untouched
+    // records and resume after Retry-After instead.
+    if (haltedReason === 'RATE_LIMITED') break;
   }
 
   return {
@@ -312,6 +345,8 @@ async function drainMutationQueue(queue, remoteHandler, onStateChange = () => {}
     remainingCount: workingQueue.length,
     dependencyBlockedCount,
     blockedCount: workingQueue.filter(item => !isRetryableMutation(item)).length,
+    reason: haltedReason,
+    retryAt,
     remainingItems: workingQueue.map(item => ({
       mutationId: item.mutationId,
       entityKey: item.entityKey,
@@ -331,6 +366,8 @@ module.exports = {
   RETRYABLE_STATUSES,
   PENDING_STATUSES,
   SUCCESS_STATUSES,
+  OUTBOX_WARNING_THRESHOLD,
+  OUTBOX_CRITICAL_THRESHOLD,
   canonicalQueueStatus,
   createMutationId,
   inferEntityKey,
@@ -340,6 +377,7 @@ module.exports = {
   requeueCorrectableMutations,
   appendUniqueMutation,
   classifyMutationError,
+  queuePressure,
   isRetryableMutation,
   isPendingMutation,
   isRetryEligible,

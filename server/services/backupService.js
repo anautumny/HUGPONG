@@ -13,6 +13,8 @@ const BACKUP_SCHEMA_VERSION = '2026-09-28';
 const MAX_BACKUP_DOCUMENTS = 10000;
 const MAX_PLAINTEXT_BYTES = 24 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
+const BACKUP_RECOMMENDED_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BACKUP_DRILL_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
 const KDF_OPTIONS = Object.freeze({ N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
 const BACKUP_COLLECTIONS = Object.freeze([
   COLLECTIONS.USERS,
@@ -135,7 +137,40 @@ function payloadChecksum(payload) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-async function createBackupArchive(database, { passphrase, projectId, actorUserId, now = new Date() }) {
+function validOperationTime(operation) {
+  const value = operation?.completedAt || operation?.createdAt;
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : null;
+}
+
+function backupOperationalStatus(operations = [], now = Date.now()) {
+  const records = Array.isArray(operations) ? operations : [];
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const lastSuccessfulExport = records.find(item => (
+    item?.operation === 'EXPORT' && ['READY', 'VERIFIED'].includes(item?.status)
+  )) || null;
+  const lastRecoveryDrill = records.find(item => (
+    item?.operation === 'VALIDATION' && ['VALIDATED', 'USED'].includes(item?.status)
+  )) || null;
+  const exportTime = validOperationTime(lastSuccessfulExport);
+  const drillTime = validOperationTime(lastRecoveryDrill);
+  const nextExportDueAt = exportTime == null ? null : new Date(exportTime + BACKUP_RECOMMENDED_INTERVAL_MS).toISOString();
+  const nextDrillDueAt = drillTime == null ? null : new Date(drillTime + BACKUP_DRILL_INTERVAL_MS).toISOString();
+  const exportOverdue = exportTime == null || nowMs > exportTime + BACKUP_RECOMMENDED_INTERVAL_MS;
+  const drillOverdue = drillTime == null || nowMs > drillTime + BACKUP_DRILL_INTERVAL_MS;
+  return {
+    health: exportOverdue ? 'BACKUP_DUE' : drillOverdue ? 'DRILL_DUE' : 'CURRENT',
+    overdue: exportOverdue,
+    exportOverdue,
+    drillOverdue,
+    lastSuccessfulExport,
+    lastRecoveryDrill,
+    nextExportDueAt,
+    nextDrillDueAt
+  };
+}
+
+async function createBackupArchive(database, { passphrase, projectId, actorUserId, operationId = null, now = new Date() }) {
   if (!database) throw serviceError('Database is unavailable.', 503, 'DATABASE_UNAVAILABLE');
   assertBackupPassphrase(passphrase);
   const collections = {};
@@ -157,6 +192,7 @@ async function createBackupArchive(database, { passphrase, projectId, actorUserI
     createdAt,
     sourceProjectId: String(projectId || '').trim(),
     createdByUserId: String(actorUserId || '').trim(),
+    exportOperationId: operationId == null ? null : String(operationId).trim(),
     includedCollections: [...BACKUP_COLLECTIONS],
     excludedSecurityCollections: [...EXCLUDED_SECURITY_COLLECTIONS],
     documentCount,
@@ -231,6 +267,9 @@ function validateBackupPayload(payload, projectId) {
   }
   if (String(payload.sourceProjectId || '') !== String(projectId || '')) {
     throw serviceError('Backup belongs to a different Firebase project.', 409, 'BACKUP_PROJECT_MISMATCH');
+  }
+  if (payload.exportOperationId != null && !/^BKP-[A-F0-9]{20}$/.test(String(payload.exportOperationId))) {
+    throw serviceError('Backup export reference is invalid.', 400, 'BACKUP_EXPORT_REFERENCE_INVALID');
   }
   if (!Array.isArray(payload.includedCollections) || payload.includedCollections.length !== BACKUP_COLLECTIONS.length
     || payload.includedCollections.some((name, index) => name !== BACKUP_COLLECTIONS[index])) {
@@ -358,10 +397,13 @@ module.exports = {
   BACKUP_FORMAT_VERSION,
   BACKUP_SCHEMA_VERSION,
   MAX_ARCHIVE_BYTES,
+  BACKUP_RECOMMENDED_INTERVAL_MS,
+  BACKUP_DRILL_INTERVAL_MS,
   assertBackupPassphrase,
   createBackupArchive,
   decryptBackupArchive,
   analyzeMissingRecords,
   restoreMissingRecords,
+  backupOperationalStatus,
   _test: { encodeValue, decodeValue, validateBackupPayload, strictArchiveBuffer }
 };

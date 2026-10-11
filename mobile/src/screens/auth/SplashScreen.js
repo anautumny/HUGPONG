@@ -68,7 +68,7 @@ export default function SplashScreen({ navigation }) {
           Agricultural Operations Platform
         </AnimatedText>
       </View>
-      <AnimatedText style={[s.version, { opacity: tagOpacity }]}>v1.0.0</AnimatedText>
+      <AnimatedText style={[s.version, { opacity: tagOpacity }]}>Beta</AnimatedText>
     </View>
   );
 }

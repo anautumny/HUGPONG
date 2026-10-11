@@ -49,6 +49,8 @@ const semaphoreApiKey = String(process.env.SEMAPHORE_API_KEY || '').trim();
 const iprogSmsApiToken = String(process.env.IPROG_SMS_API_TOKEN || '').trim();
 const host = String(process.env.HOST || '0.0.0.0').trim();
 const port = Number(process.env.PORT || '3000');
+const requestTimeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || '30000');
+const shutdownGracePeriodMs = Number(process.env.SHUTDOWN_GRACE_PERIOD_MS || '10000');
 const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '').trim();
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -56,6 +58,12 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 if (!host) {
   throw new Error('HOST must not be empty.');
+}
+if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 5000 || requestTimeoutMs > 120000) {
+  throw new Error('REQUEST_TIMEOUT_MS must be an integer between 5000 and 120000.');
+}
+if (!Number.isInteger(shutdownGracePeriodMs) || shutdownGracePeriodMs < 5000 || shutdownGracePeriodMs > 30000) {
+  throw new Error('SHUTDOWN_GRACE_PERIOD_MS must be an integer between 5000 and 30000.');
 }
 if (isProduction && ['localhost', '127.0.0.1', '::1'].includes(host.toLowerCase())) {
   throw new Error('HOST must bind to an externally reachable interface in production.');
@@ -131,5 +139,7 @@ module.exports = {
   corsOrigins,
   isProduction,
   host,
-  port
+  port,
+  requestTimeoutMs,
+  shutdownGracePeriodMs
 };

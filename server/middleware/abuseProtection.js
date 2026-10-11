@@ -25,7 +25,7 @@ const KNOWN_WEB_PATHS = new Set([
   '/fields', '/block-farms', '/registry', '/operations', '/takeover', '/prices',
   '/audit', '/users', '/sync', '/support', '/maintenance', '/diagnostics',
   '/backups', '/settings', '/analytics', '/login.html', '/index.html',
-  '/icon-foreground.png', '/favicon.ico', '/health'
+  '/icon-foreground.png', '/favicon.ico', '/health', '/health/live', '/health/ready'
 ]);
 
 function normalizedPath(req) {
@@ -102,7 +102,8 @@ function rejectRateLimited(res, state, code) {
     success: false,
     error: 'Too many requests. Please try again later.',
     code,
-    module: 'SECURITY'
+    module: 'SECURITY',
+    retryAfterSeconds: state.retryAfterSeconds
   });
 }
 

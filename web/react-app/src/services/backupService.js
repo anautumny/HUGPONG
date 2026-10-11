@@ -1,4 +1,4 @@
-import { authenticatedRequest } from './apiClient';
+import { authenticatedRead, authenticatedRequest } from './apiClient';
 
 const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
 
@@ -18,8 +18,12 @@ function base64ToBytes(value) {
   return bytes;
 }
 
-export async function fetchBackupStatus() {
-  return authenticatedRequest('/api/backups', { timeoutMs: 30000 });
+function announceBackupStatusChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('hugpong:backup-status-changed'));
+}
+
+export async function fetchBackupStatus({ force = false } = {}) {
+  return authenticatedRead('/api/backups', { force, maxAgeMs: 2 * 60 * 1000 });
 }
 
 export async function createEncryptedBackup({ currentPassword, backupPassphrase }) {
@@ -41,6 +45,7 @@ export async function createEncryptedBackup({ currentPassword, backupPassphrase 
   } finally {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   }
+  announceBackupStatusChanged();
   return response;
 }
 
@@ -52,11 +57,13 @@ export async function readBackupFile(file) {
 }
 
 export async function validateBackup({ archiveBase64, currentPassword, backupPassphrase }) {
-  return authenticatedRequest('/api/backups/validate', {
+  const response = await authenticatedRequest('/api/backups/validate', {
     method: 'POST',
     body: { archiveBase64, currentPassword, backupPassphrase },
     timeoutMs: 120000
   });
+  announceBackupStatusChanged();
+  return response;
 }
 
 export async function restoreMissingBackupRecords({
@@ -66,11 +73,13 @@ export async function restoreMissingBackupRecords({
   validationId,
   confirmation
 }) {
-  return authenticatedRequest('/api/backups/restore-missing', {
+  const response = await authenticatedRequest('/api/backups/restore-missing', {
     method: 'POST',
     body: { archiveBase64, currentPassword, backupPassphrase, validationId, confirmation },
     timeoutMs: 120000
   });
+  announceBackupStatusChanged();
+  return response;
 }
 
 export default {

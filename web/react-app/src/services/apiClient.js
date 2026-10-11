@@ -18,6 +18,7 @@ const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
 let authenticatedReadGeneration = 0;
+let mutationCooldownUntil = 0;
 const WEB_APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '1.0.0');
 
 function browserOs() {
@@ -45,6 +46,30 @@ export function responseErrorFromPayload(result = {}, status = 0, fallback = 'Re
   error.code = errorCode;
   error.referenceId = result.referenceId || '';
   error.nextAction = result.nextAction || '';
+  return error;
+}
+
+function retryAfterSeconds(response, result = {}) {
+  const value = response?.headers?.get?.('retry-after') ?? result.retryAfterSeconds;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.ceil(numeric);
+  if (typeof value === 'string') {
+    const retryAt = Date.parse(value);
+    if (Number.isFinite(retryAt)) return Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+  }
+  return 0;
+}
+
+export function getMutationCooldownRemainingSeconds(now = Date.now()) {
+  return Math.max(0, Math.ceil((mutationCooldownUntil - now) / 1000));
+}
+
+function localMutationCooldownError(seconds) {
+  const error = new Error(`Too many requests. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`);
+  error.status = 429;
+  error.code = 'CLIENT_MUTATION_COOLDOWN';
+  error.retryAfterSeconds = seconds;
+  error.retryAfterMs = seconds * 1000;
   return error;
 }
 
@@ -98,6 +123,7 @@ function clearReadCache(resources = []) {
 // account's UI.
 export function clearAuthenticatedReadState() {
   authenticatedReadGeneration += 1;
+  mutationCooldownUntil = 0;
   readCache.clear();
   inFlightReads.clear();
 }
@@ -143,6 +169,9 @@ export function createMutationContext(path, body, suppliedBaseVersion = null) {
 export async function authenticatedRequest(path, options = {}) {
   const token = options.token || '';
   const method = String(options.method || 'GET').toUpperCase();
+  const isMutation = !['GET', 'HEAD'].includes(method);
+  const cooldownSeconds = isMutation ? getMutationCooldownRemainingSeconds() : 0;
+  if (cooldownSeconds > 0) throw localMutationCooldownError(cooldownSeconds);
   let requestBody = options.body;
 
   if (path.startsWith('/api/') && !['GET', 'HEAD'].includes(method) && requestBody && typeof requestBody === 'object' && !requestBody._mutation) {
@@ -195,6 +224,21 @@ export async function authenticatedRequest(path, options = {}) {
   if (!response.ok || !result.success) {
     const errorCode = result.code || result.data?.code || '';
     const error = responseErrorFromPayload(result, response.status);
+    const waitSeconds = retryAfterSeconds(response, result);
+    if (waitSeconds > 0) {
+      error.retryAfterSeconds = waitSeconds;
+      error.retryAfterMs = waitSeconds * 1000;
+      if (response.status === 429) error.message = `${error.message} Try again in ${waitSeconds} second${waitSeconds === 1 ? '' : 's'}.`;
+    }
+    if (response.status === 429 && isMutation) {
+      const safeWaitSeconds = Math.max(1, waitSeconds || 60);
+      mutationCooldownUntil = Math.max(mutationCooldownUntil, Date.now() + (safeWaitSeconds * 1000));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hugpong:mutation-rate-limited', {
+          detail: { retryAfterSeconds: safeWaitSeconds, retryAt: new Date(mutationCooldownUntil).toISOString() }
+        }));
+      }
+    }
     if (response.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hugpong:session-revoked', {
         detail: { code: errorCode, message: error.message }

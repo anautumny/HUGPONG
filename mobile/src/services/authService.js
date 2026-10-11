@@ -64,7 +64,7 @@ export async function getMobileClientInstanceId() {
 export async function probeServerConnectivity() {
   try {
     const clientInstanceId = await getMobileClientInstanceId();
-    const response = await fetchFromApi('/health', {
+    const response = await fetchFromApi('/health/ready', {
       method: 'GET',
       headers: mobileHeaders(clientInstanceId)
     });
@@ -87,6 +87,21 @@ async function parseResponse(response) {
     error.code = errorCode;
     error.referenceId = data.referenceId || '';
     error.nextAction = data.nextAction || '';
+    const retryAfterHeader = response.headers?.get?.('retry-after');
+    const retryAfterValue = retryAfterHeader ?? data.retryAfterSeconds;
+    const numericRetryAfter = Number(retryAfterValue);
+    let retryAfterSeconds = Number.isFinite(numericRetryAfter) && numericRetryAfter > 0
+      ? Math.ceil(numericRetryAfter)
+      : 0;
+    if (!retryAfterSeconds && typeof retryAfterValue === 'string') {
+      const retryAt = Date.parse(retryAfterValue);
+      if (Number.isFinite(retryAt)) retryAfterSeconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+    }
+    if (retryAfterSeconds > 0) {
+      error.retryAfterSeconds = retryAfterSeconds;
+      error.retryAfterMs = retryAfterSeconds * 1000;
+      if (response.status === 429) error.message = `${error.message} Try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'}.`;
+    }
     throw error;
   }
   return data;

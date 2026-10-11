@@ -75,7 +75,8 @@ test('early protection blocks bursts before route work with a safe generic respo
       assert.equal(res.payload.code, 'GLOBAL_RATE_LIMITED');
       assert.equal(res.payload.error, 'Too many requests. Please try again later.');
       assert.equal(res.locals.aggregateDiagnostic, true);
-      assert.equal(Object.hasOwn(res.payload, 'retryAfterSeconds'), false);
+      assert.equal(res.payload.retryAfterSeconds, 10);
+      assert.equal(res.headers['Retry-After'], '10');
     }
   }
   assert.equal(accepted, 2);
@@ -121,6 +122,8 @@ test('authenticated budgets bind both the account and its network address', () =
 test('known routes avoid the scanner budget while unknown paths are grouped safely', () => {
   assert.equal(isKnownPath('/api/logs'), true);
   assert.equal(isKnownPath('/backups'), true);
+  assert.equal(isKnownPath('/health/live'), true);
+  assert.equal(isKnownPath('/health/ready'), true);
   assert.equal(isKnownPath('/wp-admin.php'), false);
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/api/logs/secret-document-id?x=1' })), '/api/logs/*');
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/wp-admin.php' })), '/unknown');
@@ -162,4 +165,8 @@ test('web and mobile continue to receive centralized safe retry-later errors', (
   assert.match(web, /result\.referenceId/);
   assert.match(mobile, /referenceId/);
   assert.match(mobile, /nextAction/);
+  assert.match(web, /retry-after/);
+  assert.match(web, /hugpong:mutation-rate-limited/);
+  assert.match(mobile, /retry-after/);
+  assert.match(mobile, /retryAfterMs/);
 });

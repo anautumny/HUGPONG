@@ -10,6 +10,7 @@ const {
   requeueCorrectableMutations,
   appendUniqueMutation,
   classifyMutationError,
+  queuePressure,
   getPendingOperationPayloads,
   createSingleFlightRunner,
   drainMutationQueue
@@ -157,8 +158,36 @@ test('conflicts are terminal and retained distinctly from network retries', () =
   assert.equal(classifyMutationError({ status: 401 }), 'authentication');
   assert.equal(classifyMutationError({ status: 403 }), 'authorization');
   assert.equal(classifyMutationError({ status: 422 }), 'validation');
+  assert.equal(classifyMutationError({ status: 408 }), 'retryable');
+  assert.equal(classifyMutationError({ status: 425 }), 'retryable');
+  assert.equal(classifyMutationError({ status: 429 }), 'retryable');
   assert.equal(classifyMutationError({ status: 500 }), 'server_failure');
   assert.equal(classifyMutationError(new Error('offline')), 'retryable');
+});
+
+test('queue pressure warns without deleting or changing saved mutations', () => {
+  assert.deepEqual(queuePressure(49), { level: 'normal', pendingCount: 49, threshold: 50 });
+  assert.deepEqual(queuePressure(50), { level: 'warning', pendingCount: 50, threshold: 50 });
+  assert.deepEqual(queuePressure(100), { level: 'critical', pendingCount: 100, threshold: 100 });
+});
+
+test('server throttling stops the batch and honors Retry-After without losing untouched records', async () => {
+  const queue = Array.from({ length: 5 }, (_, index) => createMutationEnvelope('operation_log', {
+    id: `LOG-THROTTLE-${index}`, fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE'
+  }, { mutationId: `MUT-THROTTLE-${index}` }));
+  let attempts = 0;
+  const before = Date.now();
+  const result = await drainMutationQueue(queue, async () => {
+    attempts += 1;
+    throw Object.assign(new Error('Please wait'), { status: 429, retryAfterMs: 90_000 });
+  }, () => {}, { batchSize: 10, applyBackoff: true });
+
+  assert.equal(attempts, 1, 'the client does not hammer the server after the first throttle response');
+  assert.equal(result.reason, 'RATE_LIMITED');
+  assert.equal(result.remainingCount, 5);
+  assert.equal(result.queue[0].status, 'retryable');
+  assert.ok(Date.parse(result.retryAt) >= before + 90_000);
+  assert.deepEqual(result.queue.slice(1).map(item => item.status), ['queued', 'queued', 'queued', 'queued']);
 });
 
 test('malformed server acknowledgement remains queued', async () => {
@@ -283,6 +312,30 @@ test('dependent mutations wait, then inherit the authoritative server version', 
   assert.equal(drained.queue.length, 0);
 });
 
+test('a terminal dependency does not starve unrelated records in a large queue', async () => {
+  const conflict = createMutationEnvelope('custom_stages', {
+    fieldId: 'FLD-1', customStages: []
+  }, { mutationId: 'MUT-BLOCKED-ROOT' });
+  conflict.status = 'conflict';
+  const dependent = createMutationEnvelope('custom_operations', {
+    fieldId: 'FLD-1', customOperations: {}
+  }, { mutationId: 'MUT-BLOCKED-CHILD' }, [conflict]);
+  const independent = createMutationEnvelope('operation_log', {
+    id: 'LOG-INDEPENDENT', fieldId: 'FLD-2', cycleId: 'CYC-2', status: 'ACTIVE'
+  }, { mutationId: 'MUT-INDEPENDENT' });
+
+  const drained = await drainMutationQueue(
+    [conflict, dependent, independent],
+    async item => ({ success: true, data: { id: item.payload.id } }),
+    () => {},
+    { batchSize: 10, applyBackoff: true }
+  );
+
+  assert.equal(drained.processedCount, 1);
+  assert.equal(drained.dependencyBlockedCount, 1);
+  assert.deepEqual(drained.queue.map(item => item.mutationId), ['MUT-BLOCKED-ROOT', 'MUT-BLOCKED-CHILD']);
+});
+
 test('server validates mutation identity and rejects stale base versions', () => {
   const context = readMutationContext({ body: { _mutation: {
     mutationId: 'MUT-VERSION-1',
@@ -339,6 +392,28 @@ test('runtime outbox replay uses bounded batches without losing remaining mutati
   assert.equal(result.processedCount, 10);
   assert.equal(result.remainingCount, 2);
   assert.deepEqual(result.queue.map(item => item.mutationId), ['MUT-BATCH-10', 'MUT-BATCH-11']);
+});
+
+test('a fifty-record backlog drains completely across bounded continuation passes', async () => {
+  let queue = Array.from({ length: 50 }, (_, index) => createMutationEnvelope('operation_log', {
+    id: `LOG-LARGE-${index}`, fieldId: 'FLD-1', cycleId: 'CYC-1', status: 'ACTIVE'
+  }, { mutationId: `MUT-LARGE-${index}` }));
+  let passes = 0;
+  let totalProcessed = 0;
+  while (queue.length > 0) {
+    const result = await drainMutationQueue(
+      queue,
+      async item => ({ success: true, data: { id: item.payload.id } }),
+      () => {},
+      { batchSize: 10, applyBackoff: true }
+    );
+    assert.ok(result.attemptedCount <= 10);
+    queue = result.queue;
+    totalProcessed += result.processedCount;
+    passes += 1;
+  }
+  assert.equal(passes, 5);
+  assert.equal(totalProcessed, 50);
 });
 
 test('runtime outbox replay defers transient failures until exponential backoff expires', async () => {

@@ -1,5 +1,5 @@
 import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
-import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId, removeOutboxItem } from '../services/syncEngine';
+import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
 import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync, resetMobileTelemetryState } from '../services/telemetryService';
 import { auth } from '../firebase/config';
@@ -88,9 +88,8 @@ export const commitExplicitMutation = async (type, payload, options = {}) => {
   const retained = getOutboxQueue().find(queued => queued.mutationId === item.mutationId);
   const outcome = { item: retained || item, result, queued: Boolean(retained), response: result.responses?.[item.mutationId] };
   const retainedStatus = outcome.queued ? outcome.item?.status : null;
-  const nonOfflineFailureStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected', 'server_failure']);
+  const nonOfflineFailureStatuses = new Set(['authentication', 'authorization', 'conflict', 'validation', 'rejected']);
   if (nonOfflineFailureStatuses.has(retainedStatus) || result.reason === 'AUTHORIZATION_FAILURE' || result.reason === 'AUTHENTICATION_RECOVERY') {
-    await removeOutboxItem(item.mutationId);
     const error = new Error(outcome.item?.lastError || 'The server rejected this mutation.');
     error.status = retainedStatus === 'conflict' ? 409 : 400;
     error.data = outcome.item?.conflict || null;
@@ -986,6 +985,7 @@ export const restoreSessionFromToken = async () => {
 
 export const logoutUser = async (options = {}) => {
   const signingOutSession = CURRENT_SESSION;
+  cancelMobileSyncContinuation();
   stopActiveCloudSync();
   await logoutFromServer(options);
   draftLogs.length = 0;
@@ -1014,6 +1014,7 @@ export const authenticateUser = async (contactOrId, password) => {
       await logoutFromServer();
       return { success: false, error: 'Super Admin access is restricted to the Web Management Console.' };
     }
+    cancelMobileSyncContinuation();
     resetMobileTelemetryState();
     clearCanonicalRuntimeData();
     CURRENT_SESSION = { ...normalizeSessionUser(result.user), lastActiveAt: Date.now() };
@@ -2927,7 +2928,10 @@ export const listenToCloudSync = () => {
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
     appState = nextState;
-    if (returnedToForeground) refresh();
+    if (returnedToForeground) {
+      refresh();
+      if (getOutboxCount() > 0) performMobileSync('APP_FOREGROUND').catch(() => {});
+    }
   });
   return stop;
 };
@@ -2962,6 +2966,50 @@ export const restartCloudSyncIfReady = async () => {
 };
 
 let mobileSyncPromise = null;
+let mobileSyncContinuationTimer = null;
+const MOBILE_SYNC_BATCH_INTERVAL_MS = 75 * 1000;
+
+const cancelMobileSyncContinuation = () => {
+  if (mobileSyncContinuationTimer) clearTimeout(mobileSyncContinuationTimer);
+  mobileSyncContinuationTimer = null;
+};
+
+const scheduleMobileSyncContinuation = (result = {}) => {
+  cancelMobileSyncContinuation();
+  if (!isAutomaticSyncEnabled() || !getNetworkStatus() || getOutboxCount() === 0) return false;
+  if (AppState.currentState && AppState.currentState !== 'active') return false;
+
+  const ownerUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+  if (!ownerUserId || !auth?.currentUser || auth.currentUser.uid !== ownerUserId) return false;
+
+  const queue = getOutboxQueue();
+  const retryableStatuses = new Set(['queued', 'retryable', 'failed', 'server_failure', 'authentication']);
+  const queueIds = new Set(queue.map(item => item.mutationId));
+  const candidates = queue.filter(item => retryableStatuses.has(item.status)
+    && (!item.dependsOnMutationId || !queueIds.has(item.dependsOnMutationId)));
+  if (candidates.length === 0) return false;
+
+  const now = Date.now();
+  const nextAttemptTimes = candidates
+    .map(item => Date.parse(item.nextAttemptAt || ''))
+    .filter(Number.isFinite);
+  const earliestRetryAt = nextAttemptTimes.length > 0 ? Math.min(...nextAttemptTimes) : now;
+  const serverRetryAt = Date.parse(result.retryAt || '');
+  const pacingFloor = Number(result.processedCount || 0) > 0
+    ? now + MOBILE_SYNC_BATCH_INTERVAL_MS
+    : now + 1000;
+  const resumeAt = result.reason === 'RATE_LIMITED' && Number.isFinite(serverRetryAt)
+    ? Math.max(pacingFloor, serverRetryAt)
+    : Math.max(pacingFloor, earliestRetryAt);
+
+  mobileSyncContinuationTimer = setTimeout(() => {
+    mobileSyncContinuationTimer = null;
+    const activeUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
+    if (activeUserId !== ownerUserId || !getNetworkStatus() || AppState.currentState !== 'active') return;
+    performMobileSync('OUTBOX_CONTINUATION').catch(() => {});
+  }, Math.max(1000, resumeAt - now));
+  return true;
+};
 
 const canonicalStageName = stageNumber => {
   const numericStage = Number(stageNumber);
@@ -3202,6 +3250,7 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       ...result,
       success: result.success === true && getOutboxCount() === 0
     };
+    scheduleMobileSyncContinuation(normalizedResult);
     const failedRemainingCount = getOutboxQueue()
       .filter(item => item.status && !['queued', 'syncing'].includes(item.status))
       .length;

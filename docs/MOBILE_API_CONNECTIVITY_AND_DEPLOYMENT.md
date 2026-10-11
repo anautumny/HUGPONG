@@ -40,7 +40,7 @@ IPROG_SMS_API_TOKEN=<server-only secret>
 GOOGLE_APPLICATION_CREDENTIALS=<provider-managed credential path, when workload identity is unavailable>
 ```
 
-The server binds to the injected `PORT` on `0.0.0.0`, trusts one TLS proxy in production, uses secure HTTP-only cookies, and rejects browser origins not explicitly listed in `CORS_ORIGINS`. Native Mobile requests do not send a browser Origin header and authenticate with bearer tokens. `/health` is deliberately public and returns only a minimal status document with `Cache-Control: no-store`.
+The server binds to the injected `PORT` on `0.0.0.0`, trusts one TLS proxy in production, uses secure HTTP-only cookies, and rejects browser origins not explicitly listed in `CORS_ORIGINS`. Native Mobile requests do not send a browser Origin header and authenticate with bearer tokens. `/health/ready` is deliberately public, returns only a minimal status document with `Cache-Control: no-store`, and becomes unavailable while an instance drains. `/health/live` is the process restart probe, while `/health` remains a compatibility alias for readiness.
 
 Use workload identity or the hosting provider's secret store for Firebase Admin credentials. Never put a Firebase service-account private key, `SESSION_SECRET`, bootstrap password, or Semaphore key in Web/Mobile environment variables or source control.
 
@@ -50,7 +50,7 @@ The Mobile monitor combines operating-system internet reachability with the conf
 
 - `NO_INTERNET`: Wi-Fi/mobile-data reachability is absent. Login explains that an internet connection is required.
 - `SERVER_UNAVAILABLE`: general internet is present but the configured HUGPONG API is not responding. Login presents a server-specific retry message.
-- `ONLINE`: `/health` succeeded. Only then may automatic outbox replay begin.
+- `ONLINE`: `/health/ready` succeeded. Only then may automatic outbox replay begin.
 
 Cached records, drafts, and the durable mutation outbox remain local during either unavailable state. A network change, foreground transition, manual retry, or scheduled gateway retry performs a fresh health check. Successful recovery triggers the existing idempotent synchronization path without requiring an app restart.
 
@@ -58,7 +58,7 @@ Cached records, drafts, and the durable mutation outbox remain local during eith
 
 Before publishing an installed build:
 
-1. Deploy the Express gateway and confirm `https://<public-api>/health` returns HTTP 200 with `{ "success": true, "status": "healthy" }`.
+1. Deploy the Express gateway and confirm `https://<public-api>/health/ready` returns HTTP 200 with `{ "success": true, "status": "ready" }`.
 2. Set the exact Web origin in server `CORS_ORIGINS` and verify Web login, authenticated reads, mutations, SMS, RBAC, QR/audit verification, and logout.
 3. Set the public HTTPS origin in the Mobile production build environment and produce a new build.
 4. Install the build on a physical device. Verify login on one Wi-Fi network, switch to another Wi-Fi network, then switch to cellular data. The same public origin must work without restarting the app.

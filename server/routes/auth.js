@@ -405,6 +405,7 @@ function rejectedLogin(req, res, error = 'Invalid credentials.') {
     success: false,
     error: exhausted ? LOGIN_LOCKOUT_MESSAGE : error,
     code: exhausted ? 'LOGIN_RATE_LIMITED' : 'INVALID_CREDENTIALS',
+    ...(exhaustedState ? { retryAfterSeconds: exhaustedState.retryAfterSeconds } : {}),
     data: (exhaustedState || state) ? loginRateLimitData(exhaustedState || state) : undefined
   });
 }

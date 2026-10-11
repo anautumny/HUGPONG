@@ -24,3 +24,9 @@ The mobile app requires an explicit `EXPO_PUBLIC_API_BASE_URL` and the `EXPO_PUB
 Development reset and test-account creation are explicit, separately gated server scripts. Runtime login screens do not contain mock-session or role-bypass controls.
 
 Before release, run `npm run verify:release` from the repository root. It checks deployment configuration parity, runtime authority, server and Web tests, the Web production build, and the Android Expo export. The same gate runs in continuous verification. The separate live database audit remains `npm --prefix server run audit:legacy-data`. See [`docs/PHASE_5_RELEASE_READINESS.md`](docs/PHASE_5_RELEASE_READINESS.md) and [`docs/PHASE_6_DEPLOYMENT_AUTOMATION.md`](docs/PHASE_6_DEPLOYMENT_AUTOMATION.md).
+
+Production operators must download an encrypted business-data backup every 24 hours, keep two separate copies, and run a validation drill at least every 30 days. See [`docs/BACKUP_AND_RECOVERY_RUNBOOK.md`](docs/BACKUP_AND_RECOVERY_RUNBOOK.md).
+
+Managed hosting must use the drain-aware `/health/ready` probe and graceful termination contract. After deployment, measure the selected host with `npm run measure:hosting`. See [`docs/HOSTING_RELIABILITY_AND_CAPACITY.md`](docs/HOSTING_RELIABILITY_AND_CAPACITY.md).
+
+Before expanding beyond the initial user group, run the guarded authenticated Web/Mobile capacity and duplicate-write checks against a separate staging project with `npm run measure:application`. See [`docs/STAGING_APPLICATION_CAPACITY.md`](docs/STAGING_APPLICATION_CAPACITY.md).

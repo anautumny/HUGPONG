@@ -13,11 +13,14 @@ const { queueAuditEvent } = require('../services/auditWriter');
 const {
   BACKUP_SCHEMA_VERSION,
   MAX_ARCHIVE_BYTES,
+  BACKUP_RECOMMENDED_INTERVAL_MS,
+  BACKUP_DRILL_INTERVAL_MS,
   assertBackupPassphrase,
   createBackupArchive,
   decryptBackupArchive,
   analyzeMissingRecords,
-  restoreMissingRecords
+  restoreMissingRecords,
+  backupOperationalStatus
 } = require('../services/backupService');
 
 const VALIDATION_TTL_MS = 10 * 60 * 1000;
@@ -111,7 +114,12 @@ function publicOperation(document) {
     schemaVersion: data.schemaVersion || null,
     documentCount: Number(data.documentCount || 0),
     archiveByteSize: Number(data.archiveByteSize || 0),
+    archiveSha256: data.archiveSha256 || '',
     collectionCounts: data.collectionCounts || {},
+    sourceCreatedAt: data.sourceCreatedAt || null,
+    sourceExportId: data.sourceExportId || null,
+    lastValidatedAt: data.lastValidatedAt || null,
+    lastValidationId: data.lastValidationId || null,
     plan: data.plan || null,
     result: data.result || null,
     referenceId: data.referenceId || data.id || document.id,
@@ -124,20 +132,21 @@ router.get('/', requireAuth, requireRole([ROLES.SUPER_ADMIN]), async (req, res) 
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.', code: 'DATABASE_UNAVAILABLE' });
     const snapshot = await db.collection(COLLECTIONS.BACKUP_OPERATIONS).orderBy('createdAt', 'desc').limit(50).get();
     const operations = snapshot.docs.map(publicOperation);
-    const lastSuccessfulExport = operations.find(item => item.operation === 'EXPORT' && item.status === 'READY') || null;
-    const overdue = !lastSuccessfulExport || Date.now() - new Date(lastSuccessfulExport.completedAt || lastSuccessfulExport.createdAt).getTime() > 7 * 24 * 60 * 60 * 1000;
+    const operationalStatus = backupOperationalStatus(operations);
     return res.json({
       success: true,
       data: operations,
       policy: {
         mode: 'MANUAL_ENCRYPTED_LOGICAL_BACKUP',
-        recommendedIntervalDays: 7,
+        recommendedIntervalHours: BACKUP_RECOMMENDED_INTERVAL_MS / (60 * 60 * 1000),
+        recoveryDrillIntervalDays: BACKUP_DRILL_INTERVAL_MS / (24 * 60 * 60 * 1000),
+        minimumOffsiteCopies: 2,
         restoreMode: 'MISSING_RECORDS_ONLY',
+        projectScope: 'SAME_FIREBASE_PROJECT',
         schemaVersion: BACKUP_SCHEMA_VERSION,
         maximumArchiveBytes: MAX_ARCHIVE_BYTES
       },
-      lastSuccessfulExport,
-      overdue
+      ...operationalStatus
     });
   } catch (error) {
     res.locals.diagnosticError = error;
@@ -158,6 +167,7 @@ router.post('/export', requireAuth, requireRole([ROLES.SUPER_ADMIN]), backupExpo
       passphrase,
       projectId: projectId(),
       actorUserId: actorId(req),
+      operationId: backupId,
       now: new Date(createdAt)
     });
     const operation = {
@@ -198,6 +208,25 @@ router.post('/validate', requireAuth, requireRole([ROLES.SUPER_ADMIN]), backupVa
     const decrypted = await decryptBackupArchive(db, req.body?.archiveBase64, req.body.backupPassphrase, projectId());
     const plan = await analyzeMissingRecords(db, decrypted.payload);
     const createdAt = nowIso();
+    const embeddedExportId = String(decrypted.payload.exportOperationId || '').trim();
+    let sourceExport = null;
+    if (embeddedExportId) {
+      const embeddedExport = await db.collection(COLLECTIONS.BACKUP_OPERATIONS).doc(embeddedExportId).get();
+      const embeddedData = embeddedExport.exists ? embeddedExport.data() : null;
+      if (embeddedData?.operation === 'EXPORT'
+        && ['READY', 'VERIFIED'].includes(embeddedData.status)
+        && embeddedData.archiveSha256 === decrypted.archiveSha256) {
+        sourceExport = embeddedExport;
+      }
+    } else {
+      const matchingExports = await db.collection(COLLECTIONS.BACKUP_OPERATIONS)
+        .where('archiveSha256', '==', decrypted.archiveSha256)
+        .get();
+      sourceExport = matchingExports.docs.find(document => {
+        const data = document.data();
+        return data.operation === 'EXPORT' && ['READY', 'VERIFIED'].includes(data.status);
+      }) || null;
+    }
     const operation = {
       id: validationId,
       operation: 'VALIDATION',
@@ -211,15 +240,34 @@ router.post('/validate', requireAuth, requireRole([ROLES.SUPER_ADMIN]), backupVa
       archiveByteSize: decrypted.archiveByteSize,
       archiveSha256: decrypted.archiveSha256,
       sourceCreatedAt: decrypted.payload.createdAt,
+      sourceExportId: sourceExport?.id || null,
       plan,
       referenceId: validationId
     };
-    await saveOperation(operation);
-    await auditOperation({
+    const batch = db.batch();
+    batch.set(db.collection(COLLECTIONS.BACKUP_OPERATIONS).doc(validationId), operation);
+    if (sourceExport) {
+      batch.update(sourceExport.ref, {
+        status: 'VERIFIED',
+        lastValidatedAt: createdAt,
+        lastValidationId: validationId
+      });
+    }
+    queueAuditEvent(batch, db, {
       eventType: 'BACKUP_VALIDATED', actorUserId: actorId(req), entityType: 'BACKUP', entityId: validationId,
       details: `Validated an encrypted backup; ${plan.missingCount} missing records are eligible for non-destructive recovery.`, createdAt
     });
-    return res.json({ success: true, validationId, expiresAt: operation.expiresAt, backupCreatedAt: decrypted.payload.createdAt, plan });
+    await batch.commit();
+    return res.json({
+      success: true,
+      validationId,
+      expiresAt: operation.expiresAt,
+      backupCreatedAt: decrypted.payload.createdAt,
+      archiveSha256: decrypted.archiveSha256,
+      sourceExportId: operation.sourceExportId,
+      recoveryDrillPassed: true,
+      plan
+    });
   } catch (error) {
     await recordFailure(req, 'VALIDATION', validationId, error);
     res.locals.diagnosticError = error;

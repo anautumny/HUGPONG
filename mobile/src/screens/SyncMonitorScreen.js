@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe } from '../data/dataStore';
-import { getOutboxDiagnostics } from '../services/syncEngine';
+import { getOutboxDiagnostics, getOutboxPressure } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
@@ -135,6 +135,7 @@ export default function SyncMonitorScreen({ navigation }) {
 
   const outbox = React.useMemo(() => getOutboxDiagnostics(), [localRevision]);
   const localPending = outbox.length;
+  const queuePressure = React.useMemo(() => getOutboxPressure(), [localRevision]);
   const localFailed = outbox.filter(item => !['queued', 'retryable', 'syncing'].includes(item.status)).length;
   const own = monitor?.subjects?.find(subject => subject.isSelf) || null;
   const members = monitor?.subjects?.filter(subject => !subject.isSelf) || [];
@@ -188,6 +189,19 @@ export default function SyncMonitorScreen({ navigation }) {
 
       <ScrollView contentContainerStyle={s.content}>
         {error ? <View style={s.error}><Text style={s.errorText}>{error}</Text></View> : null}
+        {queuePressure.level !== 'normal' ? (
+          <View style={[s.backlogNotice, queuePressure.level === 'critical' && s.backlogCritical]}>
+            <Ionicons name="cloud-upload-outline" size={20} color={queuePressure.level === 'critical' ? '#B42318' : '#805D13'} />
+            <View style={s.backlogCopy}>
+              <Text style={s.backlogTitle}>
+                {queuePressure.level === 'critical' ? t('sync_backlog_critical_title') : t('sync_backlog_warning_title')}
+              </Text>
+              <Text style={s.backlogText}>
+                {localPending} {queuePressure.level === 'critical' ? t('sync_backlog_critical_text') : t('sync_backlog_warning_text')}
+              </Text>
+            </View>
+          </View>
+        ) : null}
         {loading ? <ActivityIndicator color={COLORS.primary} size="large" /> : (
           <>
             <View style={s.card}>
@@ -325,5 +339,10 @@ const s = StyleSheet.create({
   pageButtonText: { fontSize: 12, fontWeight: '800', color: COLORS.text },
   pageCount: { flex: 1, textAlign: 'center', fontSize: 11.5, fontWeight: '800', color: COLORS.textMuted },
   error: { padding: 12, borderRadius: RADIUS.md, backgroundColor: '#FDECEC' },
-  errorText: { color: '#B42318', fontSize: 12, fontWeight: '700' }
+  errorText: { color: '#B42318', fontSize: 12, fontWeight: '700' },
+  backlogNotice: { padding: 13, borderRadius: RADIUS.md, backgroundColor: '#FFF8E8', borderWidth: 1, borderColor: '#F0D58C', flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  backlogCritical: { backgroundColor: '#FDECEC', borderColor: '#F2B8B5' },
+  backlogCopy: { flex: 1, minWidth: 0 },
+  backlogTitle: { fontSize: 12.5, fontWeight: '900', color: COLORS.text },
+  backlogText: { marginTop: 3, fontSize: 11.5, lineHeight: 17, color: COLORS.textMuted }
 });

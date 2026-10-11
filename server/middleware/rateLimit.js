@@ -152,6 +152,7 @@ function createRateLimit({
           success: false,
           error,
           code,
+          retryAfterSeconds: state.retryAfterSeconds,
           data
         });
       }

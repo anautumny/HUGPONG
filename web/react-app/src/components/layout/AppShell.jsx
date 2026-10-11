@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { RefreshCw, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertCircle, DatabaseBackup, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSync } from '../../context/SyncContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import MobileBottomNav from './MobileBottomNav';
+import { fetchBackupStatus } from '../../services/backupService';
 
 const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
@@ -15,6 +16,8 @@ export default function AppShell() {
   const { isOnline, networkOnline, reconnectNotice, dismissReconnectNotice } = useSync();
   const navigate = useNavigate();
   const [isReturningToLogin, setIsReturningToLogin] = useState(false);
+  const [mutationCooldownSeconds, setMutationCooldownSeconds] = useState(0);
+  const [backupAttention, setBackupAttention] = useState(null);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_COLLAPSED_KEY) === 'true';
@@ -44,6 +47,53 @@ export default function AppShell() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMobileDrawerOpen]);
+
+  useEffect(() => {
+    let countdownTimer = null;
+    const handleRateLimit = event => {
+      if (countdownTimer) clearInterval(countdownTimer);
+      const seconds = Math.max(1, Number(event?.detail?.retryAfterSeconds || 60));
+      setMutationCooldownSeconds(seconds);
+      countdownTimer = setInterval(() => {
+        setMutationCooldownSeconds(current => {
+          if (current <= 1) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+            return 0;
+          }
+          return current - 1;
+        });
+      }, 1000);
+    };
+    window.addEventListener('hugpong:mutation-rate-limited', handleRateLimit);
+    return () => {
+      window.removeEventListener('hugpong:mutation-rate-limited', handleRateLimit);
+      if (countdownTimer) clearInterval(countdownTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (roleKey !== ROLE_KEYS.SUPER_ADMIN) {
+      setBackupAttention(null);
+      return undefined;
+    }
+    let active = true;
+    const loadBackupAttention = async () => {
+      try {
+        const response = await fetchBackupStatus({ force: true });
+        if (!active) return;
+        setBackupAttention(response.exportOverdue || response.drillOverdue ? response : null);
+      } catch {
+        if (active) setBackupAttention(null);
+      }
+    };
+    void loadBackupAttention();
+    window.addEventListener('hugpong:backup-status-changed', loadBackupAttention);
+    return () => {
+      active = false;
+      window.removeEventListener('hugpong:backup-status-changed', loadBackupAttention);
+    };
+  }, [roleKey]);
 
   const handleToggleCollapse = useCallback(() => {
     setIsCollapsed(prev => {
@@ -161,6 +211,21 @@ export default function AppShell() {
                 ? 'HUGPONG server unavailable. You remain signed in; live SRA actions will resume automatically.'
                 : 'No internet connection. You remain signed in; live SRA actions will resume automatically.'}
             </span>
+          </div>
+        )}
+
+        {mutationCooldownSeconds > 0 && (
+          <div className="print:hidden no-print flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200" role="status" aria-live="polite">
+            <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>Submissions are temporarily paused to protect your data. Try again in {mutationCooldownSeconds} second{mutationCooldownSeconds === 1 ? '' : 's'}.</span>
+          </div>
+        )}
+
+        {backupAttention && (
+          <div className="print:hidden no-print flex items-center justify-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200" role="status" aria-live="polite">
+            <DatabaseBackup className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{backupAttention.exportOverdue ? 'The daily encrypted backup is due.' : 'The monthly backup recovery drill is due.'}</span>
+            <button type="button" onClick={() => navigate('/backups')} className="rounded-lg bg-amber-900 px-2.5 py-1 font-bold text-white dark:bg-amber-200 dark:text-amber-950">Open Backup & Recovery</button>
           </div>
         )}
 

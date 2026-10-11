@@ -42,6 +42,7 @@ const cropCycleOperations = read('server/services/cropCycleOperations.js');
 const blockFarmRoute = read('server/routes/blockFarms.js');
 const mobilePackage = read('mobile/package.json');
 const mobileAppConfig = read('mobile/app.json');
+const mobileSplash = read('mobile/src/screens/auth/SplashScreen.js');
 const stages = JSON.parse(read('mobile/src/constants/cropStages.json'));
 const { buildOperationLog } = require('../schema/firestoreSchema');
 
@@ -54,6 +55,8 @@ test('web and mobile branding use the canonical icon foreground', () => {
   const splashPlugin = expoConfig.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen');
   assert.equal(splashPlugin[1].image, './assets/icon-foreground.png');
   assert.equal(expoConfig.web.favicon, './assets/icon-foreground.png');
+  assert.match(mobileSplash, />Beta<\/AnimatedText>/);
+  assert.doesNotMatch(mobileSplash, />v1\.0\.0<\/AnimatedText>/);
   assert.equal(
     fs.readFileSync(path.join(root, 'web/react-app/public/icon-foreground.png')).equals(
       fs.readFileSync(path.join(root, 'mobile/assets/icon-foreground.png'))
@@ -76,11 +79,20 @@ test('queue removal requires an explicit successful server acknowledgement', () 
   assert.match(syncEngine, /persistOutboxQueue\(mergedQueue, processingOwnerId\)/);
 });
 
-test('rejected online mutations are removed while offline network retries remain queued', () => {
+test('failed online mutations remain visible until an explicit successful acknowledgement', () => {
   assert.match(dataStore, /nonOfflineFailureStatuses/);
-  assert.match(dataStore, /removeOutboxItem\(item\.mutationId\)/);
-  assert.match(syncEngine, /item\.mutationId !== outboxId/);
+  assert.doesNotMatch(dataStore, /removeOutboxItem\(item\.mutationId\)/);
+  assert.doesNotMatch(dataStore, /nonOfflineFailureStatuses = new Set\([^\n]*server_failure/);
   assert.doesNotMatch(dataStore, /nonOfflineFailureStatuses = new Set\([^\n]*retryable/);
+});
+
+test('large mobile backlogs continue in paced account-scoped batches', () => {
+  assert.match(dataStore, /MOBILE_SYNC_BATCH_INTERVAL_MS = 75 \* 1000/);
+  assert.match(dataStore, /scheduleMobileSyncContinuation\(normalizedResult\)/);
+  assert.match(dataStore, /activeUserId !== ownerUserId/);
+  assert.match(dataStore, /performMobileSync\('OUTBOX_CONTINUATION'\)/);
+  assert.match(dataStore, /performMobileSync\('APP_FOREGROUND'\)/);
+  assert.match(outboxCore, /haltedReason === 'RATE_LIMITED'/);
 });
 
 test('durable outboxes are isolated by signed-in account and legacy shared entries stay quarantined', () => {
@@ -288,7 +300,10 @@ test('reconnection reports progress and honors the persisted automatic-sync pref
   assert.match(webSyncContext, /flushCropStageOutbox/);
   assert.match(webSyncContext, /announceConnectionRestored/);
   assert.match(webAppShell, /Automatic synchronization is complete/);
+  assert.match(webAppShell, /hugpong:mutation-rate-limited/);
+  assert.match(webAppShell, /Submissions are temporarily paused to protect your data/);
   assert.match(webApiClient, /hugpong:connection-restored/);
+  assert.match(webApiClient, /mutationCooldownUntil = 0/);
 });
 
 test('mobile startup tolerates an older APK without the NetInfo native module', () => {
@@ -297,7 +312,7 @@ test('mobile startup tolerates an older APK without the NetInfo native module', 
   assert.match(networkService, /try \{\s*const netInfoModule = require\('@react-native-community\/netinfo'\)/);
   assert.match(networkService, /NetInfo\?\.fetch/);
   assert.match(networkService, /probeServerConnectivity\(\)/);
-  assert.match(authService, /fetchFromApi\('\/health'/);
+  assert.match(authService, /fetchFromApi\('\/health\/ready'/);
 });
 
 test('startup, foreground, reconnect, post-mutation, and manual triggers converge on one sync function', () => {
@@ -575,7 +590,7 @@ test('SRA-only mutations bypass and clear the mobile offline outbox', () => {
 });
 
 test('dashboard connectivity reflects API health and reports the failing resource', () => {
-  assert.match(webSyncContext, /fetch\('\/health'/);
+  assert.match(webSyncContext, /fetch\('\/health\/ready'/);
   assert.match(webSyncContext, /const reachable = response\.ok && result\.success === true/);
   assert.match(webSyncContext, /setApiReachable\(reachable\)/);
   assert.match(webSyncIndicator, /Server Unavailable/);

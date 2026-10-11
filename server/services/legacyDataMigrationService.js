@@ -100,8 +100,18 @@ function buildLegacyDataIntegrityReport({
     if (!farmsById.has(blockFarmId)) findings.push({ fieldId, relation: 'BLOCK_FARM', referencedId: blockFarmId || null, reason: 'NOT_FOUND' });
     if (memberUserId) {
       const member = usersById.get(memberUserId);
-      if (!member || canonicalRole(member.role) !== ROLES.MEMBER_FARMER) {
-        findings.push({ fieldId, relation: 'MEMBER', referencedId: memberUserId, reason: member ? 'ROLE_MISMATCH' : 'USER_NOT_FOUND' });
+      const ownerRole = member ? canonicalRole(member.role) : null;
+      const farm = farmsById.get(blockFarmId);
+      const isFarmMember = ownerRole === ROLES.MEMBER_FARMER;
+      const isAssignedFarmManager = ownerRole === ROLES.FARM_MANAGER
+        && String(farm?.managerUserId || '').trim() === memberUserId;
+      if (!member || (!isFarmMember && !isAssignedFarmManager)) {
+        const reason = !member
+          ? 'USER_NOT_FOUND'
+          : ownerRole === ROLES.FARM_MANAGER
+            ? 'MANAGER_SCOPE_MISMATCH'
+            : 'ROLE_MISMATCH';
+        findings.push({ fieldId, relation: 'MEMBER', referencedId: memberUserId, reason });
       }
     }
     return findings;

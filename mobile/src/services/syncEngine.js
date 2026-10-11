@@ -29,6 +29,7 @@ const {
   appendUniqueMutation,
   requeueCorrectableMutations,
   classifyMutationError,
+  queuePressure,
   createSingleFlightRunner,
   drainMutationQueue
 } = require('./mutationOutboxCore');
@@ -312,6 +313,10 @@ export function getOutboxDiagnostics() {
  */
 export function getOutboxCount() {
   return outboxQueue.length;
+}
+
+export function getOutboxPressure() {
+  return queuePressure(outboxQueue.length);
 }
 
 /**

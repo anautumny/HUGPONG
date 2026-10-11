@@ -135,8 +135,9 @@ test('public health and production errors disclose no session or infrastructure 
   const healthStart = server.indexOf("app.get('/health'");
   const health = server.slice(healthStart, server.indexOf('\n});', healthStart) + 4);
   assert.match(health, /Cache-Control', 'no-store'/);
-  assert.match(health, /success: true/);
-  assert.match(health, /status: 'healthy'/);
+  assert.match(health, /success: ready/);
+  assert.match(health, /status: ready \? 'healthy' : 'not_ready'/);
+  assert.match(health, /runtimeLifecycle\.isReady\(\)/);
   assert.doesNotMatch(health, /firebaseAdmin|authenticated|session|user|uptime/);
   assert.match(server, /safeErrorResponses\(db\)/);
   const errorHandling = read('server/middleware/errorHandling.js');

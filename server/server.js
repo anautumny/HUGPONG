@@ -7,7 +7,15 @@ const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { sessionSecret, corsOrigins, isProduction, host, port } = require('./config');
+const {
+  sessionSecret,
+  corsOrigins,
+  isProduction,
+  host,
+  port,
+  requestTimeoutMs,
+  shutdownGracePeriodMs
+} = require('./config');
 const FirestoreSessionStore = require('./services/firestoreSessionStore');
 const { startOperationalCleanup } = require('./services/operationalCleanupService');
 const { invalidateAccountAssignments } = require('./services/accountAuthorization');
@@ -18,6 +26,11 @@ const { requireAccountReady, requireApiPermission } = require('./middleware/requ
 const { validateRequestInput, malformedJsonHandler } = require('./middleware/requestInputValidation');
 const { safeErrorResponses } = require('./middleware/errorHandling');
 const { createEarlyAbuseProtection, createAuthenticatedApiRateLimit } = require('./middleware/abuseProtection');
+const {
+  createRuntimeLifecycle,
+  configureHttpServer,
+  installGracefulShutdown
+} = require('./services/runtimeLifecycle');
 const {
   LEGACY_ROLE_DASHBOARD_REDIRECTS,
   LEGACY_LEGAL_PAGE_REDIRECTS
@@ -45,6 +58,7 @@ const backupRoutes = require('./routes/backups');
 
 const app = express();
 const scopedReadCache = createScopedReadCache();
+const runtimeLifecycle = createRuntimeLifecycle();
 app.disable('x-powered-by');
 app.set('query parser', 'simple');
 if (isProduction) app.set('trust proxy', 1);
@@ -110,9 +124,26 @@ app.use((req, res, next) => {
 // connectivity checks do not need to hydrate a Firestore-backed session.
 app.get('/health', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({
-    success: true,
-    status: 'healthy'
+  const ready = runtimeLifecycle.isReady();
+  res.status(ready ? 200 : 503).json({
+    success: ready,
+    status: ready ? 'healthy' : 'not_ready'
+  });
+});
+
+// Hosting platforms use liveness to decide whether the process must restart,
+// and readiness to stop new traffic before a deployment shuts this instance down.
+app.get('/health/live', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, status: 'alive' });
+});
+
+app.get('/health/ready', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const ready = runtimeLifecycle.isReady();
+  res.status(ready ? 200 : 503).json({
+    success: ready,
+    status: ready ? 'ready' : 'not_ready'
   });
 });
 
@@ -272,6 +303,11 @@ app.use((err, req, res, next) => {
 
 // Start Server
 const server = app.listen(port, host, () => {
+  if (db) {
+    runtimeLifecycle.markReady();
+  } else {
+    console.error('[Runtime] Firebase did not initialize; the instance will remain unready.');
+  }
   console.log('══════════════════════════════════════════════════════════');
 console.log(`  HUGPONG Security Gateway & Express Backend`);
 console.log(`  Server listening on ${host}:${port}`);
@@ -279,8 +315,20 @@ console.log(`  Authentication & Role Protection: ACTIVE`);
   console.log('══════════════════════════════════════════════════════════');
 });
 
+configureHttpServer(server, { requestTimeoutMs });
+
 const operationalCleanup = isProduction && db ? startOperationalCleanup(db) : null;
-server.on('close', () => operationalCleanup?.stop());
+const gracefulShutdown = installGracefulShutdown({
+  server,
+  lifecycle: runtimeLifecycle,
+  cleanup: operationalCleanup,
+  gracePeriodMs: shutdownGracePeriodMs
+});
+server.on('close', () => {
+  runtimeLifecycle.beginDrain();
+  operationalCleanup?.stop();
+  gracefulShutdown.remove();
+});
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {

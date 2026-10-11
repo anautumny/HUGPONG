@@ -129,6 +129,20 @@ test('relationship and credential corruption is reported without inventing repai
   assert.equal(report.deploymentReady, false);
 });
 
+test('a Farm Manager may own a field only inside the Block Farm they manage', () => {
+  const valid = canonicalFixture();
+  valid.fields[0].memberUserId = '03000001';
+  const validReport = buildLegacyDataIntegrityReport(valid);
+  assert.equal(validReport.issues.invalidFieldRelationships.length, 0);
+
+  const outsideScope = canonicalFixture();
+  outsideScope.blockFarms[0].managerUserId = '';
+  outsideScope.fields[0].memberUserId = '03000001';
+  const outsideScopeReport = buildLegacyDataIntegrityReport(outsideScope);
+  assert.equal(outsideScopeReport.issues.invalidFieldRelationships.length, 1);
+  assert.equal(outsideScopeReport.issues.invalidFieldRelationships[0].reason, 'MANAGER_SCOPE_MISMATCH');
+});
+
 test('migration execution requires the explicit gate and exact Firebase project confirmation', () => {
   assert.throws(() => assertLegacyMigrationAllowed({}), /requires --execute/);
   assert.throws(() => assertLegacyMigrationAllowed({ execute: true }), /HUGPONG_ALLOW_LEGACY_MIGRATION=true/);

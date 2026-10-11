@@ -10,7 +10,8 @@ const {
   createBackupArchive,
   decryptBackupArchive,
   analyzeMissingRecords,
-  restoreMissingRecords
+  restoreMissingRecords,
+  backupOperationalStatus
 } = require('../services/backupService');
 const { COLLECTIONS, ROLES } = require('../schema/firestoreSchema');
 const { allowedRolesForRequest } = require('../middleware/requestPermissions');
@@ -73,12 +74,14 @@ test('manual backup encrypts approved business collections and excludes security
     passphrase,
     projectId: 'hugpong-test',
     actorUserId: '01000001',
+    operationId: 'BKP-AAAAAAAAAAAAAAAAAAAA',
     now: new Date('2026-09-28T00:00:00.000Z')
   });
   const archiveText = Buffer.from(result.archiveBase64, 'base64').toString('utf8');
   assert.doesNotMatch(archiveText, /Super Admin|must-not-export|FLD-1/);
   const decrypted = await decryptBackupArchive(database, result.archiveBase64, passphrase, 'hugpong-test');
   assert.equal(decrypted.payload.documentCount, 3);
+  assert.equal(decrypted.payload.exportOperationId, 'BKP-AAAAAAAAAAAAAAAAAAAA');
   assert.deepEqual(decrypted.payload.includedCollections, BACKUP_COLLECTIONS);
   assert.ok(EXCLUDED_SECURITY_COLLECTIONS.includes(COLLECTIONS.USER_CREDENTIALS));
   assert.ok(EXCLUDED_SECURITY_COLLECTIONS.includes(COLLECTIONS.DIAGNOSTIC_EVENTS));
@@ -125,6 +128,32 @@ test('recovery plan and execution create missing records without overwriting exi
   assert.equal(target.stores.get(COLLECTIONS.FIELDS).get('FLD-1').areaHa, 2);
 });
 
+test('operational status requires a daily export and a monthly recovery drill', () => {
+  const now = Date.parse('2026-10-11T12:00:00.000Z');
+  const current = backupOperationalStatus([
+    { operation: 'EXPORT', status: 'VERIFIED', completedAt: '2026-10-11T00:00:00.000Z' },
+    { operation: 'VALIDATION', status: 'VALIDATED', completedAt: '2026-09-20T00:00:00.000Z' }
+  ], now);
+  assert.equal(current.health, 'CURRENT');
+  assert.equal(current.exportOverdue, false);
+  assert.equal(current.drillOverdue, false);
+  assert.equal(current.nextExportDueAt, '2026-10-12T00:00:00.000Z');
+
+  const missingDrill = backupOperationalStatus([
+    { operation: 'EXPORT', status: 'READY', completedAt: '2026-10-11T00:00:00.000Z' }
+  ], now);
+  assert.equal(missingDrill.health, 'DRILL_DUE');
+  assert.equal(missingDrill.exportOverdue, false);
+  assert.equal(missingDrill.drillOverdue, true);
+
+  const staleExport = backupOperationalStatus([
+    { operation: 'EXPORT', status: 'VERIFIED', completedAt: '2026-10-09T00:00:00.000Z' },
+    { operation: 'VALIDATION', status: 'USED', completedAt: '2026-10-01T00:00:00.000Z' }
+  ], now);
+  assert.equal(staleExport.health, 'BACKUP_DUE');
+  assert.equal(staleExport.overdue, true);
+});
+
 test('backup APIs and web page are Super Admin web-only while mobile has no backup controls', () => {
   assert.deepEqual(allowedRolesForRequest('GET', '/api/backups'), [ROLES.SUPER_ADMIN]);
   assert.deepEqual(allowedRolesForRequest('POST', '/api/backups/export'), [ROLES.SUPER_ADMIN]);
@@ -133,9 +162,19 @@ test('backup APIs and web page are Super Admin web-only while mobile has no back
   const app = fs.readFileSync(path.join(root, 'web/react-app/src/App.jsx'), 'utf8');
   const sidebar = fs.readFileSync(path.join(root, 'web/react-app/src/components/layout/Sidebar.jsx'), 'utf8');
   const mobile = fs.readFileSync(path.join(root, 'mobile/src/navigation/RootNavigator.js'), 'utf8');
+  const backupRoute = fs.readFileSync(path.join(root, 'server/routes/backups.js'), 'utf8');
+  const backupView = fs.readFileSync(path.join(root, 'web/react-app/src/views/backups/BackupManagementView.jsx'), 'utf8');
+  const appShell = fs.readFileSync(path.join(root, 'web/react-app/src/components/layout/AppShell.jsx'), 'utf8');
   assert.match(app, /path="\/backups"[\s\S]*allowed=\{GOVERNANCE_ROLES\}/);
   assert.match(sidebar, /Backup & Recovery[\s\S]*\/backups/);
   assert.doesNotMatch(mobile, /BackupManagement|\/api\/backups|backupService/);
+  assert.match(backupRoute, /recommendedIntervalHours/);
+  assert.match(backupRoute, /recoveryDrillPassed: true/);
+  assert.match(backupRoute, /lastValidationId/);
+  assert.match(backupView, /Export daily/);
+  assert.match(backupView, /Keep two copies/);
+  assert.match(backupView, /Run recovery drill/);
+  assert.match(appShell, /The daily encrypted backup is due/);
 });
 
 test('Firestore rules deny clients direct access to backup operation metadata', () => {
