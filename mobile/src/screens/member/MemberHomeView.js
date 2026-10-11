@@ -4,13 +4,14 @@
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
 import { formatCropYearDisplay } from '../../utils/dataHelpers';
 import { STAGE_DISPLAY_LABELS } from '../../domain/presentationContract';
+import { AppText as Text } from '../../components/Typography';
 
 function MemberHomeView({
   session = {},

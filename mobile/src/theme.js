@@ -136,10 +136,16 @@ export const COLORS = {
 // ── Typography Scale ────────────────────────────────────────────
 // Standardized hierarchy: readable for outdoor and 40+ users
 // Minimum metadata size: 12px; Body: 16px; Titles: 22-24px bold; Section: 18-20px semibold
+export const FONT_FAMILY = Object.freeze({
+  body: 'Inter',
+  display: 'Plus Jakarta Sans',
+  monospace: 'monospace',
+});
+
 export const TYPE = {
   // Screen and Section Titles
-  screenTitle:   { fontSize: 24, fontWeight: '700', lineHeight: 30, letterSpacing: -0.3 },
-  sectionTitle:  { fontSize: 18, fontWeight: '600', lineHeight: 24, letterSpacing: -0.2 },
+  screenTitle:   { fontFamily: FONT_FAMILY.display, fontSize: 24, fontWeight: '700', lineHeight: 30, letterSpacing: -0.3 },
+  sectionTitle:  { fontFamily: FONT_FAMILY.display, fontSize: 18, fontWeight: '600', lineHeight: 24, letterSpacing: -0.2 },
   importantValue:{ fontSize: 24, fontWeight: '700', lineHeight: 30 },
 
   // Body & Content
@@ -154,12 +160,12 @@ export const TYPE = {
   metadata:      { fontSize: 12, fontWeight: '500', lineHeight: 16 },
 
   // Backward compatible display / headings
-  displayLg:     { fontSize: 32, fontWeight: '700', letterSpacing: -0.6, lineHeight: 38 },
-  displayMd:     { fontSize: 26, fontWeight: '700', letterSpacing: -0.4, lineHeight: 32 },
-  displaySm:     { fontSize: 22, fontWeight: '700', letterSpacing: -0.3, lineHeight: 28 },
-  h1:            { fontSize: 20, fontWeight: '600', letterSpacing: -0.2, lineHeight: 26 },
-  h2:            { fontSize: 18, fontWeight: '600', letterSpacing: -0.1, lineHeight: 24 },
-  h3:            { fontSize: 16, fontWeight: '600', lineHeight: 22 },
+  displayLg:     { fontFamily: FONT_FAMILY.display, fontSize: 32, fontWeight: '700', letterSpacing: -0.6, lineHeight: 38 },
+  displayMd:     { fontFamily: FONT_FAMILY.display, fontSize: 26, fontWeight: '700', letterSpacing: -0.4, lineHeight: 32 },
+  displaySm:     { fontFamily: FONT_FAMILY.display, fontSize: 22, fontWeight: '700', letterSpacing: -0.3, lineHeight: 28 },
+  h1:            { fontFamily: FONT_FAMILY.display, fontSize: 20, fontWeight: '600', letterSpacing: -0.2, lineHeight: 26 },
+  h2:            { fontFamily: FONT_FAMILY.display, fontSize: 18, fontWeight: '600', letterSpacing: -0.1, lineHeight: 24 },
+  h3:            { fontFamily: FONT_FAMILY.display, fontSize: 16, fontWeight: '600', lineHeight: 22 },
 
   // Labels
   labelLg:       { fontSize: 15, fontWeight: '500', letterSpacing: 0.1 },
@@ -180,11 +186,11 @@ export const TYPE = {
 
 // Keep FONTS for backward compat
 export const FONTS = {
-  regular: { fontWeight: '400' },
-  medium: { fontWeight: '500' },
-  semiBold: { fontWeight: '600' },
-  bold: { fontWeight: '700' },
-  extraBold: { fontWeight: '800' },
+  regular: { fontFamily: FONT_FAMILY.body, fontWeight: '400' },
+  medium: { fontFamily: FONT_FAMILY.body, fontWeight: '500' },
+  semiBold: { fontFamily: FONT_FAMILY.body, fontWeight: '600' },
+  bold: { fontFamily: FONT_FAMILY.body, fontWeight: '700' },
+  extraBold: { fontFamily: FONT_FAMILY.body, fontWeight: '800' },
 };
 
 // ── Spacing — 4px-based System ──────────────────────────────────

@@ -1,12 +1,13 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme';
+import { COLORS, FONT_FAMILY, RADIUS, SHADOW, SPACING } from '../../theme';
 import { operationLogs } from '../../data/dataStore';
 import { sortOperationsNewestFirst } from '../../utils/dataHelpers';
 import { useTranslation } from '../../services/i18n';
 import { fetchAgriculturalSyncMonitor } from '../../services/telemetryService';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
+import { AppText as Text } from '../../components/Typography';
 
 function summarizeCropStages(cycles) {
   const counts = new Map();
@@ -167,7 +168,7 @@ const s = StyleSheet.create({
   container: { gap: 14, paddingBottom: 24 },
   summaryCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.sm },
   eyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1, color: COLORS.primary },
-  farmName: { fontSize: 20, fontWeight: '900', color: COLORS.text, marginTop: 4 },
+  farmName: { fontFamily: FONT_FAMILY.display, fontSize: 20, fontWeight: '900', color: COLORS.text, marginTop: 4 },
   managerName: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
   metrics: { flexDirection: 'row', gap: 8, marginTop: 16 },
   metric: { flex: 1, minHeight: 78, padding: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },

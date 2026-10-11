@@ -36,7 +36,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/HUGPONG LOGO.png",
+          "image": "./assets/icon-foreground.png",
           "resizeMode": "contain",
           "backgroundColor": "#F7F9F4"
         }
@@ -46,7 +46,7 @@
       "expo-notifications"
     ],
     "web": {
-      "favicon": "./assets/HUGPONG LOGO.png"
+      "favicon": "./assets/icon-foreground.png"
     }
   }
 }

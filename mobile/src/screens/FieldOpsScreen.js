@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Dimensions, TextInput, Alert,
-  ActivityIndicator, Platform, Linking,
-} from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Modal, Dimensions, Alert, ActivityIndicator, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
@@ -53,6 +49,7 @@ import {
   writeArchiveClearViewPreference
 } from '../services/archiveViewService';
 import { exportAuditReportPdf } from '../services/auditPdfService';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 import {
   DEFAULT_PHONE_VERIFICATION_REASON,
   PHONE_VERIFICATION_REASONS,

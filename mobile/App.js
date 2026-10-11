@@ -1,5 +1,20 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, View } from 'react-native';
+import { useFonts } from 'expo-font';
+import * as ExpoSplashScreen from 'expo-splash-screen';
+import { Inter_300Light } from '@expo-google-fonts/inter/300Light';
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_400Regular_Italic } from '@expo-google-fonts/inter/400Regular_Italic';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
+import { Inter_800ExtraBold } from '@expo-google-fonts/inter/800ExtraBold';
+import { Inter_900Black } from '@expo-google-fonts/inter/900Black';
+import { PlusJakartaSans_400Regular } from '@expo-google-fonts/plus-jakarta-sans/400Regular';
+import { PlusJakartaSans_500Medium } from '@expo-google-fonts/plus-jakarta-sans/500Medium';
+import { PlusJakartaSans_600SemiBold } from '@expo-google-fonts/plus-jakarta-sans/600SemiBold';
+import { PlusJakartaSans_700Bold } from '@expo-google-fonts/plus-jakarta-sans/700Bold';
+import { PlusJakartaSans_800ExtraBold } from '@expo-google-fonts/plus-jakarta-sans/800ExtraBold';
 import { enableScreens } from 'react-native-screens';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
@@ -10,6 +25,7 @@ import { fields, getCurrentSession, performMobileSync, subscribe } from './src/d
 import { reportMobileActivity } from './src/services/telemetryService';
 import { createMobileReference, reportMobileDiagnostic } from './src/services/clientDiagnostics';
 import { COLORS } from './src/theme';
+import { AppText as Text } from './src/components/Typography';
 import {
   clearLastPlannerNotificationResponse,
   getLastPlannerNotificationResponse,
@@ -21,6 +37,24 @@ import {
 // Optimize native screen transitions and memory consumption on Android.
 enableScreens(true);
 const navigationRef = createNavigationContainerRef();
+
+ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
+
+const MOBILE_FONTS = {
+  Inter_300Light,
+  Inter_400Regular,
+  Inter_400Regular_Italic,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+  Inter_900Black,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+};
 
 function HugpongApp() {
   const pendingPlannerDate = useRef(null);
@@ -138,6 +172,15 @@ class MobileErrorBoundary extends React.Component {
 }
 
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts(MOBILE_FONTS);
+
+  useEffect(() => {
+    if (!fontsLoaded && !fontError) return;
+    ExpoSplashScreen.hideAsync().catch(() => {});
+  }, [fontsLoaded, fontError]);
+
+  if (!fontsLoaded && !fontError) return null;
+
   return <MobileErrorBoundary><HugpongApp /></MobileErrorBoundary>;
 }
 

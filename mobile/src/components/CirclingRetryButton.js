@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { TouchableOpacity, Text, StyleSheet, Animated, Easing, View } from 'react-native';
+import { TouchableOpacity, StyleSheet, Animated, Easing, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 import { checkConnectivity } from '../services/networkService';
+import { AppText as Text } from './Typography';
 
 export default function CirclingRetryButton({
   onResult,

@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, ActivityIndicator
-} from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
@@ -16,6 +13,7 @@ import {
 } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { PASSWORD_POLICY_HINT, passwordPolicy, passwordPolicyError } from '../domain/passwordPolicy';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 
 export default function SecurityScreen({ navigation }) {
   const { t } = useTranslation();

@@ -1,11 +1,8 @@
 import React, { useState } from 'react';
-import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator,
-} from 'react-native';
+import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import { registerUser, blockFarms } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
 import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
@@ -13,6 +10,7 @@ import { formatToE164 } from '../../services/smsService';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
 import { passwordPolicy, passwordPolicyError } from '../../domain/passwordPolicy';
 import { uniqueRecordsById } from '../../utils/dataHelpers';
+import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
 const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
 
@@ -804,7 +802,7 @@ const s = StyleSheet.create({
   miniLangTextActive: { color: '#fff' },
   scroll: { padding: SPACING.xl, gap: SPACING.lg },
   stepHeader: { gap: 4 },
-  stepTitle: { fontSize: 24, fontWeight: '800', color: COLORS.text },
+  stepTitle: { fontFamily: FONT_FAMILY.display, fontSize: 24, fontWeight: '800', color: COLORS.text },
   stepSub: { fontSize: 14, color: COLORS.textMuted },
   card: { backgroundColor: '#fff', borderRadius: RADIUS.xl, padding: SPACING.xl, gap: SPACING.lg, ...SHADOW.card },
   btn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
@@ -844,7 +842,7 @@ const s = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: SPACING.lg },
   successCard: { width: '100%', backgroundColor: '#fff', borderRadius: RADIUS.xl, padding: 22, alignItems: 'center', ...SHADOW.lg },
   successIconWrap: { width: 66, height: 66, borderRadius: 33, backgroundColor: COLORS.primaryBg, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  successTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  successTitle: { fontFamily: FONT_FAMILY.display, fontSize: 20, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
   successSub: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', marginTop: 3, marginBottom: 16 },
   credIdBox: { width: '100%', backgroundColor: '#F0F8EC', borderRadius: RADIUS.lg, borderWidth: 1.5, borderColor: COLORS.primary, padding: 14, alignItems: 'center', marginBottom: 12 },
   credIdLabel: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1, color: COLORS.primary, marginBottom: 4 },

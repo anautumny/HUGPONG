@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Platform, Alert
-} from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../theme';
@@ -41,6 +38,7 @@ import { getNetworkStatus, subscribeToNetwork } from '../services/networkService
 import { ScreenHeader, Card, PrimaryButton, SecondaryButton } from '../components/ui';
 import PublishPriceModal from '../components/PublishPriceModal';
 import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 
 export default function AnalyticsScreen({ navigation, route }) {
   const { t } = useTranslation();

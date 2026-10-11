@@ -25,7 +25,7 @@ const KNOWN_WEB_PATHS = new Set([
   '/fields', '/block-farms', '/registry', '/operations', '/takeover', '/prices',
   '/audit', '/users', '/sync', '/support', '/maintenance', '/diagnostics',
   '/backups', '/settings', '/analytics', '/login.html', '/index.html',
-  '/logo.png', '/favicon.ico', '/health'
+  '/icon-foreground.png', '/favicon.ico', '/health'
 ]);
 
 function normalizedPath(req) {

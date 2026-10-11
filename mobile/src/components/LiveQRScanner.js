@@ -1,17 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useTranslation } from '../services/i18n';
+import { AppText as Text } from './Typography';
+import { FONT_FAMILY } from '../theme';
 
 export default function LiveQRScanner({ visible = false, onClose, onCodeDetected }) {
   const { t } = useTranslation();
@@ -280,7 +275,7 @@ const styles = StyleSheet.create({
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 16 },
   secureBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(158,228,147,0.12)', borderWidth: 1, borderColor: 'rgba(158,228,147,0.28)' },
   secureBadgeText: { color: '#9EE493', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
-  heading: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 14 },
+  heading: { fontFamily: FONT_FAMILY.display, color: '#FFFFFF', fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 14 },
   help: { color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 19, textAlign: 'center', maxWidth: 340, marginTop: 7 },
   primaryButton: {
     minHeight: 50,

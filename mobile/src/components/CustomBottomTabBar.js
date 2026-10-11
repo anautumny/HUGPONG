@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW, RADIUS } from '../theme';
 import { getCurrentSession, subscribe, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { safeAlert } from '../utils/dialogs';
+import { AppText as Text } from './Typography';
 
 const TAB_CONFIG = {
   Home: {

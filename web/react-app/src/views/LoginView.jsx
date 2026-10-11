@@ -207,7 +207,7 @@ export default function LoginView() {
         {/* Brand Logo */}
         <Link to="/" className="flex items-center gap-3 group">
           <div className="brand-logo-box w-10 h-10 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center shadow-xs overflow-hidden group-hover:border-primary/40 transition-colors">
-            <img src="/logo.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
+            <img src="/icon-foreground.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
           </div>
           <div className="flex flex-col">
             <span className="font-display font-black text-xl tracking-tight text-hug-text leading-none">
@@ -264,7 +264,7 @@ export default function LoginView() {
         {/* Header */}
         <div className="flex flex-col items-center text-center gap-3 mb-6">
           <div className="brand-logo-box w-14 h-14 rounded-2xl bg-white border border-border/80 p-2 flex items-center justify-center shadow-xs">
-            <img src="/logo.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
+            <img src="/icon-foreground.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="font-display text-2xl font-black text-hug-text tracking-tight">

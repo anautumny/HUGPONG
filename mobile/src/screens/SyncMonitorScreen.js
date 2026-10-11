@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
@@ -8,6 +8,7 @@ import { getOutboxDiagnostics } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
+import { AppText as Text } from '../components/Typography';
 
 const MEMBER_PAGE_SIZE = 10;
 

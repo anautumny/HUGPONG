@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
+import { COLORS, FONT_FAMILY, RADIUS, SHADOW, SPACING } from '../theme';
 import legalPolicy from '../domain/legalPolicy.json';
+import { AppText as Text } from './Typography';
 
 const DOCUMENTS = [
   { key: 'privacy', label: 'Privacy' },
@@ -207,6 +208,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   documentTitle: {
+    fontFamily: FONT_FAMILY.display,
     fontSize: 20,
     lineHeight: 26,
     fontWeight: '800',

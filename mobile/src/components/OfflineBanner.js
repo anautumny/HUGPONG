@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS } from '../theme';
+import { AppText as Text } from './Typography';
 
 export default function OfflineBanner({ 
   message = 'You are offline. Connect to internet for real-time cloud data.',

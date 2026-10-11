@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONT_FAMILY } from '../theme';
 import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount, restartCloudSyncIfReady } from '../data/dataStore';
 import {
   subscribeToNetwork,
@@ -14,8 +14,9 @@ import { useTranslation } from '../services/i18n';
 import { safeAlert } from '../utils/dialogs';
 import { useNavigation } from '@react-navigation/native';
 import { syncResultMessage } from '../domain/syncPresentation';
+import { AppText as Text } from './Typography';
 
-const LOGO = require('../../assets/HUGPONG LOGO.png');
+const LOGO = require('../../assets/icon-foreground.png');
 
 /**
  * AppHeader — shared header brand row used across all main tab screens.
@@ -273,6 +274,7 @@ const s = StyleSheet.create({
   },
   logoText: {
     flexShrink: 1,
+    fontFamily: FONT_FAMILY.display,
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.primary,

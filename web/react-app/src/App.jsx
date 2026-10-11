@@ -44,7 +44,7 @@ function RootRoute() {
       <div className="flex h-screen items-center justify-center bg-bg dark:bg-[#0C1015] text-hug-text">
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-white border border-border p-1.5 flex items-center justify-center shadow-xs">
-            <img src="/logo.png" alt="HUGPONG" className="w-full h-full object-contain animate-pulse" />
+            <img src="/icon-foreground.png" alt="HUGPONG" className="w-full h-full object-contain animate-pulse" />
           </div>
           <p className="text-xs font-semibold text-hug-muted">Loading HUGPONG...</p>
         </div>

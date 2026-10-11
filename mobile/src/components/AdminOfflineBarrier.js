@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../theme';
 import CirclingRetryButton from './CirclingRetryButton';
 import { CONNECTIVITY_STATUS, getConnectivityDetails } from '../services/networkService';
+import { AppText as Text } from './Typography';
 
 const { width } = Dimensions.get('window');
 
@@ -169,6 +170,7 @@ const s = StyleSheet.create({
     backgroundColor: '#D97706',
   },
   title: {
+    fontFamily: FONT_FAMILY.display,
     fontSize: 22,
     fontWeight: '800',
     color: COLORS.text,

@@ -4,15 +4,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import React, { useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Alert,
-  ActivityIndicator
-} from 'react-native';
+import { View, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SPACING, RADIUS, SHADOW } from '../theme';
@@ -21,6 +13,7 @@ import { useTranslation } from '../services/i18n';
 import { sortNewestFirst } from '../utils/dataHelpers';
 import { exportAuditReportPdf } from '../services/auditPdfService';
 import { SearchableSelect } from './ui';
+import { AppText as Text } from './Typography';
 
 const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '0');
 

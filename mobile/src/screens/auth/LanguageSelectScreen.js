@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, ScrollView, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { setItem } from '../../services/storageService';
+import { AppText as Text } from '../../components/Typography';
 
-const LOGO = require('../../../assets/HUGPONG LOGO.png');
+const LOGO = require('../../../assets/icon-foreground.png');
 
 const LANG_CONFIGS = [
   {
@@ -142,8 +143,8 @@ const s = StyleSheet.create({
   header: { alignItems: 'center', textAlign: 'center', gap: 6, paddingTop: 8 },
   logoCard: { width: 84, height: 84, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', ...SHADOW.card, marginBottom: 4 },
   logoImg: { width: 62, height: 62 },
-  brandName: { fontSize: 13, fontWeight: '900', color: COLORS.primary, letterSpacing: 2, textTransform: 'uppercase' },
-  title: { fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center', marginTop: 4 },
+  brandName: { fontFamily: FONT_FAMILY.display, fontSize: 13, fontWeight: '900', color: COLORS.primary, letterSpacing: 2, textTransform: 'uppercase' },
+  title: { fontFamily: FONT_FAMILY.display, fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center', marginTop: 4 },
   subtitle: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center', lineHeight: 18, paddingHorizontal: 12 },
 
   cardList: { gap: 12, marginTop: 4 },

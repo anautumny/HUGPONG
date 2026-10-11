@@ -308,7 +308,7 @@ export default function Sidebar({
             className="brand-logo-box w-10 h-10 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center flex-shrink-0 shadow-xs"
             title="HUGPONG Official Emblem"
           >
-            <img src="/logo.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
+            <img src="/icon-foreground.png" alt="HUGPONG Official Emblem" className="w-full h-full object-contain" />
           </div>
           {!collapsed && (
             <div className="min-w-0">

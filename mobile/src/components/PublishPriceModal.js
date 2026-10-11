@@ -5,22 +5,12 @@
 // ══════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform
-} from 'react-native';
+import { Modal, View, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import { calculateSRAWeekLabel, publishSraPrice, getSortedPrices } from '../data/dataStore';
+import { AppText as Text, AppTextInput as TextInput } from './Typography';
 
 function formatDateIso(dateObj) {
   const y = dateObj.getFullYear();

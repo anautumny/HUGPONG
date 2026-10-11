@@ -45,14 +45,21 @@ const mobileAppConfig = read('mobile/app.json');
 const stages = JSON.parse(read('mobile/src/constants/cropStages.json'));
 const { buildOperationLog } = require('../schema/firestoreSchema');
 
-test('Android launcher icon uses a dedicated safe-area foreground without changing splash branding', () => {
+test('web and mobile branding use the canonical icon foreground', () => {
   const expoConfig = JSON.parse(mobileAppConfig).expo;
   assert.equal(expoConfig.icon, './assets/icon-foreground.png');
   assert.equal(expoConfig.android.adaptiveIcon.foregroundImage, './assets/icon-foreground.png');
   assert.equal(expoConfig.android.adaptiveIcon.backgroundColor, '#F7F9F4');
   assert.equal(fs.existsSync(path.join(root, 'mobile/assets/icon-foreground.png')), true);
   const splashPlugin = expoConfig.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen');
-  assert.equal(splashPlugin[1].image, './assets/HUGPONG LOGO.png');
+  assert.equal(splashPlugin[1].image, './assets/icon-foreground.png');
+  assert.equal(expoConfig.web.favicon, './assets/icon-foreground.png');
+  assert.equal(
+    fs.readFileSync(path.join(root, 'web/react-app/public/icon-foreground.png')).equals(
+      fs.readFileSync(path.join(root, 'mobile/assets/icon-foreground.png'))
+    ),
+    true
+  );
 });
 
 test('manual, automatic, and status UI share the canonical durable outbox', () => {

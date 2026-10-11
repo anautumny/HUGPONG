@@ -5,10 +5,11 @@
 // ══════════════════════════════════════════════════════════════
 
 import React, { forwardRef, useEffect, useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import QRCode from 'qrcode';
 import { createMobileReference, reportMobileDiagnostic } from '../services/clientDiagnostics';
+import { AppText as Text } from './Typography';
 
 /**
  * OfflineQRCode renders a vector SVG QR code completely locally.

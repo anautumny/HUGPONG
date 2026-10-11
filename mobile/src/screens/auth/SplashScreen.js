@@ -1,10 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions, Image } from 'react-native';
-import { COLORS } from '../../theme';
+import { View, StyleSheet, Animated, Dimensions, Image } from 'react-native';
+import { COLORS, FONT_FAMILY } from '../../theme';
 import { getItem } from '../../services/storageService';
 import { restoreSessionFromToken } from '../../data/dataStore';
+import { AppText as Text } from '../../components/Typography';
 
-const LOGO = require('../../../assets/HUGPONG LOGO.png');
+const LOGO = require('../../../assets/icon-foreground.png');
+const AnimatedText = Animated.createAnimatedComponent(Text);
 
 const { width, height } = Dimensions.get('window');
 
@@ -62,11 +64,11 @@ export default function SplashScreen({ navigation }) {
           <Image source={LOGO} style={s.logoImg} resizeMode="contain" />
           <Text style={s.logoText}>HUGPONG</Text>
         </Animated.View>
-        <Animated.Text style={[s.tagline, { opacity: tagOpacity }]}>
+        <AnimatedText style={[s.tagline, { opacity: tagOpacity }]}>
           Agricultural Operations Platform
-        </Animated.Text>
+        </AnimatedText>
       </View>
-      <Animated.Text style={[s.version, { opacity: tagOpacity }]}>v1.0.0</Animated.Text>
+      <AnimatedText style={[s.version, { opacity: tagOpacity }]}>v1.0.0</AnimatedText>
     </View>
   );
 }
@@ -76,7 +78,7 @@ const s = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
   logoWrap: { alignItems: 'center', gap: 18 },
   logoImg: { width: 140, height: 140 },
-  logoText: { fontSize: 32, fontWeight: '800', color: COLORS.primary, letterSpacing: 4 },
+  logoText: { fontFamily: FONT_FAMILY.display, fontSize: 32, fontWeight: '800', color: COLORS.primary, letterSpacing: 4 },
   tagline: { fontSize: 14, color: COLORS.textSecondary, letterSpacing: 1, fontWeight: '400' },
   version: { fontSize: 12, color: COLORS.textMuted },
 });

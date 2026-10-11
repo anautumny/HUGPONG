@@ -1,17 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  ScrollView,
-  StyleSheet,
-  Platform,
-  KeyboardAvoidingView
-} from 'react-native';
+import { View, TouchableOpacity, Modal, ScrollView, StyleSheet, Platform, KeyboardAvoidingView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { AppText as Text, AppTextInput as TextInput } from '../Typography';
 
 export function SearchableSelectModal({
   visible,

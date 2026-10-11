@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, TextInput, Platform, ActivityIndicator, Alert,
-} from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../theme';
 import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, cropCycles, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
@@ -27,6 +24,7 @@ import ManagerHomeView from './manager/ManagerHomeView';
 import SRAHomeView from './sra/SRAHomeView';
 import PublishPriceModal from '../components/PublishPriceModal';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 import {
   collectPlannerEntries,
   getPlannerReminderGroups,
@@ -876,6 +874,7 @@ const s = StyleSheet.create({
     marginBottom: 16,
   },
   offlineSimpleTitle: {
+    fontFamily: FONT_FAMILY.display,
     fontSize: 20,
     fontWeight: '700',
     color: '#111827',

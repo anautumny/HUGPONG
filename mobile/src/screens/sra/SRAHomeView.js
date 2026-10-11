@@ -5,13 +5,14 @@ import { getCurrentSession } from '../../data/dataStore';
 // ══════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/dataStore';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 import { uniqueRecordsById } from '../../utils/dataHelpers';
+import { AppText as Text } from '../../components/Typography';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
@@ -159,6 +160,7 @@ const s = StyleSheet.create({
     color: COLORS.primary,
   },
   districtName: {
+    fontFamily: FONT_FAMILY.display,
     fontSize: 20,
     fontWeight: '900',
     color: COLORS.text,

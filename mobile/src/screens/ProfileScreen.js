@@ -1,9 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, Switch, TextInput, Platform, ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Alert, Switch, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +18,7 @@ import {
 import { useTranslation, LANGUAGES } from '../services/i18n';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { canCreateSupportTicket, SUPPORT_TICKET_CATEGORIES } from '../domain/supportTickets';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 
 const TICKET_CATEGORY_TRANSLATION_KEYS = {
   'Account / Login': 'ticket_category_account',

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing, Platform } from 'react-native';
+import { View, Image, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import {
   authenticateUser,
   isValidUserIdentifier,
@@ -25,8 +25,9 @@ import CirclingRetryButton from '../../components/CirclingRetryButton';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
 import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
 import { passwordPolicy } from '../../domain/passwordPolicy';
+import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
-const LOGO = require('../../../assets/HUGPONG LOGO.png');
+const LOGO = require('../../../assets/icon-foreground.png');
 
 export default function LoginScreen({ navigation, route }) {
   const { t } = useTranslation();
@@ -1105,6 +1106,7 @@ const s = StyleSheet.create({
     marginBottom: 8 
   },
   title: { 
+    fontFamily: FONT_FAMILY.display,
     fontSize: 26, 
     fontWeight: '800', 
     color: COLORS.text, 

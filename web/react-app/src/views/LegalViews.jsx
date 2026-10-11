@@ -34,7 +34,7 @@ function LegalLayout({ title, subtitle, badge, icon: Icon, children }) {
           </button>
           <div className="flex items-center gap-3">
             <div className="brand-logo-box w-8 h-8 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center">
-              <img src="/logo.png" alt="HUGPONG" className="w-full h-full object-contain" />
+              <img src="/icon-foreground.png" alt="HUGPONG" className="w-full h-full object-contain" />
             </div>
             <span className="font-display font-black text-sm text-hug-text">HUGPONG</span>
           </div>

@@ -1,11 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator
-} from 'react-native';
+import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import {
   requestPasswordRecovery,
@@ -13,6 +10,7 @@ import {
   completePasswordRecovery
 } from '../../services/authService';
 import { passwordPolicyError } from '../../domain/passwordPolicy';
+import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
 export default function ForgotPasswordScreen({ navigation }) {
   const { t } = useTranslation();
@@ -357,7 +355,7 @@ const s = StyleSheet.create({
   scroll: { flexGrow: 1, padding: SPACING.xl, gap: SPACING.xl, alignItems: 'center', paddingTop: 30, paddingBottom: 40 },
   iconWrap: { width: 88, height: 88, borderRadius: 24, backgroundColor: COLORS.primaryBg, justifyContent: 'center', alignItems: 'center' },
   textBlock: { gap: 8, alignItems: 'center' },
-  title: { fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  title: { fontFamily: FONT_FAMILY.display, fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
   sub: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 20, paddingHorizontal: 12 },
   card: { width: '100%', backgroundColor: '#fff', borderRadius: RADIUS.xl, padding: SPACING.xl, gap: 14, ...SHADOW.card },
   label: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
@@ -367,7 +365,7 @@ const s = StyleSheet.create({
   btnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   successWrap: { flex: 1, alignItems: 'center', gap: SPACING.lg, paddingTop: 30 },
   successIcon: { width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.successLight, justifyContent: 'center', alignItems: 'center' },
-  successTitle: { fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  successTitle: { fontFamily: FONT_FAMILY.display, fontSize: 22, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
   successSub: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: 20 },
   lostSimHelpBox: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#F0F8EC', borderWidth: 1, borderColor: COLORS.primary + '30', padding: 14, borderRadius: RADIUS.lg },
   lostSimHelpTitle: { fontSize: 12.5, fontWeight: '700', color: COLORS.primary, marginBottom: 2 },

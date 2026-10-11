@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SPACING } from '../theme';
 import { canonicalRole } from '../data/firestoreSchema';
@@ -11,6 +11,7 @@ import {
   isOtherPhoneVerificationReason
 } from '../domain/phoneVerification';
 import { uniqueRecordsById } from '../utils/dataHelpers';
+import { AppText as Text, AppTextInput as TextInput } from './Typography';
 
 const emptyForm = {
   firstName: '', middleName: '', lastName: '', suffix: '', phone: '', password: '',

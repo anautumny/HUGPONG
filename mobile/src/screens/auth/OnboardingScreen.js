@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, FlatList, Animated } from 'react-native';
+import { View, StyleSheet, Dimensions, TouchableOpacity, FlatList, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, RADIUS } from '../../theme';
+import { COLORS, FONT_FAMILY, SPACING, RADIUS } from '../../theme';
 import { useTranslation } from '../../services/i18n';
 import { setItem } from '../../services/storageService';
+import { AppText as Text } from '../../components/Typography';
 
 const { width } = Dimensions.get('window');
 
@@ -116,7 +117,7 @@ const s = StyleSheet.create({
   skipText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
   slide: { width, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center', paddingTop: 20, gap: 24 },
   iconWrap: { width: 120, height: 120, borderRadius: 32, justifyContent: 'center', alignItems: 'center' },
-  title: { fontSize: 28, fontWeight: '800', color: COLORS.text, textAlign: 'center', lineHeight: 36 },
+  title: { fontFamily: FONT_FAMILY.display, fontSize: 28, fontWeight: '800', color: COLORS.text, textAlign: 'center', lineHeight: 36 },
   sub: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginBottom: 24 },
   dot: { height: 8, borderRadius: 4, backgroundColor: COLORS.primary },
