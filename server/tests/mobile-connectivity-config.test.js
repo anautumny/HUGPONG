@@ -81,13 +81,17 @@ test('production server config requires exact CORS origins and accepts cloud hos
   assert.notEqual(missingCors.status, 0);
   assert.match(`${missingCors.stderr}${missingCors.stdout}`, /CORS_ORIGINS must list the exact public web origin/);
 
-  const configured = spawnSync(process.execPath, ['-e', "const c=require('./server/config'); console.log(c.host,c.port,c.corsOrigins[0])"], {
+  const configured = spawnSync(process.execPath, ['-e', "const c=require('./server/config'); process.stdout.write(JSON.stringify({host:c.host,port:c.port,corsOrigin:c.corsOrigins[0]}))"], {
     cwd: root,
     env: { ...baseEnv, CORS_ORIGINS: 'https://app.example.test' },
     encoding: 'utf8'
   });
   assert.equal(configured.status, 0, configured.stderr);
-  assert.match(configured.stdout, /0\.0\.0\.0 8080 https:\/\/app\.example\.test/);
+  assert.deepEqual(JSON.parse(configured.stdout), {
+    host: '0.0.0.0',
+    port: 8080,
+    corsOrigin: 'https://app.example.test'
+  });
 });
 
 test('production server refuses to start without the server-side Semaphore key', () => {
