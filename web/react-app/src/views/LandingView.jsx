@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
 
+const ANDROID_APK_URL = String(import.meta.env.VITE_ANDROID_APK_URL || '').trim();
+
 export default function LandingView() {
   const { isAuthenticated } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -103,15 +105,26 @@ export default function LandingView() {
               <ArrowRight className="w-4 h-4" />
             </Link>
 
-            <a
-              href="https://github.com/Mattaeeee/HUGPONG/releases"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface hover:bg-surface-subtle text-hug-text border border-border text-sm font-semibold shadow-2xs hover:border-primary/40 transition-all cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-hug-muted" />
-              <span>Download Android APK</span>
-            </a>
+            {ANDROID_APK_URL ? (
+              <a
+                href={ANDROID_APK_URL}
+                download="HUGPONG-Beta.apk"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface hover:bg-surface-subtle text-hug-text border border-border text-sm font-semibold shadow-2xs hover:border-primary/40 transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4 text-hug-muted" />
+                <span>Download Android APK</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                title="The Android APK download is not configured yet."
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface text-hug-muted border border-border text-sm font-semibold shadow-2xs cursor-not-allowed opacity-60"
+              >
+                <Download className="w-4 h-4" />
+                <span>APK Download Unavailable</span>
+              </button>
+            )}
           </div>
         </section>
 
