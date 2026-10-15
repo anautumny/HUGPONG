@@ -434,27 +434,44 @@ function buildOperationSnapshot(logId, log) {
 }
 
 function buildSraPrice(input, context = {}) {
-  for (const fieldName of [
-    'sugarPricePerLkg',
-    'sugarPriceChange',
-    'molassesPricePerMetricTon',
-    'molassesPriceChange'
-  ]) {
-    if (input[fieldName] == null || input[fieldName] === '') {
-      throw new Error(`${fieldName} is required.`);
+  const statuses = ['REPORTED', 'NO_BIDDING', 'MILLING_ENDED', 'NOT_REPORTED'];
+  const sugarPriceStatus = enumValue(input.sugarPriceStatus || 'REPORTED', statuses, 'sugarPriceStatus');
+  const molassesPriceStatus = enumValue(input.molassesPriceStatus || 'REPORTED', statuses, 'molassesPriceStatus');
+  const amount = (field, status) => {
+    if (status !== 'REPORTED') {
+      if (input[field] != null && input[field] !== '') throw new Error(`${field} must be null when no price is reported.`);
+      return null;
     }
+    if (input[field] == null || input[field] === '') throw new Error(`${field} is required.`);
+    const value = finiteNumber(input[field], field);
+    if (value <= 0) throw new Error(`${field} must be greater than zero.`);
+    return value;
+  };
+  const change = (field, status) => status !== 'REPORTED' || input[field] == null
+    ? null : finiteNumber(input[field], field, { min: -1000000, max: 1000000 });
+  const sourceUrl = optionalString(input.sourceUrl, { max: 500 });
+  if (sourceUrl) {
+    const url = new URL(sourceUrl);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('sourceUrl must be a public HTTPS source URL.');
   }
   return {
     effectiveDate: calendarDate(input.effectiveDate, 'effectiveDate'),
     weekLabel: requiredString(input.weekLabel, 'weekLabel', { max: 100 }),
-    sugarPricePerLkg: finiteNumber(input.sugarPricePerLkg, 'sugarPricePerLkg'),
-    sugarPriceChange: finiteNumber(input.sugarPriceChange, 'sugarPriceChange', { min: -1000000, max: 1000000 }),
-    molassesPricePerMetricTon: finiteNumber(input.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
-    molassesPriceChange: finiteNumber(input.molassesPriceChange, 'molassesPriceChange', { min: -1000000, max: 1000000 }),
+    sugarPricePerLkg: amount('sugarPricePerLkg', sugarPriceStatus),
+    sugarPriceChange: change('sugarPriceChange', sugarPriceStatus),
+    molassesPricePerMetricTon: amount('molassesPricePerMetricTon', molassesPriceStatus),
+    molassesPriceChange: change('molassesPriceChange', molassesPriceStatus),
     circularNumber: requiredString(input.circularNumber, 'circularNumber', { max: 120 }),
     source: requiredString(input.source, 'source', { max: 300 }),
     publishedByUserId: requiredString(context.publishedByUserId || input.publishedByUserId, 'publishedByUserId', { max: 80 }),
-    publishedAt: isoTimestamp(context.publishedAt || input.publishedAt, 'publishedAt')
+    publishedAt: isoTimestamp(context.publishedAt || input.publishedAt, 'publishedAt'),
+    sugarPriceStatus,
+    molassesPriceStatus,
+    molassesMarket: optionalString(input.molassesMarket, { max: 100 }),
+    sourceUrl,
+    periodType: enumValue(input.periodType || 'EFFECTIVE_DATE', ['EFFECTIVE_DATE', 'WEEK_ENDING'], 'periodType'),
+    importBatchId: optionalString(input.importBatchId, { max: 100 }),
+    sourceFileSha256: optionalString(input.sourceFileSha256, { max: 64 })
   };
 }
 

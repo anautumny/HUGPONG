@@ -11,6 +11,7 @@ const {
   buildSraPrice
 } = require('../schema/firestoreSchema');
 const { publishSraPrice } = require('../services/priceService');
+const { decoratePriceHistory } = require('../services/priceAnalyticsService');
 const { sortNewestFirst } = require('../services/recordOrdering');
 const { readMutationContext } = require('../services/mutationContext');
 
@@ -27,10 +28,10 @@ router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGE
       .orderBy('effectiveDate', 'desc')
       .limit(requestedLimit);
     const snapshot = await query.get();
-    const data = sortNewestFirst(
+    const data = decoratePriceHistory(sortNewestFirst(
       snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })),
       ['effectiveDate']
-    );
+    ));
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -44,6 +45,9 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
     const publication = await publishSraPrice(db, req.body, {
       publishedByUserId: req.session.user.employeeId || req.session.user.userId
     });
+    const history = await db.collection(COLLECTIONS.SRA_PRICES).orderBy('effectiveDate', 'desc').limit(100).get();
+    const projected = decoratePriceHistory(history.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })));
+    publication.data = projected.find(row => row.id === publication.data.id) || publication.data;
     return res.status(publication.created ? 201 : 200).json({ success: true, ...publication });
   } catch (error) {
     const status = error.statusCode || (/already exists/i.test(error.message) ? 409 : 400);

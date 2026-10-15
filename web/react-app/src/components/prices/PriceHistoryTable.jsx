@@ -1,3 +1,4 @@
+import { priceText, movementText, priceStatusLabel } from '../../utils/pricePresentation';
 import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, ArrowUpDown, ArrowUpRight, ArrowDownRight, Minus, FileText, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Input from '../ui/Input';
@@ -25,13 +26,15 @@ export default function PriceHistoryTable({
         (p.circularNumber && p.circularNumber.toLowerCase().includes(q)) ||
         (p.source && p.source.toLowerCase().includes(q)) ||
         (p.weekLabel && p.weekLabel.toLowerCase().includes(q)) ||
-        (p.effectiveDate && p.effectiveDate.toLowerCase().includes(q))
+        (p.effectiveDate && p.effectiveDate.toLowerCase().includes(q)) || priceStatusLabel(p.sugarPriceStatus).toLowerCase().includes(q) || priceStatusLabel(p.molassesPriceStatus).toLowerCase().includes(q)
       );
     }
 
     result.sort((a, b) => {
       let valA = a[sortField];
       let valB = b[sortField];
+      if (valA == null) return valB == null ? 0 : 1;
+      if (valB == null) return -1;
 
       if (sortField === 'effectiveDate') {
         const cmp = String(valA || '').localeCompare(String(valB || ''));
@@ -89,7 +92,7 @@ export default function PriceHistoryTable({
             </span>
           </h3>
           <p className="text-xs text-hug-muted mt-0.5">
-            Audit-grade millsite pricing ledger published by the Sugar Regulatory Administration.
+            Source-referenced weekly history. Missing quotes retain their reported status.
           </p>
         </div>
 
@@ -188,15 +191,15 @@ export default function PriceHistoryTable({
               </tr>
             ) : (
               pagedPrices.map((p) => {
-                const sugarPrice = Number(p.sugarPricePerLkg || 0);
-                const molassesPrice = Number(p.molassesPricePerMetricTon || 0);
+                const sugarPrice = p.sugarPricePerLkg;
+                const molassesPrice = p.molassesPricePerMetricTon;
                 const sugarChange = Number(p.sugarPriceChange || 0);
                 const molassesChange = Number(p.molassesPriceChange || 0);
 
                 return (
                   <tr key={p.id} className="hover:bg-bg/40 dark:hover:bg-gray-800/30 transition-colors">
                     <td className="px-4 py-3.5 text-xs text-hug-muted whitespace-nowrap font-medium">
-                      {formatDate(p.effectiveDate)}
+                      {formatDate(p.effectiveDate)}<span className="block text-[10px]">{p.periodType === 'WEEK_ENDING' ? 'Week ending' : 'Effective date'}</span>
                     </td>
 
                     <td className="px-4 py-3.5 text-xs font-bold text-hug-text whitespace-nowrap">
@@ -205,14 +208,14 @@ export default function PriceHistoryTable({
 
                     <td className="px-4 py-3.5 text-xs whitespace-nowrap">
                       <span className="font-extrabold text-primary dark:text-primary-light">
-                        ₱{sugarPrice.toLocaleString()}
+                        {priceText(sugarPrice, p.sugarPriceStatus)}
                       </span>
                       <span className="text-[10px] text-hug-muted ml-1">/Lkg</span>
                     </td>
 
                     <td className="px-4 py-3.5 text-xs whitespace-nowrap">
                       <span className="font-bold text-hug-text">
-                        ₱{molassesPrice.toLocaleString()}
+                        {priceText(molassesPrice, p.molassesPriceStatus)}
                       </span>
                       <span className="text-[10px] text-hug-muted ml-1">/MT</span>
                     </td>
@@ -222,7 +225,7 @@ export default function PriceHistoryTable({
                         {/* Sugar diff */}
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Sugar:</span>
-                          {sugarChange > 0 ? (
+                          {p.sugarPriceChange == null ? <span className="text-hug-muted">No comparison</span> : sugarChange > 0 ? (
                             <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{sugarChange.toLocaleString()}
@@ -243,7 +246,7 @@ export default function PriceHistoryTable({
                         {/* Molasses diff */}
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Molasses:</span>
-                          {molassesChange > 0 ? (
+                          {p.molassesPriceChange == null ? <span className="text-hug-muted">No comparison</span> : molassesChange > 0 ? (
                             <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{molassesChange.toLocaleString()}
@@ -268,7 +271,7 @@ export default function PriceHistoryTable({
                         {p.circularNumber || 'Published Reference'}
                       </span>
                       <span className="text-[10px] text-hug-muted block truncate">
-                        {p.source || 'Sugar Regulatory Administration'}
+                        {p.sourceUrl ? <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View source bulletin</a> : (p.source || 'Sugar Regulatory Administration')}
                       </span>
                     </td>
 

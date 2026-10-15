@@ -364,74 +364,8 @@ export function ActivityFrequencyList({ ranking = [] }) {
 }
 
 // ── 7. Price Summary Card ─────────────────────────────────────────
-export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
-  const sugarPrice = Number(priceRecord?.sugarPricePerLkg);
-  const molassesPrice = Number(priceRecord?.molassesPricePerMetricTon);
-  const hasOfficialPrice = Boolean(
-    priceRecord && Number.isFinite(sugarPrice) && sugarPrice > 0
-    && Number.isFinite(molassesPrice) && molassesPrice > 0
-  );
-  if (!hasOfficialPrice) {
-    return (
-      <Card style={styles.priceCard}>
-        <AnalyticsEmptyState
-          title="No price reference available"
-          subtitle="Prices will appear after an administrator publishes a complete source-referenced record."
-        />
-        {canPost && (
-          <TouchableOpacity style={styles.postPriceBtn} onPress={onPostPricePress} activeOpacity={0.7}>
-            <Ionicons name="add-circle" size={14} color="#fff" />
-            <Text style={styles.postPriceBtnText}>Publish Price Reference</Text>
-          </TouchableOpacity>
-        )}
-      </Card>
-    );
-  }
-  const circularNum = priceRecord.circularNumber;
-  const periodLabel = priceRecord.weekLabel || priceRecord.effectiveDate;
+export { default as PriceSummaryCard } from '../PriceReferenceCard';
 
-  return (
-    <Card style={styles.priceCard}>
-      <View style={styles.priceHeader}>
-        <View style={{ flex: 1, marginRight: 8 }}>
-          <Text style={styles.scopeHeaderTag}>PUBLISHED SUGAR PRICE REFERENCE</Text>
-          <Text style={styles.priceCircularTitle}>{circularNum}</Text>
-          <Text style={styles.priceCircularSub}>{periodLabel}</Text>
-        </View>
-        {canPost && (
-          <TouchableOpacity
-            style={styles.postPriceBtn}
-            onPress={onPostPricePress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add-circle" size={14} color="#fff" />
-            <Text style={styles.postPriceBtnText}>Publish</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.analyticsSugarBox}>
-        <Text style={styles.priceBoxLabel}>RAW SUGAR (CLASS B · DOMESTIC MILLSITE)</Text>
-        <View style={styles.analyticsSugarPriceRow}>
-          <Text style={styles.analyticsSugarValue}>₱{sugarPrice.toLocaleString()}</Text>
-          <Text style={styles.analyticsSugarUnit}>per 50kg bag (Lkg)</Text>
-        </View>
-      </View>
-
-      <View style={styles.analyticsMolassesBox}>
-        <View>
-          <Text style={styles.analyticsMolLabel}>INDUSTRIAL MOLASSES</Text>
-          <View style={styles.analyticsMolPriceRow}>
-            <Text style={styles.analyticsMolValue}>₱{molassesPrice.toLocaleString()}</Text>
-            <Text style={styles.analyticsMolUnit}>/ MT</Text>
-          </View>
-        </View>
-      </View>
-    </Card>
-  );
-}
-
-// ── 8. Empty State Component ──────────────────────────────────────
 export function AnalyticsEmptyState({ title, subtitle }) {
   return (
     <View style={styles.emptyContainer}>

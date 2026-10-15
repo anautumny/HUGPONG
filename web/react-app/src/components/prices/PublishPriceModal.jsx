@@ -5,6 +5,7 @@ import FormField from '../ui/FormField';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import { calculateSRAWeekLabel, publishPrice } from '../../services/pricesService';
+import { PRICE_STATUSES, priceStatusLabel } from '../../utils/pricePresentation';
 
 export default function PublishPriceModal({
   isOpen = false,
@@ -20,6 +21,8 @@ export default function PublishPriceModal({
   const [molassesPrice, setMolassesPrice] = useState('');
   const [circularNumber, setCircularNumber] = useState('');
   const [source, setSource] = useState('');
+  const [sugarStatus, setSugarStatus] = useState('REPORTED');
+  const [molassesStatus, setMolassesStatus] = useState('REPORTED');
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -34,6 +37,8 @@ export default function PublishPriceModal({
       setMolassesPrice(latestPrice?.molassesPricePerMetricTon != null ? String(latestPrice.molassesPricePerMetricTon) : '');
       setCircularNumber('');
       setSource('');
+      setSugarStatus('REPORTED');
+      setMolassesStatus('REPORTED');
       setFormError(null);
       setSuccessMessage(null);
       setIsSubmitting(false);
@@ -56,9 +61,6 @@ export default function PublishPriceModal({
   const curSugarNum = sugarPrice !== '' ? Number(sugarPrice) : NaN;
   const curMolassesNum = molassesPrice !== '' ? Number(molassesPrice) : NaN;
 
-  const sugarChange = !isNaN(curSugarNum) && prevSugar !== null ? curSugarNum - prevSugar : 0;
-  const molassesChange = !isNaN(curMolassesNum) && prevMolasses !== null ? curMolassesNum - prevMolasses : 0;
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -74,11 +76,11 @@ export default function PublishPriceModal({
       setFormError('SRA Week Label is required.');
       return;
     }
-    if (isNaN(curSugarNum) || curSugarNum <= 0) {
+    if (sugarStatus === 'REPORTED' && (!Number.isFinite(curSugarNum) || curSugarNum <= 0)) {
       setFormError('Raw Sugar price must be a valid positive number.');
       return;
     }
-    if (isNaN(curMolassesNum) || curMolassesNum <= 0) {
+    if (molassesStatus === 'REPORTED' && (!Number.isFinite(curMolassesNum) || curMolassesNum <= 0)) {
       setFormError('Molasses price must be a valid positive number.');
       return;
     }
@@ -97,8 +99,10 @@ export default function PublishPriceModal({
       const payload = {
         effectiveDate,
         weekLabel: weekLabel.trim(),
-        sugarPricePerLkg: curSugarNum,
-        molassesPricePerMetricTon: curMolassesNum,
+        sugarPricePerLkg: sugarStatus === 'REPORTED' ? curSugarNum : null,
+        molassesPricePerMetricTon: molassesStatus === 'REPORTED' ? curMolassesNum : null,
+        sugarPriceStatus: sugarStatus,
+        molassesPriceStatus: molassesStatus,
         circularNumber: circularNumber.trim(),
         source: source.trim()
       };
@@ -207,20 +211,14 @@ export default function PublishPriceModal({
 
         {/* Sugar Price & Molasses Price */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[["Raw Sugar status", sugarStatus, setSugarStatus], ["Molasses status", molassesStatus, setMolassesStatus]].map(([label, status, update]) => <label key={label} className="text-xs font-semibold text-hug-text">{label}<select className="mt-2 block w-full rounded-xl border border-border bg-bg p-3" value={status} onChange={event => update(event.target.value)} disabled={isSubmitting}>{PRICE_STATUSES.map(value => <option key={value} value={value}>{priceStatusLabel(value)}</option>)}</select></label>)}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField
             id="price-sugar"
             label="Raw Sugar Price"
             required
-            helperText={
-              prevSugar !== null ? (
-                <span>
-                  Prev: ₱{prevSugar.toLocaleString()} ·{' '}
-                  <span className={sugarChange > 0 ? 'text-success font-bold' : sugarChange < 0 ? 'text-danger font-bold' : 'text-hug-muted'}>
-                    {sugarChange > 0 ? `+₱${sugarChange}` : sugarChange < 0 ? `-₱${Math.abs(sugarChange)}` : '₱0'}
-                  </span>
-                </span>
-              ) : 'Price per 50-kg Lkg bag'
-            }
+            helperText="Only reported weeks have a price. Comparisons are calculated by the server."
           >
             <Input
               type="number"
@@ -230,27 +228,18 @@ export default function PublishPriceModal({
               suffix="/ Lkg"
               value={sugarPrice}
               onChange={(e) => setSugarPrice(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || sugarStatus !== 'REPORTED'}
               min="1"
               step="0.01"
-              required
+              required={sugarStatus === 'REPORTED'}
             />
           </FormField>
 
           <FormField
             id="price-molasses"
-            label="Industrial Molasses Price"
+            label="Molasses Price"
             required
-            helperText={
-              prevMolasses !== null ? (
-                <span>
-                  Prev: ₱{prevMolasses.toLocaleString()} ·{' '}
-                  <span className={molassesChange > 0 ? 'text-success font-bold' : molassesChange < 0 ? 'text-danger font-bold' : 'text-hug-muted'}>
-                    {molassesChange > 0 ? `+₱${molassesChange}` : molassesChange < 0 ? `-₱${Math.abs(molassesChange)}` : '₱0'}
-                  </span>
-                </span>
-              ) : 'Price per Metric Ton'
-            }
+            helperText="Only reported weeks have a price. Comparisons are calculated by the server."
           >
             <Input
               type="number"
@@ -260,10 +249,10 @@ export default function PublishPriceModal({
               suffix="/ MT"
               value={molassesPrice}
               onChange={(e) => setMolassesPrice(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || molassesStatus !== 'REPORTED'}
               min="1"
               step="0.01"
-              required
+              required={molassesStatus === 'REPORTED'}
             />
           </FormField>
         </div>

@@ -655,24 +655,42 @@ export function toPriceDocument(value = {}, userId = '') {
   if (Number.isNaN(parsedPublishedAt.getTime()) || !publishedAt.includes('T')) {
     throw new Error('Invalid sra_prices record: publishedAt must be an ISO-8601 timestamp.');
   }
+  const priceStatus = input => {
+    const status = input || 'REPORTED';
+    if (!['REPORTED', 'NO_BIDDING', 'MILLING_ENDED', 'NOT_REPORTED'].includes(status)) throw new Error('Invalid price status.');
+    return status;
+  };
+  const amount = (input, field, status) => {
+    if (status !== 'REPORTED') {
+      if (input != null && input !== '') throw new Error(`Invalid sra_prices record: ${field} must be null.`);
+      return null;
+    }
+    const result = requiredNumber(input, field);
+    if (result <= 0) throw new Error(`Invalid sra_prices record: ${field} must be positive.`);
+    return result;
+  };
   return {
     effectiveDate,
     weekLabel: requiredText(value.weekLabel, 'weekLabel'),
-    sugarPricePerLkg: requiredNumber(value.sugarPricePerLkg, 'sugarPricePerLkg'),
-    sugarPriceChange: requiredNumber(value.sugarPriceChange, 'sugarPriceChange'),
-    molassesPricePerMetricTon: requiredNumber(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
-    molassesPriceChange: requiredNumber(value.molassesPriceChange, 'molassesPriceChange'),
+    sugarPricePerLkg: amount(value.sugarPricePerLkg, 'sugarPricePerLkg', priceStatus(value.sugarPriceStatus)),
+    sugarPriceChange: value.sugarPriceChange == null ? null : requiredNumber(value.sugarPriceChange, 'sugarPriceChange'),
+    molassesPricePerMetricTon: amount(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon', priceStatus(value.molassesPriceStatus)),
+    molassesPriceChange: value.molassesPriceChange == null ? null : requiredNumber(value.molassesPriceChange, 'molassesPriceChange'),
     circularNumber: requiredText(value.circularNumber, 'circularNumber'),
     source: requiredText(value.source, 'source'),
     publishedByUserId: requiredText(value.publishedByUserId || userId, 'publishedByUserId'),
-    publishedAt: parsedPublishedAt.toISOString()
+    publishedAt: parsedPublishedAt.toISOString(),
+    sugarPriceStatus: priceStatus(value.sugarPriceStatus), molassesPriceStatus: priceStatus(value.molassesPriceStatus),
+    molassesMarket: value.molassesMarket || '', sourceUrl: value.sourceUrl || '',
+    periodType: value.periodType || 'EFFECTIVE_DATE', importBatchId: value.importBatchId || '', sourceFileSha256: value.sourceFileSha256 || ''
   };
 }
 
 export function fromPriceDocument(id, value = {}) {
   return {
     id,
-    ...toPriceDocument(value, value.publishedByUserId)
+    ...toPriceDocument(value, value.publishedByUserId),
+    ...(value.priceAnalytics ? { priceAnalytics: value.priceAnalytics } : {})
   };
 }
 

@@ -93,7 +93,7 @@ test('language persistence and long-label layouts are guarded against regression
   assert.match(liveQrScanner, /t\('qr_upload_image',\s*'Upload QR Image'\)/);
   assert.doesNotMatch(liveQrScanner, />\s*Upload QR Image\s*</);
   assert.match(home, /t\('cloud_device_sync',\s*'Cloud & Device Sync'\)/);
-  assert.match(home, /t\('post_official_price'/);
+  assert.match(read('mobile/src/components/PriceReferenceCard.js'), /t\('post_official_price'/);
   assert.match(sraHome, /sectionTitleWrap:\s*\{\s*flex:\s*1\s*\}/);
   assert.match(sraHome, /adjustsFontSizeToFit[\s\S]*?minimumFontScale=\{0\.75\}/);
   assert.match(sraHome, /t\('sra_admin',\s*'SRA Admin'\)/);

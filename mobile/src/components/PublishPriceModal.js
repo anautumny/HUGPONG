@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import { calculateSRAWeekLabel, publishSraPrice, getSortedPrices } from '../data/dataStore';
 import { AppText as Text, AppTextInput as TextInput } from './Typography';
+import { PRICE_STATUSES, priceStatusLabel } from '../utils/pricePresentation';
 
 function formatDateIso(dateObj) {
   const y = dateObj.getFullYear();
@@ -33,6 +34,8 @@ export default function PublishPriceModal({
   const [molassesPrice, setMolassesPrice] = useState('');
   const [circularNumber, setCircularNumber] = useState('');
   const [source, setSource] = useState('');
+  const [sugarStatus, setSugarStatus] = useState('REPORTED');
+  const [molassesStatus, setMolassesStatus] = useState('REPORTED');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -62,6 +65,8 @@ export default function PublishPriceModal({
       setMolassesPrice(prevMolasses != null ? String(prevMolasses) : '');
       setCircularNumber('');
       setSource('');
+      setSugarStatus('REPORTED');
+      setMolassesStatus('REPORTED');
       setFormError(null);
       setSuccessMessage(null);
       setIsSubmitting(false);
@@ -79,9 +84,6 @@ export default function PublishPriceModal({
   // Derive variance vs previous latest price (identical to web)
   const curSugarNum = sugarPrice !== '' ? Number(sugarPrice) : NaN;
   const curMolassesNum = molassesPrice !== '' ? Number(molassesPrice) : NaN;
-
-  const sugarChange = !isNaN(curSugarNum) && prevSugar !== null ? curSugarNum - prevSugar : 0;
-  const molassesChange = !isNaN(curMolassesNum) && prevMolasses !== null ? curMolassesNum - prevMolasses : 0;
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
@@ -106,11 +108,11 @@ export default function PublishPriceModal({
       setFormError('SRA Week Label is required.');
       return;
     }
-    if (isNaN(curSugarNum) || curSugarNum <= 0) {
+    if (sugarStatus === 'REPORTED' && (!Number.isFinite(curSugarNum) || curSugarNum <= 0)) {
       setFormError('Raw Sugar price must be a valid positive number.');
       return;
     }
-    if (isNaN(curMolassesNum) || curMolassesNum <= 0) {
+    if (molassesStatus === 'REPORTED' && (!Number.isFinite(curMolassesNum) || curMolassesNum <= 0)) {
       setFormError('Molasses price must be a valid positive number.');
       return;
     }
@@ -129,8 +131,10 @@ export default function PublishPriceModal({
       const payload = {
         effectiveDate,
         weekLabel: weekLabel.trim(),
-        sugarPricePerLkg: curSugarNum,
-        molassesPricePerMetricTon: curMolassesNum,
+        sugarPricePerLkg: sugarStatus === 'REPORTED' ? curSugarNum : null,
+        molassesPricePerMetricTon: molassesStatus === 'REPORTED' ? curMolassesNum : null,
+        sugarPriceStatus: sugarStatus,
+        molassesPriceStatus: molassesStatus,
         circularNumber: circularNumber.trim(),
         source: source.trim()
       };
@@ -246,7 +250,8 @@ export default function PublishPriceModal({
                 </View>
               </View>
 
-              {/* Row 2: Raw Sugar Price & Industrial Molasses Price */}
+              {/* Row 2: Raw Sugar Price & Molasses Price */}
+              {[["Raw Sugar status", sugarStatus, setSugarStatus], ["Molasses status", molassesStatus, setMolassesStatus]].map(([label, status, update]) => <View key={label} style={{ marginVertical: 8 }}><Text style={s.fieldLabel}>{label}</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>{PRICE_STATUSES.map(value => <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked: status === value }} disabled={isSubmitting} onPress={() => update(value)} style={{ padding: 10, borderRadius: 10, borderWidth: 1, borderColor: status === value ? COLORS.primary : COLORS.border, backgroundColor: status === value ? '#EAF6E7' : '#fff' }}><Text style={{ fontSize: 12, color: COLORS.text }}>{priceStatusLabel(value)}</Text></TouchableOpacity>)}</View></View>)}
               <View style={s.rowTwoCol}>
                 {/* Raw Sugar Price */}
                 <View style={{ flex: 1 }}>
@@ -259,34 +264,20 @@ export default function PublishPriceModal({
                       style={s.affixInput}
                       value={sugarPrice}
                       onChangeText={setSugarPrice}
-                      editable={!isSubmitting}
+                      editable={!isSubmitting && sugarStatus === 'REPORTED'}
                       keyboardType="numeric"
                       placeholder="e.g. 2950"
                       placeholderTextColor={COLORS.textDisabled}
                     />
                     <Text style={s.suffixText}>/ Lkg</Text>
                   </View>
-                  <Text style={s.helperText}>
-                    {prevSugar !== null ? (
-                      <Text>
-                        Prev: ₱{prevSugar.toLocaleString()} ·{' '}
-                        <Text style={{
-                          color: sugarChange > 0 ? COLORS.success : sugarChange < 0 ? COLORS.danger : COLORS.textMuted,
-                          fontWeight: '800'
-                        }}>
-                          {sugarChange > 0 ? `+₱${sugarChange.toLocaleString()}` : sugarChange < 0 ? `-₱${Math.abs(sugarChange).toLocaleString()}` : '₱0'}
-                        </Text>
-                      </Text>
-                    ) : (
-                      'Price per 50-kg Lkg bag'
-                    )}
-                  </Text>
+                  <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
                 </View>
 
-                {/* Industrial Molasses Price */}
+                {/* Molasses Price */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    Industrial Molasses Price <Text style={{ color: COLORS.danger }}>*</Text>
+                    Molasses Price <Text style={{ color: COLORS.danger }}>*</Text>
                   </Text>
                   <View style={s.inputWithAffixes}>
                     <Text style={s.prefixText}>₱</Text>
@@ -294,28 +285,14 @@ export default function PublishPriceModal({
                       style={s.affixInput}
                       value={molassesPrice}
                       onChangeText={setMolassesPrice}
-                      editable={!isSubmitting}
+                      editable={!isSubmitting && molassesStatus === 'REPORTED'}
                       keyboardType="numeric"
                       placeholder="e.g. 11500"
                       placeholderTextColor={COLORS.textDisabled}
                     />
                     <Text style={s.suffixText}>/ MT</Text>
                   </View>
-                  <Text style={s.helperText}>
-                    {prevMolasses !== null ? (
-                      <Text>
-                        Prev: ₱{prevMolasses.toLocaleString()} ·{' '}
-                        <Text style={{
-                          color: molassesChange > 0 ? COLORS.success : molassesChange < 0 ? COLORS.danger : COLORS.textMuted,
-                          fontWeight: '800'
-                        }}>
-                          {molassesChange > 0 ? `+₱${molassesChange.toLocaleString()}` : molassesChange < 0 ? `-₱${Math.abs(molassesChange).toLocaleString()}` : '₱0'}
-                        </Text>
-                      </Text>
-                    ) : (
-                      'Price per Metric Ton'
-                    )}
-                  </Text>
+                  <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
                 </View>
               </View>
 

@@ -1,3 +1,5 @@
+import PriceReferenceCard from '../components/PriceReferenceCard';
+import { priceText } from '../utils/pricePresentation';
 import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -119,8 +121,8 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   if (sortedPrices.length > 0) {
     const latest = sortedPrices[0];
     const prev = sortedPrices[1];
-    const diff = prev ? (Number(latest.sugarPricePerLkg) - Number(prev.sugarPricePerLkg)) : 0;
-    const diffStr = diff !== 0 ? ` (${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} vs previous)` : '';
+    const diff = latest.sugarPriceChange;
+    const diffStr = diff != null && diff !== 0 ? ` (${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} vs previous)` : '';
     const priceNotifId = `notif-price-${latest.id || latest.effectiveDate || 'latest'}`;
 
     if (!dismissedIds.has(priceNotifId)) {
@@ -130,7 +132,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         icon: 'trending-up',
         color: '#267326',
         title: 'New SRA Price Circular Broadcast',
-        msg: `${latest.source || 'Published price reference'}: Raw Sugar is ₱${Number(latest.sugarPricePerLkg).toLocaleString()}/Lkg${diffStr}, Molasses at ₱${Number(latest.molassesPricePerMetricTon).toLocaleString()}/MT (${latest.weekLabel}).`,
+        msg: `Raw Sugar: ${priceText(latest.sugarPricePerLkg, latest.sugarPriceStatus, 'Lkg')}${diffStr}. Molasses: ${priceText(latest.molassesPricePerMetricTon, latest.molassesPriceStatus, 'MT')} (${latest.weekLabel}).`,
         time: latest.effectiveDate,
         createdAt: latest.effectiveDate,
         unread: !readIds.has(priceNotifId),
@@ -538,94 +540,7 @@ export default function HomeScreen({ navigation }) {
       ) : (
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {/* ── 1. Published price card ── */}
-            <TouchableOpacity
-              style={[s.card, s.priceCard]}
-              activeOpacity={session?.role === 'SRA Admin' ? 0.7 : 1}
-              onPress={handleOpenPriceModal}
-            >
-          <View style={s.priceCardHeader}>
-            <View style={s.priceSourceRow}>
-              <View style={[s.sourceDot, (!isOnline && isFieldRole) && { backgroundColor: COLORS.accent }]} />
-              <Text style={s.priceSource}>{currentPrice.source}</Text>
-            </View>
-            <View style={s.priceDateBadge}>
-              <Ionicons name="calendar-outline" size={11} color={COLORS.textMuted} />
-              <Text style={s.priceDateBadgeText}>
-              {liveWeek !== 'No records' && liveDate !== 'No records' 
-                ? (isOnline ? `${liveWeek} · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Offline: Cached') : `${liveWeek} · ${liveDate}`))
-                : t('no_records', 'No records')}
-              </Text>
-            </View>
-          </View>
-
-          {/* ── Top: Dominant Sugar (B) per 50kg bag (Lkg) ── */}
-          <View style={s.sugarSection}>
-            {/* Dominant Sugar (B) */}
-            <View style={s.sugarTagRow}>
-              <Text style={s.sugarTag}>Sugar (B) · Raw Sugar</Text>
-              <View style={[
-                s.trendPill,
-                liveChange > 0 ? s.trendPillUp : (liveChange < 0 ? s.trendPillDown : s.trendPillSteady)
-              ]}>
-                <Ionicons
-                  name={liveChange > 0 ? "arrow-up" : (liveChange < 0 ? "arrow-down" : "remove-outline")}
-                  size={11}
-                  color={liveChange > 0 ? COLORS.success : (liveChange < 0 ? COLORS.danger : COLORS.textMuted)}
-                />
-                <Text style={[
-                  s.trendPillText,
-                  liveChange > 0 ? s.trendTextUp : (liveChange < 0 ? s.trendTextDown : s.trendTextSteady)
-                ]}>
-                  {livePrice == null ? t('no_price', 'No price') : (liveChange > 0 ? `+₱${Number(liveChange).toFixed(2)}` : (liveChange < 0 ? `-₱${Math.abs(Number(liveChange)).toFixed(2)}` : t('trend_steady', 'Steady')))}
-                </Text>
-              </View>
-            </View>
-            <View style={s.sugarPriceRow}>
-              <Text style={s.sugarPriceValue}>
-                {livePrice == null ? '—' : `₱${Number(livePrice).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-              </Text>
-              <Text style={s.sugarUnitText}>{t('unit_per_bag', 'per 50kg bag (Lkg)')}</Text>
-            </View>
-          </View>
-
-          <View style={s.priceSectionDivider} />
-
-          {/* ── Bottom: Supporting Molasses per MT ── */}
-          <View style={s.molassesSection}>
-            <View style={s.molassesInfoCol}>
-              <Text style={s.molassesTag}>{t('industrial_molasses', 'Industrial Molasses')}</Text>
-              <View style={s.molassesPriceRow}>
-                <Text style={s.molassesPriceValue}>
-                  {liveMol == null ? '—' : `₱${Number(liveMol).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                </Text>
-                <Text style={s.molassesUnitText}>{t('unit_per_mt', '/ MT')}</Text>
-              </View>
-            </View>
-            <View style={[
-              s.trendPill,
-              (liveMolChange || 0) > 0 ? s.trendPillUp : ((liveMolChange || 0) < 0 ? s.trendPillDown : s.trendPillSteady)
-            ]}>
-              <Ionicons
-                name={(liveMolChange || 0) > 0 ? "arrow-up" : ((liveMolChange || 0) < 0 ? "arrow-down" : "remove-outline")}
-                size={11}
-                color={(liveMolChange || 0) > 0 ? COLORS.success : ((liveMolChange || 0) < 0 ? COLORS.danger : COLORS.textMuted)}
-              />
-              <Text style={[
-                s.trendPillText,
-                (liveMolChange || 0) > 0 ? s.trendTextUp : ((liveMolChange || 0) < 0 ? s.trendTextDown : s.trendTextSteady)
-              ]}>
-                {liveMol == null ? t('no_price', 'No price') : ((liveMolChange || 0) > 0 ? `+₱${Number(liveMolChange).toFixed(2)}` : ((liveMolChange || 0) < 0 ? `-₱${Math.abs(Number(liveMolChange)).toFixed(2)}` : t('trend_steady', 'Steady')))}
-              </Text>
-            </View>
-          </View>
-
-          {session?.role === 'SRA Admin' && (
-            <View style={s.sraEditHint}>
-              <Ionicons name="create-outline" size={13} color={COLORS.primary} />
-              <Text style={s.sraEditText}>{t('post_official_price', 'Publish Price Reference')}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+            <PriceReferenceCard priceRecord={getSortedPrices()[0]} canPost={session?.role === 'SRA Admin' && isOnline} onPostPricePress={handleOpenPriceModal} />
 
         {/* ── 2. SRA Weekly Price Monitor (Directly Under Price Card) ── */}
         <View style={s.card}>
@@ -690,14 +605,16 @@ export default function HomeScreen({ navigation }) {
                       <View key={mi} style={[s.barGroup, { overflow: 'hidden', height: 110, justifyContent: 'flex-end' }]}>
                         {chartMode === 'weekly' ? (
                           priceAnalytics.weeks.map((wk, wi) => {
-                            const val = Number(wk[mi]) || 0;
+                            if (wk[mi] == null) return <View key={wi} style={[s.bar, { height: 0 }]} />;
+                            const val = Number(wk[mi]);
                             const rawH = ((val - dynamicMin) / priceRange) * 105;
                             const h = Math.min(105, Math.max(6, Math.round(rawH)));
                             return <View key={wi} style={[s.bar, { height: h, backgroundColor: BAR_COLORS[wi] }]} />;
                           })
                         ) : (
                           (() => {
-                            const avg = priceAnalytics.weeks.reduce((sum, wk) => sum + (Number(wk[mi]) || 0), 0) / (priceAnalytics.weeks.length || 1);
+                            const avg = priceAnalytics.monthlyValues[mi];
+                            if (avg == null) return null;
                             const rawH = ((avg - dynamicMin) / priceRange) * 105;
                             const h = Math.min(105, Math.max(6, Math.round(rawH)));
                             return <View style={[s.bar, { width: 14, height: h, backgroundColor: COLORS.primary }]} />;
@@ -721,7 +638,7 @@ export default function HomeScreen({ navigation }) {
           {/* Legend (Weeks 1 to 4) */}
           {priceAnalytics.hasData && (chartMode === 'weekly' ? (
             <View style={s.legendRow}>
-              {['Week 1', 'Week 2', 'Week 3', 'Week 4'].map((l, i) => (
+              {['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'].map((l, i) => (
                 <View key={i} style={s.legendItem}>
                   <View style={[s.legendDot, { backgroundColor: BAR_COLORS[i] }]} />
                   <Text style={s.legendText}>{`${t('time_week', 'Week')} ${i + 1}`}</Text>
@@ -740,14 +657,14 @@ export default function HomeScreen({ navigation }) {
           {/* Stats Row */}
           <View style={s.statsRow}>
             <View style={s.statBox}>
-              <Text style={s.statLabel}>{t('stat_monthly_avg', 'Monthly Avg')}</Text>
+              <Text style={s.statLabel}>{'Latest Month Avg'}</Text>
               <Text style={s.statValue}>
                 {priceAnalytics.monthlyAvg > 0 ? `₱${Number(priceAnalytics.monthlyAvg).toLocaleString()}` : '—'}
               </Text>
             </View>
             <View style={s.statDivider} />
             <View style={s.statBox}>
-              <Text style={s.statLabel}>{t('stat_crop_year_peak', 'Crop Year Cycle Peak')}</Text>
+              <Text style={s.statLabel}>{'History High'}</Text>
               <Text style={s.statValue}>
                 {priceAnalytics.cropYearPeak > 0 ? `₱${Number(priceAnalytics.cropYearPeak).toLocaleString()}` : '—'}
               </Text>
@@ -758,9 +675,7 @@ export default function HomeScreen({ navigation }) {
               {(() => {
                 const sorted = getSortedPrices();
                 if (sorted.length < 2) return <Text style={s.statValue}>—</Text>;
-                const latest = sorted[0].sugarPricePerLkg;
-                const prev = sorted[sorted.length - 1].sugarPricePerLkg;
-                const pct = prev > 0 ? (((latest - prev) / prev) * 100).toFixed(1) : null;
+                const pct = sorted[0]?.priceAnalytics?.summary?.sugarPeriodChangePercent;
                 if (!pct) return <Text style={s.statValue}>—</Text>;
                 const up = parseFloat(pct) >= 0;
                 return <Text style={[s.statValue, { color: up ? COLORS.success : COLORS.danger }]}>{up ? '↑' : '↓'} {Math.abs(pct)}%</Text>;

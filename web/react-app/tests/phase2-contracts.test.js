@@ -86,7 +86,10 @@ test('price trends preserve the canonical SRA units and latest values', () => {
     prices: [
       { effectiveDate: '2026-09-01', weekLabel: 'Week 1', sugarPricePerLkg: 2800, molassesPricePerMetricTon: 4100 },
       { effectiveDate: '2026-09-08', weekLabel: 'Week 2', sugarPricePerLkg: 2850, molassesPricePerMetricTon: 4200 }
-    ]
+    ].map((row, index) => index === 1 ? { ...row, priceAnalytics: { weekly: {
+      trendPoints: [{ date: '2026-09-01', sugarPrice: 2800, molassesPrice: 4100 }, { date: '2026-09-08', sugarPrice: 2850, molassesPrice: 4200 }],
+      currentSugar: 2850, currentMolasses: 4200, minSugar: 2800, maxMolasses: 4200
+    } } } : row)
   });
 
   assert.equal(result.trendPoints.length, 2);

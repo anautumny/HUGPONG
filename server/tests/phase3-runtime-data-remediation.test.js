@@ -40,8 +40,8 @@ test('price source is explicit on both clients and price deltas are server-deriv
   assert.doesNotMatch(mobile, /sugarPriceChange:\s*sugarChange|molassesPriceChange:\s*molassesChange/);
   assert.doesNotMatch(mobileStore, /priceHistory\.unshift\(localRecord\)/);
   assert.match(mobileStore, /commitExplicitMutation\('price', publicationRequest\)[\s\S]*fromPriceDocument\(outcome\.response\.data\.id/);
-  assert.match(server, /sugarPriceChange:\s*previous/);
-  assert.match(server, /molassesPriceChange:\s*previous/);
+  assert.match(server, /sugarPriceChange:\s*comparableChange/);
+  assert.match(server, /molassesPriceChange:\s*comparableChange/);
 });
 
 test('dead demo labels and named-site operation samples are absent from mobile runtime', () => {

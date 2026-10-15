@@ -831,42 +831,22 @@ export const extractPriceMonth = (p) => {
   return MONTH_NAMES[monthIndex] || null;
 };
 
+// All statistics come from the API projection cached with the latest bulletin.
 export const priceAnalytics = {
-  get hasData() {
-    return priceHistory.length > 0;
-  },
-  get months() {
-    const sorted = getSortedPrices();
-    if (sorted.length === 0) return ['No Data'];
-    const uniqueMonths = Array.from(new Set(sorted.map(p => extractPriceMonth(p))));
-    return uniqueMonths.slice(0, 6).reverse();
-  },
+  get snapshot() { return getSortedPrices()[0]?.priceAnalytics || null; },
+  get hasData() { return Boolean(this.snapshot?.weekly?.trendPoints?.length); },
+  get monthPoints() { return this.snapshot?.monthly?.trendPoints?.slice(-6) || []; },
+  get months() { return this.monthPoints.map(point => point.periodLabel); },
   get weeks() {
-    const sorted = getSortedPrices();
-    if (sorted.length === 0) {
-      return [];
-    }
-    const months = this.months;
-    return [0, 1, 2, 3].map(wIndex => {
-      return months.map(m => {
-        const matching = sorted.filter(p => extractPriceMonth(p) === m);
-        if (matching.length > wIndex) return matching[wIndex].sugarPricePerLkg;
-        if (matching.length > 0) return matching[0].sugarPricePerLkg;
-        return sorted[0].sugarPricePerLkg;
-      });
-    });
+    const points = this.snapshot?.weekly?.trendPoints || [];
+    return [0, 1, 2, 3, 4].map(index => this.monthPoints.map(month => {
+      const point = points.filter(row => row.date.slice(0,7) === month.date.slice(0,7))[index];
+      return point?.sugarPrice ?? null;
+    }));
   },
-  get monthlyAvg() {
-    const sorted = getSortedPrices();
-    if (sorted.length === 0) return null;
-    const sum = sorted.reduce((acc, p) => acc + p.sugarPricePerLkg, 0);
-    return Math.round(sum / sorted.length);
-  },
-  get cropYearPeak() {
-    const sorted = getSortedPrices();
-    if (sorted.length === 0) return null;
-    return Math.max(...sorted.map(p => p.sugarPricePerLkg));
-  }
+  get monthlyValues() { return this.monthPoints.map(point => point.sugarPrice); },
+  get monthlyAvg() { return this.snapshot?.summary?.latestMonthSugarAverage ?? null; },
+  get cropYearPeak() { return this.snapshot?.summary?.sugarPeriodHigh ?? null; }
 };
 
 // Server and Firebase issue all authentication credentials. The mobile client
@@ -2131,10 +2111,10 @@ export const calculateSRAWeekLabel = (dateInput = new Date()) => {
   return `Week ${boundedWeek} ${monthName}`;
 };
 
-export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, weekLabel, circularNumber, source, effectiveDate }) => {
-  const sugar = Number(sugarPricePerLkg);
-  const molasses = Number(molassesPricePerMetricTon);
-  if (!Number.isFinite(sugar) || sugar <= 0 || !Number.isFinite(molasses) || molasses <= 0) {
+export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, sugarPriceStatus = 'REPORTED', molassesPriceStatus = 'REPORTED', weekLabel, circularNumber, source, effectiveDate }) => {
+  const sugar = sugarPriceStatus === 'REPORTED' ? Number(sugarPricePerLkg) : null;
+  const molasses = molassesPriceStatus === 'REPORTED' ? Number(molassesPricePerMetricTon) : null;
+  if ((sugarPriceStatus === 'REPORTED' && (!Number.isFinite(sugar) || sugar <= 0)) || (molassesPriceStatus === 'REPORTED' && (!Number.isFinite(molasses) || molasses <= 0))) {
     throw new Error('Both published price values must be greater than zero.');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(effectiveDate || '')) || !String(weekLabel || '').trim()
@@ -2148,6 +2128,8 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
     weekLabel: String(weekLabel).trim(),
     sugarPricePerLkg: sugar,
     molassesPricePerMetricTon: molasses,
+    sugarPriceStatus,
+    molassesPriceStatus,
     circularNumber: String(circularNumber).trim(),
     source: String(source).trim()
   };

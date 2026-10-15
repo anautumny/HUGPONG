@@ -1,3 +1,4 @@
+import { priceText } from '../../utils/pricePresentation';
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -243,10 +244,10 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
           </div>
 
           <div className="p-3.5 rounded-xl bg-bg border border-border/60">
-            <span className="text-[11px] font-medium text-hug-muted block mb-1">Price Stability Index</span>
+            <span className="text-[11px] font-medium text-hug-muted block mb-1">Latest Sugar Bulletin</span>
             <div className="flex items-baseline justify-between">
               <span className="text-base font-bold text-hug-text">
-                {currentPrice ? formatCurrency(currentPrice.sugarPricePerLkg) : '—'}
+                {currentPrice ? priceText(currentPrice.sugarPricePerLkg, currentPrice.sugarPriceStatus) : '—'}
               </span>
               <span className="text-xs text-hug-muted font-medium">per LKg</span>
             </div>

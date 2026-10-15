@@ -105,7 +105,8 @@ test('buildSraPrice accepts and emits only the canonical Phase 2 fields', () => 
   assert.deepEqual(Object.keys(payload), [
     'effectiveDate', 'weekLabel', 'sugarPricePerLkg', 'sugarPriceChange',
     'molassesPricePerMetricTon', 'molassesPriceChange', 'circularNumber',
-    'source', 'publishedByUserId', 'publishedAt'
+    'source', 'publishedByUserId', 'publishedAt', 'sugarPriceStatus', 'molassesPriceStatus',
+    'molassesMarket', 'sourceUrl', 'periodType', 'importBatchId', 'sourceFileSha256'
   ]);
   assert.equal(payload.effectiveDate, '2026-09-17');
   assert.equal(payload.sugarPricePerLkg, 2850);
@@ -124,8 +125,8 @@ test('price publication creates exactly one record and an identical retry is ide
   assert.equal(database.records.size, 1);
   assert.equal(database.audits.size, 1);
   assert.equal(first.data.effectiveDate, '2026-09-17');
-  assert.equal(first.data.sugarPriceChange, 0);
-  assert.equal(first.data.molassesPriceChange, 0);
+  assert.equal(first.data.sugarPriceChange, null);
+  assert.equal(first.data.molassesPriceChange, null);
 });
 
 test('price movements are derived from persisted history and ignore client-supplied changes', async () => {
@@ -197,9 +198,9 @@ test('active React publisher previews changes but leaves authoritative deltas to
     path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'components', 'prices', 'PublishPriceModal.jsx'),
     'utf8'
   );
-  assert.match(modal, /const sugarChange = .*curSugarNum - prevSugar : 0/);
-  assert.match(modal, /const molassesChange = .*curMolassesNum - prevMolasses : 0/);
-  assert.match(modal, /effectiveDate,\s+weekLabel: weekLabel\.trim\(\),\s+sugarPricePerLkg: curSugarNum,\s+molassesPricePerMetricTon: curMolassesNum,\s+circularNumber:/);
+  assert.match(modal, /sugarPricePerLkg: sugarStatus === 'REPORTED' \? curSugarNum : null/);
+  assert.match(modal, /molassesPricePerMetricTon: molassesStatus === 'REPORTED' \? curMolassesNum : null/);
+  assert.match(modal, /sugarPriceStatus: sugarStatus/);
   assert.doesNotMatch(modal, /sugarPriceChange:\s*sugarChange|molassesPriceChange:\s*molassesChange/);
   assert.doesNotMatch(modal, /\b(date|week|price|molasses|change|molassesChange)\s*:/);
 });
@@ -213,13 +214,11 @@ test('active web price service posts the canonical payload to the authoritative 
   assert.doesNotMatch(service, /addDoc|setDoc|updateDoc/);
 });
 
-test('first active React price publication derives zero changes without fabricating prior prices', () => {
+test('React publisher leaves comparisons to the server without fabricating a prior quote', () => {
   const modal = fs.readFileSync(
     path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'components', 'prices', 'PublishPriceModal.jsx'),
     'utf8'
   );
-  assert.match(modal, /const prevSugar = latestPrice\?\.sugarPricePerLkg != null[\s\S]*?: null/);
-  assert.match(modal, /const prevMolasses = latestPrice\?\.molassesPricePerMetricTon != null[\s\S]*?: null/);
-  assert.match(modal, /prevSugar !== null \? curSugarNum - prevSugar : 0/);
-  assert.match(modal, /prevMolasses !== null \? curMolassesNum - prevMolasses : 0/);
+  assert.match(modal, /Comparisons are calculated by the server/);
+  assert.doesNotMatch(modal, /const sugarChange =|const molassesChange =/);
 });

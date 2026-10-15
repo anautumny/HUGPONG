@@ -1,3 +1,4 @@
+import { priceText } from '../../utils/pricePresentation';
 import React, { useState } from 'react';
 import { TrendingUp, Calendar, FileText, ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
 import Button from '../ui/Button';
@@ -54,30 +55,26 @@ export default function PriceTrendsSection({
   // Compute coordinates
   const pointsWithCoords = trendPoints.map((pt, i) => {
     const x = n > 1 ? padL + (i / (n - 1)) * W : padL + W / 2;
-    const ySugar = padT + H - ((pt.sugarPrice - sugarMinP) / sugarRange) * H;
-    const yMol = padT + H - ((pt.molassesPrice - molMinP) / molRange) * H;
+    const ySugar = pt.sugarPrice == null ? null : padT + H - ((pt.sugarPrice - sugarMinP) / sugarRange) * H;
+    const yMol = pt.molassesPrice == null ? null : padT + H - ((pt.molassesPrice - molMinP) / molRange) * H;
     return { ...pt, x, ySugar, yMol };
   });
 
   // Build SVG Paths
   const buildPath = (coordKey) => {
-    if (pointsWithCoords.length === 0) return '';
-    let d = `M ${pointsWithCoords[0].x} ${pointsWithCoords[0][coordKey]}`;
-    for (let i = 0; i < pointsWithCoords.length - 1; i++) {
-      const p0 = pointsWithCoords[i];
-      const p1 = pointsWithCoords[i + 1];
-      const mx = (p0.x + p1.x) / 2;
-      d += ` C ${mx} ${p0[coordKey]}, ${mx} ${p1[coordKey]}, ${p1.x} ${p1[coordKey]}`;
-    }
+    let d = '', connected = false;
+    pointsWithCoords.forEach(point => {
+      if (point[coordKey] == null) { connected = false; return; }
+      d += `${connected ? ' L' : ' M'} ${point.x} ${point[coordKey]}`;
+      connected = true;
+    });
     return d;
   };
 
   const sugarPathD = buildPath('ySugar');
   const molassesPathD = buildPath('yMol');
 
-  const sugarAreaD = sugarPathD && pointsWithCoords.length > 1
-    ? `${sugarPathD} L ${pointsWithCoords[pointsWithCoords.length - 1].x} ${padT + H} L ${pointsWithCoords[0].x} ${padT + H} Z`
-    : '';
+  const sugarAreaD = ''; // Do not fill across missing quotes.
 
   // Y-axis grid ticks for sugar or molasses
   const yTicks = [0, 0.33, 0.66, 1].map(frac => {
@@ -153,12 +150,14 @@ export default function PriceTrendsSection({
                   : 'text-hug-muted hover:text-hug-text'
               }`}
             >
-              Monthly Avg
+              Monthly Average
             </button>
           </div>
         </div>
       </div>
 
+      <p className="text-xs text-hug-muted">Gaps mean no quoted price. Monthly averages use reported weeks only; unavailable quotes are never counted as zero.</p>
+      {trendPoints.length > 0 && <div className="max-h-60 overflow-auto rounded-xl border border-border"><table className="w-full text-left text-xs text-hug-text"><thead className="sticky top-0 bg-bg"><tr><th className="p-3">Period</th><th className="p-3">Raw Sugar / Lkg</th><th className="p-3">Molasses / MT</th></tr></thead><tbody className="divide-y divide-border">{trendPoints.map(point => <tr key={point.date}><td className="p-3">{point.periodLabel}</td><td className="p-3">{priceText(point.sugarPrice, point.sugarStatus)}{timeframe === 'monthly' && <span className="block text-hug-muted">{point.sugarReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td><td className="p-3">{priceText(point.molassesPrice, point.molassesStatus)}{timeframe === 'monthly' && <span className="block text-hug-muted">{point.molassesReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td></tr>)}</tbody></table></div>}
       {trendPoints.length === 0 ? (
         <div className="py-10 text-center text-hug-muted text-xs">
           <TrendingUp className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
@@ -176,28 +175,28 @@ export default function PriceTrendsSection({
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Latest Circular</span>
                   <span className="text-base sm:text-lg font-black text-primary dark:text-primary-light">
-                    ₱{currentSugar.toLocaleString()}
+                    {priceText(currentSugar, trendsData?.currentSugarStatus)}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Period Low</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{minSugar.toLocaleString()}
+                    {priceText(minSugar, minSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Period High</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{maxSugar.toLocaleString()}
+                    {priceText(maxSugar, maxSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Trajectory Range</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{(maxSugar - minSugar).toLocaleString()}
+                    {priceText(maxSugar != null && minSugar != null ? maxSugar - minSugar : null, maxSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">variance across series</span>
                 </div>
@@ -207,28 +206,28 @@ export default function PriceTrendsSection({
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Latest Circular</span>
                   <span className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400">
-                    ₱{currentMolasses.toLocaleString()}
+                    {priceText(currentMolasses, trendsData?.currentMolassesStatus)}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Period Low</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{minMolasses.toLocaleString()}
+                    {priceText(minMolasses, minMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Period High</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{maxMolasses.toLocaleString()}
+                    {priceText(maxMolasses, maxMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
                 </div>
                 <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
                   <span className="text-[10px] uppercase font-bold text-hug-muted block">Trajectory Range</span>
                   <span className="text-base sm:text-lg font-black text-hug-text">
-                    ₱{(maxMolasses - minMolasses).toLocaleString()}
+                    {priceText(maxMolasses != null && minMolasses != null ? maxMolasses - minMolasses : null, maxMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
                   </span>
                   <span className="text-[10px] text-hug-muted block">variance across series</span>
                 </div>
@@ -308,6 +307,7 @@ export default function PriceTrendsSection({
                 const color = activeSeries === 'sugar' ? '#2D5016' : '#B45309';
                 const priceVal = activeSeries === 'sugar' ? pt.sugarPrice : pt.molassesPrice;
                 const unit = activeSeries === 'sugar' ? '/ Lkg' : '/ MT';
+                if (priceVal == null) return null;
 
                 return (
                   <g
@@ -365,10 +365,10 @@ export default function PriceTrendsSection({
               </div>
               <div className="flex items-center gap-4">
                 <span className="font-extrabold text-primary dark:text-primary-light">
-                  Raw Sugar: ₱{hoveredPoint.sugarPrice.toLocaleString()} / Lkg
+                  Raw Sugar: {priceText(hoveredPoint.sugarPrice, hoveredPoint.sugarStatus, 'Lkg')}
                 </span>
                 <span className="font-extrabold text-amber-600 dark:text-amber-400">
-                  Molasses: ₱{hoveredPoint.molassesPrice.toLocaleString()} / MT
+                  Molasses: {priceText(hoveredPoint.molassesPrice, hoveredPoint.molassesStatus, 'MT')}
                 </span>
               </div>
             </div>

@@ -1,3 +1,4 @@
+import { priceText } from '../utils/pricePresentation';
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -590,10 +591,11 @@ export default function AnalyticsScreen({ navigation, route }) {
                       <View style={{ flex: 1 }}>
                         <Text style={s.priceCircularNum}>{pt.circularNumber}</Text>
                         <Text style={s.pricePeriodDate}>{pt.periodLabel}</Text>
+                        {priceTimeframe === 'monthly' && <Text style={s.pricePeriodDate}>Reported weeks: Sugar {pt.sugarReportedWeeks}/{pt.totalWeeks}, Molasses {pt.molassesReportedWeeks}/{pt.totalWeeks}</Text>}
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={s.priceSugarValue}>₱{pt.sugarPrice.toLocaleString()} / Lkg</Text>
-                        <Text style={s.priceMolassesValue}>Molasses: ₱{pt.molassesPrice.toLocaleString()} / MT</Text>
+                        <Text style={s.priceSugarValue}>{priceText(pt.sugarPrice, pt.sugarStatus, 'Lkg')}</Text>
+                        <Text style={s.priceMolassesValue}>Molasses: {priceText(pt.molassesPrice, pt.molassesStatus, 'MT')}</Text>
                       </View>
                     </View>
                   ))}

@@ -3,6 +3,7 @@
 const { COLLECTIONS, buildSraPrice, nowIso, requiredString } = require('../schema/firestoreSchema');
 const { createPriceId } = require('../domain/systemIds');
 const { queueAuditEvent } = require('./auditWriter');
+const { comparableChange } = require('./priceAnalyticsService');
 
 async function publishSraPrice(database, input, context = {}) {
   if (!database) throw new Error('Database is unavailable.');
@@ -17,6 +18,8 @@ async function publishSraPrice(database, input, context = {}) {
   // manufacture the reported movement.
   const basePayload = buildSraPrice({
     ...input,
+    importBatchId: '',
+    sourceFileSha256: '',
     sugarPriceChange: 0,
     molassesPriceChange: 0
   }, {
@@ -28,9 +31,8 @@ async function publishSraPrice(database, input, context = {}) {
     const existing = await transaction.get(ref);
     if (existing.exists) {
       const current = buildSraPrice(existing.data());
-      const isReplay = current.publishedByUserId === basePayload.publishedByUserId
-        && current.effectiveDate === basePayload.effectiveDate
-        && current.circularNumber === basePayload.circularNumber;
+      const isReplay = Object.keys(basePayload).filter(key => !['publishedAt', 'sugarPriceChange', 'molassesPriceChange'].includes(key))
+        .every(key => JSON.stringify(current[key]) === JSON.stringify(basePayload[key]));
       if (isReplay) return { created: false, replayed: true, data: { id: priceId, ...current } };
       const conflict = new Error('Price ID already belongs to another publication.');
       conflict.statusCode = 409;
@@ -44,12 +46,8 @@ async function publishSraPrice(database, input, context = {}) {
     const previous = previousSnapshot.docs?.[0]?.data?.() || null;
     const payload = {
       ...basePayload,
-      sugarPriceChange: previous
-        ? Number((basePayload.sugarPricePerLkg - Number(previous.sugarPricePerLkg)).toFixed(2))
-        : 0,
-      molassesPriceChange: previous
-        ? Number((basePayload.molassesPricePerMetricTon - Number(previous.molassesPricePerMetricTon)).toFixed(2))
-        : 0
+      sugarPriceChange: comparableChange(basePayload, previous, 'sugar'),
+      molassesPriceChange: comparableChange(basePayload, previous, 'molasses')
     };
     transaction.create(ref, payload);
     queueAuditEvent(transaction, database, {

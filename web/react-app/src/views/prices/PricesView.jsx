@@ -43,26 +43,32 @@ export default function PricesView() {
   const handleExportCSV = () => {
     if (!prices || prices.length === 0) return;
 
-    const headers = ['Effective Date', 'Week Label', 'Raw Sugar (PHP/Lkg)', 'Sugar Change', 'Molasses (PHP/MT)', 'Molasses Change', 'Circular Number', 'Source'];
+    const headers = ['Reporting Date', 'Period Type', 'Week Label', 'Raw Sugar (PHP/Lkg)', 'Sugar Status', 'Sugar Change', 'Molasses (PHP/MT)', 'Molasses Status', 'Molasses Change', 'Circular Number', 'Source', 'Source URL'];
     const rows = prices.map(p => [
       p.effectiveDate,
-      `"${p.weekLabel || ''}"`,
+      p.periodType,
+      p.weekLabel,
       p.sugarPricePerLkg,
-      p.sugarPriceChange || 0,
+      p.sugarPriceStatus,
+      p.sugarPriceChange,
       p.molassesPricePerMetricTon,
-      p.molassesPriceChange || 0,
-      `"${p.circularNumber || ''}"`,
-      `"${p.source || ''}"`
+      p.molassesPriceStatus,
+      p.molassesPriceChange,
+      p.circularNumber,
+      p.source,
+      p.sourceUrl
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvCell = value => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`;
+    const csvContent = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
+    const encodedUri = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `SRA_Price_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(encodedUri);
   };
 
   return (

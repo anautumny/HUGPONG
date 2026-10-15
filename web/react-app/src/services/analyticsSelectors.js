@@ -381,73 +381,11 @@ export function selectFarmOperationsAnalytics({
  * 5. SRA Price Trends Selector
  * Transforms official historical price circulars into chronological time-series points.
  */
-export function selectPriceTrends({
-  prices = [],
-  timeframe = 'weekly' // 'weekly' | 'monthly'
-}) {
-  if (!prices || prices.length === 0) {
-    return {
-      trendPoints: [],
-      minSugar: 0,
-      maxSugar: 0,
-      minMolasses: 0,
-      maxMolasses: 0,
-      currentSugar: 0,
-      currentMolasses: 0
-    };
-  }
-
-  // Sort chronological: oldest to newest for graphing
-  const sorted = [...prices].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
-
-  let points = [];
-
-  if (timeframe === 'monthly') {
-    // Group by YYYY-MM, taking the latest price record of each month
-    const monthMap = new Map();
-    sorted.forEach(p => {
-      const monthKey = String(p.effectiveDate).slice(0, 7);
-      monthMap.set(monthKey, p); // overwrite with latest
-    });
-    points = Array.from(monthMap.values()).map(p => ({
-      date: p.effectiveDate,
-      periodLabel: new Date(`${p.effectiveDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-      sugarPrice: Number(p.sugarPricePerLkg || 0),
-      sugarChange: Number(p.sugarPriceChange || 0),
-      molassesPrice: Number(p.molassesPricePerMetricTon || 0),
-      molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Published Reference'
-    }));
-  } else {
-    // Weekly points
-    points = sorted.map(p => ({
-      date: p.effectiveDate,
-      periodLabel: p.weekLabel || p.effectiveDate,
-      sugarPrice: Number(p.sugarPricePerLkg || 0),
-      sugarChange: Number(p.sugarPriceChange || 0),
-      molassesPrice: Number(p.molassesPricePerMetricTon || 0),
-      molassesChange: Number(p.molassesPriceChange || 0),
-      circularNumber: p.circularNumber || p.source || 'Published Reference'
-    }));
-  }
-
-  const sugarValues = points.map(p => p.sugarPrice).filter(v => v > 0);
-  const molassesValues = points.map(p => p.molassesPrice).filter(v => v > 0);
-
-  const minSugar = sugarValues.length > 0 ? Math.min(...sugarValues) : 0;
-  const maxSugar = sugarValues.length > 0 ? Math.max(...sugarValues) : 0;
-  const minMolasses = molassesValues.length > 0 ? Math.min(...molassesValues) : 0;
-  const maxMolasses = molassesValues.length > 0 ? Math.max(...molassesValues) : 0;
-
-  const latest = sorted[sorted.length - 1] || null;
-
-  return {
-    trendPoints: points,
-    minSugar,
-    maxSugar,
-    minMolasses,
-    maxMolasses,
-    currentSugar: latest ? Number(latest.sugarPricePerLkg || 0) : 0,
-    currentMolasses: latest ? Number(latest.molassesPricePerMetricTon || 0) : 0
+export function selectPriceTrends({ prices = [], timeframe = 'weekly' }) {
+  // Analytics are computed by the API and retained with the cached latest bulletin.
+  const snapshot = [...prices].sort((a, b) => String(b.effectiveDate).localeCompare(String(a.effectiveDate)))[0]?.priceAnalytics;
+  return snapshot?.[timeframe] || {
+    trendPoints: [], minSugar: null, maxSugar: null, minMolasses: null, maxMolasses: null,
+    currentSugar: null, currentMolasses: null
   };
 }

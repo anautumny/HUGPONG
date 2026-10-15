@@ -452,10 +452,17 @@ The operation and field snapshots intentionally preserve exactly what the SRA re
 {
   effectiveDate: string,
   weekLabel: string,
-  sugarPricePerLkg: number,
-  sugarPriceChange: number,
-  molassesPricePerMetricTon: number,
-  molassesPriceChange: number,
+  sugarPricePerLkg: number | null,
+  sugarPriceChange: number | null,
+  molassesPricePerMetricTon: number | null,
+  molassesPriceChange: number | null,
+  sugarPriceStatus: "REPORTED" | "NO_BIDDING" | "MILLING_ENDED" | "NOT_REPORTED",
+  molassesPriceStatus: "REPORTED" | "NO_BIDDING" | "MILLING_ENDED" | "NOT_REPORTED",
+  molassesMarket: string, // Source provenance only; displayed product label remains Molasses.
+  sourceUrl: string,
+  periodType: "EFFECTIVE_DATE" | "WEEK_ENDING",
+  importBatchId: string,
+  sourceFileSha256: string,
   circularNumber: string,
   source: string,
   publishedByUserId: string,
@@ -463,7 +470,9 @@ The operation and field snapshots intentionally preserve exactly what the SRA re
 }
 ```
 
-For new publications, `sugarPriceChange` and `molassesPriceChange` are calculated by the server transaction from the preceding persisted record by `effectiveDate`. Client-supplied change values are ignored. The earliest chronological record uses `0` for both values.
+Reported amounts must be positive; all non-reported statuses require a null amount. Legacy numeric records default to `REPORTED`. The server derives price changes only when both adjacent weekly bulletins contain a quote for the same commodity/market and are seven days apart. Missing comparisons, including the first observation, use null. Client-supplied change values and import provenance are ignored by the publication API.
+
+The newest API result includes a read-only `priceAnalytics` projection (not persisted in Firestore). It contains weekly points with explicit gaps, monthly arithmetic means over each product's reported weeks, reported-week counts, latest bulletin date/staleness, and separately dated last reported quotes. Web and Mobile cache/render this same server projection. No price is carried forward as a current quote. No additional collection, index, or rule is needed for these fields.
 
 ### `support_tickets/{ticketId}`
 

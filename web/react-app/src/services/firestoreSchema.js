@@ -522,6 +522,21 @@ const priceNumber = (value, fieldName) => {
   return result;
 };
 
+const priceStatus = value => {
+  const status = value || 'REPORTED';
+  if (!['REPORTED', 'NO_BIDDING', 'MILLING_ENDED', 'NOT_REPORTED'].includes(status)) throw new Error('Invalid price status.');
+  return status;
+};
+const priceAmount = (value, field, status) => {
+  if (status !== 'REPORTED') {
+    if (value != null && value !== '') throw new Error(`Invalid sra_prices record: ${field} must be null.`);
+    return null;
+  }
+  const amount = priceNumber(value, field);
+  if (amount <= 0) throw new Error(`Invalid sra_prices record: ${field} must be positive.`);
+  return amount;
+};
+
 const priceTimestamp = value => {
   const result = priceString(value, 'publishedAt');
   const parsed = new Date(result);
@@ -542,19 +557,23 @@ export const canonicalPrice = (value, userId) => {
   return {
     effectiveDate,
     weekLabel: priceString(value.weekLabel, 'weekLabel'),
-    sugarPricePerLkg: priceNumber(value.sugarPricePerLkg, 'sugarPricePerLkg'),
-    sugarPriceChange: priceNumber(value.sugarPriceChange, 'sugarPriceChange'),
-    molassesPricePerMetricTon: priceNumber(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon'),
-    molassesPriceChange: priceNumber(value.molassesPriceChange, 'molassesPriceChange'),
+    sugarPricePerLkg: priceAmount(value.sugarPricePerLkg, 'sugarPricePerLkg', priceStatus(value.sugarPriceStatus)),
+    sugarPriceChange: value.sugarPriceChange == null ? null : priceNumber(value.sugarPriceChange, 'sugarPriceChange'),
+    molassesPricePerMetricTon: priceAmount(value.molassesPricePerMetricTon, 'molassesPricePerMetricTon', priceStatus(value.molassesPriceStatus)),
+    molassesPriceChange: value.molassesPriceChange == null ? null : priceNumber(value.molassesPriceChange, 'molassesPriceChange'),
     circularNumber: priceString(value.circularNumber, 'circularNumber'),
     source: priceString(value.source, 'source'),
     publishedByUserId: priceString(value.publishedByUserId || userId, 'publishedByUserId'),
-    publishedAt: priceTimestamp(value.publishedAt || now())
+    publishedAt: priceTimestamp(value.publishedAt || now()),
+    sugarPriceStatus: priceStatus(value.sugarPriceStatus), molassesPriceStatus: priceStatus(value.molassesPriceStatus),
+    molassesMarket: value.molassesMarket || '', sourceUrl: value.sourceUrl || '',
+    periodType: value.periodType || 'EFFECTIVE_DATE', importBatchId: value.importBatchId || '', sourceFileSha256: value.sourceFileSha256 || ''
   };
 };
 
 export const toPrice = (value, userId) => canonicalPrice(value || {}, userId);
-export const fromPrice = (id, value) => ({ id: priceString(id, 'id'), ...canonicalPrice(value || {}) });
+export const fromPrice = (id, value) => ({ id: priceString(id, 'id'), ...canonicalPrice(value || {}),
+  ...(value?.priceAnalytics ? { priceAnalytics: value.priceAnalytics } : {}) });
 
 export const toTicket = (value, userId) => ({
   createdByUserId: value.createdByUserId || value.memberId || userId || '',
