@@ -9,6 +9,7 @@
       "distribution": "internal"
     },
     "preview": {
+      "autoIncrement": true,
       "distribution": "internal",
       "environment": "preview",
       "env": { "EXPO_PUBLIC_API_BASE_URL": "https://hugpong-beta.onrender.com" },
