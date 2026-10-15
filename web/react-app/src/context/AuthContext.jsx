@@ -4,6 +4,7 @@ import { getWebClientInstanceId, reportWebActivity, resetWebTelemetryState } fro
 import { clearAuthenticatedReadState, responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
 
 const AuthContext = createContext(null);
+const LOGIN_REQUEST_TIMEOUT_MS = 15000;
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
@@ -115,16 +116,32 @@ export function AuthProvider({ children }) {
 
   const login = async (contactNumber, password) => {
     setSessionExpiredNotice('');
-    const res = await fetch('/auth/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...webClientHeaders(),
-        'x-client-instance-id': getWebClientInstanceId()
-      },
-      body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
-      credentials: 'include'
-    });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), LOGIN_REQUEST_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch('/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...webClientHeaders(),
+          'x-client-instance-id': getWebClientInstanceId()
+        },
+        body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
+        credentials: 'include',
+        signal: controller.signal
+      });
+    } catch (cause) {
+      const timedOut = cause?.name === 'AbortError';
+      const error = new Error(timedOut
+        ? 'HUGPONG is taking longer than expected. Your login details have been kept. Check your connection and try again.'
+        : 'Unable to reach HUGPONG. Your login details have been kept. Check your connection and try again.');
+      error.code = timedOut ? 'LOGIN_REQUEST_TIMEOUT' : 'LOGIN_NETWORK_UNAVAILABLE';
+      error.isNetworkError = true;
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.success) {

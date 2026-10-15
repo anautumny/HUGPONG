@@ -22,6 +22,31 @@ import { PaginationFooter } from '../../components/ui/Table';
 
 const RESTORE_CONFIRMATION = 'RECOVER MISSING RECORDS';
 const ACTIVITY_PAGE_SIZE = 10;
+const EMPTY_EXPORT_ERRORS = Object.freeze({});
+const EMPTY_RESTORE_ERRORS = Object.freeze({});
+
+function fieldClass(hasError, accent = 'primary') {
+  const focusClass = accent === 'warning' ? 'focus:border-warning' : 'focus:border-primary';
+  return `mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none dark:bg-[#121820] ${hasError ? 'border-danger focus:border-danger' : `border-border ${focusClass}`}`;
+}
+
+function exportErrorFor(error) {
+  if (error?.code === 'INVALID_CURRENT_PASSWORD') return { currentPassword: 'Your current account password is incorrect.' };
+  if (['BACKUP_PASSPHRASE_WEAK', 'BACKUP_PASSPHRASE_REUSED'].includes(error?.code)) return { backupPassphrase: error.message };
+  return { form: error?.message || 'The encrypted backup could not be created.' };
+}
+
+function restoreErrorFor(error) {
+  if (error?.code === 'INVALID_CURRENT_PASSWORD') return { currentPassword: 'Your current account password is incorrect.' };
+  if (['BACKUP_PASSPHRASE_WEAK', 'BACKUP_PASSPHRASE_REUSED', 'BACKUP_DECRYPTION_FAILED'].includes(error?.code)) {
+    return { backupPassphrase: error.message };
+  }
+  if (['BACKUP_FILE_REQUIRED', 'BACKUP_FILE_EXTENSION', 'BACKUP_FILE_SIZE', 'BACKUP_ARCHIVE_INVALID', 'BACKUP_FORMAT_UNSUPPORTED', 'BACKUP_SCHEMA_UNSUPPORTED', 'BACKUP_PROJECT_MISMATCH', 'BACKUP_INTEGRITY_FAILED', 'BACKUP_EXPORT_REFERENCE_INVALID'].includes(error?.code)) {
+    return { file: error.message };
+  }
+  if (error?.code === 'BACKUP_CONFIRMATION_REQUIRED') return { confirmation: error.message };
+  return { form: error?.message || 'The backup could not be validated.' };
+}
 
 function formatTimestamp(value) {
   if (!value) return 'Not available';
@@ -43,9 +68,11 @@ export default function BackupManagementView() {
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [notice, setNotice] = useState(null);
   const [exportForm, setExportForm] = useState({ currentPassword: '', backupPassphrase: '', confirmPassphrase: '' });
+  const [exportErrors, setExportErrors] = useState(EMPTY_EXPORT_ERRORS);
   const [creating, setCreating] = useState(false);
   const [file, setFile] = useState(null);
   const [restoreForm, setRestoreForm] = useState({ currentPassword: '', backupPassphrase: '', confirmation: '' });
+  const [restoreErrors, setRestoreErrors] = useState(EMPTY_RESTORE_ERRORS);
   const [validation, setValidation] = useState(null);
   const [archiveBase64, setArchiveBase64] = useState('');
   const [validating, setValidating] = useState(false);
@@ -58,10 +85,10 @@ export default function BackupManagementView() {
     return status.data.slice(start, start + ACTIVITY_PAGE_SIZE);
   }, [status.data, validActivityPage]);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async ({ force = false } = {}) => {
     setLoadingStatus(true);
     try {
-      const response = await fetchBackupStatus();
+      const response = await fetchBackupStatus({ force });
       setStatus(response);
     } catch (error) {
       setNotice({ type: 'error', text: error.message });
@@ -75,8 +102,9 @@ export default function BackupManagementView() {
   const createBackup = async event => {
     event.preventDefault();
     setNotice(null);
+    setExportErrors(EMPTY_EXPORT_ERRORS);
     if (exportForm.backupPassphrase !== exportForm.confirmPassphrase) {
-      setNotice({ type: 'error', text: 'The backup passphrases do not match.' });
+      setExportErrors({ confirmPassphrase: 'The two backup passphrases do not match.' });
       return;
     }
     setCreating(true);
@@ -89,7 +117,7 @@ export default function BackupManagementView() {
       setExportForm({ currentPassword: '', backupPassphrase: '', confirmPassphrase: '' });
       await refreshStatus();
     } catch (error) {
-      setNotice({ type: 'error', text: error.message });
+      setExportErrors(exportErrorFor(error));
     } finally {
       setCreating(false);
     }
@@ -100,12 +128,14 @@ export default function BackupManagementView() {
     setFile(selected);
     setArchiveBase64('');
     setValidation(null);
+    setRestoreErrors(EMPTY_RESTORE_ERRORS);
     setRestoreForm(prev => ({ ...prev, confirmation: '' }));
   };
 
   const runValidation = async event => {
     event.preventDefault();
     setNotice(null);
+    setRestoreErrors(EMPTY_RESTORE_ERRORS);
     setValidating(true);
     try {
       const encoded = await readBackupFile(file);
@@ -120,7 +150,7 @@ export default function BackupManagementView() {
     } catch (error) {
       setArchiveBase64('');
       setValidation(null);
-      setNotice({ type: 'error', text: error.message });
+      setRestoreErrors(restoreErrorFor(error));
     } finally {
       setValidating(false);
     }
@@ -128,6 +158,7 @@ export default function BackupManagementView() {
 
   const recoverMissing = async () => {
     setNotice(null);
+    setRestoreErrors(EMPTY_RESTORE_ERRORS);
     setRestoring(true);
     try {
       const response = await restoreMissingBackupRecords({
@@ -147,7 +178,7 @@ export default function BackupManagementView() {
       if (input) input.value = '';
       await refreshStatus();
     } catch (error) {
-      setNotice({ type: 'error', text: error.message });
+      setRestoreErrors(restoreErrorFor(error));
     } finally {
       setRestoring(false);
     }
@@ -163,8 +194,8 @@ export default function BackupManagementView() {
             Create encrypted business-data archives and recover only records that are missing. Existing live records are never overwritten or deleted.
           </p>
         </div>
-        <button type="button" onClick={refreshStatus} disabled={loadingStatus} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-bold text-hug-text hover:bg-surface-subtle disabled:opacity-50">
-          <RefreshCw className={`h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} /> Refresh status
+        <button type="button" onClick={() => void refreshStatus({ force: true })} disabled={loadingStatus} aria-busy={loadingStatus} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-bold text-hug-text hover:bg-surface-subtle disabled:opacity-50">
+          <RefreshCw className={`h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} aria-hidden="true" /> {loadingStatus ? 'Refreshing…' : 'Refresh status'}
         </button>
       </div>
 
@@ -226,15 +257,19 @@ export default function BackupManagementView() {
           </div>
           <form className="mt-5 space-y-4" onSubmit={createBackup}>
             <label className="block text-sm font-semibold text-hug-text">Current account password
-              <input type="password" value={exportForm.currentPassword} onChange={event => setExportForm(prev => ({ ...prev, currentPassword: event.target.value }))} autoComplete="current-password" required maxLength={256} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
+              <input id="backup-export-current-password" type="password" value={exportForm.currentPassword} onChange={event => { setExportForm(prev => ({ ...prev, currentPassword: event.target.value })); setExportErrors(prev => ({ ...prev, currentPassword: undefined, form: undefined })); }} autoComplete="current-password" required maxLength={256} aria-invalid={Boolean(exportErrors.currentPassword)} aria-describedby={exportErrors.currentPassword ? 'backup-export-current-password-error' : undefined} className={fieldClass(exportErrors.currentPassword)} />
+              {exportErrors.currentPassword && <span id="backup-export-current-password-error" className="mt-1 block text-xs font-semibold text-danger">{exportErrors.currentPassword}</span>}
             </label>
-            <label className="block text-sm font-semibold text-hug-text">Backup passphrase
-              <input type="password" value={exportForm.backupPassphrase} onChange={event => setExportForm(prev => ({ ...prev, backupPassphrase: event.target.value }))} autoComplete="new-password" required minLength={16} maxLength={128} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
-              <span className="mt-1 block text-xs font-normal text-hug-muted">Use 16+ characters with uppercase, lowercase, number, and symbol. Do not reuse your login password.</span>
+            <label className="block text-sm font-semibold text-hug-text">Create a backup passphrase
+              <input id="backup-export-passphrase" type="password" value={exportForm.backupPassphrase} onChange={event => { setExportForm(prev => ({ ...prev, backupPassphrase: event.target.value })); setExportErrors(prev => ({ ...prev, backupPassphrase: undefined, form: undefined })); }} autoComplete="new-password" required minLength={16} maxLength={128} aria-invalid={Boolean(exportErrors.backupPassphrase)} aria-describedby={exportErrors.backupPassphrase ? 'backup-export-passphrase-error' : 'backup-export-passphrase-help'} className={fieldClass(exportErrors.backupPassphrase)} />
+              {exportErrors.backupPassphrase && <span id="backup-export-passphrase-error" className="mt-1 block text-xs font-semibold text-danger">{exportErrors.backupPassphrase}</span>}
+              <span id="backup-export-passphrase-help" className="mt-1 block text-xs font-normal text-hug-muted">This is a password you create, not a 16-digit code. Use at least 16 characters with uppercase, lowercase, a number, and a symbol. Do not reuse your login password.</span>
             </label>
             <label className="block text-sm font-semibold text-hug-text">Confirm backup passphrase
-              <input type="password" value={exportForm.confirmPassphrase} onChange={event => setExportForm(prev => ({ ...prev, confirmPassphrase: event.target.value }))} autoComplete="new-password" required minLength={16} maxLength={128} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
+              <input id="backup-export-confirm-passphrase" type="password" value={exportForm.confirmPassphrase} onChange={event => { setExportForm(prev => ({ ...prev, confirmPassphrase: event.target.value })); setExportErrors(prev => ({ ...prev, confirmPassphrase: undefined, form: undefined })); }} autoComplete="new-password" required minLength={16} maxLength={128} aria-invalid={Boolean(exportErrors.confirmPassphrase)} aria-describedby={exportErrors.confirmPassphrase ? 'backup-export-confirm-passphrase-error' : undefined} className={fieldClass(exportErrors.confirmPassphrase)} />
+              {exportErrors.confirmPassphrase && <span id="backup-export-confirm-passphrase-error" className="mt-1 block text-xs font-semibold text-danger">{exportErrors.confirmPassphrase}</span>}
             </label>
+            {exportErrors.form && <p role="alert" className="rounded-xl border border-danger/30 bg-danger-bg/40 p-3 text-sm font-semibold text-danger">{exportErrors.form}</p>}
             <button type="submit" disabled={creating} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white hover:bg-primary-dark disabled:opacity-50">
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {creating ? 'Creating encrypted backup…' : 'Create and download backup'}
             </button>
@@ -248,14 +283,19 @@ export default function BackupManagementView() {
           </div>
           <form className="mt-5 space-y-4" onSubmit={runValidation}>
             <label className="block text-sm font-semibold text-hug-text">Encrypted HUGPONG backup
-              <input id="backup-file" type="file" accept=".hpbak,application/vnd.hugpong.backup" onChange={selectFile} required className="mt-1.5 block w-full rounded-xl border border-border bg-surface-subtle px-3 py-2.5 text-sm text-hug-text file:mr-3 file:rounded-lg file:border-0 file:bg-primary-bg file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-primary" />
+              <input id="backup-file" type="file" accept=".hpbak,application/vnd.hugpong.backup" onChange={selectFile} required aria-invalid={Boolean(restoreErrors.file)} aria-describedby={restoreErrors.file ? 'backup-file-error' : undefined} className={`mt-1.5 block w-full rounded-xl border bg-surface-subtle px-3 py-2.5 text-sm text-hug-text file:mr-3 file:rounded-lg file:border-0 file:bg-primary-bg file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-primary ${restoreErrors.file ? 'border-danger' : 'border-border'}`} />
+              {restoreErrors.file && <span id="backup-file-error" className="mt-1 block text-xs font-semibold text-danger">{restoreErrors.file}</span>}
             </label>
             <label className="block text-sm font-semibold text-hug-text">Current account password
-              <input type="password" value={restoreForm.currentPassword} onChange={event => { setRestoreForm(prev => ({ ...prev, currentPassword: event.target.value })); setValidation(null); }} autoComplete="current-password" required maxLength={256} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
+              <input id="backup-restore-current-password" type="password" value={restoreForm.currentPassword} onChange={event => { setRestoreForm(prev => ({ ...prev, currentPassword: event.target.value })); setValidation(null); setRestoreErrors(prev => ({ ...prev, currentPassword: undefined, form: undefined })); }} autoComplete="current-password" required maxLength={256} aria-invalid={Boolean(restoreErrors.currentPassword)} aria-describedby={restoreErrors.currentPassword ? 'backup-restore-current-password-error' : undefined} className={fieldClass(restoreErrors.currentPassword)} />
+              {restoreErrors.currentPassword && <span id="backup-restore-current-password-error" className="mt-1 block text-xs font-semibold text-danger">{restoreErrors.currentPassword}</span>}
             </label>
-            <label className="block text-sm font-semibold text-hug-text">Backup passphrase
-              <input type="password" value={restoreForm.backupPassphrase} onChange={event => { setRestoreForm(prev => ({ ...prev, backupPassphrase: event.target.value })); setValidation(null); }} autoComplete="off" required minLength={16} maxLength={128} className="mt-1.5 w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-hug-text outline-none focus:border-primary dark:bg-[#121820]" />
+            <label className="block text-sm font-semibold text-hug-text">Backup passphrase for this file
+              <input id="backup-restore-passphrase" type="password" value={restoreForm.backupPassphrase} onChange={event => { setRestoreForm(prev => ({ ...prev, backupPassphrase: event.target.value })); setValidation(null); setRestoreErrors(prev => ({ ...prev, backupPassphrase: undefined, form: undefined })); }} autoComplete="off" required minLength={16} maxLength={128} aria-invalid={Boolean(restoreErrors.backupPassphrase)} aria-describedby={restoreErrors.backupPassphrase ? 'backup-restore-passphrase-error' : 'backup-restore-passphrase-help'} className={fieldClass(restoreErrors.backupPassphrase)} />
+              {restoreErrors.backupPassphrase && <span id="backup-restore-passphrase-error" className="mt-1 block text-xs font-semibold text-danger">{restoreErrors.backupPassphrase}</span>}
+              <span id="backup-restore-passphrase-help" className="mt-1 block text-xs font-normal text-hug-muted">Enter the separate passphrase that was created when this .hpbak file was downloaded.</span>
             </label>
+            {restoreErrors.form && <p role="alert" className="rounded-xl border border-danger/30 bg-danger-bg/40 p-3 text-sm font-semibold text-danger">{restoreErrors.form}</p>}
             <button type="submit" disabled={validating || !file} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary-bg px-4 py-3 text-sm font-bold text-primary hover:bg-primary/15 disabled:opacity-50">
               {validating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} {validating ? 'Validating backup…' : 'Run recovery drill'}
             </button>
@@ -271,8 +311,9 @@ export default function BackupManagementView() {
                 <div><dt className="text-xs text-hug-muted">Validation expires</dt><dd className="font-semibold text-hug-text">{formatTimestamp(validation.expiresAt)}</dd></div>
               </dl>
               <p className="mt-3 text-xs leading-relaxed text-hug-muted">Recovery creates missing documents only. It will not overwrite, merge, or delete existing documents.</p>
-              <label className="mt-4 block text-sm font-semibold text-hug-text">Type {RESTORE_CONFIRMATION}
-                <input type="text" value={restoreForm.confirmation} onChange={event => setRestoreForm(prev => ({ ...prev, confirmation: event.target.value }))} autoComplete="off" className="mt-1.5 w-full rounded-xl border border-warning/40 bg-white px-3.5 py-2.5 font-mono text-sm text-hug-text outline-none focus:border-warning dark:bg-[#121820]" />
+              <label className="mt-4 block text-sm font-semibold text-hug-text">To prevent an accidental recovery, type <span className="font-mono">{RESTORE_CONFIRMATION}</span> exactly
+                <input id="backup-restore-confirmation" type="text" value={restoreForm.confirmation} onChange={event => { const confirmation = event.target.value; setRestoreForm(prev => ({ ...prev, confirmation })); setRestoreErrors(prev => ({ ...prev, confirmation: confirmation && confirmation !== RESTORE_CONFIRMATION ? `Type ${RESTORE_CONFIRMATION} exactly.` : undefined, form: undefined })); }} autoComplete="off" aria-invalid={Boolean(restoreErrors.confirmation)} aria-describedby={restoreErrors.confirmation ? 'backup-restore-confirmation-error' : undefined} className={`${fieldClass(restoreErrors.confirmation, 'warning')} font-mono`} />
+                {restoreErrors.confirmation && <span id="backup-restore-confirmation-error" className="mt-1 block text-xs font-semibold text-danger">{restoreErrors.confirmation}</span>}
               </label>
               <button type="button" onClick={recoverMissing} disabled={restoring || validation.plan.missingCount === 0 || restoreForm.confirmation !== RESTORE_CONFIRMATION} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-warning px-4 py-3 text-sm font-black text-white disabled:opacity-50">
                 {restoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} {restoring ? 'Recovering missing records…' : 'Recover missing records'}

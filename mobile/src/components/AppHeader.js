@@ -205,7 +205,7 @@ function AppHeader({ right }) {
     <View style={s.header}>
       <View style={s.brand}>
         <Image source={LOGO} style={s.logoImg} resizeMode="contain" />
-        <Text style={s.logoText} numberOfLines={1}>HUGPONG</Text>
+        <Text style={s.logoText}>HUGPONG</Text>
       </View>
       <View style={s.rightActions}>
         {(isFieldRole || isSraAdmin) && (
@@ -228,8 +228,6 @@ function AppHeader({ right }) {
             </Animated.View>
             <Text
               style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
             >
               {isSyncing
                 ? (syncStatusText || t('syncing_progress', 'Syncing...'))
@@ -253,6 +251,8 @@ export default React.memo(AppHeader);
 const s = StyleSheet.create({
   header: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 8,
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -262,6 +262,7 @@ const s = StyleSheet.create({
     borderBottomColor: '#DCE8CC',
   },
   brand: {
+    flexGrow: 1,
     flexShrink: 1,
     minWidth: 0,
     flexDirection: 'row',
@@ -281,6 +282,7 @@ const s = StyleSheet.create({
     letterSpacing: 1.5,
   },
   rightActions: {
+    maxWidth: '100%',
     flexShrink: 1,
     minWidth: 0,
     flexDirection: 'row',
@@ -296,6 +298,7 @@ const s = StyleSheet.create({
     width: 0,
   },
   syncPill: {
+    maxWidth: '100%',
     flexShrink: 1,
     minWidth: 0,
     flexDirection: 'row',
@@ -320,6 +323,8 @@ const s = StyleSheet.create({
   },
   syncText: {
     flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'center',
     fontSize: 11,
     fontWeight: '700',
   },

@@ -37,7 +37,7 @@ export default function LegalPolicyModal({ visible = true, onClose }) {
         </TouchableOpacity>
         <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>Legal Information</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>
+          <Text style={styles.headerSubtitle}>
             Effective {legalPolicy.effectiveDate} · Version {legalPolicy.version}
           </Text>
         </View>
@@ -108,6 +108,7 @@ const styles = StyleSheet.create({
   header: {
     minHeight: 64,
     paddingHorizontal: SPACING.lg,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

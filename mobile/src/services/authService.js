@@ -125,6 +125,15 @@ export async function publicAuthRequest(path, body) {
   return parseResponse(response);
 }
 
+export async function publicAuthGet(path) {
+  const clientInstanceId = await getMobileClientInstanceId();
+  const response = await fetchFromApi(path, {
+    method: 'GET',
+    headers: mobileHeaders(clientInstanceId)
+  });
+  return parseResponse(response);
+}
+
 export async function authenticatedRequest(path, options = {}) {
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
   const clientInstanceId = await getMobileClientInstanceId();
@@ -250,6 +259,14 @@ export async function requestRegistrationOtp(phone, displayName) {
   return publicAuthRequest('/auth/registration-otp/request', { phone, displayName });
 }
 
+export async function fetchRegistrationBlockFarms() {
+  return publicAuthGet('/auth/registration-block-farms');
+}
+
+export async function requestRegistrationPhoneVerification(phone) {
+  return publicAuthRequest('/auth/registration-phone-verification/request', { phone });
+}
+
 export async function verifyRegistrationOtp(phone, code) {
   return publicAuthRequest('/auth/registration-otp/verify', { phone, code });
 }
@@ -264,6 +281,29 @@ export async function verifyPasswordRecovery(recoveryId, code) {
 
 export async function completePasswordRecovery(recoveryId, resetToken, newPassword) {
   return publicAuthRequest('/auth/password-recovery/complete', { recoveryId, resetToken, newPassword });
+}
+
+export async function requestPasswordRecoveryReview(userId, phone, mobilePushToken = null) {
+  return publicAuthRequest('/auth/password-recovery-review/request', { userId, phone, mobilePushToken });
+}
+
+export async function checkPasswordRecoveryReview(reviewId, claimToken) {
+  return publicAuthRequest('/auth/password-recovery-review/status', { reviewId, claimToken });
+}
+
+export async function completePasswordRecoveryReview(reviewId, claimToken, newPassword) {
+  return publicAuthRequest('/auth/password-recovery-review/complete', { reviewId, claimToken, newPassword });
+}
+
+export async function fetchPasswordRecoveryReviews() {
+  return authenticatedRequest('/api/recovery-reviews');
+}
+
+export async function decidePasswordRecoveryReview(reviewId, approve) {
+  return authenticatedRequest(`/api/recovery-reviews/${encodeURIComponent(reviewId)}/${approve ? 'approve' : 'reject'}`, {
+    method: 'POST',
+    body: {}
+  });
 }
 
 export async function logoutFromServer(options = {}) {

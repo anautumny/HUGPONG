@@ -14,6 +14,12 @@ import {
 import { PASSWORD_POLICY_HINT, passwordPolicyError } from '../../domain/passwordPolicy';
 import { responseErrorFromPayload, webClientHeaders } from '../../services/apiClient';
 
+const ASSISTED_RECOVERY_STORAGE_KEY = 'hugpong_assisted_recovery';
+
+function clearStoredAssistedRecovery() {
+  try { window.sessionStorage.removeItem(ASSISTED_RECOVERY_STORAGE_KEY); } catch { /* Storage can be unavailable. */ }
+}
+
 async function recoveryRequest(path, body) {
   const response = await fetch(path, {
     method: 'POST',
@@ -45,6 +51,10 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
   const [notice, setNotice] = useState('');
   const [resendSeconds, setResendSeconds] = useState(0);
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
+  const [assistedMode, setAssistedMode] = useState(false);
+  const [assistedPhone, setAssistedPhone] = useState('');
+  const [reviewId, setReviewId] = useState('');
+  const [claimToken, setClaimToken] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,6 +71,23 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
     setNotice('');
     setResendSeconds(0);
     setCodeRequestsRemaining(3);
+    setAssistedMode(false);
+    setAssistedPhone('');
+    setReviewId('');
+    setClaimToken('');
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(ASSISTED_RECOVERY_STORAGE_KEY) || 'null');
+      if (stored?.reviewId && stored?.claimToken && Date.parse(stored.expiresAt) > Date.now()) {
+        setAssistedMode(true);
+        setReviewId(stored.reviewId);
+        setClaimToken(stored.claimToken);
+        setStep(5);
+      } else {
+        clearStoredAssistedRecovery();
+      }
+    } catch {
+      clearStoredAssistedRecovery();
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -70,6 +97,43 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [isOpen, resendSeconds > 0]);
+
+  useEffect(() => {
+    if (!isOpen || step !== 5 || !reviewId || !claimToken) return undefined;
+    let active = true;
+    let checking = false;
+    const refreshReview = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const result = await recoveryRequest('/auth/password-recovery-review/status', { reviewId, claimToken });
+        if (!active) return;
+        if (result.status === 'APPROVED') {
+          setNotice(result.message);
+          setStep(3);
+          if (typeof window.Notification === 'function' && window.Notification.permission === 'granted') {
+            new window.Notification('Password recovery approved', {
+              body: 'Return to HUGPONG now to create your new password.'
+            });
+          }
+        } else if (['REJECTED', 'EXPIRED', 'REPLACED', 'USED'].includes(result.status)) {
+          clearStoredAssistedRecovery();
+          setError(result.message || 'This recovery request is no longer available.');
+        }
+      } catch {
+        // Manual status checking remains available when a background refresh fails.
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = window.setInterval(refreshReview, 30_000);
+    window.addEventListener('focus', refreshReview);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshReview);
+    };
+  }, [claimToken, isOpen, reviewId, step]);
 
   if (!isOpen) return null;
 
@@ -123,6 +187,61 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
     }
   };
 
+  const requestAssistedRecovery = async (event) => {
+    event.preventDefault();
+    if (!/^0[1-4]\d{6}$/.test(identifier.trim()) || !/^09\d{9}$/.test(assistedPhone.replace(/\D/g, ''))) {
+      setError('Enter your 8-digit HUGPONG User ID and registered 11-digit mobile number.');
+      return;
+    }
+    setIsSubmitting(true);
+    setError('');
+    if (typeof window.Notification === 'function' && window.Notification.permission === 'default') {
+      window.Notification.requestPermission().catch(() => {});
+    }
+    try {
+      const result = await recoveryRequest('/auth/password-recovery-review/request', {
+        userId: identifier.trim(),
+        phone: assistedPhone.replace(/\D/g, '')
+      });
+      setReviewId(result.reviewId);
+      setClaimToken(result.claimToken);
+      try {
+        window.sessionStorage.setItem(ASSISTED_RECOVERY_STORAGE_KEY, JSON.stringify({
+          reviewId: result.reviewId,
+          claimToken: result.claimToken,
+          expiresAt: result.expiresAt
+        }));
+      } catch { /* The active page can still continue without persistence. */ }
+      setNotice(result.message);
+      setStep(5);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const checkAssistedRecovery = async () => {
+    setIsSubmitting(true);
+    setError('');
+    try {
+      const result = await recoveryRequest('/auth/password-recovery-review/status', { reviewId, claimToken });
+      if (result.status === 'APPROVED') {
+        setNotice(result.message);
+        setStep(3);
+      } else if (['REJECTED', 'EXPIRED', 'REPLACED', 'USED'].includes(result.status)) {
+        clearStoredAssistedRecovery();
+        setError(result.message || 'This recovery request is no longer available.');
+      } else {
+        setNotice(result.message || 'The recovery request is still awaiting review.');
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const resetPassword = async (event) => {
     event.preventDefault();
     const policyError = passwordPolicyError(newPassword);
@@ -137,14 +256,14 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
     setIsSubmitting(true);
     setError('');
     try {
-      await recoveryRequest('/auth/password-recovery/complete', {
-        recoveryId,
-        resetToken,
-        newPassword
-      });
+      await recoveryRequest(
+        assistedMode ? '/auth/password-recovery-review/complete' : '/auth/password-recovery/complete',
+        assistedMode ? { reviewId, claimToken, newPassword } : { recoveryId, resetToken, newPassword }
+      );
       setNewPassword('');
       setConfirmPassword('');
       setResetToken('');
+      clearStoredAssistedRecovery();
       setNotice('Your password was reset and all existing sessions were signed out.');
       setStep(4);
     } catch (requestError) {
@@ -161,6 +280,12 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
       setResetToken('');
       setRecoveryId('');
       setCode('');
+      setStep(1);
+    } else if (step === 5) {
+      setReviewId('');
+      setClaimToken('');
+      clearStoredAssistedRecovery();
+      setAssistedMode(false);
       setStep(1);
     } else if (step === 2) {
       setRecoveryId('');
@@ -203,9 +328,9 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
           </div>
           <div>
             <h3 className="text-base font-extrabold text-hug-text">
-              {step === 1 ? 'Reset Your Password' : step === 2 ? 'Enter Code If Received' : step === 3 ? 'Create New Password' : 'Password Reset Complete'}
+              {step === 1 ? (assistedMode ? 'Request Authorized Recovery' : 'Reset Your Password') : step === 2 ? 'Enter Code If Received' : step === 3 ? 'Create New Password' : step === 5 ? 'Recovery Review Pending' : 'Password Reset Complete'}
             </h3>
-            <p className="text-xs text-hug-muted">Step {Math.min(step, 3)} of 3 · Secure account recovery</p>
+            <p className="text-xs text-hug-muted">{step === 5 ? 'Authorized review' : `Step ${Math.min(step, 3)} of 3`} · Secure account recovery</p>
           </div>
         </div>
 
@@ -215,34 +340,45 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
             <span>{error}</span>
           </div>
         )}
-        {notice && step < 4 && (
+        {notice && step !== 4 && (
           <div className="p-3 rounded-xl bg-primary-bg/50 border border-primary/20 text-xs text-hug-text2 leading-relaxed">
             {notice}
           </div>
         )}
 
         {step === 1 && (
-          <form onSubmit={(event) => { event.preventDefault(); requestCode(); }} className="space-y-4">
+          <form onSubmit={assistedMode ? requestAssistedRecovery : (event) => { event.preventDefault(); requestCode(); }} className="space-y-4">
             <p className="text-xs text-hug-muted leading-relaxed">
-              Enter your permanent User ID or registered mobile number. If it matches an active account, HUGPONG will send a 6-digit code to the registered mobile number.
+              {assistedMode
+                ? 'For Smart/TNT or unavailable SMS, enter both account details and meet an authorized HUGPONG reviewer in person. The reviewer will never create or see your new password.'
+                : 'Enter your permanent User ID or registered mobile number. If it matches an active account, HUGPONG will send a 6-digit code to the registered mobile number.'}
             </p>
             <label className="block">
-              <span className="block text-xs font-bold text-hug-text2 mb-1.5">User ID or Mobile Number</span>
+              <span className="block text-xs font-bold text-hug-text2 mb-1.5">{assistedMode ? '8-Digit HUGPONG User ID' : 'User ID or Mobile Number'}</span>
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
                 disabled={isSubmitting}
                 autoComplete="username"
-                placeholder="04000001 or 09171234567"
+                placeholder={assistedMode ? '04000001' : '04000001 or 09171234567'}
                 className="w-full px-3 py-2.5 rounded-xl border border-border bg-bg dark:bg-[#0C1015] text-sm font-semibold text-hug-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               />
             </label>
+            {assistedMode && (
+              <label className="block">
+                <span className="block text-xs font-bold text-hug-text2 mb-1.5">Registered Mobile Number</span>
+                <input value={assistedPhone} onChange={(event) => setAssistedPhone(event.target.value.replace(/\D/g, '').slice(0, 11))} disabled={isSubmitting} inputMode="numeric" autoComplete="tel" placeholder="09171234567" className="w-full px-3 py-2.5 rounded-xl border border-border bg-bg dark:bg-[#0C1015] text-sm font-semibold text-hug-text outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+              </label>
+            )}
             <button type="submit" disabled={isSubmitting} className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2">
               {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
-              {isSubmitting ? 'Requesting code...' : 'Send Password Reset Code'}
+              {isSubmitting ? 'Submitting...' : assistedMode ? 'Request Recovery Review' : 'Send Password Reset Code'}
             </button>
-            <div className="p-3 rounded-xl bg-bg dark:bg-[#0C1015] border border-border text-[11px] text-hug-muted leading-relaxed">
-              <strong className="text-hug-text2">No access to your registered SIM?</strong> Visit your assigned Farm Manager or SRA District Regulatory Officer. After in-person identity verification, they can update your registered number; then restart this recovery flow.
+            <div className="p-3 rounded-xl bg-bg dark:bg-[#0C1015] border border-border text-[11px] text-hug-muted leading-relaxed space-y-2">
+              <p><strong className="text-hug-text2">Using Smart/TNT or unable to receive SMS?</strong> Request authorized recovery and bring valid identification to your Farm Manager, SRA Admin, or Super Admin, depending on your account role.</p>
+              <button type="button" onClick={() => { setAssistedMode(value => !value); setError(''); }} className="font-bold text-primary hover:text-primary-dark">
+                {assistedMode ? 'Use SMS recovery instead' : 'Request authorized password recovery'}
+              </button>
             </div>
           </form>
         )}
@@ -272,7 +408,24 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
                   ? `${codeRequestsRemaining === 0 ? 'Hourly limit reached' : 'Resend available'} in ${formatCountdown(resendSeconds)}`
                   : `Request a new code (${codeRequestsRemaining} remaining)`}
             </button>
+            <button type="button" onClick={() => { setAssistedMode(true); setStep(1); setError(''); setNotice(''); }} className="w-full text-xs font-bold text-primary hover:text-primary-dark">
+              Smart/TNT or no SMS? Request authorized recovery
+            </button>
           </form>
+        )}
+
+        {step === 5 && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-warning/30 bg-warning-bg/30 p-4 text-xs leading-relaxed text-hug-text2">
+              <p className="font-bold text-hug-text">Reference: <span className="font-mono">{reviewId}</span></p>
+              <p className="mt-2">Visit your Farm Manager, SRA Admin, or Super Admin, as applicable, for in-person identity verification. After approval, return here and check the status. Approval gives you 15 minutes to create a new password.</p>
+              <p className="mt-2 text-hug-muted">While this page remains open, HUGPONG checks the status automatically every 30 seconds.</p>
+            </div>
+            <button type="button" onClick={checkAssistedRecovery} disabled={isSubmitting} className="w-full py-2.5 bg-primary hover:bg-primary-dark text-white text-xs font-bold rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">
+              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {isSubmitting ? 'Checking...' : 'Check Review Status'}
+            </button>
+          </div>
         )}
 
         {step === 3 && (
@@ -322,7 +475,7 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
           </div>
         )}
 
-        {step > 1 && step < 4 && (
+        {((step > 1 && step < 4) || step === 5) && (
           <button type="button" onClick={goBack} disabled={isSubmitting} className="self-start inline-flex items-center gap-1.5 text-xs font-bold text-hug-muted hover:text-hug-text disabled:opacity-50">
             <ArrowLeft className="w-3.5 h-3.5" /> Back
           </button>

@@ -172,9 +172,14 @@ test('every authentication route is either protected or explicitly public and th
     'POST /password-recovery/request',
     'POST /password-recovery/verify',
     'POST /password-recovery/complete',
+    'POST /password-recovery-review/request',
+    'POST /password-recovery-review/status',
+    'POST /password-recovery-review/complete',
     'POST /login',
+    'GET /registration-block-farms',
     'POST /registration-otp/request',
     'POST /registration-otp/verify',
+    'POST /registration-phone-verification/request',
     'POST /register',
     'POST /logout'
   ]);

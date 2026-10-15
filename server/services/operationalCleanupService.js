@@ -9,6 +9,7 @@ const MAX_BATCHES_PER_COLLECTION = 5;
 const EXPIRATION_POLICIES = Object.freeze([
   Object.freeze({ collection: COLLECTIONS.SERVER_SESSIONS, field: 'expiresAt' }),
   Object.freeze({ collection: COLLECTIONS.PASSWORD_RECOVERY_CHALLENGES, field: 'deleteAfter' }),
+  Object.freeze({ collection: COLLECTIONS.PASSWORD_RECOVERY_REVIEWS, field: 'deleteAfter' }),
   Object.freeze({ collection: COLLECTIONS.SECURITY_RATE_LIMITS, field: 'deleteAfter' }),
   Object.freeze({ collection: COLLECTIONS.DIAGNOSTIC_EVENTS, field: 'deleteAfter' }),
   Object.freeze({ collection: COLLECTIONS.TERMINAL_DIAGNOSTICS, field: 'deleteAfter' })

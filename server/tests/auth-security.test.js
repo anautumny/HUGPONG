@@ -422,7 +422,7 @@ test('web and mobile runtime source contain no SMS-provider credential or endpoi
 
 test('Firestore rules deny all client database access and deny unmatched collections', () => {
   const rules = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
-  for (const collection of ['users', 'user_credentials', 'account_identifiers', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics', 'diagnostic_events', 'backup_operations', 'server_sessions', 'security_rate_limits', 'password_recovery_challenges']) {
+  for (const collection of ['users', 'user_credentials', 'account_identifiers', 'block_farms', 'fields', 'crop_cycles', 'operation_logs', 'audit_reports', 'audit_logs', 'sra_prices', 'support_tickets', 'terminal_diagnostics', 'diagnostic_events', 'backup_operations', 'server_sessions', 'security_rate_limits', 'password_recovery_challenges', 'password_recovery_reviews']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{documentId\\}[\\s\\S]*?allow read, write: if false;`));
   }
   assert.doesNotMatch(rules, /allow\s+(?:read|write|create|update|delete)(?:\s*,\s*(?:read|write|create|update|delete))*\s*:\s*if\s+(?!false\b)/);

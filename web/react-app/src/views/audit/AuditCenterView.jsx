@@ -29,6 +29,7 @@ const QRVerifierPanel = lazyWithRecovery(() => import('../../components/audit/QR
 const AuditCompilationModal = lazyWithRecovery(() => import('../../components/audit/AuditCompilationModal'), 'audit-compilation');
 const AuditHistoryModal = lazyWithRecovery(() => import('../../components/audit/AuditHistoryModal'), 'audit-history');
 const PrintableAuditReport = lazyWithRecovery(() => import('../../components/audit/PrintableAuditReport'), 'audit-print');
+const CropYearCompilationModal = lazyWithRecovery(() => import('../../components/audit/CropYearCompilationModal'), 'crop-year-compilation');
 
 function DeferredAuditPanel({ label }) {
   return (
@@ -66,6 +67,7 @@ export default function AuditCenterView() {
   const [isReturning, setIsReturning] = useState(false);
   const [showCompileModal, setShowCompileModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showCropYearModal, setShowCropYearModal] = useState(false);
   const [printReport, setPrintReport] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [historyReports, setHistoryReports] = useState([]);
@@ -342,6 +344,7 @@ export default function AuditCenterView() {
             )}
 
             {/* SRA Audit History Button */}
+            {isSraAdmin && <Button variant="secondary" size="md" icon={FileCheck2} onClick={() => setShowCropYearModal(true)}>Crop Year Compilations</Button>}
             <Button
               variant="primary"
               size="md"
@@ -418,6 +421,7 @@ export default function AuditCenterView() {
       )}
 
       {/* Audit History Modal (Hidden during print) */}
+      {isSraAdmin && showCropYearModal && <React.Suspense fallback={<DeferredAuditModal label="Loading crop year compilations..." />}><CropYearCompilationModal onClose={() => setShowCropYearModal(false)} /></React.Suspense>}
       {showHistoryModal && (
         <div className="print:hidden no-print">
           <React.Suspense fallback={<DeferredAuditModal label="Loading audit history..." />}>

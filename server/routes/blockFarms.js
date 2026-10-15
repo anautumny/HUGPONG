@@ -18,7 +18,21 @@ const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = req
 const { uniqueRecordsById } = require('../domain/recordIdentity');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { queueAuditEvent } = require('../services/auditWriter');
-const { assertDeclaredAreaCoversFields } = require('../domain/landArea');
+const {
+  assertDeclaredAreaCoversFields,
+  attachBlockFarmAreaSummaries,
+  blockFarmAreaSummary
+} = require('../domain/landArea');
+
+async function withAuthoritativeAreas(blockFarms) {
+  if (!blockFarms.length) return [];
+  const farmIds = new Set(blockFarms.map(farm => String(farm.id || '').trim()).filter(Boolean));
+  const fieldsSnapshot = await db.collection(COLLECTIONS.FIELDS).get();
+  const farmFields = fieldsSnapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter(field => farmIds.has(String(field.blockFarmId || '').trim()));
+  return attachBlockFarmAreaSummaries(blockFarms, farmFields);
+}
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -37,17 +51,19 @@ router.get('/', requireAuth, async (req, res) => {
       ].filter(Boolean)));
       if (!farmIds.length) return res.json({ success: true, count: 0, data: [] });
       const farms = await db.getAll(...farmIds.map(id => db.collection(COLLECTIONS.BLOCK_FARMS).doc(id)));
-      const data = uniqueRecordsById(farms
+      const scopedFarms = uniqueRecordsById(farms
         .filter(doc => doc.exists && String(doc.data().status || 'ACTIVE').toUpperCase() === 'ACTIVE')
         .map(doc => ({ ...doc.data(), id: doc.id })))
         .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+      const data = await withAuthoritativeAreas(scopedFarms);
       return res.json({ success: true, count: data.length, data });
     } else if (role !== ROLES.SRA_ADMIN) {
       return res.status(403).json({ success: false, error: 'Role is not authorized to list block farms.' });
     }
     const snapshot = await query.get();
-    const data = uniqueRecordsById(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })))
+    const scopedFarms = uniqueRecordsById(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const data = await withAuthoritativeAreas(scopedFarms);
     return res.json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -92,7 +108,10 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
       createdAt: now
     });
     await batch.commit();
-    return res.status(201).json({ success: true, data: { id: blockFarmId, ...payload } });
+    return res.status(201).json({
+      success: true,
+      data: { id: blockFarmId, ...payload, ...blockFarmAreaSummary(payload, []) }
+    });
   } catch (error) {
     const status = /already exists/i.test(error.message) ? 409 : 400;
     return res.status(status).json({ success: false, error: error.message });
@@ -170,7 +189,13 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
         details: `Updated block farm ${nextPayload.name}${managerUserId ? ` and assigned Farm Manager ${managerUserId}` : ' and left it unassigned'}.`,
         createdAt: updatedAt
       });
-      return nextPayload;
+      return {
+        ...nextPayload,
+        ...blockFarmAreaSummary(
+          nextPayload,
+          farmFieldsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        )
+      };
     });
     return res.json({ success: true, data: { id: blockFarmId, ...payload } });
   } catch (error) {

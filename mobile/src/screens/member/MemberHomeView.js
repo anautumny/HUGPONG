@@ -51,7 +51,7 @@ function MemberHomeView({
               <Text style={[s.fieldFarm, { color: '#B45309' }]}>{session?.farm || session?.blockFarm || t('block_farm', 'Block Farm')}</Text>
             </View>
             <View style={[s.haBadge, { backgroundColor: '#FEF3C7' }]}>
-              <Text style={[s.haText, { color: '#B45309' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+              <Text style={[s.haText, { color: '#B45309' }]}>
                 {t('badge_unassigned', 'UNASSIGNED')}
               </Text>
             </View>
@@ -68,13 +68,13 @@ function MemberHomeView({
           <View style={s.actionRow}>
             <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#92400E' }]} onPress={() => navigation.navigate('Field Ops')} activeOpacity={0.8}>
               <Ionicons name="information-circle-outline" size={16} color="#FFF" />
-              <Text style={s.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={s.actionBtnText}>
                 {t('btn_view_status_notice', 'View Status Notice')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.syncActionBtn} onPress={onManualSync} activeOpacity={0.8}>
               <Ionicons name="sync" size={16} color={COLORS.primary} />
-              <Text style={s.syncBtnText} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={s.syncBtnText}>
                 {t('btn_sync_now', 'Sync Now')}
               </Text>
             </TouchableOpacity>
@@ -93,7 +93,7 @@ function MemberHomeView({
               <Text style={s.fieldFarm}>{session?.farm || session?.blockFarm || primaryField.blockFarm || t('block_farm', 'Block Farm')}</Text>
             </View>
             <View style={s.haBadge}>
-              <Text style={s.haText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{primaryField.ha} Ha</Text>
+              <Text style={s.haText}>{primaryField.ha} Ha</Text>
             </View>
           </View>
 
@@ -117,13 +117,13 @@ function MemberHomeView({
           <View style={s.actionRow}>
             <TouchableOpacity style={s.actionBtn} onPress={() => navigation.navigate('Field Ops')} activeOpacity={0.8}>
               <Ionicons name="add-circle" size={16} color="#FFF" />
-              <Text style={s.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={s.actionBtnText}>
                 {t('action_log_ops', 'Log Operation')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.syncActionBtn} onPress={onManualSync} activeOpacity={0.8}>
               <Ionicons name="sync" size={16} color={COLORS.primary} />
-              <Text style={s.syncBtnText} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={s.syncBtnText}>
                 {t('btn_sync_now', 'Sync Now')}
               </Text>
             </TouchableOpacity>
@@ -164,9 +164,10 @@ const s = StyleSheet.create({
   fieldContextItem: { flex: 1 },
   stageLabel: { fontSize: 11.5, color: COLORS.textMuted, textTransform: 'uppercase', fontWeight: '700', letterSpacing: 0.3 },
   stageValue: { fontSize: 14.5, fontWeight: '800', color: COLORS.text, marginTop: 3 },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: SPACING.xs },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: SPACING.xs },
   actionBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 145,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -180,7 +181,8 @@ const s = StyleSheet.create({
   },
   actionBtnText: { fontSize: 13.5, fontWeight: '800', color: '#FFF', textAlign: 'center', flexShrink: 1 },
   syncActionBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 120,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
   AUTH_TOKEN: '@hugpong_auth_token',
   CLIENT_INSTANCE_ID: '@hugpong_client_instance_id',
   LOGIN_LOCKOUT_UNTIL: '@hugpong_login_lockout_until',
+  PASSWORD_RECOVERY_REVIEW: '@hugpong_password_recovery_review',
   SESSION: '@hugpong_session',
   CLOUD_REFRESH_META: '@hugpong_cloud_refresh_meta',
   USERS: '@hugpong_users',
@@ -42,7 +43,7 @@ const PRESERVED_INSTALLATION_KEYS = new Set([
   '@hugpong_client_instance_id'
 ]);
 
-const SECURE_KEYS = new Set([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
+const SECURE_KEYS = new Set([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW, STORAGE_KEYS.SESSION]);
 const SECURE_OPTIONS = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
 function isSecureKey(key) {

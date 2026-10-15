@@ -55,12 +55,22 @@ test('connectivity classification gates reconnect sync on API health', () => {
 
 test('login reports connectivity failures without treating them as bad credentials', () => {
   const login = read('mobile/src/screens/auth/LoginScreen.js');
+  const webLogin = read('web/react-app/src/views/LoginView.jsx');
+  const webAuth = read('web/react-app/src/context/AuthContext.jsx');
   const failureBranch = login.slice(login.indexOf('if (!res.success)'), login.indexOf('// Successful authentication'));
   assert.match(login, /CONNECTIVITY_STATUS\.NO_INTERNET/);
   assert.match(login, /API_UNAVAILABLE_MESSAGE/);
+  assert.match(login, /auth_no_internet_desc/);
+  assert.match(login, /auth_retry_connection/);
+  assert.doesNotMatch(login, /showOfflineGateModal|offlineScreenContainer/);
   assert.match(failureBranch, /if \(res\.isNetworkError\)[\s\S]*return;/);
   assert.match(failureBranch, /res\.code === 'LOGIN_RATE_LIMITED'/);
   assert.match(failureBranch, /applyServerLockout\(res\.data\)/);
+  assert.match(webLogin, /useSync\(\)/);
+  assert.match(webLogin, /Your login details will remain on this page/);
+  assert.match(webAuth, /LOGIN_REQUEST_TIMEOUT_MS/);
+  assert.match(webAuth, /signal: controller\.signal/);
+  assert.match(webAuth, /Your login details have been kept/);
 });
 
 test('production server config requires exact CORS origins and accepts cloud host/port', () => {

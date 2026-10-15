@@ -20,6 +20,7 @@ const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '0');
 export default function AuditHistoryModal({
   visible = false,
   onClose,
+  onOpenCropYear,
   onOpenQR,
   reports = null,
   onLoadMore,
@@ -114,12 +115,13 @@ export default function AuditHistoryModal({
         </TouchableOpacity>
         <View style={s.headerCopy}>
           <Text style={s.headerTitle}>{t('monthly_audit_history_title', 'Monthly Audit History')}</Text>
-          <Text style={s.headerSub} numberOfLines={1}>{t('audit_history_sub', 'Monthly operation breakdowns & SRA compliance records')}</Text>
+          <Text style={s.headerSub}>{t('audit_history_sub', 'Monthly operation breakdowns & SRA compliance records')}</Text>
         </View>
         <View style={{ width: 38 }} />
       </View>
 
         <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+          {onOpenCropYear && <TouchableOpacity onPress={onOpenCropYear} accessibilityRole="button" style={{ padding: 14, borderWidth: 1, borderColor: COLORS.primary, borderRadius: RADIUS.md, marginBottom: 12 }}><Text style={{ color: COLORS.primary, fontWeight: '800' }}>Crop Year Compilations</Text><Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 4 }}>Combine certified monthly reports into a yearly overview.</Text></TouchableOpacity>}
           {isOffline && (
             <View style={s.offlineBanner}>
               <Ionicons name="cloud-offline-outline" size={18} color="#B45309" />
@@ -228,7 +230,7 @@ export default function AuditHistoryModal({
                 activeOpacity={0.8}
               >
                 <Ionicons name="qr-code-outline" size={16} color="#fff" />
-                <Text style={s.qrBtnText} numberOfLines={1}>{t('view_qr_code_btn', 'View SRA QR Code')}</Text>
+                <Text style={s.qrBtnText}>{t('view_qr_code_btn', 'View SRA QR Code')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -242,7 +244,7 @@ export default function AuditHistoryModal({
                 ) : (
                   <Ionicons name="download-outline" size={16} color={COLORS.primary} />
                 )}
-                <Text style={s.pdfBtnText} numberOfLines={1}>
+                <Text style={s.pdfBtnText}>
                   {exportingReportId ? 'Preparing PDF...' : t('export_pdf_btn', 'Export PDF Report')}
                 </Text>
               </TouchableOpacity>
@@ -325,6 +327,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
+    paddingVertical: 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border
@@ -384,28 +387,28 @@ const s = StyleSheet.create({
     ...SHADOW.card,
     gap: 14
   },
-  summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  summaryTop: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
   monthTitle: { fontSize: 18, fontWeight: '900', color: COLORS.text, letterSpacing: -0.2 },
   reportFarm: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.primaryBg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.xs, flexShrink: 0 },
+  statusBadge: { maxWidth: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, backgroundColor: COLORS.primaryBg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.xs, flexShrink: 1 },
   statusText: { fontSize: 11, fontWeight: '800', color: COLORS.primary },
 
-  statsGrid: { flexDirection: 'row', backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, paddingVertical: 12, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: '#EDF2E8' },
-  statItem: { flex: 1, alignItems: 'center' },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: '#F8FAF5', borderRadius: RADIUS.md, paddingVertical: 12, paddingHorizontal: 8, alignItems: 'stretch', borderWidth: 1, borderColor: '#EDF2E8' },
+  statItem: { flexGrow: 1, flexBasis: 90, minWidth: 0, alignItems: 'center' },
   statVal: { fontSize: 17, fontWeight: '900', color: COLORS.text },
   statLbl: { fontSize: 10.5, fontWeight: '600', color: COLORS.textMuted, marginTop: 3 },
-  statDivider: { width: 1, height: 26, backgroundColor: '#E2E8DC' },
+  statDivider: { width: 1, minHeight: 26, backgroundColor: '#E2E8DC' },
 
   metaBox: { backgroundColor: '#F8FAF5', padding: 12, borderRadius: RADIUS.md, gap: 7, borderWidth: 1, borderColor: '#EDF2E8' },
-  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  metaLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
-  metaValue: { fontSize: 11.5, fontWeight: '800', color: COLORS.text, flexShrink: 1, textAlign: 'right' },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  metaLabel: { flexGrow: 1, flexBasis: 120, fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
+  metaValue: { flexGrow: 1, flexBasis: 150, minWidth: 0, fontSize: 11.5, fontWeight: '800', color: COLORS.text, flexShrink: 1, textAlign: 'right' },
 
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 2 },
-  qrBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 8, borderRadius: RADIUS.md, ...SHADOW.sm },
-  qrBtnText: { fontSize: 12.5, fontWeight: '800', color: '#fff', textAlign: 'center' },
-  pdfBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#FFFFFF', borderWidth: 1.2, borderColor: '#D1D5DB', paddingVertical: 12, paddingHorizontal: 8, borderRadius: RADIUS.md },
-  pdfBtnText: { fontSize: 12.5, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 },
+  qrBtn: { flexGrow: 1, flexBasis: 145, minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.primary, paddingVertical: 12, paddingHorizontal: 8, borderRadius: RADIUS.md, ...SHADOW.sm },
+  qrBtnText: { flexShrink: 1, fontSize: 12.5, fontWeight: '800', color: '#fff', textAlign: 'center' },
+  pdfBtn: { flexGrow: 1, flexBasis: 145, minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#FFFFFF', borderWidth: 1.2, borderColor: '#D1D5DB', paddingVertical: 12, paddingHorizontal: 8, borderRadius: RADIUS.md },
+  pdfBtnText: { flexShrink: 1, fontSize: 12.5, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
 
   operationsCard: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: 14, borderWidth: 1.2, borderColor: '#E5E7EB', gap: 10, ...SHADOW.card },
   operationRow: { paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', gap: 2 }

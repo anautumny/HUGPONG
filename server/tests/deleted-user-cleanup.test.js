@@ -36,6 +36,7 @@ test('cleanup is scoped to orphaned authentication state and preserves business 
   assert.match(service, /COLLECTIONS\.ACCOUNT_IDENTIFIERS/);
   assert.match(service, /COLLECTIONS\.SERVER_SESSIONS/);
   assert.match(service, /COLLECTIONS\.PASSWORD_RECOVERY_CHALLENGES/);
+  assert.match(service, /COLLECTIONS\.PASSWORD_RECOVERY_REVIEWS/);
   assert.match(service, /authClient\.deleteUser/);
   assert.match(service, /DELETED_USER_AUTH_CLEANUP/);
   assert.doesNotMatch(service, /COLLECTIONS\.(FIELDS|CROP_CYCLES|OPERATION_LOGS|AUDIT_REPORTS)/);

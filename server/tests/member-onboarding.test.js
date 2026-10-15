@@ -38,8 +38,15 @@ test('member registration is optional-farm while approval requires an SRA-confir
   const pendingQueue = read('web/react-app/src/components/users/PendingApprovalsQueue.jsx');
 
   assert.match(authRoute, /requestedBlockFarmId: blockFarmId \|\| null/);
+  assert.match(authRoute, /router\.get\('\/registration-block-farms', registrationCatalogRateLimit/);
+  assert.match(authRoute, /String\(farm\.status \|\| 'ACTIVE'\)\.toUpperCase\(\) === 'ACTIVE'/);
+  assert.match(authRoute, /router\.post\('\/registration-phone-verification\/request', registrationReviewRequestRateLimit/);
   assert.doesNotMatch(registerScreen, /if \(!form\.blockFarmId\) e\.blockFarm/);
   assert.match(registerScreen, /t\('reg_not_assigned'\)/);
+  assert.match(registerScreen, /fetchRegistrationBlockFarms/);
+  assert.match(registerScreen, /requestRegistrationPhoneVerification/);
+  assert.match(registerScreen, /onComplete=\{handleVerifyCode\}/);
+  assert.doesNotMatch(registerScreen, /getAvailableBlockFarms/);
   assert.match(usersRoute, /Assign a Block Farm before approving this Farm Member/);
   assert.match(usersRoute, /affiliatedBlockFarmId/);
   assert.match(pendingQueue, /Assign Block Farm/);
@@ -94,6 +101,9 @@ test('provisioned users choose phone verification before entering the manual-rev
   assert.match(mobileStore, /user\.reviewQueueEligible === true/);
   assert.match(webVerification, /Smart or TNT SIM\?/);
   assert.match(webVerification, /Request authorized verification review/);
+  assert.match(webVerification, /onComplete=\{handleVerifyCode\}/);
+  assert.doesNotMatch(webVerification, /Verify & Continue/);
   assert.match(mobileLogin, /first_smart_tnt_help/);
   assert.match(mobileLogin, /handleRequestPhoneVerificationReview/);
+  assert.match(mobileLogin, /onComplete=\{handleVerifyPhone\}/);
 });

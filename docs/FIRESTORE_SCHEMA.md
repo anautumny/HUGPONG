@@ -21,7 +21,7 @@ Compatibility policy: existing records must pass the Phase 4 legacy-data audit a
 13. User, Block Farm, Field, and Crop Year Cycle document IDs are server-issued and immutable. Relationship forms select scoped entities; they never accept a new canonical document ID as user input.
 14. Offline-capable operation, report, ticket, and mutation IDs are non-editable idempotency identifiers. A client may generate them once, but every retry must reuse the same value.
 15. Every account carries an `authVersion`. Password, phone, role, and status changes increment it so old server and Firebase credentials are rejected immediately.
-16. `account_identifiers`, `server_sessions`, `security_rate_limits`, `password_recovery_challenges`, `diagnostic_events`, and `backup_operations` are server-only operational collections. Web and Mobile never read or write them directly.
+16. `account_identifiers`, `server_sessions`, `security_rate_limits`, `password_recovery_challenges`, `password_recovery_reviews`, `diagnostic_events`, and `backup_operations` are server-only operational collections. Web and Mobile never read or write them directly.
 17. A normalized phone number is reserved atomically in `account_identifiers` when an account is created or its phone changes. This prevents concurrent requests from creating duplicate login identifiers.
 18. Every Firestore collection is client-denied. Web and Mobile access application data only through the authenticated Express API; Firebase Admin is the sole database authority.
 19. Request objects are never written directly. The server validates transport structure first and then constructs each Firestore document through collection-specific canonicalizers; unknown fields are discarded or rejected before persistence.
@@ -148,6 +148,52 @@ retention period have elapsed.
 
 Forgot-password codes and reset grants are persisted here so recovery remains authoritative across API instances and restarts. Raw SMS codes and reset tokens are never stored; the server stores HMAC digests, expiry/attempt state, the account's issuance-time `authVersion`, and one-time-use status. Successful recovery atomically updates `user_credentials`, increments the user's `authVersion`, consumes the challenge, and writes an audit event. Firestore client access is always denied. The production cleanup removes challenges after their server-owned `deleteAfter` value has passed.
 
+### `password_recovery_reviews/{reviewId}` — server only
+
+```js
+{
+  userId: string,
+  displayName: string,
+  registeredPhone: string,
+  role: "MEMBER_FARMER" | "FARM_MANAGER" | "SRA_ADMIN" | "SUPER_ADMIN",
+  blockFarmId: string | null,
+  accountAuthVersion: number,
+  status: "PENDING" | "APPROVED" | "REJECTED" | "REPLACED" | "USED",
+  mobilePushToken: string | null,
+  notificationStatus: "READY" | "PENDING" | "SENT" | "FAILED" | "NOT_REQUESTED",
+  notificationAttemptedAt: ISODateString | null,
+  notificationTicketId: string | null,
+  notificationErrorCode: string | null,
+  claimantDigest: string | null,
+  requestedAt: ISODateString,
+  expiresAt: ISODateString,
+  expiresAtMs: number,
+  approvedAt: ISODateString | null,
+  approvedByUserId: string | null,
+  approvalExpiresAt: ISODateString | null,
+  approvalExpiresAtMs: number | null,
+  rejectedAt: ISODateString | null,
+  rejectedByUserId: string | null,
+  reviewReasonCode: string | null,
+  reviewReason: string | null,
+  usedAt: ISODateString | null,
+  updatedAt: ISODateString,
+  deleteAfter: timestamp,
+  deleteAfterMs: number
+}
+```
+
+This collection supports Smart/TNT and unavailable-SMS password recovery. A
+request requires the permanent User ID plus the registered mobile number. An
+authorized role-scoped reviewer verifies the person in front of them and may
+open one 15-minute reset window. Only the claimant device holds the HMAC-bound
+claim token; reviewers never create or see the new password. Completion
+atomically advances `authVersion`, consumes the review, updates credentials,
+and writes the Audit Ledger. When the claimant grants Mobile notification
+permission, the request also stores that device's Expo push token so the server
+can send an approval or rejection alert. The token is never returned to a
+reviewer or included in logical backups. Firestore client access is always denied.
+
 ### `block_farms/{blockFarmId}`
 
 `blockFarmId` is issued by the server as `BF-` plus a cryptographically random suffix. `code` is the same permanent public reference for new records. Existing IDs/codes remain unchanged.
@@ -165,6 +211,13 @@ Forgot-password codes and reset grants are persisted here so recovery remains au
   archivedAt: string | null
 }
 ```
+
+`GET /api/block-farms` also adds non-persisted area projections calculated by
+the server from ACTIVE `fields`: `allocatedAreaHa`, `remainingAreaHa`,
+`effectiveAreaHa`, and `areaSource`. `effectiveAreaHa` uses the declared area
+when it is valid and otherwise falls back to the active allocated field area,
+so legacy Block Farms do not appear as `0 Ha`. These response fields are not a
+second source of truth and require no database migration.
 
 ### `fields/{fieldId}`
 
@@ -601,3 +654,9 @@ The canonical writers reject or drop these historical aliases:
 - Device/browser-local operation drafts are account-scoped working data. They are never Firestore documents, outbox mutations, sync-count items, analytics inputs, or audit records. Submission revalidates canonical Field ownership and reuses one stable operation ID.
 
 Clients may derive compatibility-shaped view data in memory while the UI is incrementally cleaned up, but none of these aliases may be written to Firestore.
+
+## 7. Crop Year compilations
+
+`crop_year_compilations` stores immutable SRA-generated aggregates of certified monthly report snapshots. The server selects operations by their Crop Year Cycle, deduplicates operation IDs, counts field area once, and records source report fingerprints and certification attribution. The collection is client-denied and included in logical backups. Monthly `audit_reports` remain the certification records; yearly summaries use status `COMPILED` and coverage `CERTIFIED_REPORTS_TO_DATE`.
+
+See [CROP_YEAR_COMPILATIONS.md](CROP_YEAR_COMPILATIONS.md) for the schema, API, Web/Mobile workflows, accounting rules, limits, and deployment requirements.

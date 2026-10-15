@@ -38,6 +38,12 @@ const {
   verifyPasswordRecoveryCode,
   completePasswordRecovery
 } = require('../services/passwordRecoveryService');
+const {
+  createAssistedRecoveryRequest,
+  assistedRecoveryStatus,
+  completeAssistedRecovery
+} = require('../services/assistedPasswordRecoveryService');
+const { normalizeExpoPushToken } = require('../services/mobilePushService');
 
 const VERIFICATION_CODE_SEND_LIMIT = 3;
 const VERIFICATION_CODE_WINDOW_MS = 60 * 60 * 1000;
@@ -102,6 +108,18 @@ const otpRequestRateLimit = createRateLimit({
 });
 const otpVerifyRateLimit = createRateLimit({ name: 'auth-otp-verify', max: 10, windowMs: 15 * 60 * 1000 });
 const registrationRateLimit = createRateLimit({ name: 'auth-register', max: 5, windowMs: 60 * 60 * 1000 });
+const registrationCatalogRateLimit = createRateLimit({
+  name: 'auth-registration-catalog',
+  max: 60,
+  windowMs: 15 * 60 * 1000,
+  key: clientAddress
+});
+const registrationReviewRequestRateLimit = createRateLimit({
+  name: 'auth-registration-review-request',
+  max: 10,
+  windowMs: 60 * 60 * 1000,
+  key: req => `${clientAddress(req)}:${normalizeContact(req.body?.phone) || 'missing'}`
+});
 const passwordRateLimit = createRateLimit({ name: 'auth-password-check', max: 10, windowMs: 15 * 60 * 1000, key: req => `${clientAddress(req)}:${identifier(req)}` });
 const passwordRecoveryIpRateLimit = createRateLimit({
   name: 'auth-password-recovery-ip',
@@ -129,6 +147,30 @@ const passwordRecoveryCompleteRateLimit = createRateLimit({
   max: 5,
   windowMs: 15 * 60 * 1000,
   key: req => `${clientAddress(req)}:${String(req.body?.recoveryId || '').slice(0, 100)}`
+});
+const assistedRecoveryRequestIpRateLimit = createRateLimit({
+  name: 'auth-assisted-password-recovery-request-ip',
+  max: 5,
+  windowMs: 60 * 60 * 1000,
+  key: clientAddress
+});
+const assistedRecoveryRequestAccountRateLimit = createRateLimit({
+  name: 'auth-assisted-password-recovery-request-account',
+  max: 3,
+  windowMs: 60 * 60 * 1000,
+  key: req => `${String(req.body?.userId || '').trim()}:${normalizeContact(req.body?.phone) || 'missing'}`
+});
+const assistedRecoveryStatusRateLimit = createRateLimit({
+  name: 'auth-assisted-password-recovery-status',
+  max: 60,
+  windowMs: 15 * 60 * 1000,
+  key: req => `${clientAddress(req)}:${String(req.body?.reviewId || '').slice(0, 40)}`
+});
+const assistedRecoveryCompleteRateLimit = createRateLimit({
+  name: 'auth-assisted-password-recovery-complete',
+  max: 5,
+  windowMs: 15 * 60 * 1000,
+  key: req => `${clientAddress(req)}:${String(req.body?.reviewId || '').slice(0, 40)}`
 });
 
 function normalizeContact(value) {
@@ -392,6 +434,85 @@ router.post('/password-recovery/complete', passwordRecoveryCompleteRateLimit, as
   }
 });
 
+router.post('/password-recovery-review/request', assistedRecoveryRequestIpRateLimit, assistedRecoveryRequestAccountRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  const userId = String(req.body?.userId || '').trim();
+  const phone = normalizeContact(req.body?.phone);
+  const mobilePushToken = normalizeExpoPushToken(req.body?.mobilePushToken);
+  if (!/^0[1-4]\d{6}$/.test(userId) || !/^09\d{9}$/.test(phone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Enter an 8-digit HUGPONG User ID and the registered 11-digit mobile number.'
+    });
+  }
+
+  let result = {
+    reviewId: `PRR-${crypto.randomBytes(10).toString('hex').toUpperCase()}`,
+    claimToken: crypto.randomBytes(32).toString('base64url'),
+    expiresAt: new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString()
+  };
+  try {
+    const matchedUser = await findUser(userId);
+    if (matchedUser?.id === userId
+      && matchedUser.status === 'ACTIVE'
+      && normalizeContact(matchedUser.phone) === phone) {
+      result = await createAssistedRecoveryRequest(db, { userId, user: matchedUser, mobilePushToken }) || result;
+    }
+  } catch (error) {
+    console.warn('[HUGPONG Auth] Assisted recovery request notice:', cleanText(error.message));
+  }
+  return res.status(202).json({
+    success: true,
+    ...result,
+    message: 'If the account information matches, an authorized password-recovery review is now pending. Bring valid identification to an authorized HUGPONG administrator.'
+  });
+});
+
+router.post('/password-recovery-review/status', assistedRecoveryStatusRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  try {
+    const status = await assistedRecoveryStatus(db, {
+      reviewId: req.body?.reviewId,
+      claimToken: req.body?.claimToken
+    });
+    return res.json({ success: true, ...status });
+  } catch {
+    return res.status(503).json({ success: false, error: 'Recovery status is temporarily unavailable.' });
+  }
+});
+
+router.post('/password-recovery-review/complete', assistedRecoveryCompleteRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account recovery is temporarily unavailable.' });
+  try {
+    validatePassword(req.body?.newPassword);
+    const result = await completeAssistedRecovery(db, {
+      reviewId: req.body?.reviewId,
+      claimToken: req.body?.claimToken,
+      passwordHash: await hashPassword(req.body.newPassword)
+    });
+    await revokeFirebaseSessions(result.userId);
+    if (req.session && typeof req.session.destroy === 'function') {
+      await new Promise(resolve => req.session.destroy(error => {
+        if (error) console.warn('[HUGPONG Auth] Assisted recovery session cleanup notice:', cleanText(error.message));
+        resolve();
+      }));
+    }
+    res.clearCookie('hugpong.sid');
+    return res.json({
+      success: true,
+      signOutRequired: true,
+      message: 'Password reset complete. All devices were signed out; sign in with your new password.'
+    });
+  } catch (error) {
+    const status = error.status || (/Password must|less predictable password/.test(error.message) ? 400 : 500);
+    return res.status(status).json({
+      success: false,
+      error: status === 400 ? error.message : 'The assisted password reset could not be completed.',
+      code: error.code || 'RECOVERY_REVIEW_COMPLETE_FAILED'
+    });
+  }
+});
+
 function rejectedLogin(req, res, error = 'Invalid credentials.') {
   const states = ['auth-login', 'auth-login-account', 'auth-login-ip']
     .map(name => rateLimitState(req, name))
@@ -506,6 +627,52 @@ router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) =
   }
 });
 
+router.get('/registration-block-farms', registrationCatalogRateLimit, async (_req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Block Farm directory is unavailable.' });
+  try {
+    const snapshot = await db.collection(COLLECTIONS.BLOCK_FARMS).get();
+    const data = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(farm => String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .filter(farm => String(farm.name || '').trim())
+      .map(farm => ({
+        id: farm.id,
+        code: String(farm.code || farm.id).trim(),
+        name: String(farm.name).trim()
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: 'Block Farm directory could not be loaded.' });
+  }
+});
+
+router.post('/registration-phone-verification/request', registrationReviewRequestRateLimit, async (req, res) => {
+  if (!db) return res.status(503).json({ success: false, error: 'Account database is unavailable.' });
+  const phone = normalizeContact(req.body?.phone);
+  if (!/^09\d{9}$/.test(phone)) {
+    return res.status(400).json({ success: false, error: 'A valid Philippine mobile number is required.' });
+  }
+  try {
+    const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
+    if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
+    const request = createPhoneVerificationRequestToken(phone);
+    return res.json({
+      success: true,
+      data: {
+        phoneVerificationRequestToken: request.token,
+        phoneVerificationRequestExpiresAt: request.expiresAt
+      },
+      message: 'Authorized phone-verification review selected.'
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      success: false,
+      error: error.message || 'Phone-verification review could not be selected.'
+    });
+  }
+});
+
 router.post('/registration-otp/verify', otpVerifyRateLimit, async (req, res) => {
   const phone = normalizeContact(req.body?.phone);
   const code = String(req.body?.code || '').trim();
@@ -533,7 +700,9 @@ router.post('/register', registrationRateLimit, async (req, res) => {
     validatePassword(password);
     if (blockFarmId) {
       const farm = await db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId).get();
-      if (!farm.exists) throw new Error('The selected block farm does not exist.');
+      if (!farm.exists || String(farm.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+        throw new Error('The selected Block Farm is no longer available. Refresh the registration list and choose again.');
+      }
     }
     const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });

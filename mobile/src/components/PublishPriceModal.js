@@ -178,7 +178,7 @@ export default function PublishPriceModal({
               </View>
               <Text style={s.modalTitle}>Publish Price Reference</Text>
             </View>
-            <Text style={s.modalSub} numberOfLines={1}>
+            <Text style={s.modalSub}>
               Traceable domestic millsite sugar & molasses price reference
             </Text>
           </View>
@@ -743,7 +743,8 @@ const s = StyleSheet.create({
     padding: 16
   },
   calModalCard: {
-    width: 320,
+    width: '92%',
+    maxWidth: 360,
     backgroundColor: '#fff',
     borderRadius: RADIUS.xl,
     overflow: 'hidden',

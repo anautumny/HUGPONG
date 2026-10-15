@@ -158,8 +158,8 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
 function Metric({ value, label }) {
   return (
     <View style={s.metric}>
-      <Text style={s.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
-      <Text style={s.metricLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{label}</Text>
+      <Text style={s.metricValue}>{value}</Text>
+      <Text style={s.metricLabel}>{label}</Text>
     </View>
   );
 }
@@ -170,8 +170,8 @@ const s = StyleSheet.create({
   eyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1, color: COLORS.primary },
   farmName: { fontFamily: FONT_FAMILY.display, fontSize: 20, fontWeight: '900', color: COLORS.text, marginTop: 4 },
   managerName: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
-  metrics: { flexDirection: 'row', gap: 8, marginTop: 16 },
-  metric: { flex: 1, minHeight: 78, padding: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+  metric: { flexGrow: 1, flexBasis: 90, minHeight: 78, padding: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
   metricValue: { fontSize: 16, fontWeight: '900', color: COLORS.text, textAlign: 'center' },
   metricLabel: { fontSize: 9.5, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
   cycleCard: { padding: 14, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg },

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, RefreshCw, AlertCircle, MessageSquareText } from 'lucide-react';
+import { Smartphone, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import OtpCodeInput from './OtpCodeInput';
 
 export default function FirstLoginVerifyModal({
   isOpen,
@@ -20,12 +21,13 @@ export default function FirstLoginVerifyModal({
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [error, setError] = useState('');
   const [verificationStep, setVerificationStep] = useState('choice');
-  const inputRef = useRef(null);
+  const verificationAttemptRef = useRef('');
 
   // The user must explicitly choose SMS or authorized review on first login.
   useEffect(() => {
     if (isOpen) {
       setOtpCode('');
+      verificationAttemptRef.current = '';
       setError('');
       setTimeLeft(300);
       setResendCooldown(60);
@@ -36,10 +38,6 @@ export default function FirstLoginVerifyModal({
         && pendingUser?.phoneVerificationReviewRequestedByUser === true
         ? 'review'
         : (status === 'SMS_OTP_SENT' ? 'code' : 'choice'));
-
-      setTimeout(() => {
-        if (inputRef.current) inputRef.current.focus();
-      }, 150);
     }
   }, [
     isOpen,
@@ -85,6 +83,8 @@ export default function FirstLoginVerifyModal({
       setTimeLeft(300);
       setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
       setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      setOtpCode('');
+      verificationAttemptRef.current = '';
     } catch (err) {
       if (err.data?.retryAfterSeconds) {
         setResendCooldown(Math.max(0, Number(err.data.retryAfterSeconds)));
@@ -105,8 +105,9 @@ export default function FirstLoginVerifyModal({
       setTimeLeft(300);
       setResendCooldown(Math.max(0, Number(result.resendAfterSeconds || 0)));
       setCodeRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      setOtpCode('');
+      verificationAttemptRef.current = '';
       setVerificationStep('code');
-      setTimeout(() => inputRef.current?.focus(), 100);
     } catch (err) {
       setError(err.message || 'Unable to dispatch verification SMS. You can request manual review instead.');
     } finally {
@@ -128,14 +129,14 @@ export default function FirstLoginVerifyModal({
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const cleanCode = otpCode.trim();
+  const handleVerifyCode = async candidateCode => {
+    const cleanCode = String(candidateCode ?? otpCode).trim();
     if (!/^\d{6}$/.test(cleanCode)) {
       setError('Please enter the 6-digit verification code.');
-      if (inputRef.current) inputRef.current.focus();
       return;
     }
+    if (verificationAttemptRef.current === cleanCode) return;
+    verificationAttemptRef.current = cleanCode;
 
     setError('');
     setIsVerifying(true);
@@ -143,8 +144,8 @@ export default function FirstLoginVerifyModal({
       const result = await verifyPhone(cleanCode, pendingToken);
       onVerificationSuccess(result);
     } catch (err) {
+      verificationAttemptRef.current = '';
       setError(err.message || 'Verification code is incorrect or expired.');
-      if (inputRef.current) inputRef.current.focus();
     } finally {
       setIsVerifying(false);
     }
@@ -221,25 +222,25 @@ export default function FirstLoginVerifyModal({
         )}
 
         {/* OTP Input Form */}
-        {verificationStep === 'code' && <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {verificationStep === 'code' && <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="otp-code-input" className="text-xs font-semibold text-hug-text2">
               Enter 6-Digit SMS Verification Code
             </label>
-            <input
-              ref={inputRef}
-              id="otp-code-input"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
+            <OtpCodeInput
               value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="• • • • • •"
-              className="w-full text-center text-xl font-mono font-bold tracking-[0.3em] px-3 py-2.5 border border-border rounded-xl bg-white dark:bg-[#0C1015] text-hug-text focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-              autoComplete="one-time-code"
+              onChange={value => {
+                setOtpCode(value);
+                if (value.length < 6) verificationAttemptRef.current = '';
+                setError('');
+              }}
+              onComplete={handleVerifyCode}
               disabled={isVerifying}
+              error={Boolean(error)}
             />
+            <span className="text-center text-[11px] text-hug-muted" aria-live="polite">
+              {isVerifying ? 'Verifying code...' : 'Verification starts automatically after all six digits are entered.'}
+            </span>
           </div>
 
           <div className="flex items-center justify-between text-xs text-hug-muted">
@@ -274,16 +275,8 @@ export default function FirstLoginVerifyModal({
             >
               Sign Out
             </button>
-            <button
-              type="submit"
-              disabled={isVerifying || otpCode.length !== 6}
-              className="px-4 py-2 bg-primary hover:bg-primary-dark text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isVerifying && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-              <span>{isVerifying ? 'Verifying...' : 'Verify & Continue'}</span>
-            </button>
           </div>
-        </form>}
+        </div>}
       </div>
     </div>
   );

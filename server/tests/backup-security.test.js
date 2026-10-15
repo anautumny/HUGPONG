@@ -84,6 +84,7 @@ test('manual backup encrypts approved business collections and excludes security
   assert.equal(decrypted.payload.exportOperationId, 'BKP-AAAAAAAAAAAAAAAAAAAA');
   assert.deepEqual(decrypted.payload.includedCollections, BACKUP_COLLECTIONS);
   assert.ok(EXCLUDED_SECURITY_COLLECTIONS.includes(COLLECTIONS.USER_CREDENTIALS));
+  assert.ok(EXCLUDED_SECURITY_COLLECTIONS.includes(COLLECTIONS.PASSWORD_RECOVERY_REVIEWS));
   assert.ok(EXCLUDED_SECURITY_COLLECTIONS.includes(COLLECTIONS.DIAGNOSTIC_EVENTS));
   assert.equal(decrypted.payload.collections[COLLECTIONS.USER_CREDENTIALS], undefined);
 });
@@ -174,6 +175,14 @@ test('backup APIs and web page are Super Admin web-only while mobile has no back
   assert.match(backupView, /Export daily/);
   assert.match(backupView, /Keep two copies/);
   assert.match(backupView, /Run recovery drill/);
+  assert.match(backupView, /not a 16-digit code/);
+  assert.match(backupView, /INVALID_CURRENT_PASSWORD/);
+  assert.match(backupView, /BACKUP_DECRYPTION_FAILED/);
+  assert.match(backupView, /backup-export-current-password-error/);
+  assert.match(backupView, /backup-restore-passphrase-error/);
+  assert.match(backupView, /prevent an accidental recovery/);
+  assert.match(backupView, /refreshStatus\(\{ force: true \}\)/);
+  assert.match(backupView, /loadingStatus \? 'Refreshing…' : 'Refresh status'/);
   assert.match(appShell, /The daily encrypted backup is due/);
 });
 

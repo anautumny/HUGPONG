@@ -14,6 +14,7 @@ const COLLECTIONS = Object.freeze({
   CROP_CYCLES: 'crop_cycles',
   OPERATION_LOGS: 'operation_logs',
   AUDIT_REPORTS: 'audit_reports',
+  CROP_YEAR_COMPILATIONS: 'crop_year_compilations',
   AUDIT_LOGS: 'audit_logs',
   SRA_PRICES: 'sra_prices',
   SUPPORT_TICKETS: 'support_tickets',
@@ -23,6 +24,7 @@ const COLLECTIONS = Object.freeze({
   SERVER_SESSIONS: 'server_sessions',
   SECURITY_RATE_LIMITS: 'security_rate_limits',
   PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges',
+  PASSWORD_RECOVERY_REVIEWS: 'password_recovery_reviews',
   SYSTEM_METADATA: 'system_metadata'
 });
 

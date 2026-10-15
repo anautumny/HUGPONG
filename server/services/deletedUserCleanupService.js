@@ -62,7 +62,7 @@ async function inspectDeletedUserArtifacts(database, authClient, { userId, ident
   const userRef = database.collection(COLLECTIONS.USERS).doc(normalizedUserId);
   const credentialRef = database.collection(COLLECTIONS.USER_CREDENTIALS).doc(normalizedUserId);
   const identifierRef = database.collection(COLLECTIONS.ACCOUNT_IDENTIFIERS).doc(normalizedIdentifierId);
-  const [user, credential, identifier, sessionRefs, recoveryRefs, authExists] = await Promise.all([
+  const [user, credential, identifier, sessionRefs, recoveryRefs, recoveryReviewRefs, authExists] = await Promise.all([
     userRef.get(),
     credentialRef.get(),
     identifierRef.get(),
@@ -72,6 +72,7 @@ async function inspectDeletedUserArtifacts(database, authClient, { userId, ident
       'session.user.id'
     ], normalizedUserId),
     relatedDocumentRefs(database, COLLECTIONS.PASSWORD_RECOVERY_CHALLENGES, ['userId'], normalizedUserId),
+    relatedDocumentRefs(database, COLLECTIONS.PASSWORD_RECOVERY_REVIEWS, ['userId'], normalizedUserId),
     firebaseUserExists(authClient, normalizedUserId)
   ]);
   const identifierOwner = identifier.exists ? clean(identifier.data()?.userId) : null;
@@ -87,7 +88,8 @@ async function inspectDeletedUserArtifacts(database, authClient, { userId, ident
     firebaseAuthExists: authExists,
     sessionCount: sessionRefs.length,
     recoveryChallengeCount: recoveryRefs.length,
-    refs: { userRef, credentialRef, identifierRef, sessionRefs, recoveryRefs }
+    recoveryReviewCount: recoveryReviewRefs.length,
+    refs: { userRef, credentialRef, identifierRef, sessionRefs, recoveryRefs, recoveryReviewRefs }
   };
 }
 
@@ -100,7 +102,8 @@ function publicCleanupPlan(inspection) {
     exactIdentifierOwnedByDeletedUser: inspection.identifierOwnedByTarget,
     firebaseAuthenticationUserPresent: inspection.firebaseAuthExists,
     serverSessionsToDelete: inspection.sessionCount,
-    passwordRecoveryChallengesToDelete: inspection.recoveryChallengeCount
+    passwordRecoveryChallengesToDelete: inspection.recoveryChallengeCount,
+    passwordRecoveryReviewsToDelete: inspection.recoveryReviewCount
   };
 }
 
@@ -129,7 +132,8 @@ async function cleanupDeletedUserArtifacts(database, authClient, input) {
     || before.identifierOwnedByTarget
     || before.firebaseAuthExists
     || before.sessionCount > 0
-    || before.recoveryChallengeCount > 0;
+    || before.recoveryChallengeCount > 0
+    || before.recoveryReviewCount > 0;
   if (!hasArtifacts) {
     return { changed: false, before: publicCleanupPlan(before), after: publicCleanupPlan(before) };
   }
@@ -167,13 +171,15 @@ async function cleanupDeletedUserArtifacts(database, authClient, input) {
 
   const sessionsDeleted = await deleteRefs(database, before.refs.sessionRefs);
   const recoveryChallengesDeleted = await deleteRefs(database, before.refs.recoveryRefs);
+  const recoveryReviewsDeleted = await deleteRefs(database, before.refs.recoveryReviewRefs);
   const after = await inspectDeletedUserArtifacts(database, authClient, input);
   if (after.userExists
     || after.credentialExists
     || after.identifierExists
     || after.firebaseAuthExists
     || after.sessionCount > 0
-    || after.recoveryChallengeCount > 0) {
+    || after.recoveryChallengeCount > 0
+    || after.recoveryReviewCount > 0) {
     throw new Error('Deleted-user cleanup verification failed; re-run the dry-run inspection.');
   }
 
@@ -181,6 +187,7 @@ async function cleanupDeletedUserArtifacts(database, authClient, input) {
     changed: true,
     sessionsDeleted,
     recoveryChallengesDeleted,
+    recoveryReviewsDeleted,
     before: publicCleanupPlan(before),
     after: publicCleanupPlan(after)
   };

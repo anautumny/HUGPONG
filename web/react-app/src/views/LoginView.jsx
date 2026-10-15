@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { LogIn, Eye, EyeOff, Lock, User, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft, Github, Sun, Moon, Monitor } from 'lucide-react';
+import { LogIn, Eye, EyeOff, Lock, User, AlertCircle, ShieldCheck, RefreshCw, ArrowLeft, Github, Sun, Moon, Monitor, WifiOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSync } from '../context/SyncContext';
 import { useTheme } from '../context/ThemeContext';
 import { ROLE_KEYS } from '../utils/authRouting';
 import AccountRecoveryModal from '../components/auth/AccountRecoveryModal';
@@ -18,6 +19,7 @@ function storedLoginLockoutUntil() {
 
 export default function LoginView() {
   const { login, saveSession, isAuthenticated, isLoading, roleKey, sessionExpiredNotice, logout } = useAuth();
+  const { networkOnline, apiReachable } = useSync();
   const { theme, setTheme } = useTheme();
 
   const cycleTheme = () => {
@@ -36,6 +38,7 @@ export default function LoginView() {
   const [errorMessage, setErrorMessage] = useState('');
   const [lockoutUntil, setLockoutUntil] = useState(storedLoginLockoutUntil);
   const [lockoutRemaining, setLockoutRemaining] = useState(() => Math.max(0, Math.ceil((storedLoginLockoutUntil() - Date.now()) / 1000)));
+  const connectionUnavailable = !networkOnline || apiReachable === false;
 
   // Modals state
   const [isRecoveryModalOpen, setIsRecoveryModalOpen] = useState(false);
@@ -103,6 +106,11 @@ export default function LoginView() {
       return;
     }
 
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setErrorMessage('Internet is required for your first sign-in. Your login details have been kept.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -136,6 +144,8 @@ export default function LoginView() {
       if (err.code === 'LOGIN_RATE_LIMITED' || err.status === 429) {
         applyServerLockout(err.data);
         setErrorMessage(err.message || 'Too many login attempts. Please try again later.');
+      } else if (err.isNetworkError || err.code === 'LOGIN_REQUEST_TIMEOUT' || err.code === 'LOGIN_NETWORK_UNAVAILABLE') {
+        setErrorMessage(err.message);
       } else {
         setErrorMessage(err.message || 'Invalid User ID or password.');
       }
@@ -281,6 +291,24 @@ export default function LoginView() {
           <div className="mb-4 p-3 rounded-xl bg-warning-bg text-warning text-xs font-semibold flex items-center gap-2 border border-warning/30 animate-in fade-in duration-200">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{sessionExpiredNotice}</span>
+          </div>
+        )}
+
+        {connectionUnavailable && (
+          <div className="mb-4 p-3 rounded-xl bg-warning-bg text-warning text-xs border border-warning/30 animate-in fade-in duration-200" role="status">
+            <div className="flex items-start gap-2">
+              <WifiOff className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">
+                  {!networkOnline ? 'Internet required for first sign-in' : 'HUGPONG is temporarily unreachable'}
+                </p>
+                <p className="mt-1 font-medium leading-relaxed">
+                  {!networkOnline
+                    ? 'You need to sign in online once before you can access HUGPONG offline features. Your login details will remain on this page.'
+                    : 'The server is taking longer than expected. Your login details will remain on this page while you check the connection and try again.'}
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

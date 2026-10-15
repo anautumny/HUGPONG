@@ -37,7 +37,7 @@ keep an encrypted copy on an external device or another protected location.
 
 The logical archive deliberately excludes `user_credentials`,
 `account_identifiers`, `server_sessions`, `security_rate_limits`,
-`password_recovery_challenges`, `terminal_diagnostics`, `diagnostic_events`, and
+`password_recovery_challenges`, `password_recovery_reviews`, `terminal_diagnostics`, `diagnostic_events`, and
 `backup_operations`. It also excludes environment files, service-account keys,
 API keys, tokens, and private server logs.
 

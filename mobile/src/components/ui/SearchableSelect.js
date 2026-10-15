@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { View, TouchableOpacity, Modal, ScrollView, StyleSheet, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { AppText as Text, AppTextInput as TextInput } from '../Typography';
+import AnimatedBottomSheet from '../AnimatedBottomSheet';
 
 export function SearchableSelectModal({
   visible,
@@ -56,22 +57,14 @@ export function SearchableSelectModal({
   }, [normalizedOptions, searchQuery]);
 
   return (
-    <Modal
+    <AnimatedBottomSheet
       visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
+      onClose={onClose}
+      keyboardAvoiding
+      backdropColor="rgba(15, 23, 42, 0.5)"
+      sheetStyle={styles.sheetContainer}
     >
-      <KeyboardAvoidingView
-        style={styles.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        <View style={styles.sheetContainer}>
+        <View>
           {/* Drag Handle Indicator */}
           <View style={styles.handleBar} />
 
@@ -170,7 +163,6 @@ export function SearchableSelectModal({
                             styles.optionLabel,
                             isSelected && styles.optionLabelSelected
                           ]}
-                          numberOfLines={2}
                         >
                           {item.label}
                         </Text>
@@ -180,7 +172,6 @@ export function SearchableSelectModal({
                               styles.optionSublabel,
                               isSelected && styles.optionSublabelSelected
                             ]}
-                            numberOfLines={1}
                           >
                             {item.sublabel}
                           </Text>
@@ -207,8 +198,7 @@ export function SearchableSelectModal({
             )}
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    </AnimatedBottomSheet>
   );
 }
 
@@ -282,12 +272,11 @@ export function SearchableSelect({
                 styles.triggerText,
                 !selectedItem && styles.triggerPlaceholder
               ]}
-              numberOfLines={1}
             >
               {displayLabel}
             </Text>
             {displaySublabel && (
-              <Text style={styles.triggerSubtext} numberOfLines={1}>
+              <Text style={styles.triggerSubtext}>
                 {displaySublabel}
               </Text>
             )}
@@ -346,11 +335,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
   },
   triggerLeftIcon: {
     marginRight: 10,
   },
   triggerText: {
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.text,
@@ -361,6 +352,7 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
   triggerSubtext: {
+    flexShrink: 1,
     fontSize: 12.5,
     fontWeight: '600',
     color: COLORS.textMuted,
@@ -377,14 +369,6 @@ const styles = StyleSheet.create({
   },
 
   // Modal Sheet Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    flex: 1,
-  },
   sheetContainer: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: RADIUS.xl,
@@ -442,7 +426,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 6,
     paddingHorizontal: 12,
-    height: 48,
+    minHeight: 50,
+    paddingVertical: 6,
     gap: 8,
   },
   searchInput: {
@@ -461,7 +446,7 @@ const styles = StyleSheet.create({
   },
   optionRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -478,8 +463,9 @@ const styles = StyleSheet.create({
   },
   optionLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
+    minWidth: 0,
   },
   syncDot: {
     width: 8,
@@ -488,6 +474,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   optionLabel: {
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.text,
@@ -497,6 +484,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   optionSublabel: {
+    flexShrink: 1,
     fontSize: 12.5,
     color: COLORS.textMuted,
     marginTop: 2,
@@ -506,6 +494,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   optionBadge: {
+    maxWidth: '35%',
+    flexShrink: 1,
     backgroundColor: COLORS.primaryBg,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -513,11 +503,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   optionBadgeText: {
+    flexShrink: 1,
+    textAlign: 'center',
     fontSize: 11,
     fontWeight: '700',
     color: COLORS.primary,
   },
   radioBox: {
+    flexShrink: 0,
     width: 28,
     alignItems: 'center',
     justifyContent: 'center',

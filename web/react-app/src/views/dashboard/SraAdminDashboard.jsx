@@ -34,7 +34,9 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
   // Calculate total district area across all block farms
   const totalDistrictArea = useMemo(() => {
-    return blockFarms.reduce((sum, bf) => sum + (Number(bf.declaredAreaHa ?? bf.declaredHa ?? 0)), 0);
+    return blockFarms.reduce((sum, bf) => sum + Number(
+      bf.effectiveAreaHa ?? bf.declaredAreaHa ?? bf.declaredHa ?? bf.allocatedAreaHa ?? 0
+    ), 0);
   }, [blockFarms]);
 
   // Pending audit reports awaiting certification

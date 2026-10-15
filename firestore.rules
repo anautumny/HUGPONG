@@ -38,6 +38,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /crop_year_compilations/{documentId} {
+      allow read, write: if false;
+    }
+
     match /audit_logs/{documentId} {
       allow read, write: if false;
     }
@@ -75,6 +79,10 @@ service cloud.firestore {
     }
 
     match /password_recovery_challenges/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /password_recovery_reviews/{documentId} {
       allow read, write: if false;
     }
 

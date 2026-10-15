@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, TouchableOpacity, ScrollView, Modal, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { Card, PrimaryButton, SecondaryButton, SearchableSelect } from '../ui';
 import { AppText as Text } from '../Typography';
+import AnimatedBottomSheet from '../AnimatedBottomSheet';
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -41,7 +42,7 @@ export function AnalyticsScopeCard({
             activeOpacity={0.7}
           >
             <Ionicons name="leaf-outline" size={13} color={COLORS.primary} />
-            <Text style={[styles.scopeChipValueClean, { maxWidth: 170 }]} numberOfLines={1}>{farmName}</Text>
+            <Text style={styles.scopeChipValueClean}>{farmName}</Text>
           </TouchableOpacity>
         )}
         {season && (
@@ -61,7 +62,7 @@ export function AnalyticsScopeCard({
             activeOpacity={0.7}
           >
             <Ionicons name="grid-outline" size={13} color={COLORS.textSecondary} />
-            <Text style={styles.scopeChipValueClean} numberOfLines={1}>{fieldName}</Text>
+            <Text style={styles.scopeChipValueClean}>{fieldName}</Text>
           </TouchableOpacity>
         )}
         {period && (
@@ -101,9 +102,13 @@ export function AnalyticsScopeModal({
   isManager
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalSheet}>
+    <AnimatedBottomSheet
+      visible={visible}
+      onClose={onClose}
+      closeOnBackdropPress={false}
+      backdropColor="rgba(0, 0, 0, 0.45)"
+      sheetStyle={styles.modalSheet}
+    >
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalTitle}>Filter Analytics Scope</Text>
@@ -140,7 +145,9 @@ export function AnalyticsScopeModal({
                   ...farms.map(f => ({
                     id: f.id,
                     label: f.name,
-                    sublabel: f.address || f.location || `${f.hectares || 0} Ha`,
+                    sublabel: `${f.address || f.location ? `${f.address || f.location} · ` : ''}${Number(
+                      f.effectiveAreaHa ?? f.declaredAreaHa ?? f.declaredHa ?? f.allocatedAreaHa ?? 0
+                    ).toFixed(2)} Ha`,
                     icon: 'business-outline'
                   }))
                 ]}
@@ -202,9 +209,7 @@ export function AnalyticsScopeModal({
               style={{ flex: 2 }}
             />
           </View>
-        </View>
-      </View>
-    </Modal>
+    </AnimatedBottomSheet>
   );
 }
 
@@ -240,7 +245,7 @@ export function StageDistributionList({
               <View style={[styles.stageBadge, { backgroundColor: COLORS.primary }]}>
                 <Text style={styles.stageBadgeNum}>{st.stageNumber}</Text>
               </View>
-              <Text style={[styles.stageNameText, { flex: 1 }]} numberOfLines={2}>
+              <Text style={[styles.stageNameText, { flex: 1 }]}>
                 {st.name}
               </Text>
             </View>
@@ -289,7 +294,7 @@ export function CostBreakdownList({
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
               <View style={[styles.catDot, { backgroundColor: cat.color || COLORS.primary }]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.catLabel} numberOfLines={1}>{cat.label}</Text>
+                <Text style={styles.catLabel}>{cat.label}</Text>
                 <Text style={styles.catSub}>{cat.opsCount ?? cat.operationsCount ?? 0} operations logged</Text>
               </View>
             </View>
@@ -342,7 +347,7 @@ export function ActivityFrequencyList({ ranking = [] }) {
               <Text style={styles.freqRankText}>#{idx + 1}</Text>
             </View>
             <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.freqTitle} numberOfLines={1}>{actName}</Text>
+              <Text style={styles.freqTitle}>{actName}</Text>
               <Text style={styles.freqSub}>
                 {execCount} {execCount === 1 ? 'pass' : 'passes'} · Avg ₱{Number(avgCost).toLocaleString()}
               </Text>
@@ -390,7 +395,7 @@ export function PriceSummaryCard({ priceRecord, canPost, onPostPricePress }) {
       <View style={styles.priceHeader}>
         <View style={{ flex: 1, marginRight: 8 }}>
           <Text style={styles.scopeHeaderTag}>PUBLISHED SUGAR PRICE REFERENCE</Text>
-          <Text style={styles.priceCircularTitle} numberOfLines={1}>{circularNum}</Text>
+          <Text style={styles.priceCircularTitle}>{circularNum}</Text>
           <Text style={styles.priceCircularSub}>{periodLabel}</Text>
         </View>
         {canPost && (
@@ -494,13 +499,17 @@ const styles = StyleSheet.create({
   },
   scopeHeaderClean: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'space-between',
     alignItems: 'center'
   },
   scopeTitleWrapClean: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6
+    gap: 6,
+    flexShrink: 1,
+    minWidth: 0
   },
   scopeHeaderTagClean: {
     fontSize: 11.5,
@@ -510,6 +519,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase'
   },
   changeScopeBtnClean: {
+    maxWidth: '100%',
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -532,6 +543,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2
   },
   scopeChipClean: {
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -544,17 +556,14 @@ const styles = StyleSheet.create({
     minHeight: 32
   },
   scopeChipValueClean: {
+    flexShrink: 1,
+    minWidth: 0,
     fontSize: 12.5,
     color: COLORS.text,
     fontWeight: '700'
   },
 
   // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end'
-  },
   modalSheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: RADIUS.xl,
@@ -567,6 +576,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 10,
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border
@@ -616,6 +626,7 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 8
   },
@@ -697,6 +708,8 @@ const styles = StyleSheet.create({
   },
   costCatRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'space-between',
     alignItems: 'center'
   },
@@ -706,6 +719,7 @@ const styles = StyleSheet.create({
     borderRadius: 4.5
   },
   catLabel: {
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: '700',
     color: COLORS.text
@@ -739,7 +753,9 @@ const styles = StyleSheet.create({
   // Activity Frequency
   freqRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 8,
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#F5F5F5'
@@ -759,6 +775,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary
   },
   freqTitle: {
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: '700',
     color: COLORS.text
@@ -791,6 +808,8 @@ const styles = StyleSheet.create({
   },
   priceHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'space-between',
     alignItems: 'flex-start'
   },
@@ -831,6 +850,7 @@ const styles = StyleSheet.create({
   },
   analyticsSugarPriceRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: 6,
   },
@@ -866,6 +886,7 @@ const styles = StyleSheet.create({
   },
   analyticsMolPriceRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: 4,
     marginTop: 2,

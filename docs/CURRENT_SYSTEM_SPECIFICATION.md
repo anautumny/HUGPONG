@@ -206,7 +206,7 @@ Observed implementation:
 Observed features:
 
 - Web login by 8-digit user ID or Philippine mobile number; privacy/terms acknowledgement; server-authoritative five-failed-attempt, 15-minute persistent lockout restored after refresh without exposing the remaining duration; phone verification and first-login password change; local session persistence; logout.
-- Mobile login, registration, forgot/reset password, first-login password change, local session restore, profile contact/password changes, PIN/biometric preferences, and the same server-authoritative five-failed-attempt lockout restored after app restart.
+- Mobile login, registration, forgot/reset password, first-login password change, local session restore, profile contact/password changes, PIN/biometric preferences, and the same server-authoritative five-failed-attempt lockout restored after app restart. The supported native application requests notification permission on first launch. Smart/TNT and other unavailable-SMS users can request an authorized password-recovery review using their permanent User ID and registered number; a role-scoped Farm Manager, SRA Admin, or Super Admin performs the in-person identity check, while the user alone creates the new password during a 15-minute approval window. When notification permission is granted, the server sends the claimant's Mobile device an approval or rejection push alert and a tap returns to the securely persisted recovery request. Web exposes the same claimant and reviewer workflow with automatic status refresh while the recovery view is open.
 - SMS OTP via server/Semaphore with simulation fallback; mobile also contains a direct Semaphore fallback.
 
 Important baseline limitations:
@@ -361,3 +361,7 @@ This audit intentionally stops before refactoring. Any subsequent remediation sh
 6. Execute the baseline checklist and add automated contract/integration tests before behavioral cleanup.
 
 No such refactor is part of this baseline artifact.
+
+## 10. Crop Year compilation addition — 15 October 2026
+
+The implemented SRA workflow now supports immutable Crop Year summaries built by the API from certified monthly reports. Web Audit Center and Mobile Audit Desk expose the same selection, preview, compile, saved-history, and printable/PDF report flow. Monthly certification remains separate. See [CROP_YEAR_COMPILATIONS.md](CROP_YEAR_COMPILATIONS.md) for current behavior and deployment requirements; historical audit findings elsewhere in this baseline document are not a release certification.

@@ -13,7 +13,9 @@ HUGPONG uses Firestore as the authoritative database. The Super Admin web consol
 
 ## Recovery drill
 
-Run this at least every 30 days and after changing backup code:
+Run this at least every 30 days and after changing the backup passphrase. The
+passphrase is a password chosen by the operator (at least 16 characters), not a
+system-issued 16-digit code:
 
 1. Select the newest downloaded `.hpbak` file.
 2. Enter the current Super Admin password and the archive passphrase.

@@ -13,6 +13,7 @@
     "measure:hosting": "node scripts/measureHostingCapacity.js",
     "measure:application": "node scripts/measureApplicationCapacity.js",
     "audit:crop-years": "node scripts/auditCropYearIntegrity.js",
+    "reset:crop-year": "node scripts/resetActiveCropYear.js",
     "audit:legacy-data": "node scripts/migrateLegacyData.js",
     "migrate:legacy-data": "node scripts/migrateLegacyData.js --execute",
     "cleanup:deleted-user": "node scripts/cleanupDeletedUser.js",

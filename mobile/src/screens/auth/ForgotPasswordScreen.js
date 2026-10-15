@@ -7,12 +7,17 @@ import { useTranslation } from '../../services/i18n';
 import {
   requestPasswordRecovery,
   verifyPasswordRecovery,
-  completePasswordRecovery
+  completePasswordRecovery,
+  requestPasswordRecoveryReview,
+  checkPasswordRecoveryReview,
+  completePasswordRecoveryReview
 } from '../../services/authService';
 import { passwordPolicyError } from '../../domain/passwordPolicy';
+import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
+import { getRecoveryPushToken } from '../../services/recoveryNotificationService';
 import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
-export default function ForgotPasswordScreen({ navigation }) {
+export default function ForgotPasswordScreen({ navigation, route }) {
   const { t } = useTranslation();
 
   // Step 1: Identifier Entry; Step 2: SMS OTP Verification; Step 3: Set New Password; Step 4: Success
@@ -27,6 +32,55 @@ export default function ForgotPasswordScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [resendSeconds, setResendSeconds] = useState(0);
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
+  const [assistedMode, setAssistedMode] = useState(false);
+  const [assistedPhone, setAssistedPhone] = useState('');
+  const [reviewId, setReviewId] = useState('');
+  const [claimToken, setClaimToken] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW).then(stored => {
+      if (!active || !stored?.reviewId || !stored?.claimToken) return;
+      if (Date.parse(stored.expiresAt) <= Date.now()) {
+        void removeItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW);
+        return;
+      }
+      setAssistedMode(true);
+      setReviewId(stored.reviewId);
+      setClaimToken(stored.claimToken);
+      setStep(5);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!route?.params?.checkRecoveryReview || !reviewId || !claimToken) return undefined;
+    let active = true;
+    setLoading(true);
+    checkPasswordRecoveryReview(reviewId, claimToken)
+      .then(async result => {
+        if (!active) return;
+        if (result.status === 'APPROVED') {
+          setStep(3);
+          Alert.alert('Recovery approved', 'Create your new password now. This approval expires 15 minutes after it was granted.');
+        } else if (['REJECTED', 'EXPIRED', 'REPLACED', 'USED'].includes(result.status)) {
+          await removeItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW);
+          Alert.alert('Recovery unavailable', result.message || 'This recovery request is no longer available.');
+        } else {
+          setStep(5);
+        }
+      })
+      .catch(error => {
+        if (active) Alert.alert('Status unavailable', error.message || 'The review status could not be checked.');
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+          navigation.setParams({ checkRecoveryReview: undefined });
+        }
+      });
+    return () => { active = false; };
+  }, [claimToken, navigation, reviewId, route?.params?.checkRecoveryReview]);
 
   useEffect(() => {
     if (resendSeconds <= 0) return undefined;
@@ -47,6 +101,14 @@ export default function ForgotPasswordScreen({ navigation }) {
       setRecoveryId('');
       setResetToken('');
       setOtpCode('');
+      setStep(1);
+      return;
+    }
+    if (step === 5) {
+      setReviewId('');
+      setClaimToken('');
+      void removeItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW);
+      setAssistedMode(false);
       setStep(1);
       return;
     }
@@ -107,6 +169,57 @@ export default function ForgotPasswordScreen({ navigation }) {
     }
   };
 
+  const handleRequestReview = async () => {
+    const userId = identifier.trim();
+    const phone = assistedPhone.replace(/\D/g, '');
+    if (!/^0[1-4]\d{6}$/.test(userId) || !/^09\d{9}$/.test(phone)) {
+      Alert.alert('Account details required', 'Enter your 8-digit HUGPONG User ID and registered 11-digit mobile number.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const mobilePushToken = await getRecoveryPushToken();
+      const result = await requestPasswordRecoveryReview(userId, phone, mobilePushToken);
+      setReviewId(result.reviewId);
+      setClaimToken(result.claimToken);
+      await saveItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW, {
+        reviewId: result.reviewId,
+        claimToken: result.claimToken,
+        expiresAt: result.expiresAt
+      });
+      setStep(5);
+      Alert.alert(
+        'Recovery request submitted',
+        mobilePushToken
+          ? 'You may close HUGPONG. We will notify this device when an authorized reviewer approves or rejects the request.'
+          : 'Notifications are unavailable. Return to this screen and tap Check Review Status after meeting your authorized reviewer.'
+      );
+    } catch (error) {
+      Alert.alert('Recovery request unavailable', error.message || 'The recovery review could not be requested.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCheckReview = async () => {
+    setLoading(true);
+    try {
+      const result = await checkPasswordRecoveryReview(reviewId, claimToken);
+      if (result.status === 'APPROVED') {
+        setStep(3);
+      } else if (['REJECTED', 'EXPIRED', 'REPLACED', 'USED'].includes(result.status)) {
+        await removeItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW);
+        Alert.alert('Recovery unavailable', result.message || 'This recovery request is no longer available.');
+      } else {
+        Alert.alert('Review pending', result.message || 'Your authorized reviewer has not approved this request yet.');
+      }
+    } catch (error) {
+      Alert.alert('Status unavailable', error.message || 'The review status could not be checked.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ── Step 3: Save New Password ────────────────────────────────
   const handleResetPassword = async () => {
     const policyError = passwordPolicyError(newPassword);
@@ -121,10 +234,12 @@ export default function ForgotPasswordScreen({ navigation }) {
 
     setLoading(true);
     try {
-      await completePasswordRecovery(recoveryId, resetToken, newPassword);
+      if (assistedMode) await completePasswordRecoveryReview(reviewId, claimToken, newPassword);
+      else await completePasswordRecovery(recoveryId, resetToken, newPassword);
       setNewPassword('');
       setConfirmPassword('');
       setResetToken('');
+      await removeItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW);
       setStep(4);
     } catch (error) {
       Alert.alert(t('recovery_reset_failed'), t('recovery_reset_failed_msg'));
@@ -155,35 +270,44 @@ export default function ForgotPasswordScreen({ navigation }) {
               </View>
 
               <View style={s.textBlock}>
-                <Text style={s.title}>{t('reset_pw_heading', 'Reset your password')}</Text>
-                <Text style={s.sub}>{t('reset_pw_sub')}</Text>
+                <Text style={s.title}>{assistedMode ? 'Request authorized recovery' : t('reset_pw_heading', 'Reset your password')}</Text>
+                <Text style={s.sub}>{assistedMode ? 'For Smart/TNT or unavailable SMS, enter both account details and meet an authorized HUGPONG reviewer in person.' : t('reset_pw_sub')}</Text>
               </View>
 
               <View style={s.card}>
-                <Text style={s.label}>{t('recovery_identifier_label')}</Text>
+                <Text style={s.label}>{assistedMode ? '8-Digit HUGPONG User ID' : t('recovery_identifier_label')}</Text>
                 <View style={s.inputWrap}>
                   <Ionicons name="person-circle-outline" size={18} color={COLORS.textMuted} />
                   <TextInput
                     style={s.input}
                     value={identifier}
                     onChangeText={setIdentifier}
-                    placeholder="04000001 or 09171234567"
+                    placeholder={assistedMode ? '04000001' : '04000001 or 09171234567'}
                     placeholderTextColor={COLORS.textMuted}
                     autoCapitalize="none"
                   />
                 </View>
+                {assistedMode && (
+                  <>
+                    <Text style={s.label}>Registered Mobile Number</Text>
+                    <View style={s.inputWrap}>
+                      <Ionicons name="call-outline" size={18} color={COLORS.textMuted} />
+                      <TextInput style={s.input} value={assistedPhone} onChangeText={value => setAssistedPhone(value.replace(/\D/g, '').slice(0, 11))} placeholder="09171234567" placeholderTextColor={COLORS.textMuted} keyboardType="phone-pad" maxLength={11} />
+                    </View>
+                  </>
+                )}
               </View>
 
               <TouchableOpacity 
                 style={[s.btn, loading && { opacity: 0.6 }]}
-                onPress={handleSendOtp} 
+                onPress={assistedMode ? handleRequestReview : handleSendOtp}
                 disabled={loading}
                 activeOpacity={0.8}
               >
                 {loading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={s.btnText}>{t('recovery_send_code')}</Text>
+                  <Text style={s.btnText}>{assistedMode ? 'Request Recovery Review' : t('recovery_send_code')}</Text>
                 )}
               </TouchableOpacity>
 
@@ -191,8 +315,11 @@ export default function ForgotPasswordScreen({ navigation }) {
               <View style={s.lostSimHelpBox}>
                 <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} style={{ marginTop: 2 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={s.lostSimHelpTitle}>{t('recovery_lost_sim_title')}</Text>
-                  <Text style={s.lostSimHelpText}>{t('recovery_lost_sim_help')}</Text>
+                  <Text style={s.lostSimHelpTitle}>Using Smart/TNT or unable to receive SMS?</Text>
+                  <Text style={s.lostSimHelpText}>Request authorized recovery and bring valid identification to your Farm Manager, SRA Admin, or Super Admin, depending on your role. They never create or see your new password.</Text>
+                  <TouchableOpacity onPress={() => setAssistedMode(value => !value)} style={{ marginTop: 8 }}>
+                    <Text style={{ color: COLORS.primary, fontSize: 12, fontWeight: '800' }}>{assistedMode ? 'Use SMS recovery instead' : 'Request authorized password recovery'}</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </>
@@ -256,8 +383,30 @@ export default function ForgotPasswordScreen({ navigation }) {
                 <View style={{ flex: 1 }}>
                   <Text style={s.lostSimHelpTitle}>{t('recovery_sms_missing_title')}</Text>
                   <Text style={s.lostSimHelpText}>{t('recovery_sms_missing_help')}</Text>
+                  <TouchableOpacity onPress={() => { setAssistedMode(true); setStep(1); }} style={{ marginTop: 8 }}>
+                    <Text style={{ color: COLORS.primary, fontSize: 12, fontWeight: '800' }}>Smart/TNT or no SMS? Request authorized recovery</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
+            </>
+          )}
+
+          {step === 5 && (
+            <>
+              <View style={s.iconWrap}><Ionicons name="people-circle-outline" size={44} color={COLORS.primary} /></View>
+              <View style={s.textBlock}>
+                <Text style={s.title}>Recovery review pending</Text>
+                <Text style={s.sub}>Visit your Farm Manager, SRA Admin, or Super Admin, as applicable, for in-person identity verification. Return here after approval.</Text>
+              </View>
+              <View style={s.card}>
+                <Text style={s.label}>Recovery Reference</Text>
+                <Text style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: '800', color: COLORS.text }}>{reviewId}</Text>
+                <Text style={s.lostSimHelpText}>After approval, you have 15 minutes to create your own new password. The reviewer cannot see it.</Text>
+                <Text style={s.lostSimHelpText}>If notifications are enabled, you may close the app. Tapping the approval notification returns you here.</Text>
+              </View>
+              <TouchableOpacity style={[s.btn, loading && { opacity: 0.6 }]} onPress={handleCheckReview} disabled={loading} activeOpacity={0.8}>
+                {loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.btnText}>Check Review Status</Text>}
+              </TouchableOpacity>
             </>
           )}
 

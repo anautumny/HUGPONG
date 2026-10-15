@@ -82,7 +82,7 @@ test('mobile credentials use encrypted storage and shared account replicas are c
   const storage = read('mobile/src/services/storageService.js');
   const store = read('mobile/src/data/dataStore.js');
   assert.match(storage, /from 'expo-secure-store'/);
-  assert.match(storage, /SECURE_KEYS = new Set\(\[STORAGE_KEYS\.AUTH_TOKEN, STORAGE_KEYS\.SESSION\]\)/);
+  assert.match(storage, /SECURE_KEYS = new Set\(\[STORAGE_KEYS\.AUTH_TOKEN, STORAGE_KEYS\.PASSWORD_RECOVERY_REVIEW, STORAGE_KEYS\.SESSION\]\)/);
   assert.match(store, /await clearSharedAccountCache\(\)/);
 });
 

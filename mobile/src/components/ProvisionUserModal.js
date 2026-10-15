@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SPACING } from '../theme';
@@ -24,9 +24,11 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
   const actorId = String(session?.employeeId || session?.id || '').trim();
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const closeRequestedRef = useRef(false);
 
   useEffect(() => {
     if (!visible) return;
+    closeRequestedRef.current = false;
     const managerFarm = blockFarms.find(farm => String(farm.managerUserId || '').trim() === actorId);
     setForm({
       ...emptyForm,
@@ -35,6 +37,12 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
     });
     setSaving(false);
   }, [visible, actorRole, actorId, blockFarms, session?.blockFarmId]);
+
+  const closeOnce = useCallback(() => {
+    if (closeRequestedRef.current) return;
+    closeRequestedRef.current = true;
+    onClose?.();
+  }, [onClose]);
 
   const availableFarms = useMemo(() => uniqueRecordsById(blockFarms).filter(farm => {
     if (String(farm.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') return false;
@@ -70,7 +78,7 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
       });
       const accountId = response?.accountId || response?.data?.id;
       onCreated?.(response?.data);
-      onClose();
+      closeOnce();
       Alert.alert('User Added', `Account ID: ${accountId}\nPhone verification: ${form.phoneVerificationMode === 'VERIFIED' ? 'Verified' : 'User will choose SMS or manual review at first login'}`);
     } catch (error) {
       Alert.alert('User Not Added', error.message || 'The account could not be created.');
@@ -97,10 +105,10 @@ export default function ProvisionUserModal({ visible, onClose, session, blockFar
   );
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={saving ? undefined : onClose}>
+    <Modal visible={visible} animationType="none" presentationStyle="fullScreen" onRequestClose={saving ? undefined : closeOnce}>
       <View style={{ flex: 1, backgroundColor: COLORS.background }}>
         <View style={{ paddingTop: 52, paddingHorizontal: SPACING.lg, paddingBottom: 14, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: COLORS.border, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <TouchableOpacity disabled={saving} onPress={onClose} style={{ padding: 4 }}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
+          <TouchableOpacity disabled={saving} onPress={closeOnce} style={{ padding: 4 }}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
           <View><Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text }}>Add User</Text><Text style={{ fontSize: 11, color: COLORS.textMuted }}>Create an account and choose its phone-verification state.</Text></View>
         </View>
         <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 14, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">

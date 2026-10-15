@@ -5,6 +5,7 @@ import { subscribeToUsersData, toggleUserStatus, approveOrProvisionUser, updateU
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import UserTable from '../../components/users/UserTable';
 import PendingApprovalsQueue from '../../components/users/PendingApprovalsQueue';
+import RecoveryReviewQueue from '../../components/users/RecoveryReviewQueue';
 import UserFormModal from '../../components/users/UserFormModal';
 import AccountIdConfirmationModal from '../../components/users/AccountIdConfirmationModal';
 import Button from '../../components/ui/Button';
@@ -28,7 +29,7 @@ export default function UsersView() {
   const [loadMoreUsers, setLoadMoreUsers] = useState(null);
   const [error, setError] = useState(null);
 
-  // Tab State: 'directory' | 'pending'
+  // Tab State: 'directory' | 'pending' | 'recovery'
   const [activeTab, setActiveTab] = useState('directory');
 
   // Modal & Dialog States
@@ -232,6 +233,14 @@ export default function UsersView() {
             </span>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('recovery')}
+          className={`px-4.5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${activeTab === 'recovery' ? 'bg-primary text-white shadow-xs' : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'}`}
+        >
+          Password Recovery Reviews
+        </button>
       </div>
 
       {/* Active Tab Content */}
@@ -243,13 +252,15 @@ export default function UsersView() {
           onEditUser={handleEditUser}
           onToggleStatus={handleInitiateToggle}
         />
-      ) : (
+      ) : activeTab === 'pending' ? (
         <PendingApprovalsQueue
           pendingUsers={pendingUsers}
           blockFarms={blockFarms}
           onApproveUser={handleApprovePending}
           currentUser={user}
         />
+      ) : (
+        <RecoveryReviewQueue />
       )}
 
       {hasMoreUsers && (

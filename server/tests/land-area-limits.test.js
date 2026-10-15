@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   activeAllocatedArea,
+  attachBlockFarmAreaSummaries,
+  blockFarmAreaSummary,
   assertDeclaredAreaCoversFields,
   assertFieldFitsBlockFarm,
   assertOperationFitsField
@@ -33,6 +35,33 @@ test('active field allocations cannot exceed the Block Farm declared area', () =
   }), error => error.status === 409
     && error.data.code === 'BLOCK_FARM_AREA_EXCEEDED'
     && error.data.remainingAreaHa === 5);
+});
+
+test('Block Farm summaries expose an authoritative display area for current and legacy records', () => {
+  assert.deepEqual(blockFarmAreaSummary({ declaredAreaHa: 50 }, fields), {
+    declaredAreaHa: 50,
+    allocatedAreaHa: 45,
+    effectiveAreaHa: 50,
+    remainingAreaHa: 5,
+    areaSource: 'DECLARED_AREA'
+  });
+  assert.deepEqual(blockFarmAreaSummary({}, fields), {
+    declaredAreaHa: null,
+    allocatedAreaHa: 45,
+    effectiveAreaHa: 45,
+    remainingAreaHa: null,
+    areaSource: 'ACTIVE_FIELDS'
+  });
+
+  const summarized = attachBlockFarmAreaSummaries(
+    [{ id: 'BF-1' }, { id: 'BF-2', declaredAreaHa: 12 }],
+    [
+      { blockFarmId: 'BF-1', status: 'ACTIVE', areaHa: 7.5 },
+      { blockFarmId: 'BF-2', status: 'ARCHIVED', areaHa: 99 }
+    ]
+  );
+  assert.equal(summarized[0].effectiveAreaHa, 7.5);
+  assert.equal(summarized[1].effectiveAreaHa, 12);
 });
 
 test('editing a field excludes its current allocation before checking the replacement', () => {

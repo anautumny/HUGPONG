@@ -19,6 +19,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [cameraKey, setCameraKey] = useState(0);
   const permissionRequestedRef = useRef(false);
+  const closeRequestedRef = useRef(false);
   const scanLockedRef = useRef(false);
   const scanRearmTimerRef = useRef(null);
   const lastScanRef = useRef({ data: '', scannedAt: 0 });
@@ -31,6 +32,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
 
   useEffect(() => {
     if (!visible) {
+      closeRequestedRef.current = false;
       permissionRequestedRef.current = false;
       scanLockedRef.current = false;
       lastScanRef.current = { data: '', scannedAt: 0 };
@@ -48,6 +50,12 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       requestPermission().catch(() => {});
     }
   }, [visible, permission, requestPermission]);
+
+  const closeScanner = useCallback(() => {
+    if (closeRequestedRef.current) return;
+    closeRequestedRef.current = true;
+    onClose?.();
+  }, [onClose]);
 
   const handleBarcodeScanned = useCallback(async (result, source = 'camera') => {
     const event = result?.nativeEvent || result || {};
@@ -128,15 +136,15 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const permissionDenied = permission && !permission.granted;
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible animationType="none" presentationStyle="fullScreen" onRequestClose={closeScanner}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('qr_back', 'Back')} style={styles.closeButton} onPress={onClose}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('qr_back', 'Back')} style={styles.closeButton} onPress={closeScanner}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerTitleWrap}>
             <Text style={styles.brand}>HUGPONG</Text>
-            <Text style={styles.title} numberOfLines={1}>{t('qr_scan_title', 'Scan QR')}</Text>
+            <Text style={styles.title}>{t('qr_scan_title', 'Scan QR')}</Text>
           </View>
           <TouchableOpacity
             accessibilityRole="button"
@@ -161,7 +169,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
               <Text style={styles.help}>{t('qr_permission_help', 'Allow camera access to open the device QR scanner. Image upload works without the camera.')}</Text>
               {permission.canAskAgain ? (
                 <TouchableOpacity style={styles.primaryButton} onPress={retryPermission}>
-                  <Text style={styles.primaryButtonText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{t('qr_allow_camera', 'Allow Camera')}</Text>
+                  <Text style={styles.primaryButtonText}>{t('qr_allow_camera', 'Allow Camera')}</Text>
                 </TouchableOpacity>
               ) : null}
             </>
@@ -245,7 +253,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             {uploadBusy
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <Ionicons name="image-outline" size={20} color="#FFFFFF" />}
-            <Text style={styles.uploadButtonText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{uploadBusy ? t('qr_reading_image', 'Reading Image...') : t('qr_upload_image', 'Upload QR Image')}</Text>
+            <Text style={styles.uploadButtonText}>{uploadBusy ? t('qr_reading_image', 'Reading Image...') : t('qr_upload_image', 'Upload QR Image')}</Text>
           </TouchableOpacity>
           <Text style={styles.uploadHint}>{t('qr_upload_hint', 'Crop the image so the QR square fills most of the frame.')}</Text>
         </View>
@@ -284,11 +292,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#2F6B3B',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
   cameraFrame: {
     width: '100%',
     maxWidth: 310,
@@ -329,11 +338,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.28)',
     backgroundColor: 'rgba(255,255,255,0.08)',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
-  uploadButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  uploadButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
   uploadHint: { color: 'rgba(255,255,255,0.5)', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 8 },
   disabledButton: { opacity: 0.6 },
 });

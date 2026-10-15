@@ -113,13 +113,8 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
 function Metric({ value, label, onPress }) {
   const content = (
     <>
-      <Text style={s.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
-      <Text
-        style={s.metricLabel}
-        numberOfLines={2}
-        adjustsFontSizeToFit
-        minimumFontScale={0.75}
-      >
+      <Text style={s.metricValue}>{value}</Text>
+      <Text style={s.metricLabel}>
         {label}
       </Text>
     </>
@@ -173,11 +168,13 @@ const s = StyleSheet.create({
   },
   metrics: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 16,
   },
   metric: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 90,
     minHeight: 74,
     paddingHorizontal: 6,
     paddingVertical: 10,

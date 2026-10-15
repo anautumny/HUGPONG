@@ -55,6 +55,7 @@ const telemetryRoutes = require('./routes/telemetry');
 const systemDiagnosticsRoutes = require('./routes/systemDiagnostics');
 const diagnosticsRoutes = require('./routes/diagnostics');
 const backupRoutes = require('./routes/backups');
+const recoveryReviewRoutes = require('./routes/recoveryReviews');
 
 const app = express();
 const scopedReadCache = createScopedReadCache();
@@ -226,11 +227,13 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api/prices', priceRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/recovery-reviews', recoveryReviewRoutes);
 app.use('/api/block-farms', blockFarmRoutes);
 app.use('/api/fields', fieldRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/crop-cycles', cropCycleRoutes);
 app.use('/api/audit-reports', auditReportRoutes);
+app.use('/api/crop-year-compilations', require('./routes/cropYearCompilations'));
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/audit-events', auditEventRoutes);

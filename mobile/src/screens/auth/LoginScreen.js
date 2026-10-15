@@ -21,8 +21,8 @@ import {
   CONNECTIVITY_STATUS
 } from '../../services/networkService';
 import { API_UNAVAILABLE_MESSAGE } from '../../config/apiConfig';
-import CirclingRetryButton from '../../components/CirclingRetryButton';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
+import OtpCodeInput from '../../components/OtpCodeInput';
 import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
 import { passwordPolicy } from '../../domain/passwordPolicy';
 import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
@@ -39,7 +39,6 @@ export default function LoginScreen({ navigation, route }) {
   const [authError, setAuthError] = useState(() => String(route?.params?.sessionNotice || ''));
   const [deviceOnline, setDeviceOnline] = useState(isOnline());
   const [connectivityStatus, setConnectivityStatus] = useState(getConnectivityDetails().status);
-  const [showOfflineGateModal, setShowOfflineGateModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
 
@@ -71,6 +70,7 @@ export default function LoginScreen({ navigation, route }) {
   const [offlineRetryFeedback, setOfflineRetryFeedback] = useState('');
   const spinAnim = useRef(new Animated.Value(0)).current;
   const loopAnimRef = useRef(null);
+  const phoneVerificationAttemptRef = useRef('');
 
   const startSpinAnimation = () => {
     spinAnim.setValue(0);
@@ -103,22 +103,17 @@ export default function LoginScreen({ navigation, route }) {
       if (reachable) {
         setDeviceOnline(true);
         setConnectivityStatus(CONNECTIVITY_STATUS.ONLINE);
+        setOfflineRetryFeedback(t('auth_connection_ready'));
       } else {
         const details = getConnectivityDetails();
         setConnectivityStatus(details.status);
-        setOfflineRetryFeedback(
-          details.status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE
-            ? 'Server is temporarily unreachable. Please retry shortly.'
-            : 'No internet connection detected. Please check Wi-Fi or mobile data.'
-        );
+        setOfflineRetryFeedback(t('auth_connection_still_unavailable'));
       }
     } catch {
-      setOfflineRetryFeedback('Unable to connect. Please check your network.');
+      setOfflineRetryFeedback(t('auth_connection_still_unavailable'));
     } finally {
-      setTimeout(() => {
-        stopSpinAnimation();
-        setIsRetryingOffline(false);
-      }, 500);
+      stopSpinAnimation();
+      setIsRetryingOffline(false);
     }
   };
 
@@ -127,7 +122,7 @@ export default function LoginScreen({ navigation, route }) {
       setDeviceOnline(status);
       setConnectivityStatus(details.status);
       if (status) {
-        setShowOfflineGateModal(false);
+        setOfflineRetryFeedback('');
       }
     });
     return () => {
@@ -220,7 +215,7 @@ export default function LoginScreen({ navigation, route }) {
       if (!serverReachable) {
         const connectivity = getConnectivityDetails();
         if (connectivity.status === CONNECTIVITY_STATUS.NO_INTERNET) {
-          setShowOfflineGateModal(true);
+          setOfflineRetryFeedback('');
         } else {
           setAuthError(API_UNAVAILABLE_MESSAGE);
         }
@@ -255,6 +250,7 @@ export default function LoginScreen({ navigation, route }) {
       if (res.user?.pendingFirstLoginVerification === true || res.user?.phoneVerified === false) {
         setPendingPasswordChange(res.requiresPasswordChange === true);
         setPhoneVerificationCode('');
+        phoneVerificationAttemptRef.current = '';
         setPhoneVerificationError('');
         const verificationStatus = String(res.user?.phoneVerificationStatus || '').toUpperCase();
         setPhoneVerificationStep(verificationStatus === 'PENDING_VERIFICATION'
@@ -282,16 +278,20 @@ export default function LoginScreen({ navigation, route }) {
     }
   };
 
-  const handleVerifyPhone = async () => {
-    if (!/^\d{6}$/.test(phoneVerificationCode.trim())) {
+  const handleVerifyPhone = async candidateCode => {
+    const cleanCode = String(candidateCode ?? phoneVerificationCode).trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
       setPhoneVerificationError(t('auth_code_complete'));
       return;
     }
+    if (phoneVerificationAttemptRef.current === cleanCode) return;
+    phoneVerificationAttemptRef.current = cleanCode;
     setPhoneVerificationSaving(true);
     setPhoneVerificationError('');
-    const result = await verifyCurrentPhone(phoneVerificationCode.trim());
+    const result = await verifyCurrentPhone(cleanCode);
     setPhoneVerificationSaving(false);
     if (!result.success) {
+      phoneVerificationAttemptRef.current = '';
       setPhoneVerificationError(result.error || t('auth_code_invalid'));
       return;
     }
@@ -320,6 +320,8 @@ export default function LoginScreen({ navigation, route }) {
       } else {
         setPhoneVerificationResendSeconds(Math.max(0, Number(result.resendAfterSeconds || 0)));
         setPhoneVerificationRequestsRemaining(Math.max(0, Number(result.codeRequestsRemaining ?? 0)));
+      setPhoneVerificationCode('');
+      phoneVerificationAttemptRef.current = '';
       }
     } catch (error) {
       setPhoneVerificationError(error.message || t('auth_new_code_failed'));
@@ -347,6 +349,8 @@ export default function LoginScreen({ navigation, route }) {
     }
     setPhoneVerificationResendSeconds(Math.max(0, Number(request.resendAfterSeconds || 0)));
     setPhoneVerificationRequestsRemaining(Math.max(0, Number(request.codeRequestsRemaining ?? 0)));
+    setPhoneVerificationCode('');
+    phoneVerificationAttemptRef.current = '';
     setPhoneVerificationStep('code');
   };
 
@@ -374,6 +378,7 @@ export default function LoginScreen({ navigation, route }) {
       setAuthenticatedUser(null);
       setPendingPasswordChange(false);
       setPhoneVerificationCode('');
+      phoneVerificationAttemptRef.current = '';
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
@@ -463,68 +468,10 @@ export default function LoginScreen({ navigation, route }) {
     );
   }
 
-  if (!deviceOnline && connectivityStatus !== CONNECTIVITY_STATUS.CHECKING && !showFirstLoginModal && !showPhoneVerificationModal) {
-    const isServerDown = connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE;
-    const spin = spinAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0deg', '360deg'],
-    });
-
-    return (
-      <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-        <View style={s.offlineScreenContainer}>
-          {/* Header */}
-          <View style={s.offlineHeader}>
-            <Image source={LOGO} style={s.offlineLogoImg} resizeMode="contain" />
-          </View>
-
-          {/* Center Minimal State (Exact Instagram Style) */}
-          <View style={s.offlineCenterContent}>
-            <TouchableOpacity
-              onPress={handleRetryOffline}
-              disabled={isRetryingOffline}
-              activeOpacity={0.65}
-              style={s.offlineIconWrap}
-              accessibilityRole="button"
-              accessibilityLabel={t('a11y_retry_connection')}
-            >
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <Ionicons
-                  name="reload"
-                  size={48}
-                  color="#111827"
-                />
-              </Animated.View>
-            </TouchableOpacity>
-
-            <Text style={s.offlineTitle}>
-              {isServerDown ? t('offline_server_unavailable_title') : t('auth_no_internet_title')}
-            </Text>
-
-            {offlineRetryFeedback ? (
-              <Text style={s.offlineFeedbackText}>{offlineRetryFeedback}</Text>
-            ) : null}
-          </View>
-
-          {/* Footer Notice */}
-          <View style={s.offlineFooter}>
-            <TouchableOpacity
-              style={s.legalNoticeRow}
-              onPress={() => setShowLegalModal(true)}
-              accessibilityRole="button"
-              accessibilityLabel={t('a11y_open_legal')}
-            >
-              <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.textMuted} />
-              <Text style={s.legalNoticeText}>
-                {t('profile_legal')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-      </SafeAreaView>
-    );
-  }
+  const retrySpin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -549,14 +496,29 @@ export default function LoginScreen({ navigation, route }) {
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={s.offlineBannerTitle}>
                     {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
-                      ? 'No internet connection'
-                      : 'HUGPONG server unavailable'}
+                      ? t('auth_no_internet_title')
+                      : t('offline_server_unavailable_title')}
                   </Text>
                   <Text style={s.offlineBannerText}>
                     {connectivityStatus === CONNECTIVITY_STATUS.NO_INTERNET
-                      ? 'Connect to Wi-Fi or mobile data to sign in. Once signed in, your field work remains available offline.'
-                      : 'Your internet connection is active, but the HUGPONG server cannot be reached. Please retry shortly.'}
+                      ? t('auth_no_internet_desc')
+                      : t('auth_server_unavailable_desc')}
                   </Text>
+                  {offlineRetryFeedback ? <Text style={s.offlineFeedbackText}>{offlineRetryFeedback}</Text> : null}
+                  <TouchableOpacity
+                    onPress={handleRetryOffline}
+                    disabled={isRetryingOffline}
+                    style={s.offlineRetryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('a11y_retry_connection')}
+                  >
+                    <Animated.View style={{ transform: [{ rotate: retrySpin }] }}>
+                      <Ionicons name="refresh" size={15} color="#92400E" />
+                    </Animated.View>
+                    <Text style={s.offlineRetryText}>
+                      {isRetryingOffline ? t('auth_checking_connection') : t('auth_retry_connection')}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ) : null}
@@ -765,18 +727,21 @@ export default function LoginScreen({ navigation, route }) {
               </View>}
               {phoneVerificationStep === 'code' && <View style={s.fieldGroup}>
                 <Text style={s.label}>{t('first_verification_code')}</Text>
-                <View style={s.inputWrap}>
-                  <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
-                  <TextInput
-                    style={[s.input, { letterSpacing: 4 }]}
-                    value={phoneVerificationCode}
-                    onChangeText={value => { setPhoneVerificationCode(value); setPhoneVerificationError(''); }}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    placeholder="123456"
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                </View>
+                <OtpCodeInput
+                  value={phoneVerificationCode}
+                  onChangeText={value => {
+                    setPhoneVerificationCode(value);
+                    if (value.length < 6) phoneVerificationAttemptRef.current = '';
+                    setPhoneVerificationError('');
+                  }}
+                  onComplete={handleVerifyPhone}
+                  disabled={phoneVerificationSaving}
+                  error={Boolean(phoneVerificationError)}
+                  accessibilityLabel={t('first_verification_code')}
+                />
+                <Text style={{ marginTop: 7, textAlign: 'center', fontSize: 11, color: COLORS.textMuted }}>
+                  {phoneVerificationSaving ? t('reg_verifying_code', 'Verifying code...') : t('reg_auto_verify_help', 'Verification starts automatically after all six digits are entered.')}
+                </Text>
               </View>}
               {phoneVerificationStep === 'code' && <TouchableOpacity style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 10 }} onPress={handleRequestPhoneVerificationReview} disabled={phoneVerificationReviewSaving || phoneVerificationSaving || phoneVerificationResending || setupSigningOut}>
                 {phoneVerificationReviewSaving ? <ActivityIndicator size="small" color="#92400E" /> : <Text style={{ color: '#92400E', fontWeight: '800', fontSize: 11, textAlign: 'center' }}>{t('first_sms_unavailable_review')}</Text>}
@@ -804,15 +769,6 @@ export default function LoginScreen({ navigation, route }) {
                           ? `${phoneVerificationRequestsRemaining === 0 ? t('recovery_limit_reached') : t('reg_resend_btn')} ${Math.floor(phoneVerificationResendSeconds / 60)}:${String(phoneVerificationResendSeconds % 60).padStart(2, '0')}`
                           : `${t('reg_resend_btn')} (${phoneVerificationRequestsRemaining} ${t('recovery_remaining')})`}
                       </Text>}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.modalSaveBtn}
-                  onPress={handleVerifyPhone}
-                  disabled={phoneVerificationSaving || setupSigningOut}
-                >
-                  {phoneVerificationSaving
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={s.modalSaveText}>{t('first_verify_phone')}</Text>}
                 </TouchableOpacity>
               </View>}
             </View>
@@ -964,120 +920,17 @@ export default function LoginScreen({ navigation, route }) {
         </View>
       </Modal>
 
-      {/* Offline Connection Required Barrier Modal */}
-      <Modal
-        visible={showOfflineGateModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowOfflineGateModal(false)}
-      >
-        <View style={s.modalOverlay}>
-          <View style={[s.modalContent, { maxWidth: 380, alignItems: 'center', paddingVertical: 24, paddingHorizontal: 20 }]}>
-            <View style={{
-              width: 58,
-              height: 58,
-              borderRadius: 29,
-              backgroundColor: '#FEF3C7',
-              borderWidth: 1.5,
-              borderColor: '#FDE68A',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 14,
-            }}>
-              <Ionicons name="cloud-offline" size={30} color="#D97706" />
-            </View>
-
-            <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.text, textAlign: 'center', marginBottom: 8 }}>
-              {t('auth_no_internet_title')}
-            </Text>
-
-            <Text style={{ fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 19, marginBottom: 20 }}>
-              {t('auth_no_internet_desc')}
-            </Text>
-
-            <CirclingRetryButton
-              label="Scan for Internet"
-              scanningLabel="Scanning Connection..."
-              theme="primary"
-              style={{ width: '100%', minHeight: 46 }}
-              onResult={(online) => {
-                setDeviceOnline(online);
-                if (online) {
-                  setShowOfflineGateModal(false);
-                } else if (getConnectivityDetails().status === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE) {
-                  setShowOfflineGateModal(false);
-                  setAuthError(API_UNAVAILABLE_MESSAGE);
-                }
-              }}
-            />
-
-            <TouchableOpacity
-              onPress={() => setShowOfflineGateModal(false)}
-              style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 }}
-              activeOpacity={0.7}
-            >
-              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted }}>
-                {t('btn_dismiss')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  // Minimal Instagram-style Offline Screen
-  offlineScreenContainer: {
-    flex: 1,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
-    backgroundColor: '#FFFFFF',
-  },
-  offlineHeader: {
-    width: '100%',
-    alignItems: 'center',
-    paddingTop: 8,
-  },
-  offlineLogoImg: {
-    width: 44,
-    height: 44,
-  },
-  offlineCenterContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    maxWidth: 320,
-    marginTop: -20,
-  },
-  offlineIconWrap: {
-    width: 72,
-    height: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  offlineTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-    letterSpacing: -0.3,
-  },
   offlineFeedbackText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#B45309',
     fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  offlineFooter: {
-    width: '100%',
-    alignItems: 'center',
+    lineHeight: 15,
+    marginTop: 4,
   },
   safe: { flex: 1, backgroundColor: COLORS.background },
   scrollWrap: { flex: 1 },
@@ -1149,6 +1002,25 @@ const s = StyleSheet.create({
     fontSize: 11,
     color: '#B45309',
     lineHeight: 15,
+  },
+  offlineRetryButton: {
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    marginTop: 7,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    backgroundColor: '#FFFFFF',
+  },
+  offlineRetryText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#92400E',
   },
 
   errorBanner: {

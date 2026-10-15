@@ -497,13 +497,13 @@ export default function AnalyticsScreen({ navigation, route }) {
                 <View style={{ gap: 8, marginTop: 8 }}>
                   {productionCost.breakdownByEntity.map((item) => (
                     <View key={item.id} style={s.entityRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.entityName} numberOfLines={1}>{item.name}</Text>
+                      <View style={{ flexGrow: 1, flexBasis: 170, minWidth: 0 }}>
+                        <Text style={s.entityName}>{item.name}</Text>
                         <Text style={s.entitySub}>
                           {item.areaHa.toFixed(2)} Ha · {item.opsCount} {item.opsCount === 1 ? 'operation' : 'operations'}
                         </Text>
                       </View>
-                      <View style={{ alignItems: 'flex-end' }}>
+                      <View style={{ flexGrow: 1, flexBasis: 110, minWidth: 0, alignItems: 'flex-end' }}>
                         <Text style={s.entityCost}>₱{item.totalCost.toLocaleString()}</Text>
                         <Text style={s.entityPerHa}>₱{item.costPerHa.toLocaleString()} / ha</Text>
                       </View>
@@ -811,7 +811,9 @@ const s = StyleSheet.create({
   },
   entityRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingVertical: 9,
     borderBottomWidth: 1,

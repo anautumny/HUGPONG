@@ -2,6 +2,10 @@ import { authenticatedRead, authenticatedRequest } from './apiClient';
 
 const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
 
+function backupFileError(message, code) {
+  return Object.assign(new Error(message), { code });
+}
+
 function bytesToBase64(bytes) {
   let binary = '';
   const chunkSize = 0x8000;
@@ -50,9 +54,13 @@ export async function createEncryptedBackup({ currentPassword, backupPassphrase 
 }
 
 export async function readBackupFile(file) {
-  if (!file) throw new Error('Select a HUGPONG backup file first.');
-  if (!String(file.name || '').toLowerCase().endsWith('.hpbak')) throw new Error('Select a .hpbak HUGPONG backup file.');
-  if (file.size < 1 || file.size > MAX_ARCHIVE_BYTES) throw new Error('The backup file is empty or exceeds the 8 MB safety limit.');
+  if (!file) throw backupFileError('Select a HUGPONG backup file first.', 'BACKUP_FILE_REQUIRED');
+  if (!String(file.name || '').toLowerCase().endsWith('.hpbak')) {
+    throw backupFileError('Select a .hpbak HUGPONG backup file.', 'BACKUP_FILE_EXTENSION');
+  }
+  if (file.size < 1 || file.size > MAX_ARCHIVE_BYTES) {
+    throw backupFileError('The backup file is empty or exceeds the 8 MB safety limit.', 'BACKUP_FILE_SIZE');
+  }
   return bytesToBase64(new Uint8Array(await file.arrayBuffer()));
 }
 

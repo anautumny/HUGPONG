@@ -546,11 +546,11 @@ export default function HomeScreen({ navigation }) {
           <View style={s.priceCardHeader}>
             <View style={s.priceSourceRow}>
               <View style={[s.sourceDot, (!isOnline && isFieldRole) && { backgroundColor: COLORS.accent }]} />
-              <Text style={s.priceSource} numberOfLines={1}>{currentPrice.source}</Text>
+              <Text style={s.priceSource}>{currentPrice.source}</Text>
             </View>
             <View style={s.priceDateBadge}>
               <Ionicons name="calendar-outline" size={11} color={COLORS.textMuted} />
-              <Text style={s.priceDateBadgeText} numberOfLines={1}>
+              <Text style={s.priceDateBadgeText}>
               {liveWeek !== 'No records' && liveDate !== 'No records' 
                 ? (isOnline ? `${liveWeek} · ${liveDate}` : (isFieldRole ? t('sync_cached_stamp', 'Offline: Cached') : `${liveWeek} · ${liveDate}`))
                 : t('no_records', 'No records')}
@@ -581,7 +581,7 @@ export default function HomeScreen({ navigation }) {
               </View>
             </View>
             <View style={s.sugarPriceRow}>
-              <Text style={s.sugarPriceValue} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={s.sugarPriceValue}>
                 {livePrice == null ? '—' : `₱${Number(livePrice).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </Text>
               <Text style={s.sugarUnitText}>{t('unit_per_bag', 'per 50kg bag (Lkg)')}</Text>
@@ -595,7 +595,7 @@ export default function HomeScreen({ navigation }) {
             <View style={s.molassesInfoCol}>
               <Text style={s.molassesTag}>{t('industrial_molasses', 'Industrial Molasses')}</Text>
               <View style={s.molassesPriceRow}>
-                <Text style={s.molassesPriceValue} numberOfLines={1}>
+                <Text style={s.molassesPriceValue}>
                   {liveMol == null ? '—' : `₱${Number(liveMol).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </Text>
                 <Text style={s.molassesUnitText}>{t('unit_per_mt', '/ MT')}</Text>
@@ -923,16 +923,19 @@ const s = StyleSheet.create({
   },
   priceCardHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 8,
     marginBottom: SPACING.md,
   },
   priceSourceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    flex: 1,
-    marginRight: 8,
+    flexGrow: 1,
+    flexBasis: 150,
+    minWidth: 0,
   },
   sourceDot: {
     width: 8,
@@ -948,6 +951,7 @@ const s = StyleSheet.create({
   },
   priceDateBadge: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 4,
     backgroundColor: COLORS.background,
@@ -956,11 +960,13 @@ const s = StyleSheet.create({
     borderRadius: RADIUS.full,
     borderWidth: 1,
     borderColor: COLORS.border,
+    maxWidth: '100%',
   },
   priceDateBadgeText: {
     fontSize: 10,
     fontWeight: '600',
     color: COLORS.textMuted,
+    flexShrink: 1,
   },
 
   // Sugar section (dominant)
@@ -1009,8 +1015,10 @@ const s = StyleSheet.create({
   // Molasses section (supporting sub-row underneath)
   molassesSection: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     backgroundColor: COLORS.primaryBg,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1020,6 +1028,9 @@ const s = StyleSheet.create({
   },
   molassesInfoCol: {
     gap: 2,
+    flexGrow: 1,
+    flexBasis: 140,
+    minWidth: 0,
   },
   molassesTag: {
     fontSize: 10,
@@ -1030,6 +1041,7 @@ const s = StyleSheet.create({
   },
   molassesPriceRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: 4,
   },

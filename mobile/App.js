@@ -33,6 +33,13 @@ import {
   subscribeToPlannerNotificationResponses,
   syncPlannerDeviceNotifications
 } from './src/services/plannerNotificationService';
+import {
+  clearLastRecoveryNotificationResponse,
+  getLastRecoveryNotificationResponse,
+  recoveryNotificationData,
+  requestApplicationNotificationPermission,
+  subscribeToRecoveryNotificationResponses
+} from './src/services/recoveryNotificationService';
 
 // Optimize native screen transitions and memory consumption on Android.
 enableScreens(true);
@@ -58,6 +65,7 @@ const MOBILE_FONTS = {
 
 function HugpongApp() {
   const pendingPlannerDate = useRef(null);
+  const pendingRecoveryReview = useRef(false);
   const openPlannerReminder = useCallback((response) => {
     const data = plannerNotificationData(response);
     if (!data?.plannedDate) return;
@@ -71,8 +79,18 @@ function HugpongApp() {
     });
   }, []);
 
+  const openRecoveryReview = useCallback((response) => {
+    if (!recoveryNotificationData(response)) return;
+    if (!navigationRef.isReady() || navigationRef.getCurrentRoute()?.name === 'Splash') {
+      pendingRecoveryReview.current = true;
+      return;
+    }
+    navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });
+  }, []);
+
   useEffect(() => {
     startNetworkMonitor();
+    requestApplicationNotificationPermission().catch(() => {});
     let previousState = AppState.currentState;
     const appStateSubscription = AppState.addEventListener('change', nextState => {
       const returnedToForeground = /inactive|background/.test(previousState || '') && nextState === 'active';
@@ -109,11 +127,29 @@ function HugpongApp() {
     };
   }, [openPlannerReminder]);
 
+  useEffect(() => {
+    const responseSubscription = subscribeToRecoveryNotificationResponses(response => {
+      openRecoveryReview(response);
+      clearLastRecoveryNotificationResponse().catch(() => {});
+    });
+    getLastRecoveryNotificationResponse().then(response => {
+      if (!recoveryNotificationData(response)) return;
+      openRecoveryReview(response);
+      clearLastRecoveryNotificationResponse().catch(() => {});
+    }).catch(() => {});
+    return () => responseSubscription.remove();
+  }, [openRecoveryReview]);
+
   return (
     <LanguageProvider>
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
+          if (pendingRecoveryReview.current && navigationRef.getCurrentRoute()?.name !== 'Splash') {
+            pendingRecoveryReview.current = false;
+            navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });
+            return;
+          }
           if (!pendingPlannerDate.current) return;
           const plannedDate = pendingPlannerDate.current;
           pendingPlannerDate.current = null;
@@ -121,6 +157,11 @@ function HugpongApp() {
             screen: 'Planner',
             params: { screen: 'CalcMain', params: { selectedDate: plannedDate } }
           });
+        }}
+        onStateChange={() => {
+          if (!pendingRecoveryReview.current || navigationRef.getCurrentRoute()?.name === 'Splash') return;
+          pendingRecoveryReview.current = false;
+          navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });
         }}
       >
         <StatusBar style="auto" />

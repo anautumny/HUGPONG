@@ -58,15 +58,21 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
 
   const farmName = assignedBlockFarm?.name || 'Unassigned Block Farm';
   const farmCode = assignedBlockFarm?.code || '—';
-  const declaredHa = assignedBlockFarm?.declaredHa ?? assignedBlockFarm?.declaredAreaHa ?? 0;
+  const registeredHa = Number(
+    assignedBlockFarm?.effectiveAreaHa
+      ?? assignedBlockFarm?.declaredAreaHa
+      ?? assignedBlockFarm?.declaredHa
+      ?? assignedBlockFarm?.allocatedAreaHa
+      ?? 0
+  );
 
   // Calculate cultivated area from scoped fields
   const totalCultivatedArea = useMemo(() => {
     return scopedFields.reduce((sum, f) => sum + (Number(f.ha || f.areaHa || 0)), 0);
   }, [scopedFields]);
 
-  const utilizationPct = declaredHa > 0
-    ? Math.min(100, Math.round((totalCultivatedArea / declaredHa) * 100))
+  const utilizationPct = registeredHa > 0
+    ? Math.min(100, Math.round((totalCultivatedArea / registeredHa) * 100))
     : 0;
 
   const activeCropCycles = useMemo(() => {
@@ -180,7 +186,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     {
       label: 'Cultivated Area',
       value: formatHectares(totalCultivatedArea),
-      subtext: `Declared: ${formatHectares(declaredHa)}`,
+      subtext: `Registered: ${formatHectares(registeredHa)}`,
       icon: MapPin
     },
     {
@@ -250,9 +256,9 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-hug-muted">Declared Area</span>
+                <span className="text-hug-muted">Registered Area</span>
                 <span className="font-semibold text-hug-text">
-                  {formatHectares(declaredHa)}
+                  {formatHectares(registeredHa)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">

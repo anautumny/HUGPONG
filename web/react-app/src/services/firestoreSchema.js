@@ -15,6 +15,7 @@ export const COLLECTIONS = Object.freeze({
   CROP_CYCLES: 'crop_cycles',
   OPERATION_LOGS: 'operation_logs',
   AUDIT_REPORTS: 'audit_reports',
+  CROP_YEAR_COMPILATIONS: 'crop_year_compilations',
   AUDIT_LOGS: 'audit_logs',
   SRA_PRICES: 'sra_prices',
   SUPPORT_TICKETS: 'support_tickets',
@@ -190,14 +191,23 @@ export const toBlockFarm = value => ({
   archivedAt: value.archivedAt || null
 });
 
-export const fromBlockFarm = (id, value) => ({
-  ...value,
-  id,
-  address: String(value.address || value.location || '').trim(),
-  location: String(value.address || value.location || '').trim(),
-  declaredHa: Number(value.declaredAreaHa || 0),
-  farmManagerId: value.managerUserId || ''
-});
+export const fromBlockFarm = (id, value) => {
+  const declaredAreaHa = Number(value.declaredAreaHa ?? value.declaredHa ?? 0);
+  const allocatedAreaHa = Number(value.allocatedAreaHa ?? 0);
+  const effectiveAreaHa = Number(value.effectiveAreaHa ?? Math.max(declaredAreaHa, allocatedAreaHa));
+  return {
+    ...value,
+    id,
+    address: String(value.address || value.location || '').trim(),
+    location: String(value.address || value.location || '').trim(),
+    declaredAreaHa,
+    declaredHa: declaredAreaHa,
+    allocatedAreaHa,
+    effectiveAreaHa,
+    hectares: effectiveAreaHa,
+    farmManagerId: value.managerUserId || ''
+  };
+};
 
 export const toField = value => {
   const blockFarmId = String(value.blockFarmId || '').trim().toUpperCase();

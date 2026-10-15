@@ -1194,8 +1194,7 @@ export const registerUser = async (userData) => {
   }
   const middleName = userData.middleInitial || userData.middleName || '';
   const formattedName = formatFullName(userData.firstName, middleName, userData.lastName, userData.suffix);
-  const selectedFarm = blockFarms.find(farm => farm.id === userData.blockFarmId)
-    || blockFarms.find(farm => farm.id === userData.blockFarm || farm.name === userData.blockFarm);
+  const selectedBlockFarmId = String(userData.blockFarmId || '').trim().toUpperCase();
   try {
     const result = await registerWithServer({
       displayName: formattedName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
@@ -1206,7 +1205,7 @@ export const registerUser = async (userData) => {
       phone: cleaned,
       password: userData.password,
       role: 'MEMBER_FARMER',
-      blockFarmId: selectedFarm?.id || '',
+      blockFarmId: selectedBlockFarmId,
       phoneVerificationRequestToken: String(userData.phoneVerificationRequestToken || '')
     });
     if (result.user) {

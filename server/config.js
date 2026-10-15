@@ -47,6 +47,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const smsProvider = String(process.env.SMS_PROVIDER || 'semaphore').trim().toLowerCase();
 const semaphoreApiKey = String(process.env.SEMAPHORE_API_KEY || '').trim();
 const iprogSmsApiToken = String(process.env.IPROG_SMS_API_TOKEN || '').trim();
+const expoPushAccessToken = String(process.env.EXPO_PUSH_ACCESS_TOKEN || '').trim();
 const host = String(process.env.HOST || '0.0.0.0').trim();
 const port = Number(process.env.PORT || '3000');
 const requestTimeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || '30000');
@@ -136,6 +137,7 @@ module.exports = {
   semaphoreApiKey,
   semaphoreSenderName: process.env.SEMAPHORE_SENDER_NAME || 'SEMAPHORE',
   iprogSmsApiToken,
+  expoPushAccessToken,
   corsOrigins,
   isProduction,
   host,

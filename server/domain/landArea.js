@@ -20,6 +20,41 @@ function activeAllocatedArea(fields = [], excludedFieldId = null) {
     .toFixed(4));
 }
 
+function blockFarmAreaSummary(blockFarm = {}, fields = []) {
+  const declared = Number(blockFarm.declaredAreaHa ?? blockFarm.declaredHa);
+  const hasDeclaredArea = Number.isFinite(declared) && declared > 0;
+  const declaredAreaHa = hasDeclaredArea ? Number(declared.toFixed(4)) : null;
+  const allocatedAreaHa = activeAllocatedArea(fields);
+  const effectiveAreaHa = Number(Math.max(declaredAreaHa || 0, allocatedAreaHa).toFixed(4));
+
+  return {
+    declaredAreaHa,
+    allocatedAreaHa,
+    effectiveAreaHa,
+    remainingAreaHa: hasDeclaredArea
+      ? Number(Math.max(0, declaredAreaHa - allocatedAreaHa).toFixed(4))
+      : null,
+    areaSource: hasDeclaredArea && declaredAreaHa >= allocatedAreaHa
+      ? 'DECLARED_AREA'
+      : (allocatedAreaHa > 0 ? 'ACTIVE_FIELDS' : 'UNCONFIGURED')
+  };
+}
+
+function attachBlockFarmAreaSummaries(blockFarms = [], fields = []) {
+  const fieldsByFarmId = new Map();
+  fields.forEach(field => {
+    const blockFarmId = String(field?.blockFarmId || '').trim();
+    if (!blockFarmId) return;
+    if (!fieldsByFarmId.has(blockFarmId)) fieldsByFarmId.set(blockFarmId, []);
+    fieldsByFarmId.get(blockFarmId).push(field);
+  });
+
+  return blockFarms.map(blockFarm => ({
+    ...blockFarm,
+    ...blockFarmAreaSummary(blockFarm, fieldsByFarmId.get(String(blockFarm?.id || '').trim()) || [])
+  }));
+}
+
 function assertFieldFitsBlockFarm({ declaredAreaHa, fields = [], requestedAreaHa, excludedFieldId = null, blockFarmId = null }) {
   const declared = Number(declaredAreaHa);
   const requested = Number(requestedAreaHa);
@@ -79,6 +114,8 @@ function assertDeclaredAreaCoversFields({ declaredAreaHa, fields = [], blockFarm
 module.exports = {
   AREA_EPSILON,
   activeAllocatedArea,
+  attachBlockFarmAreaSummaries,
+  blockFarmAreaSummary,
   assertDeclaredAreaCoversFields,
   assertFieldFitsBlockFarm,
   assertOperationFitsField

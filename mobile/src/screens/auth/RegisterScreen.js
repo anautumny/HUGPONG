@@ -3,13 +3,17 @@ import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, A
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
-import { registerUser, blockFarms } from '../../data/dataStore';
+import { registerUser } from '../../data/dataStore';
 import { useTranslation } from '../../services/i18n';
-import { requestRegistrationOtp, verifyRegistrationOtp } from '../../services/authService';
-import { formatToE164 } from '../../services/smsService';
+import {
+  fetchRegistrationBlockFarms,
+  requestRegistrationOtp,
+  requestRegistrationPhoneVerification,
+  verifyRegistrationOtp
+} from '../../services/authService';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
+import OtpCodeInput from '../../components/OtpCodeInput';
 import { passwordPolicy, passwordPolicyError } from '../../domain/passwordPolicy';
-import { uniqueRecordsById } from '../../utils/dataHelpers';
 import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
 const ROLES = ['Farm Member', 'Farm Manager', 'SRA Admin'];
@@ -18,11 +22,6 @@ const ROLE_DESCRIPTIONS = {
   'Farm Member': 'Logs weekly/monthly field operations',
   'Farm Manager': 'Reviews logs & compiles SRA reports',
   'SRA Admin': 'Scans QR & audits monthly reports',
-};
-
-const getAvailableBlockFarms = () => {
-  return uniqueRecordsById(blockFarms)
-    .filter(farm => farm?.id && farm?.name && String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
 };
 
 function ProgressBar({ step, totalSteps, t }) {
@@ -110,6 +109,30 @@ export default function RegisterScreen({ navigation }) {
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
+  const [availableBlockFarms, setAvailableBlockFarms] = useState([]);
+  const [farmsLoading, setFarmsLoading] = useState(true);
+  const [farmsError, setFarmsError] = useState('');
+  const verificationAttemptRef = React.useRef('');
+  const phoneRequestLockRef = React.useRef(false);
+
+  const loadRegistrationBlockFarms = React.useCallback(async () => {
+    setFarmsLoading(true);
+    setFarmsError('');
+    try {
+      const result = await fetchRegistrationBlockFarms();
+      const farms = Array.isArray(result?.data) ? result.data : [];
+      setAvailableBlockFarms(farms.filter(farm => farm?.id && farm?.name));
+    } catch (error) {
+      setAvailableBlockFarms([]);
+      setFarmsError(error.message || t('reg_farms_load_failed', 'Block Farms could not be loaded. Check your connection and try again.'));
+    } finally {
+      setFarmsLoading(false);
+    }
+  }, [t]);
+
+  React.useEffect(() => {
+    loadRegistrationBlockFarms();
+  }, [loadRegistrationBlockFarms]);
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { score: 0, level: '', color: COLORS.border, pct: 0, hasMin: false, hasLetter: false, hasNum: false, hasUpper: false, isUnpredictable: false };
@@ -158,37 +181,32 @@ export default function RegisterScreen({ navigation }) {
   const activeStepTitle = stepTitles[step - 1].title;
 
   const handleSendCode = async () => {
+    if (phoneRequestLockRef.current) return;
     const raw = (form.contactNumber || '').replace(/\D/g, '');
     if (!raw.startsWith('09') || raw.length !== 11) {
       setErrors(p => ({ ...p, contactNumber: t('auth_enter_valid_phone', 'Enter a valid 11-digit mobile number (09XXXXXXXXX)') }));
       return;
     }
 
-    const formatted = formatToE164(raw);
+    verificationAttemptRef.current = '';
     setVerificationCode('');
     setErrors(p => ({ ...p, contactNumber: null, verificationCode: null }));
+    phoneRequestLockRef.current = true;
     setLoading(true);
 
     try {
       const displayName = `${form.firstName} ${form.lastName}`.trim();
       const smsResult = await requestRegistrationOtp(raw, displayName);
-      setLoading(false);
 
       if (smsResult.success) {
         setPhoneVerificationRequestToken(String(smsResult.data?.phoneVerificationRequestToken || ''));
         setCodeSent(true);
         setCountdown(Math.max(0, Number(smsResult.resendAfterSeconds || 0)));
         setCodeRequestsRemaining(Math.max(0, Number(smsResult.codeRequestsRemaining ?? 0)));
-        Alert.alert(
-          t('reg_sms_sent_title'),
-          t('reg_sms_sent_msg').replace('{phone}', formatted),
-          [{ text: t('reg_enter_code'), onPress: () => {} }]
-        );
       } else {
         Alert.alert(t('reg_sms_notice'), smsResult.error || t('reg_code_dispatched'));
       }
     } catch (err) {
-      setLoading(false);
       const fallbackToken = String(err.data?.phoneVerificationRequestToken || '');
       if (fallbackToken) setPhoneVerificationRequestToken(fallbackToken);
       if (err.data?.retryAfterSeconds) {
@@ -202,36 +220,55 @@ export default function RegisterScreen({ navigation }) {
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
           {
             text: t('reg_phone_verification_action', 'Request Phone Verification Review'),
-            onPress: () => {
-              setPhoneVerificationRequested(true);
-              setCodeSent(false);
-              setVerificationCode('');
-              setStep(4);
-            }
+            onPress: () => continueWithPhoneVerificationReview(fallbackToken)
           }
         ] : undefined
       );
+    } finally {
+      phoneRequestLockRef.current = false;
+      setLoading(false);
     }
   };
 
-  const continueWithPhoneVerificationReview = () => {
-    if (!phoneVerificationRequestToken) {
-      Alert.alert(t('reg_sms_unavailable_title'), t('reg_phone_verification_retry', 'Try sending the SMS first so the server can authorize a phone-verification review request.'));
+  const continueWithPhoneVerificationReview = async (authorizedToken = '') => {
+    if (phoneRequestLockRef.current) return;
+    const raw = (form.contactNumber || '').replace(/\D/g, '');
+    if (!raw.startsWith('09') || raw.length !== 11) {
+      setErrors(p => ({ ...p, contactNumber: t('auth_enter_valid_phone', 'Enter a valid 11-digit mobile number (09XXXXXXXXX)') }));
       return;
     }
-    setPhoneVerificationRequested(true);
-    setCodeSent(false);
-    setVerificationCode('');
-    setErrors(p => ({ ...p, contactNumber: null, verificationCode: null }));
-    setStep(4);
+    phoneRequestLockRef.current = true;
+    setLoading(true);
+    try {
+      let token = String(authorizedToken || phoneVerificationRequestToken || '');
+      if (!token) {
+        const result = await requestRegistrationPhoneVerification(raw);
+        token = String(result.data?.phoneVerificationRequestToken || '');
+      }
+      if (!token) throw new Error(t('reg_phone_verification_retry', 'The verification request could not be authorized. Please try again.'));
+      setPhoneVerificationRequestToken(token);
+      setPhoneVerificationRequested(true);
+      setCodeSent(false);
+      setCodeVerified(false);
+      setVerificationCode('');
+      verificationAttemptRef.current = '';
+      setErrors(p => ({ ...p, contactNumber: null, verificationCode: null }));
+    } catch (error) {
+      setErrors(p => ({ ...p, contactNumber: error.message || t('reg_phone_verification_retry', 'The verification request could not be authorized. Please try again.') }));
+    } finally {
+      phoneRequestLockRef.current = false;
+      setLoading(false);
+    }
   };
 
-  const handleVerifyCode = async () => {
-    const entered = verificationCode.trim();
+  const handleVerifyCode = async candidateCode => {
+    const entered = String(candidateCode ?? verificationCode).trim();
     if (!entered || entered.length !== 6 || !/^\d{6}$/.test(entered)) {
       setErrors(p => ({ ...p, verificationCode: t('reg_enter_code_label', 'Please enter the complete 6-digit verification code.') }));
       return;
     }
+    if (verificationAttemptRef.current === entered) return;
+    verificationAttemptRef.current = entered;
     setLoading(true);
     try {
       await verifyRegistrationOtp(form.contactNumber, entered);
@@ -239,6 +276,7 @@ export default function RegisterScreen({ navigation }) {
       setErrors(p => ({ ...p, verificationCode: null }));
       setStep(4);
     } catch (error) {
+      verificationAttemptRef.current = '';
       setErrors(p => ({ ...p, verificationCode: error.message || t('reg_code_invalid') }));
     } finally {
       setLoading(false);
@@ -311,16 +349,6 @@ export default function RegisterScreen({ navigation }) {
   };
 
   const handleMainButtonPress = () => {
-    if (step === 3) {
-      if (!codeSent && !phoneVerificationRequested) {
-        handleSendCode();
-        return;
-      }
-      if (!codeVerified && !phoneVerificationRequested) {
-        handleVerifyCode();
-        return;
-      }
-    }
     next();
   };
 
@@ -328,8 +356,6 @@ export default function RegisterScreen({ navigation }) {
     if (loading) return { text: 'Creating account...', icon: null };
     if (step === 3) {
       if (phoneVerificationRequested) return { text: t('reg_btn_continue', 'Continue'), icon: 'arrow-forward' };
-      if (!codeSent) return { text: t('reg_btn_send_code', 'Send Code via SMS'), icon: 'chatbubble-ellipses-outline' };
-      if (!codeVerified) return { text: t('reg_btn_verify_continue', 'Verify & Continue'), icon: 'shield-checkmark-outline' };
     }
     if (step === totalSteps) return { text: t('reg_btn_create_account', 'Create Account'), icon: 'checkmark-circle-outline' };
     return { text: t('reg_btn_continue', 'Continue'), icon: 'arrow-forward' };
@@ -339,6 +365,7 @@ export default function RegisterScreen({ navigation }) {
     if (step === 3 && codeSent && !codeVerified && !phoneVerificationRequested) {
       setCodeSent(false);
       setVerificationCode('');
+      verificationAttemptRef.current = '';
       return;
     }
     if (step > 1) {
@@ -349,6 +376,7 @@ export default function RegisterScreen({ navigation }) {
   };
 
   const btnInfo = getMainButtonInfo();
+  const showMainButton = step !== 3 || phoneVerificationRequested || codeVerified;
 
   if (showLegalModal) {
     return (
@@ -367,7 +395,7 @@ export default function RegisterScreen({ navigation }) {
           <TouchableOpacity style={s.backBtn} onPress={back}>
             <Ionicons name="arrow-back" size={20} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={s.navTitle} numberOfLines={1}>{t('reg_nav_title', 'Farm Member Registration')}</Text>
+          <Text style={s.navTitle}>{t('reg_nav_title', 'Farm Member Registration')}</Text>
           
           <View style={{ width: 36 }} />
         </View>
@@ -416,7 +444,25 @@ export default function RegisterScreen({ navigation }) {
                       </View>
                     </View>
                   </TouchableOpacity>
-                  {getAvailableBlockFarms().map(farm => (
+                  {farmsLoading ? (
+                    <View style={s.infoNoticeBox}>
+                      <ActivityIndicator size="small" color={COLORS.primary} />
+                      <Text style={s.infoNoticeText}>{t('reg_loading_farms', 'Loading available Block Farms...')}</Text>
+                    </View>
+                  ) : null}
+                  {!farmsLoading && farmsError ? (
+                    <View style={[s.infoNoticeBox, { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
+                      <Ionicons name="cloud-offline-outline" size={16} color="#B45309" />
+                      <View style={{ flex: 1, gap: 7 }}>
+                        <Text style={[s.infoNoticeText, { color: '#92400E' }]}>{farmsError}</Text>
+                        <TouchableOpacity onPress={loadRegistrationBlockFarms} style={s.retryFarmButton}>
+                          <Ionicons name="refresh-outline" size={14} color={COLORS.primary} />
+                          <Text style={s.retryFarmButtonText}>{t('btn_try_again', 'Try Again')}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
+                  {!farmsLoading && !farmsError && availableBlockFarms.map(farm => (
                     <TouchableOpacity 
                       key={farm.id}
                       style={[rc.chip, form.blockFarmId === farm.id && rc.selected, { paddingVertical: 14 }]}
@@ -437,7 +483,7 @@ export default function RegisterScreen({ navigation }) {
                       </View>
                     </TouchableOpacity>
                   ))}
-                  {getAvailableBlockFarms().length === 0 && (
+                  {!farmsLoading && !farmsError && availableBlockFarms.length === 0 && (
                     <View style={s.infoNoticeBox}>
                       <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
                       <Text style={s.infoNoticeText}>{t('reg_no_farms')}</Text>
@@ -477,6 +523,10 @@ export default function RegisterScreen({ navigation }) {
                         set('contactNumber', v);
                         setPhoneVerificationRequestToken('');
                         setPhoneVerificationRequested(false);
+                        setCodeSent(false);
+                        setCodeVerified(false);
+                        setVerificationCode('');
+                        verificationAttemptRef.current = '';
                         setErrors(p => ({ ...p, contactNumber: null }));
                       }}
                       placeholder="09XX XXX XXXX" 
@@ -485,11 +535,39 @@ export default function RegisterScreen({ navigation }) {
                       error={errors.contactNumber} 
                     />
                   </Field>
-                  <View style={s.infoNoticeBox}>
-                    <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.primary} />
-                    <Text style={s.infoNoticeText}>
-                      {t('reg_sms_notice', 'We will send a 6-digit one-time SMS verification code to confirm this SIM card belongs to you. Standard rates apply.')}
+                  <View style={[s.infoNoticeBox, { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
+                    <Ionicons name="information-circle-outline" size={16} color="#B45309" />
+                    <Text style={[s.infoNoticeText, { color: '#92400E' }]}>
+                      {t('reg_smart_tnt_choice_help', 'Using Smart or TNT? Choose authorized verification because SMS code delivery is unavailable for those networks.')}
                     </Text>
+                  </View>
+                  <View style={s.verificationChoiceList}>
+                    <TouchableOpacity
+                      style={[s.verificationChoice, s.verificationChoicePrimary]}
+                      onPress={handleSendCode}
+                      disabled={loading}
+                      activeOpacity={0.8}
+                    >
+                      {loading
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Ionicons name="chatbubble-ellipses-outline" size={20} color="#fff" />}
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.verificationChoicePrimaryTitle}>{t('reg_btn_send_code', 'Send Code via SMS')}</Text>
+                        <Text style={s.verificationChoicePrimaryText}>{t('reg_sms_supported_networks', 'Choose this for supported mobile networks.')}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.verificationChoice}
+                      onPress={() => continueWithPhoneVerificationReview()}
+                      disabled={loading}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="people-outline" size={20} color={COLORS.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.verificationChoiceTitle}>{t('reg_phone_verification_action', 'Request Phone Verification Review')}</Text>
+                        <Text style={s.verificationChoiceText}>{t('reg_smart_tnt_review_help', 'Choose this for Smart/TNT or when you cannot receive an SMS code.')}</Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
                 </>
               ) : !codeVerified ? (
@@ -500,7 +578,12 @@ export default function RegisterScreen({ navigation }) {
                       <Text style={s.otpSentPhone}>+63 {form.contactNumber.slice(1)}</Text>
                     </View>
                     <TouchableOpacity 
-                      onPress={() => { setCodeSent(false); setVerificationCode(''); setErrors(p => ({ ...p, verificationCode: null })); }}
+                      onPress={() => {
+                        setCodeSent(false);
+                        setVerificationCode('');
+                        verificationAttemptRef.current = '';
+                        setErrors(p => ({ ...p, verificationCode: null }));
+                      }}
                       style={s.editPhoneBtn}
                     >
                       <Ionicons name="create-outline" size={13} color={COLORS.primary} />
@@ -509,27 +592,29 @@ export default function RegisterScreen({ navigation }) {
                   </View>
 
                   <Field label={t('reg_enter_code_label', 'Enter 6-digit SMS Code *')} error={errors.verificationCode}>
-                    <View style={[inp.wrap, errors.verificationCode && inp.err, { justifyContent: 'center' }]}>
-                      <TextInput 
-                        style={[inp.input, s.otpInput]} 
-                        value={verificationCode} 
-                        onChangeText={v => {
-                          setVerificationCode(v);
-                          setErrors(p => ({ ...p, verificationCode: null }));
-                        }} 
-                        placeholder="• • • • • •" 
-                        placeholderTextColor={COLORS.textMuted}
-                        keyboardType="number-pad" 
-                        maxLength={6} 
-                        autoFocus={true}
-                      />
-                    </View>
+                    <OtpCodeInput
+                      value={verificationCode}
+                      onChangeText={v => {
+                        setVerificationCode(v);
+                        if (v.length < 6) verificationAttemptRef.current = '';
+                        setErrors(p => ({ ...p, verificationCode: null }));
+                      }}
+                      onComplete={handleVerifyCode}
+                      disabled={loading}
+                      error={Boolean(errors.verificationCode)}
+                      accessibilityLabel={t('reg_enter_code_label', 'Enter 6-digit SMS Code')}
+                    />
+                    <Text style={s.autoVerifyText}>
+                      {loading
+                        ? t('reg_verifying_code', 'Verifying code...')
+                        : t('reg_auto_verify_help', 'Verification starts automatically after all six digits are entered.')}
+                    </Text>
                   </Field>
 
                   <View style={s.resendRow}>
                     <Text style={s.resendText}>{t('reg_resend_prompt', "Didn't receive the SMS?")}</Text>
                     <TouchableOpacity 
-                      disabled={countdown > 0} 
+                      disabled={countdown > 0 || loading}
                       onPress={handleSendCode}
                       style={{ paddingVertical: 4 }}
                     >
@@ -542,7 +627,7 @@ export default function RegisterScreen({ navigation }) {
                   </View>
                   {phoneVerificationRequestToken ? (
                     <TouchableOpacity
-                      onPress={continueWithPhoneVerificationReview}
+                      onPress={() => continueWithPhoneVerificationReview(phoneVerificationRequestToken)}
                       style={s.phoneVerificationBtn}
                     >
                       <Ionicons name="people-outline" size={16} color={COLORS.primary} />
@@ -692,7 +777,7 @@ export default function RegisterScreen({ navigation }) {
             })()}
           </View>
 
-          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleMainButtonPress} disabled={loading} activeOpacity={0.8}>
+          {showMainButton && <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleMainButtonPress} disabled={loading} activeOpacity={0.8}>
             {loading ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
@@ -701,7 +786,7 @@ export default function RegisterScreen({ navigation }) {
                 {btnInfo.icon && <Ionicons name={btnInfo.icon} size={18} color="#fff" />}
               </>
             )}
-          </TouchableOpacity>
+          </TouchableOpacity>}
 
           <View style={s.adminNoteBox}>
             <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
@@ -738,7 +823,7 @@ export default function RegisterScreen({ navigation }) {
               </View>
               <View style={s.metaCol}>
                 <Text style={s.metaLabel}>{t('reg_block_farm')}</Text>
-                <Text style={s.metaVal} numberOfLines={2}>{registeredAccount?.blockFarm || form.blockFarm || t('reg_awaiting_assignment')}</Text>
+                <Text style={s.metaVal}>{registeredAccount?.blockFarm || form.blockFarm || t('reg_awaiting_assignment')}</Text>
               </View>
             </View>
 
@@ -808,6 +893,16 @@ const s = StyleSheet.create({
   btn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   btnDisabled: { opacity: 0.6 },
   btnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  retryFarmButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3 },
+  retryFarmButtonText: { fontSize: 12, fontWeight: '800', color: COLORS.primary },
+  verificationChoiceList: { gap: 10 },
+  verificationChoice: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primaryBg },
+  verificationChoicePrimary: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  verificationChoiceTitle: { fontSize: 13.5, fontWeight: '800', color: COLORS.primary },
+  verificationChoiceText: { marginTop: 2, fontSize: 11, lineHeight: 15, color: COLORS.textSecondary },
+  verificationChoicePrimaryTitle: { fontSize: 13.5, fontWeight: '800', color: '#fff' },
+  verificationChoicePrimaryText: { marginTop: 2, fontSize: 11, lineHeight: 15, color: 'rgba(255,255,255,0.85)' },
+  autoVerifyText: { marginTop: 7, textAlign: 'center', fontSize: 11, lineHeight: 15, color: COLORS.textMuted },
   phoneVerificationBtn: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primaryBg, marginTop: 8 },
   phoneVerificationTitle: { fontSize: 12.5, fontWeight: '800', color: COLORS.primary },
   phoneVerificationText: { fontSize: 11, lineHeight: 16, color: COLORS.textSecondary, marginTop: 2 },
@@ -816,7 +911,6 @@ const s = StyleSheet.create({
   otpSentPhone: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginTop: 2 },
   editPhoneBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
   editPhoneBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
-  otpInput: { fontSize: 22, letterSpacing: 8, textAlign: 'center', fontWeight: '800', color: COLORS.primary, paddingVertical: 8 },
   resendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 4 },
   resendText: { fontSize: 12, color: COLORS.textMuted },
   resendBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },

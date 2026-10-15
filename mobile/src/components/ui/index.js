@@ -28,11 +28,11 @@ export function ScreenHeader({
           </TouchableOpacity>
         )}
         <View style={styles.titleWrap}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={styles.headerTitle}>
             {title}
           </Text>
           {subtitle ? (
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
+            <Text style={styles.headerSubtitle}>
               {subtitle}
             </Text>
           ) : null}
@@ -123,7 +123,7 @@ export function PrimaryButton({
               name={icon}
               size={16}
               color="#FFFFFF"
-              style={{ marginRight: 6 }}
+              style={styles.buttonIcon}
             />
           )}
           <Text style={[styles.primaryBtnText, textStyle]}>{title}</Text>
@@ -158,7 +158,7 @@ export function SecondaryButton({
           name={icon}
           size={16}
           color={COLORS.primary}
-          style={{ marginRight: 6 }}
+          style={styles.buttonIcon}
         />
       )}
       <Text style={[styles.secondaryBtnText, textStyle]}>{title}</Text>
@@ -224,8 +224,10 @@ const styles = StyleSheet.create({
   // Header
   headerContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
     paddingHorizontal: SPACING.lg,
     paddingVertical: 10,
     backgroundColor: '#FFFFFF',
@@ -238,7 +240,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
-    marginRight: 8
+    minWidth: 220
   },
   backButton: {
     width: 38,
@@ -251,22 +253,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   titleWrap: {
-    flex: 1
+    flex: 1,
+    minWidth: 0
   },
   headerTitle: {
+    flexShrink: 1,
     fontSize: 17,
     fontWeight: '800',
     color: COLORS.text,
     letterSpacing: -0.2
   },
   headerSubtitle: {
+    flexShrink: 1,
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2
   },
   rightActionBtn: {
+    maxWidth: '100%',
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 4,
     backgroundColor: '#F4FAF0',
     borderWidth: 1,
@@ -276,6 +284,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md
   },
   rightActionLabel: {
+    flexShrink: 1,
     fontSize: 11.5,
     fontWeight: '800',
     color: COLORS.primary
@@ -306,12 +315,16 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     paddingHorizontal: 16,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 46,
     ...SHADOW.xs
   },
   primaryBtnText: {
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'center',
     color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '800',
@@ -327,11 +340,15 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 46
   },
   secondaryBtnText: {
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'center',
     color: COLORS.text,
     fontSize: 13.5,
     fontWeight: '700'
@@ -339,9 +356,14 @@ const styles = StyleSheet.create({
   btnDisabled: {
     opacity: 0.55
   },
+  buttonIcon: {
+    flexShrink: 0,
+    marginRight: 6
+  },
 
   // Badge
   badgeBase: {
+    maxWidth: '100%',
     borderWidth: 1,
     borderRadius: RADIUS.full,
     paddingHorizontal: 8,
@@ -349,6 +371,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start'
   },
   badgeText: {
+    flexShrink: 1,
+    textAlign: 'center',
     fontSize: 10.5,
     fontWeight: '800'
   },

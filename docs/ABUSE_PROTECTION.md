@@ -49,6 +49,9 @@ Authenticated accounts are limited over five-minute windows:
 Login permits at most 30 attempts per IP, 10 per normalized account identifier,
 and 5 per IP/account pair during the existing 15-minute window. Backup export,
 validation, and restore allow 5, 12, and 3 operations per Super Admin per hour.
+Assisted password recovery permits 5 review requests per IP and 3 per supplied
+User-ID/mobile pair per hour. Status checks and completion attempts have
+separate review-reference budgets.
 
 These values are initial safety budgets and should be reviewed against real
 production telemetry. They must not be increased merely to conceal a defective

@@ -68,16 +68,58 @@ const resolveTypographyStyle = (style, requestedFamily) => {
 };
 
 export const AppText = forwardRef(function AppText(
-  { family, style, ...props },
+  {
+    family,
+    style,
+    allowFontScaling = true,
+    maxFontSizeMultiplier = 1.8,
+    ...props
+  },
   ref,
 ) {
-  return <NativeText ref={ref} {...props} style={resolveTypographyStyle(style, family)} />;
+  return (
+    <NativeText
+      ref={ref}
+      {...props}
+      allowFontScaling={allowFontScaling}
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
+      style={[styles.responsiveText, resolveTypographyStyle(style, family)]}
+    />
+  );
 });
 
 export const AppTextInput = forwardRef(function AppTextInput(
-  { family, style, ...props },
+  {
+    family,
+    style,
+    multiline = false,
+    allowFontScaling = true,
+    maxFontSizeMultiplier = 1.6,
+    textAlignVertical,
+    ...props
+  },
   ref,
 ) {
-  return <NativeTextInput ref={ref} {...props} style={resolveTypographyStyle(style, family)} />;
+  return (
+    <NativeTextInput
+      ref={ref}
+      {...props}
+      multiline={multiline}
+      allowFontScaling={allowFontScaling}
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
+      textAlignVertical={textAlignVertical || (multiline ? 'top' : 'center')}
+      style={[styles.responsiveInput, resolveTypographyStyle(style, family)]}
+    />
+  );
+});
+
+const styles = StyleSheet.create({
+  responsiveText: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  responsiveInput: {
+    minWidth: 0,
+  },
 });
 

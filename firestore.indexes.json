@@ -1,6 +1,23 @@
 {
   "indexes": [
     {
+      "collectionGroup": "crop_year_compilations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cropYearCycle", "order": "ASCENDING" },
+        { "fieldPath": "blockFarmId", "order": "ASCENDING" },
+        { "fieldPath": "compiledAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "blockFarmId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "operation_logs",
       "queryScope": "COLLECTION",
       "fields": [

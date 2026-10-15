@@ -20,7 +20,8 @@ test('mobile block-farm lists use canonical IDs for React keys and selection', (
   assert.match(fieldOps, /key=\{farm\.id\}/);
   assert.match(fieldOps, /onSelect=\{\(farm\) => setSelectedFarm\(farm\.id\)\}/);
 
-  assert.match(registration, /uniqueRecordsById\(blockFarms\)/);
+  assert.match(registration, /availableBlockFarms\.map\(farm =>/);
+  assert.match(registration, /fetchRegistrationBlockFarms/);
   assert.match(registration, /key=\{farm\.id\}/);
   assert.match(registration, /blockFarmId: farm\.id/);
 

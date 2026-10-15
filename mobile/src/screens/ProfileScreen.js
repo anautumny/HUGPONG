@@ -75,6 +75,27 @@ export default function ProfileScreen({ navigation }) {
   const assignedFarm = session?.role === 'Farm Manager'
     ? (managedFarm || sessionFarm)
     : (memberFarm || sessionFarm);
+  const activeAdminFarms = blockFarms.filter(farm => String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+  const farmAreaFromServer = activeAdminFarms.reduce((sum, farm) => sum + Number(
+    farm.effectiveAreaHa ?? farm.declaredAreaHa ?? farm.declaredHa ?? farm.allocatedAreaHa ?? 0
+  ), 0);
+  const synchronizedFieldArea = fields
+    .filter(field => String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+    .reduce((sum, field) => sum + Number(field.areaHa ?? field.ha ?? 0), 0);
+  const adminRegisteredAreaHa = farmAreaFromServer > 0 ? farmAreaFromServer : synchronizedFieldArea;
+  const adminLocation = Array.from(new Set([session?.district, session?.location]
+    .map(value => String(value || '').trim())
+    .filter(Boolean)))
+    .join(' · ');
+  const adminScopeDetails = [
+    adminLocation,
+    activeAdminFarms.length > 0
+      ? `${activeAdminFarms.length} ${activeAdminFarms.length === 1 ? 'Block Farm' : t('block_farms_count_lbl', 'Block Farms')}`
+      : '',
+    adminRegisteredAreaHa > 0
+      ? `${adminRegisteredAreaHa.toFixed(2).replace(/\.?0+$/, '')} Ha`
+      : ''
+  ].filter(Boolean).join(' · ');
   const ticketCreationAllowed = canCreateSupportTicket(session?.canonicalRole || session?.role || session?.roleKey);
   const activeTickets = ticketsList.filter(ticket => ['PENDING_SUBMISSION', 'OPEN', 'IN_PROGRESS'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));
   const ticketHistory = ticketsList.filter(ticket => ['RESOLVED', 'CLOSED'].includes(String(ticket.status || '').replace(/[\s-]+/g, '_').toUpperCase()));
@@ -318,12 +339,7 @@ export default function ProfileScreen({ navigation }) {
                 activeOpacity={0.7}
               >
                 <Ionicons name="create-outline" size={14} color={ticketTab === 'submit' ? COLORS.primary : COLORS.textMuted} />
-                <Text
-                  style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]}
-                  numberOfLines={2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
-                >
+                <Text style={[s.ticketTabText, ticketTab === 'submit' && s.ticketTabTextActive]}>
                   {t('ticket_tab_send', 'New Ticket')}
                 </Text>
               </TouchableOpacity>
@@ -335,12 +351,7 @@ export default function ProfileScreen({ navigation }) {
               activeOpacity={0.7}
             >
               <Ionicons name="file-tray-full-outline" size={14} color={ticketTab === 'active' ? COLORS.primary : COLORS.textMuted} />
-              <Text
-                style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]}
-                numberOfLines={2}
-                adjustsFontSizeToFit
-                minimumFontScale={0.78}
-              >
+              <Text style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]}>
                 {t('ticket_tab_my', 'My Tickets')} ({activeTickets.length})
               </Text>
             </TouchableOpacity>
@@ -350,12 +361,7 @@ export default function ProfileScreen({ navigation }) {
               activeOpacity={0.7}
             >
               <Ionicons name="time-outline" size={14} color={ticketTab === 'history' ? COLORS.primary : COLORS.textMuted} />
-              <Text
-                style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]}
-                numberOfLines={2}
-                adjustsFontSizeToFit
-                minimumFontScale={0.78}
-              >
+              <Text style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]}>
                 {t('ticket_tab_history', 'History')}
               </Text>
             </TouchableOpacity>
@@ -645,9 +651,7 @@ export default function ProfileScreen({ navigation }) {
                 : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
               value: (() => {
                 if (session?.role === 'SRA Admin') {
-                  const districtName = session?.district || '';
-                  const loc = session?.location || '';
-                  return [districtName, loc].filter(Boolean).join(' · ') || t('profile_not_configured', 'Not configured');
+                  return adminScopeDetails || t('profile_no_audit_records', 'No synchronized scope records');
                 }
                 if (session?.role === 'Farm Manager') {
                   const managedFields = fields.filter(field => field.blockFarmId === managedFarm?.id);
@@ -1064,20 +1068,20 @@ const s = StyleSheet.create({
   priorityChipText: { fontSize: 12.5, fontWeight: '700', color: COLORS.textSecondary },
 
   ticketInput: { backgroundColor: COLORS.background, borderWidth: 1.2, borderColor: COLORS.border, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: COLORS.text, minHeight: 46 },
-  ticketInputArea: { height: 95, textAlignVertical: 'top' },
+  ticketInputArea: { minHeight: 110, textAlignVertical: 'top' },
 
   ticketSubmitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 14, minHeight: 50, borderRadius: RADIUS.lg, marginTop: 6, ...SHADOW.card },
   ticketSubmitBtnText: { fontSize: 15.5, fontWeight: '800', color: COLORS.textInverse },
 
   ticketCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: 15, borderWidth: 1.2, borderColor: COLORS.border, gap: 8, ...SHADOW.card },
-  ticketTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  ticketIdBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F5EC', paddingHorizontal: 8, paddingVertical: 3.5, borderRadius: 6 },
-  ticketIdText: { fontSize: 12, fontWeight: '800', color: COLORS.primary },
-  ticketStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.full, borderWidth: 1 },
-  ticketStatusText: { fontSize: 11.5, fontWeight: '800' },
+  ticketTopRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  ticketIdBadge: { maxWidth: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, backgroundColor: '#F0F5EC', paddingHorizontal: 8, paddingVertical: 3.5, borderRadius: 6 },
+  ticketIdText: { fontSize: 12, fontWeight: '800', color: COLORS.primary, flexShrink: 1 },
+  ticketStatusBadge: { maxWidth: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.full, borderWidth: 1 },
+  ticketStatusText: { fontSize: 11.5, fontWeight: '800', flexShrink: 1 },
   ticketCardTitle: { fontSize: 15.5, fontWeight: '800', color: COLORS.text, marginTop: 1 },
   ticketCardDetails: { fontSize: 13.5, color: COLORS.textSecondary, lineHeight: 19 },
-  ticketMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F0F4EC' },
+  ticketMetaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F0F4EC' },
   ticketPill: { backgroundColor: '#F2F6EF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   ticketPillText: { fontSize: 11.5, fontWeight: '700', color: COLORS.textSecondary },
   priorityPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },

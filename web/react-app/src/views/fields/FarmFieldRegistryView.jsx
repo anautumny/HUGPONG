@@ -290,7 +290,13 @@ export default function FarmFieldRegistryView() {
   const summaryCards = useMemo(() => {
     if (isFarmManager) {
       const totalCultivated = managerScopedFields.reduce((sum, f) => sum + Number(f.areaHa || f.ha || 0), 0);
-      const declaredArea = Number(assignedBlockFarm?.declaredAreaHa ?? assignedBlockFarm?.declaredHa ?? 0);
+      const declaredArea = Number(
+        assignedBlockFarm?.effectiveAreaHa
+          ?? assignedBlockFarm?.declaredAreaHa
+          ?? assignedBlockFarm?.declaredHa
+          ?? assignedBlockFarm?.allocatedAreaHa
+          ?? 0
+      );
       return [
         {
           label: 'Assigned Block Farm',
@@ -299,7 +305,7 @@ export default function FarmFieldRegistryView() {
           icon: Building2
         },
         {
-          label: 'Declared Area',
+          label: 'Registered Area',
           value: formatHectares(declaredArea),
           subtext: 'Certified landholding',
           icon: MapPin
@@ -320,7 +326,9 @@ export default function FarmFieldRegistryView() {
     }
 
     if (isSraAdmin) {
-      const totalDeclared = filteredBlockFarms.reduce((sum, bf) => sum + Number(bf.declaredAreaHa ?? bf.declaredHa ?? 0), 0);
+      const totalDeclared = filteredBlockFarms.reduce((sum, bf) => sum + Number(
+        bf.effectiveAreaHa ?? bf.declaredAreaHa ?? bf.declaredHa ?? bf.allocatedAreaHa ?? 0
+      ), 0);
       const totalDistrictPlots = blockFarmsState.fields.length;
       const assignedManagers = new Set(filteredBlockFarms.map(bf => bf.managerUserId).filter(Boolean)).size;
       return [
@@ -331,7 +339,7 @@ export default function FarmFieldRegistryView() {
           icon: Building2
         },
         {
-          label: 'Total Declared Area',
+          label: 'Total Registered Area',
           value: formatHectares(totalDeclared),
           subtext: 'District cooperative landholding',
           icon: MapPin
@@ -352,7 +360,9 @@ export default function FarmFieldRegistryView() {
     }
 
     // Super Admin: Governance Oversight
-    const totalDeclared = filteredBlockFarms.reduce((sum, bf) => sum + Number(bf.declaredAreaHa ?? bf.declaredHa ?? 0), 0);
+    const totalDeclared = filteredBlockFarms.reduce((sum, bf) => sum + Number(
+      bf.effectiveAreaHa ?? bf.declaredAreaHa ?? bf.declaredHa ?? bf.allocatedAreaHa ?? 0
+    ), 0);
     const assignedManagers = new Set(blockFarmsState.blockFarms.map(bf => bf.managerUserId).filter(Boolean)).size;
     return [
       {
@@ -362,7 +372,7 @@ export default function FarmFieldRegistryView() {
         icon: Building2
       },
       {
-        label: 'Declared Landholding',
+        label: 'Registered Landholding',
         value: formatHectares(totalDeclared),
         subtext: 'Certified agricultural acreage',
         icon: MapPin
@@ -556,12 +566,12 @@ export default function FarmFieldRegistryView() {
       }
     },
     {
-      key: 'declaredAreaHa',
-      header: 'Declared Area',
+      key: 'effectiveAreaHa',
+      header: 'Registered Area',
       width: '130px',
       render: (val, row) => (
         <span className="font-bold text-hug-text">
-          {formatHectares(val ?? row.declaredHa ?? 0)}
+          {formatHectares(val ?? row.declaredAreaHa ?? row.declaredHa ?? row.allocatedAreaHa ?? 0)}
         </span>
       )
     },
@@ -941,10 +951,16 @@ export default function FarmFieldRegistryView() {
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="p-3 bg-surface border border-border/80 rounded-xl">
                 <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider block mb-1">
-                  Declared Area
+                  Registered Area
                 </span>
                 <span className="font-bold text-sm text-hug-text">
-                  {formatHectares(inspectBlockFarm.declaredAreaHa ?? inspectBlockFarm.declaredHa ?? 0)}
+                  {formatHectares(
+                    inspectBlockFarm.effectiveAreaHa
+                      ?? inspectBlockFarm.declaredAreaHa
+                      ?? inspectBlockFarm.declaredHa
+                      ?? inspectBlockFarm.allocatedAreaHa
+                      ?? 0
+                  )}
                 </span>
               </div>
 
