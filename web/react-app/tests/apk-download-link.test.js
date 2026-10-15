@@ -15,7 +15,10 @@ test('landing header keeps the GitHub Releases link', () => {
   assert.match(landingSource, /GitHub Releases \(APK\)/);
 });
 
-test('main Android button uses the separately configured APK artifact URL', () => {
+test('main Android button uses the published release artifact before a host fallback', () => {
+  const release = JSON.parse(fs.readFileSync(path.resolve(testDir, '../src/config/androidRelease.json'), 'utf8'));
+  assert.match(release.downloadUrl, /^https:\/\/github\.com\/anautumny\/HUGPONG\/releases\/download\/[^/]+\/[^/]+\.apk$/);
+  assert.match(landingSource, /androidRelease\.downloadUrl \|\| import\.meta\.env\.VITE_ANDROID_APK_URL/);
   assert.match(landingSource, /VITE_ANDROID_APK_URL/);
   assert.match(landingSource, /href=\{ANDROID_APK_URL\}/);
   assert.match(landingSource, /download="HUGPONG-Beta\.apk"/);

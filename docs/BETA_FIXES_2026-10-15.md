@@ -2,6 +2,8 @@
 
 The application fixes from the earlier beta audit are implemented locally. The release verification command passes. These changes have not been deployed, and no live database writes or SMS sends were performed.
 
+Subsequent rollout: see [Beta 1.0.1 release record](BETA_RELEASE_1.0.1.md) for the deployed Firestore configuration, Render release path, and published signed APK. The statements below describe the original remediation work and its acceptance limits.
+
 ## Finding status
 
 | Earlier finding | Result |

@@ -16,6 +16,8 @@ The installed Mobile app does not discover a Metro host and does not probe emula
 
 After changing the environment, restart Metro for development or create a new installed build for production. Do not add host arrays or runtime fallback probing.
 
+The Web download button uses the published APK URL in `web/react-app/src/config/androidRelease.json`. Update that file only after publishing the signed APK asset; it takes precedence over an older `VITE_ANDROID_APK_URL` setting on the host. Keep the previous APK available for existing release references. EAS preview builds increment the remote Android version code so Android can install the new APK over the earlier beta signed with the same key.
+
 The current beta preview and production profiles in `mobile/eas.json` use `https://hugpong-beta.onrender.com`. Release configuration is checked by `mobile/app.config.js` and the full release gate: HTTP/local/missing origins and missing Firebase client values fail the build. The EAS environment must still supply the matching Firebase client variables. Development `.env` values remain separate. The API now requires Node.js 22 or newer after the Firebase Admin update.
 
 ## Express deployment contract

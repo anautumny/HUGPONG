@@ -4,8 +4,10 @@ import { ArrowRight, Download, Github, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
+import androidRelease from '../config/androidRelease.json';
 
-const ANDROID_APK_URL = String(import.meta.env.VITE_ANDROID_APK_URL || '').trim();
+// A published release travels with this Web build; older host overrides cannot pin the previous APK.
+const ANDROID_APK_URL = String(androidRelease.downloadUrl || import.meta.env.VITE_ANDROID_APK_URL || '').trim();
 
 export default function LandingView() {
   const { isAuthenticated } = useAuth();
