@@ -561,7 +561,7 @@ export default function AnalyticsScreen({ navigation, route }) {
 
             {/* Timeframe selector (Weekly vs Monthly) */}
             <View style={s.timeframeRow}>
-              <Text style={s.sectionHeaderTag}>PRICE CIRCULARS & BENCHMARKS</Text>
+              <Text style={s.sectionHeaderTag}>PRICE HISTORY</Text>
               <View style={s.timeframeChipsWrap}>
                 {['weekly', 'monthly'].map(tf => (
                   <TouchableOpacity
@@ -582,19 +582,18 @@ export default function AnalyticsScreen({ navigation, route }) {
               {priceTrends.trendPoints.length === 0 ? (
                 <AnalyticsEmptyState
                   title="No price records available"
-                  subtitle="Source-referenced records will display here once published."
+                  subtitle="Prices will display here once published."
                 />
               ) : (
                 <View style={{ gap: 8 }}>
                   {priceTrends.trendPoints.map((pt, idx) => (
                     <View key={idx} style={s.priceHistoryRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.priceCircularNum}>{pt.circularNumber}</Text>
-                        <Text style={s.pricePeriodDate}>{pt.periodLabel}</Text>
+                      <View>
+                        <Text style={s.pricePeriodTitle}>{pt.periodLabel}</Text>
                         {priceTimeframe === 'monthly' && <Text style={s.pricePeriodDate}>Reported weeks: Sugar {pt.sugarReportedWeeks}/{pt.totalWeeks}, Molasses {pt.molassesReportedWeeks}/{pt.totalWeeks}</Text>}
                       </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={s.priceSugarValue}>{priceText(pt.sugarPrice, pt.sugarStatus, 'Lkg')}</Text>
+                      <View style={{ gap: 6 }}>
+                        <Text style={s.priceSugarValue}>Raw Sugar: {priceText(pt.sugarPrice, pt.sugarStatus, 'Lkg')}</Text>
                         <Text style={s.priceMolassesValue}>Molasses: {priceText(pt.molassesPrice, pt.molassesStatus, 'MT')}</Text>
                       </View>
                     </View>
@@ -871,32 +870,32 @@ const s = StyleSheet.create({
     fontWeight: '800'
   },
   priceHistoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 9,
+    gap: 10,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.borderLight
   },
-  priceCircularNum: {
-    fontSize: 13,
+  pricePeriodTitle: {
+    fontSize: 15,
     fontWeight: '700',
     color: COLORS.text
   },
   pricePeriodDate: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 1
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    marginTop: 4
   },
   priceSugarValue: {
-    fontSize: 13.5,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '800',
     color: COLORS.primaryDark
   },
   priceMolassesValue: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 1
+    fontSize: 15,
+    lineHeight: 22,
+    color: COLORS.text
   },
   modalOverlay: {
     flex: 1,

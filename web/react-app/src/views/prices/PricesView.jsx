@@ -81,14 +81,14 @@ export default function PricesView() {
               Market Intelligence
             </span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
-              Source-Referenced Records
+              Published Prices
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-hug-text tracking-tight mt-1">
             SRA Price Monitor
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Published millsite price references for Raw Sugar (₱/Lkg) and Industrial Molasses (₱/MT), with their source details.
+            Weekly millsite prices and availability for Raw Sugar (PHP/Lkg) and Molasses (PHP/MT).
           </p>
         </div>
 

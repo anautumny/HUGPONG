@@ -25,9 +25,11 @@ The first command writes an ignored local plan/backup of current price records. 
 
 Dashboard/Prices show the latest bulletin date and each product's status. Older numeric values appear separately as “Last reported” with dates. Stale bulletins are labeled historical. History and CSV export preserve statuses and blank amounts/comparisons. Charts break at missing quotes. Monthly averages show reported-week counts. Publishing supports each product's status independently and submits no invented zero price.
 
+The price display omits source-bulletin links, source descriptions, and issuing-reference details. Provenance remains in the database/API and exports. Trend axes use up to eight short, horizontal date labels across the full supplied period, including weeks without quotations. Every quoted point retains full period/date details through pointer, keyboard, or touch selection. On narrow screens, the chart scrolls horizontally at a readable minimum width; the full weekly/monthly table is expandable below it. Chart/price text uses larger type and stronger contrast in both themes. This is a presentation update: database schema, server authorization, and analytics calculations do not change.
+
 ## Mobile
 
-Home and Market analytics share a status-aware bulletin card. Notifications and history render status text, not currency zeros. Monthly statistics use the API projection, include fifth weeks, and leave missing bars empty. Publishing supports the same statuses. Older APKs cannot interpret the nullable price schema; install the updated beta to view these records. Cached older data refreshes through the normal API synchronization flow.
+Home and Market analytics share a status-aware bulletin card without source-bulletin links or reference footers. Notifications and history render status text, not currency zeros. Market history stacks the period and product prices with larger text so long statuses can wrap on narrow screens. Monthly statistics use the API projection, include fifth weeks, and leave missing bars empty. Publishing supports the same statuses. Older APKs cannot interpret the nullable price schema; install the updated beta to view these records. Cached older data refreshes through the normal API synchronization flow.
 
 ## Verification and rollout
 

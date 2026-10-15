@@ -1,384 +1,100 @@
-import { priceText } from '../../utils/pricePresentation';
 import React, { useState } from 'react';
-import { TrendingUp, Calendar, FileText, ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
-import Button from '../ui/Button';
+import { TrendingUp } from 'lucide-react';
+import { priceText } from '../../utils/pricePresentation';
 
-export default function PriceTrendsSection({
-  trendsData = null,
-  timeframe = 'weekly',
-  onTimeframeChange,
-  isLoading = false,
-  className = ''
-}) {
-  const [activeSeries, setActiveSeries] = useState('sugar'); // 'sugar' | 'molasses' | 'both'
-  const [hoveredPoint, setHoveredPoint] = useState(null);
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const axisLabel = (date, timeframe) => {
+  const [year, month, day] = date.split('-');
+  return { label: `${months[Number(month) - 1]}${timeframe === 'weekly' ? ` ${Number(day)}` : ''}`, year };
+};
 
-  if (isLoading) {
-    return (
-      <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-6 shadow-xs animate-pulse ${className}`}>
-        <div className="h-5 w-48 bg-gray-200 dark:bg-gray-800 rounded mb-4" />
-        <div className="h-56 bg-gray-200 dark:bg-gray-800 rounded-xl mb-4" />
-      </div>
-    );
-  }
+export default function PriceTrendsSection({ trendsData = null, timeframe = 'weekly', onTimeframeChange, isLoading = false, className = '' }) {
+  const [activeSeries, setActiveSeries] = useState('sugar');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const { trendPoints = [] } = trendsData || {};
+  const isSugar = activeSeries === 'sugar';
+  const product = isSugar ? 'Raw Sugar' : 'Molasses';
+  const unit = isSugar ? 'Lkg (50 kg)' : 'MT';
+  const min = isSugar ? trendsData?.minSugar : trendsData?.minMolasses;
+  const max = isSugar ? trendsData?.maxSugar : trendsData?.maxMolasses;
+  const current = isSugar ? trendsData?.currentSugar : trendsData?.currentMolasses;
+  const currentStatus = isSugar ? trendsData?.currentSugarStatus : trendsData?.currentMolassesStatus;
+  const seriesColor = isSugar ? 'text-[#2D5016] dark:text-[#A3D977]' : 'text-amber-800 dark:text-amber-300';
 
-  const {
-    trendPoints = [],
-    minSugar = 0,
-    maxSugar = 0,
-    minMolasses = 0,
-    maxMolasses = 0,
-    currentSugar = 0,
-    currentMolasses = 0
-  } = trendsData || {};
-
-  // Dimensions for SVG Chart
-  const W = 620;
-  const H = 200;
-  const padL = 60;
-  const padR = 25;
-  const padT = 25;
-  const padB = 40;
-  const svgW = W + padL + padR;
-  const svgH = H + padT + padB;
-  const n = trendPoints.length;
-
-  // Scales
-  const sugarMinP = minSugar * 0.95;
-  const sugarMaxP = maxSugar * 1.05;
-  const sugarRange = (sugarMaxP - sugarMinP) || 1;
-
-  const molMinP = minMolasses * 0.95;
-  const molMaxP = maxMolasses * 1.05;
-  const molRange = (molMaxP - molMinP) || 1;
-
-  // Compute coordinates
-  const pointsWithCoords = trendPoints.map((pt, i) => {
-    const x = n > 1 ? padL + (i / (n - 1)) * W : padL + W / 2;
-    const ySugar = pt.sugarPrice == null ? null : padT + H - ((pt.sugarPrice - sugarMinP) / sugarRange) * H;
-    const yMol = pt.molassesPrice == null ? null : padT + H - ((pt.molassesPrice - molMinP) / molRange) * H;
-    return { ...pt, x, ySugar, yMol };
+  // These coordinates only present the server-computed trend projection.
+  const W = 800, H = 250, padL = 105, padR = 35, padT = 25, padB = 75;
+  const svgW = W + padL + padR, svgH = H + padT + padB;
+  const lower = (min ?? 0) * 0.95, upper = (max ?? 0) * 1.05;
+  const range = upper - lower || 1;
+  const points = trendPoints.map((point, index) => {
+    const value = isSugar ? point.sugarPrice : point.molassesPrice;
+    return { ...point, value, x: padL + (trendPoints.length > 1 ? index / (trendPoints.length - 1) : 0.5) * W,
+      y: value == null ? null : padT + H - (value - lower) / range * H };
   });
-
-  // Build SVG Paths
-  const buildPath = (coordKey) => {
-    let d = '', connected = false;
-    pointsWithCoords.forEach(point => {
-      if (point[coordKey] == null) { connected = false; return; }
-      d += `${connected ? ' L' : ' M'} ${point.x} ${point[coordKey]}`;
-      connected = true;
-    });
-    return d;
-  };
-
-  const sugarPathD = buildPath('ySugar');
-  const molassesPathD = buildPath('yMol');
-
-  const sugarAreaD = ''; // Do not fill across missing quotes.
-
-  // Y-axis grid ticks for sugar or molasses
-  const yTicks = [0, 0.33, 0.66, 1].map(frac => {
-    const y = padT + H - frac * H;
-    const sugarVal = Math.round(sugarMinP + frac * sugarRange);
-    const molVal = Math.round(molMinP + frac * molRange);
-    return { y, sugarVal, molVal };
+  let path = '', connected = false;
+  points.forEach(point => {
+    if (point.y == null) { connected = false; return; }
+    path += `${connected ? ' L' : ' M'} ${point.x} ${point.y}`;
+    connected = true;
   });
+  // Space a maximum of eight labels across the entire period, including unquoted weeks.
+  const tickCount = Math.min(8, points.length);
+  const tickIndexes = Array.from({ length: tickCount }, (_, i) => tickCount === 1 ? 0 : Math.round(i * (points.length - 1) / (tickCount - 1)));
+  const selected = points.find(point => point.date === selectedDate);
+  const chooseTimeframe = next => { setSelectedDate(null); onTimeframeChange?.(next); };
 
-  return (
-    <div className={`bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs ${className}`}>
-      {/* Section Header & Toggles */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-4">
-        <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-hug-muted block">
-            Price Trajectory
-          </span>
-          <h2 className="text-lg sm:text-xl font-black text-hug-text mt-0.5">
-            Published Price Trends
-          </h2>
-          <p className="text-xs text-hug-muted mt-0.5">
-            Chronological price series based on the source recorded with each publication.
-          </p>
+  if (isLoading) return <div className={`bg-surface rounded-2xl border border-border p-6 animate-pulse ${className}`} aria-busy="true"><div className="h-5 w-48 bg-bg rounded mb-4" /><div className="h-64 bg-bg rounded-xl" /></div>;
+
+  return <section className={`bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs space-y-4 ${className}`}>
+    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-border pb-4">
+      <div><h2 className="text-lg sm:text-xl font-bold text-hug-text">Price trends</h2><p className="text-sm text-hug-text2 mt-1">Weekly prices and monthly averages of reported weeks.</p></div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl border border-border bg-bg" role="group" aria-label="Price product">
+          {[['sugar', 'Raw Sugar'], ['molasses', 'Molasses']].map(([key, label]) => <button key={key} type="button" aria-pressed={activeSeries === key} onClick={() => setActiveSeries(key)} className={`px-3 py-2 text-sm rounded-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${activeSeries === key ? 'bg-surface text-hug-text shadow-sm border border-border' : 'text-hug-text2 hover:text-hug-text'}`}>{label}</button>)}
         </div>
-
-        {/* Series & Timeframe Controls */}
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          {/* Commodity Toggle */}
-          <div className="flex items-center bg-bg p-1 rounded-xl border border-border text-xs">
-            <button
-              type="button"
-              onClick={() => setActiveSeries('sugar')}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                activeSeries === 'sugar'
-                  ? 'bg-surface text-primary dark:text-primary-light shadow-2xs border border-border/80'
-                  : 'text-hug-muted hover:text-hug-text'
-              }`}
-            >
-              Raw Sugar (₱/Lkg)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSeries('molasses')}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                activeSeries === 'molasses'
-                  ? 'bg-surface text-amber-700 dark:text-amber-400 shadow-2xs border border-border/80'
-                  : 'text-hug-muted hover:text-hug-text'
-              }`}
-            >
-              Molasses (₱/MT)
-            </button>
-          </div>
-
-          {/* Timeframe Toggle */}
-          <div className="flex items-center bg-bg p-1 rounded-xl border border-border text-xs">
-            <button
-              type="button"
-              onClick={() => onTimeframeChange('weekly')}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                timeframe === 'weekly'
-                  ? 'bg-surface text-hug-text shadow-2xs border border-border/80'
-                  : 'text-hug-muted hover:text-hug-text'
-              }`}
-            >
-              Weekly
-            </button>
-            <button
-              type="button"
-              onClick={() => onTimeframeChange('monthly')}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                timeframe === 'monthly'
-                  ? 'bg-surface text-hug-text shadow-2xs border border-border/80'
-                  : 'text-hug-muted hover:text-hug-text'
-              }`}
-            >
-              Monthly Average
-            </button>
-          </div>
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl border border-border bg-bg" role="group" aria-label="Price timeframe">
+          {[['weekly', 'Weekly'], ['monthly', 'Monthly average']].map(([key, label]) => <button key={key} type="button" aria-pressed={timeframe === key} onClick={() => chooseTimeframe(key)} className={`px-3 py-2 text-sm rounded-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${timeframe === key ? 'bg-surface text-hug-text shadow-sm border border-border' : 'text-hug-text2 hover:text-hug-text'}`}>{label}</button>)}
         </div>
       </div>
-
-      <p className="text-xs text-hug-muted">Gaps mean no quoted price. Monthly averages use reported weeks only; unavailable quotes are never counted as zero.</p>
-      {trendPoints.length > 0 && <div className="max-h-60 overflow-auto rounded-xl border border-border"><table className="w-full text-left text-xs text-hug-text"><thead className="sticky top-0 bg-bg"><tr><th className="p-3">Period</th><th className="p-3">Raw Sugar / Lkg</th><th className="p-3">Molasses / MT</th></tr></thead><tbody className="divide-y divide-border">{trendPoints.map(point => <tr key={point.date}><td className="p-3">{point.periodLabel}</td><td className="p-3">{priceText(point.sugarPrice, point.sugarStatus)}{timeframe === 'monthly' && <span className="block text-hug-muted">{point.sugarReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td><td className="p-3">{priceText(point.molassesPrice, point.molassesStatus)}{timeframe === 'monthly' && <span className="block text-hug-muted">{point.molassesReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td></tr>)}</tbody></table></div>}
-      {trendPoints.length === 0 ? (
-        <div className="py-10 text-center text-hug-muted text-xs">
-          <TrendingUp className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
-          <p className="font-semibold text-hug-text text-sm">No historical prices recorded</p>
-          <p className="text-xs text-hug-muted mt-0.5">
-            Price trends will appear once source-referenced records are published.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-5 space-y-4">
-          {/* Key Metrics Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {activeSeries === 'sugar' ? (
-              <>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Latest Circular</span>
-                  <span className="text-base sm:text-lg font-black text-primary dark:text-primary-light">
-                    {priceText(currentSugar, trendsData?.currentSugarStatus)}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Period Low</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(minSugar, minSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Period High</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(maxSugar, maxSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Lkg bag</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Trajectory Range</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(maxSugar != null && minSugar != null ? maxSugar - minSugar : null, maxSugar == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">variance across series</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Latest Circular</span>
-                  <span className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400">
-                    {priceText(currentMolasses, trendsData?.currentMolassesStatus)}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Period Low</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(minMolasses, minMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Period High</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(maxMolasses, maxMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">/ Metric Ton</span>
-                </div>
-                <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-3 border border-border">
-                  <span className="text-[10px] uppercase font-bold text-hug-muted block">Trajectory Range</span>
-                  <span className="text-base sm:text-lg font-black text-hug-text">
-                    {priceText(maxMolasses != null && minMolasses != null ? maxMolasses - minMolasses : null, maxMolasses == null ? 'NOT_REPORTED' : 'REPORTED')}
-                  </span>
-                  <span className="text-[10px] text-hug-muted block">variance across series</span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* SVG Line Chart */}
-          <div className="overflow-x-auto bg-bg/20 dark:bg-gray-900/20 rounded-xl p-3 border border-border/80">
-            <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full min-w-[560px] select-none">
-              <defs>
-                <linearGradient id="analyticsSugarGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2D5016" stopOpacity="0.25" />
-                  <stop offset="100%" stopColor="#2D5016" stopOpacity="0.0" />
-                </linearGradient>
-                <linearGradient id="analyticsMolGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#B45309" stopOpacity="0.25" />
-                  <stop offset="100%" stopColor="#B45309" stopOpacity="0.0" />
-                </linearGradient>
-              </defs>
-
-              {/* Horizontal Gridlines & Y-labels */}
-              {yTicks.map(({ y, sugarVal, molVal }) => (
-                <g key={y}>
-                  <line
-                    x1={padL}
-                    y1={y}
-                    x2={padL + W}
-                    y2={y}
-                    stroke="currentColor"
-                    className="text-border"
-                    strokeWidth="1"
-                    strokeDasharray="3 3"
-                  />
-                  <text
-                    x={padL - 10}
-                    y={y + 3}
-                    textAnchor="end"
-                    fontSize="10"
-                    fontWeight="600"
-                    className="fill-hug-muted font-mono"
-                  >
-                    ₱{(activeSeries === 'sugar' ? sugarVal : molVal).toLocaleString()}
-                  </text>
-                </g>
-              ))}
-
-              {/* Sugar Line & Area */}
-              {activeSeries === 'sugar' && sugarAreaD && (
-                <path d={sugarAreaD} fill="url(#analyticsSugarGrad)" />
-              )}
-              {activeSeries === 'sugar' && sugarPathD && (
-                <path
-                  d={sugarPathD}
-                  fill="none"
-                  stroke="#2D5016"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-              )}
-
-              {/* Molasses Line */}
-              {activeSeries === 'molasses' && (
-                <path
-                  d={molassesPathD}
-                  fill="none"
-                  stroke="#B45309"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-              )}
-
-              {/* Data Points and X Labels */}
-              {pointsWithCoords.map((pt, i) => {
-                const isLatest = i === n - 1;
-                const ptY = activeSeries === 'sugar' ? pt.ySugar : pt.yMol;
-                const color = activeSeries === 'sugar' ? '#2D5016' : '#B45309';
-                const priceVal = activeSeries === 'sugar' ? pt.sugarPrice : pt.molassesPrice;
-                const unit = activeSeries === 'sugar' ? '/ Lkg' : '/ MT';
-                if (priceVal == null) return null;
-
-                return (
-                  <g
-                    key={i}
-                    className="cursor-pointer"
-                    onMouseEnter={() => setHoveredPoint(pt)}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                  >
-                    {isLatest && (
-                      <circle
-                        cx={pt.x}
-                        cy={ptY}
-                        r="10"
-                        fill={color}
-                        opacity="0.25"
-                      />
-                    )}
-                    <circle
-                      cx={pt.x}
-                      cy={ptY}
-                      r={isLatest ? 5.5 : 4}
-                      fill={color}
-                      stroke="#FFFFFF"
-                      strokeWidth="2"
-                    />
-
-                    {/* X-axis Label */}
-                    <text
-                      x={pt.x}
-                      y={padT + H + 18}
-                      textAnchor="middle"
-                      fontSize="9"
-                      fontWeight="600"
-                      className="fill-hug-muted"
-                      transform={`rotate(-25, ${pt.x}, ${padT + H + 18})`}
-                    >
-                      {timeframe === 'monthly' ? pt.periodLabel : pt.periodLabel.replace(/Week\s+/i, 'W')}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-
-          {/* Hover / Point Details Callout */}
-          {hoveredPoint ? (
-            <div className="p-3 bg-bg dark:bg-gray-800/60 rounded-xl border border-border flex items-center justify-between text-xs animate-fadeIn">
-              <div>
-                <span className="font-bold text-hug-text">
-                  {hoveredPoint.periodLabel} ({hoveredPoint.date})
-                </span>
-                <span className="text-[11px] text-hug-muted ml-2 font-mono">
-                  {hoveredPoint.circularNumber}
-                </span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="font-extrabold text-primary dark:text-primary-light">
-                  Raw Sugar: {priceText(hoveredPoint.sugarPrice, hoveredPoint.sugarStatus, 'Lkg')}
-                </span>
-                <span className="font-extrabold text-amber-600 dark:text-amber-400">
-                  Molasses: {priceText(hoveredPoint.molassesPrice, hoveredPoint.molassesStatus, 'MT')}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <p className="text-[11px] text-hug-muted text-center pt-1">
-              Hover over points to inspect specific circular prices and issuing reference codes.
-            </p>
-          )}
-        </div>
-      )}
     </div>
-  );
+
+    <p className="text-sm text-hug-text2 leading-relaxed">Gaps mean no quoted price. Monthly averages include reported weeks only.</p>
+    {points.length === 0 ? <div className="py-10 text-center text-hug-text2"><TrendingUp className="w-8 h-8 mx-auto mb-3" /><p className="font-semibold text-hug-text">No historical prices recorded</p><p className="text-sm mt-1">Price trends will appear once prices are published.</p></div> : <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          ['Latest status / price', priceText(current, currentStatus), current != null && currentStatus === 'REPORTED' ? `PHP / ${unit}` : 'Latest published week'],
+          ['Period low', priceText(min, min == null ? 'NOT_REPORTED' : 'REPORTED'), `PHP / ${unit}`],
+          ['Period high', priceText(max, max == null ? 'NOT_REPORTED' : 'REPORTED'), `PHP / ${unit}`],
+          ['Price range', priceText(max != null && min != null ? max - min : null, max == null ? 'NOT_REPORTED' : 'REPORTED'), 'Highest minus lowest']
+        ].map(([label, value, note]) => <div key={label} className="bg-bg rounded-xl p-4 border border-border min-w-0"><p className="text-sm font-medium text-hug-text2">{label}</p><p className="text-lg sm:text-xl font-bold text-hug-text mt-1 break-words">{value}</p><p className="text-xs text-hug-text2 mt-1">{note}</p></div>)}
+      </div>
+
+      <figure className="space-y-2">
+        <figcaption className="text-sm font-semibold text-hug-text">{product} · PHP / {unit}</figcaption>
+        {path ? <div className="overflow-x-auto rounded-xl border border-border bg-bg/30 p-3 focus-visible:outline-2 focus-visible:outline-primary" tabIndex={0} role="region" aria-label={`${product} price chart; scroll horizontally on smaller screens`}>
+          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full min-w-[900px] select-none" role="group" aria-label={`${product} prices by ${timeframe === 'weekly' ? 'week' : 'month'}`}>
+            {[0, 1 / 3, 2 / 3, 1].map(fraction => {
+              const y = padT + H - fraction * H;
+              return <g key={fraction}><line x1={padL} x2={padL + W} y1={y} y2={y} stroke="currentColor" className="text-border-strong" strokeDasharray="4 4" /><text x={padL - 14} y={y + 5} textAnchor="end" fontSize="14" fontWeight="600" className="fill-hug-text2">₱{Math.round(lower + fraction * range).toLocaleString('en-PH')}</text></g>;
+            })}
+            <path d={path} fill="none" stroke="currentColor" className={seriesColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            {points.filter(point => point.y != null).map(point => <g key={point.date} role="button" tabIndex={0} aria-label={`${point.periodLabel}, ${point.date}: ${priceText(point.value, 'REPORTED', unit)}`} aria-pressed={selectedDate === point.date} className={`cursor-pointer outline-none group ${seriesColor}`} onMouseEnter={() => setSelectedDate(point.date)} onFocus={() => setSelectedDate(point.date)} onClick={() => setSelectedDate(point.date)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedDate(point.date); } }}>
+              <circle cx={point.x} cy={point.y} r="12" fill="transparent" stroke="currentColor" className="opacity-0 group-focus-visible:opacity-100" strokeWidth="2" />
+              <circle cx={point.x} cy={point.y} r={selectedDate === point.date ? 6 : 4} fill="currentColor" className="stroke-surface" strokeWidth="2" />
+              <title>{`${point.periodLabel}: ${priceText(point.value, 'REPORTED', unit)}`}</title>
+            </g>)}
+            {tickIndexes.map(index => {
+              const point = points[index], { label, year } = axisLabel(point.date, timeframe);
+              return <g key={point.date}><line x1={point.x} x2={point.x} y1={padT + H} y2={padT + H + 6} stroke="currentColor" className="text-hug-text2" /><text x={point.x} y={padT + H + 28} textAnchor="middle" fontSize="14" fontWeight="600" className="fill-hug-text2"><tspan x={point.x}>{label}</tspan><tspan x={point.x} dy="20" fontSize="12">{year}</tspan></text></g>;
+            })}
+          </svg>
+        </div> : <div className="py-10 px-4 text-center rounded-xl border border-border text-hug-text2">No quoted {product} prices for this period.</div>}
+        <p className="text-sm text-hug-text2">{path ? 'Select a point for its full date and price. Scroll the chart sideways on smaller screens.' : 'See the weekly statuses below for availability.'}</p>
+      </figure>
+
+      {selected && <div className="p-4 bg-bg rounded-xl border border-border space-y-2 text-sm" aria-live="polite"><p className="font-semibold text-hug-text">{selected.periodLabel} · {selected.date}</p><div className="flex flex-wrap gap-x-6 gap-y-2 text-hug-text"><span>Raw Sugar: <strong>{priceText(selected.sugarPrice, selected.sugarStatus, 'Lkg')}</strong></span><span>Molasses: <strong>{priceText(selected.molassesPrice, selected.molassesStatus, 'MT')}</strong></span></div></div>}
+
+      <details className="rounded-xl border border-border"><summary className="p-4 cursor-pointer text-sm font-semibold text-hug-text">View all {timeframe === 'weekly' ? 'weekly prices' : 'monthly averages'} ({points.length})</summary><div className="max-h-80 overflow-auto border-t border-border"><table className="w-full text-left text-sm text-hug-text"><thead className="sticky top-0 bg-surface"><tr><th scope="col" className="p-3">Period</th><th scope="col" className="p-3">Raw Sugar / Lkg</th><th scope="col" className="p-3">Molasses / MT</th></tr></thead><tbody className="divide-y divide-border">{points.map(point => <tr key={point.date}><th scope="row" className="p-3 font-medium">{point.periodLabel}</th><td className="p-3">{priceText(point.sugarPrice, point.sugarStatus)}{timeframe === 'monthly' && <span className="block text-xs text-hug-text2 mt-1">{point.sugarReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td><td className="p-3">{priceText(point.molassesPrice, point.molassesStatus)}{timeframe === 'monthly' && <span className="block text-xs text-hug-text2 mt-1">{point.molassesReportedWeeks}/{point.totalWeeks} reported weeks</span>}</td></tr>)}</tbody></table></div></details>
+    </>}
+  </section>;
 }

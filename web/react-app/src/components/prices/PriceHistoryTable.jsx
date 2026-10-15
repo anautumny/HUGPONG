@@ -87,19 +87,19 @@ export default function PriceHistoryTable({
         <div>
           <h3 className="text-base font-bold text-hug-text flex items-center gap-2">
             <span>Historical SRA Price Records</span>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-bg dark:bg-gray-800 text-hug-muted border border-border">
-              {filteredPrices.length} circulars
+            <span className="text-sm font-semibold px-2 py-0.5 rounded-full bg-bg dark:bg-gray-800 text-hug-text2 border border-border">
+              {filteredPrices.length} records
             </span>
           </h3>
-          <p className="text-xs text-hug-muted mt-0.5">
-            Source-referenced weekly history. Missing quotes retain their reported status.
+          <p className="text-sm text-hug-text2 mt-0.5">
+            Weekly price history. Missing quotes retain their reported status.
           </p>
         </div>
 
         <div className="w-full sm:w-64">
           <Input
             type="text"
-            placeholder="Search circulars, weeks, dates..."
+            placeholder="Search weeks, dates, statuses..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -114,7 +114,7 @@ export default function PriceHistoryTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-sm">
           <thead>
-            <tr className="bg-bg/60 dark:bg-[#0C1015]/60 border-b border-border/80 text-hug-muted font-bold text-xs uppercase tracking-wider">
+            <tr className="bg-bg/60 dark:bg-[#0C1015]/60 border-b border-border/80 text-hug-text2 font-bold text-sm uppercase tracking-wider">
               <th
                 scope="col"
                 className="px-4 py-3.5 cursor-pointer hover:text-hug-text transition-colors select-none"
@@ -122,7 +122,7 @@ export default function PriceHistoryTable({
               >
                 <div className="flex items-center gap-1.5">
                   <span>Effective Date</span>
-                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-muted" />
+                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-text2" />
                 </div>
               </th>
 
@@ -136,8 +136,8 @@ export default function PriceHistoryTable({
                 onClick={() => handleSort('sugarPricePerLkg')}
               >
                 <div className="flex items-center gap-1.5">
-                  <span>Raw Sugar (â‚±/Lkg)</span>
-                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-muted" />
+                  <span>Raw Sugar (PHP/Lkg)</span>
+                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-text2" />
                 </div>
               </th>
 
@@ -147,17 +147,13 @@ export default function PriceHistoryTable({
                 onClick={() => handleSort('molassesPricePerMetricTon')}
               >
                 <div className="flex items-center gap-1.5">
-                  <span>Molasses (â‚±/MT)</span>
-                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-muted" />
+                  <span>Molasses (PHP/MT)</span>
+                  <ArrowUpDown className="w-3.5 h-3.5 text-hug-text2" />
                 </div>
               </th>
 
               <th scope="col" className="px-4 py-3.5 select-none">
                 Weekly Variance
-              </th>
-
-              <th scope="col" className="px-4 py-3.5 select-none">
-                Circular / Source
               </th>
 
               <th scope="col" className="px-4 py-3.5 text-right select-none">
@@ -175,17 +171,16 @@ export default function PriceHistoryTable({
                   <td className="px-4 py-4"><div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4"><div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4"><div className="h-4 w-28 bg-gray-200 dark:bg-gray-800 rounded" /></td>
-                  <td className="px-4 py-4"><div className="h-4 w-36 bg-gray-200 dark:bg-gray-800 rounded" /></td>
                   <td className="px-4 py-4 text-right"><div className="h-4 w-16 bg-gray-200 dark:bg-gray-800 rounded ml-auto" /></td>
                 </tr>
               ))
             ) : pagedPrices.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-10 px-4 text-hug-muted text-xs">
-                  <FileText className="w-8 h-8 mx-auto text-hug-muted/50 mb-2" />
-                  <p className="font-semibold text-hug-text text-sm">No price circulars found</p>
-                  <p className="text-xs text-hug-muted mt-0.5">
-                    {searchTerm ? 'Try adjusting your search terms.' : 'Source-referenced price records will appear here once published.'}
+                <td colSpan={6} className="text-center py-10 px-4 text-hug-text2 text-sm">
+                  <FileText className="w-8 h-8 mx-auto text-hug-text2/50 mb-2" />
+                  <p className="font-semibold text-hug-text text-sm">No price records found</p>
+                  <p className="text-sm text-hug-text2 mt-0.5">
+                    {searchTerm ? 'Try adjusting your search terms.' : 'Price records will appear here once published.'}
                   </p>
                 </td>
               </tr>
@@ -198,34 +193,34 @@ export default function PriceHistoryTable({
 
                 return (
                   <tr key={p.id} className="hover:bg-bg/40 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3.5 text-xs text-hug-muted whitespace-nowrap font-medium">
-                      {formatDate(p.effectiveDate)}<span className="block text-[10px]">{p.periodType === 'WEEK_ENDING' ? 'Week ending' : 'Effective date'}</span>
+                    <td className="px-4 py-3.5 text-sm text-hug-text2 whitespace-nowrap font-medium">
+                      {formatDate(p.effectiveDate)}<span className="block text-xs">{p.periodType === 'WEEK_ENDING' ? 'Week ending' : 'Effective date'}</span>
                     </td>
 
-                    <td className="px-4 py-3.5 text-xs font-bold text-hug-text whitespace-nowrap">
+                    <td className="px-4 py-3.5 text-sm font-bold text-hug-text whitespace-nowrap">
                       {p.weekLabel || '—'}
                     </td>
 
-                    <td className="px-4 py-3.5 text-xs whitespace-nowrap">
-                      <span className="font-extrabold text-primary dark:text-primary-light">
+                    <td className="px-4 py-3.5 text-sm whitespace-nowrap">
+                      <span className="font-extrabold text-primary dark:text-[#A3D977]">
                         {priceText(sugarPrice, p.sugarPriceStatus)}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1">/Lkg</span>
+                      {sugarPrice != null && (p.sugarPriceStatus || 'REPORTED') === 'REPORTED' && <span className="text-xs text-hug-text2 ml-1">/Lkg</span>}
                     </td>
 
-                    <td className="px-4 py-3.5 text-xs whitespace-nowrap">
+                    <td className="px-4 py-3.5 text-sm whitespace-nowrap">
                       <span className="font-bold text-hug-text">
                         {priceText(molassesPrice, p.molassesPriceStatus)}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1">/MT</span>
+                      {molassesPrice != null && (p.molassesPriceStatus || 'REPORTED') === 'REPORTED' && <span className="text-xs text-hug-text2 ml-1">/MT</span>}
                     </td>
 
                     <td className="px-4 py-3.5 whitespace-nowrap">
-                      <div className="flex flex-col gap-1 text-[11px]">
+                      <div className="flex flex-col gap-1 text-xs">
                         {/* Sugar diff */}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Sugar:</span>
-                          {p.sugarPriceChange == null ? <span className="text-hug-muted">No comparison</span> : sugarChange > 0 ? (
+                          <span className="text-xs font-bold text-hug-text2 uppercase tracking-wider">Sugar:</span>
+                          {p.sugarPriceChange == null ? <span className="text-hug-text2">No comparison</span> : sugarChange > 0 ? (
                             <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{sugarChange.toLocaleString()}
@@ -236,7 +231,7 @@ export default function PriceHistoryTable({
                               -₱{Math.abs(sugarChange).toLocaleString()}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center font-medium text-hug-muted">
+                            <span className="inline-flex items-center font-medium text-hug-text2">
                               <Minus className="w-3 h-3" />
                               ₱0
                             </span>
@@ -245,8 +240,8 @@ export default function PriceHistoryTable({
 
                         {/* Molasses diff */}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-bold text-hug-muted uppercase tracking-wider">Molasses:</span>
-                          {p.molassesPriceChange == null ? <span className="text-hug-muted">No comparison</span> : molassesChange > 0 ? (
+                          <span className="text-xs font-bold text-hug-text2 uppercase tracking-wider">Molasses:</span>
+                          {p.molassesPriceChange == null ? <span className="text-hug-text2">No comparison</span> : molassesChange > 0 ? (
                             <span className="inline-flex items-center font-bold text-success">
                               <ArrowUpRight className="w-3 h-3" />
                               +₱{molassesChange.toLocaleString()}
@@ -257,7 +252,7 @@ export default function PriceHistoryTable({
                               -₱{Math.abs(molassesChange).toLocaleString()}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center font-medium text-hug-muted">
+                            <span className="inline-flex items-center font-medium text-hug-text2">
                               <Minus className="w-3 h-3" />
                               ₱0
                             </span>
@@ -266,17 +261,8 @@ export default function PriceHistoryTable({
                       </div>
                     </td>
 
-                    <td className="px-4 py-3.5 text-xs text-hug-muted max-w-[200px] truncate" title={p.source}>
-                      <span className="font-mono font-semibold text-hug-text block truncate">
-                        {p.circularNumber || 'Published Reference'}
-                      </span>
-                      <span className="text-[10px] text-hug-muted block truncate">
-                        {p.sourceUrl ? <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View source bulletin</a> : (p.source || 'Sugar Regulatory Administration')}
-                      </span>
-                    </td>
-
                     <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-success-bg text-success border border-success/30">
+                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-success-bg text-success border border-success/30">
                         <CheckCircle2 className="w-3 h-3" />
                         Published Reference
                       </span>
@@ -290,12 +276,12 @@ export default function PriceHistoryTable({
       </div>
 
       {/* Pagination Footer — always rendered, matches Table card footer */}
-      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-xs">
-        <div className="text-hug-muted font-medium">
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-sm">
+        <div className="text-hug-text2 font-medium">
           <span>
             Showing page <strong className="text-hug-text">{validCurrentPage}</strong> of{' '}
             <strong className="text-hug-text">{totalPages}</strong>{' '}
-            <span className="text-hug-muted">({filteredPrices.length} records)</span>
+            <span className="text-hug-text2">({filteredPrices.length} records)</span>
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -304,8 +290,8 @@ export default function PriceHistoryTable({
             disabled={validCurrentPage === 1}
             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
             aria-label="Previous page"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
-              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold border border-border
+              text-hug-text2 bg-surface hover:bg-bg hover:text-hug-text transition-colors
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -316,8 +302,8 @@ export default function PriceHistoryTable({
             disabled={validCurrentPage === totalPages}
             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
             aria-label="Next page"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border
-              text-hug-muted bg-surface hover:bg-bg hover:text-hug-text transition-colors
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold border border-border
+              text-hug-text2 bg-surface hover:bg-bg hover:text-hug-text transition-colors
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <span>Next</span>
