@@ -31,6 +31,8 @@ Home and Market analytics share a status-aware bulletin card. Notifications and 
 
 ## Verification and rollout
 
-The complete release gate passes 542 server tests, 38 Web tests, the Web production build, and Android Hermes export. Eight behavioral regression tests cover CSV validation, independent product availability, monthly means, comparison gaps, atomic mock replacement/replay, and Web/Mobile contract parity. Native device acceptance remains required.
+The complete release gate passes 546 server tests, 38 Web tests, the Web production build, and Android Hermes export, including the direct-download integration coverage added for Beta 1.0.2. Eight behavioral price regression tests cover CSV validation, independent product availability, monthly means, comparison gaps, atomic mock replacement/replay, and Web/Mobile contract parity. Native device acceptance remains required.
 
 Deploy the updated API/Web before applying the import. Release the compatible Android APK alongside the schema change. Existing rules/indexes remain valid; no unrelated farm, user, audit-report, or operation record is changed.
+
+Production import completed on 16 October 2026 (Asia/Manila): 39 historical records created and the backed-up selected mock removed. An independent database read-back matched the imported records and analytics values. See [Beta 1.0.2 release record](BETA_RELEASE_1.0.2.md).
