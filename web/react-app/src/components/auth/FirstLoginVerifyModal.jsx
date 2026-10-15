@@ -1,3 +1,4 @@
+import VerificationMethodChoices from './VerificationMethodChoices';
 import React, { useState, useEffect, useRef } from 'react';
 import { Smartphone, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -21,12 +22,14 @@ export default function FirstLoginVerifyModal({
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [error, setError] = useState('');
   const [verificationStep, setVerificationStep] = useState('choice');
+  const [verificationMethod, setVerificationMethod] = useState(null);
   const verificationAttemptRef = useRef('');
 
   // The user must explicitly choose SMS or authorized review on first login.
   useEffect(() => {
     if (isOpen) {
       setOtpCode('');
+      setVerificationMethod(null);
       verificationAttemptRef.current = '';
       setError('');
       setTimeLeft(300);
@@ -199,14 +202,8 @@ export default function FirstLoginVerifyModal({
             <div className="rounded-xl border border-amber-300/70 bg-amber-50/80 p-3 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
               <strong>Smart or TNT SIM?</strong> SMS code verification is currently unavailable for Smart and TNT numbers. Request authorized review instead.
             </div>
-            <button type="button" onClick={handleChooseSms} disabled={isResending || isRequestingReview} className="rounded-xl bg-primary px-4 py-3 text-left text-sm font-bold text-white disabled:opacity-50">
-              {isResending ? 'Sending code...' : 'Verify using an SMS code'}
-              <span className="mt-0.5 block text-[11px] font-normal opacity-90">For supported mobile networks.</span>
-            </button>
-            <button type="button" onClick={handleRequestReview} disabled={isResending || isRequestingReview} className="rounded-xl border border-border bg-surface px-4 py-3 text-left text-sm font-bold text-hug-text disabled:opacity-50">
-              {isRequestingReview ? 'Requesting review...' : 'Request authorized verification review'}
-              <span className="mt-0.5 block text-[11px] font-normal text-hug-muted">Use this for Smart/TNT or when SMS is unavailable.</span>
-            </button>
+            <VerificationMethodChoices value={verificationMethod} onChange={setVerificationMethod} disabled={isResending || isRequestingReview} />
+            <button type="button" onClick={() => verificationMethod === 'sms' ? handleChooseSms() : handleRequestReview()} disabled={!verificationMethod || isResending || isRequestingReview} className="min-h-12 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50">{isResending ? 'Sending code...' : isRequestingReview ? 'Requesting review...' : 'Continue with selected method'}</button>
             <button type="button" onClick={onCancel} disabled={isResending || isRequestingReview} className="self-end text-xs font-bold text-hug-muted hover:text-hug-text">Sign Out</button>
           </div>
         )}

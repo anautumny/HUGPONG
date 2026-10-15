@@ -148,6 +148,12 @@ app.get('/health/ready', (req, res) => {
   });
 });
 
+// Public streaming download: the browser receives an attachment directly from
+// HUGPONG. It never navigates to GitHub or creates a Firestore-backed session.
+app.get('/downloads/android/:version', require('./routes/androidDownload').createAndroidDownloadHandler({
+  release: require('../web/react-app/src/config/androidRelease.json')
+}));
+
 // Session Configuration
 app.use(session({
   name: 'hugpong.sid',

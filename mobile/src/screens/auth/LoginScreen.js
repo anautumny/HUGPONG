@@ -1,3 +1,4 @@
+import VerificationMethodChoices from '../../components/VerificationMethodChoices';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -63,6 +64,7 @@ export default function LoginScreen({ navigation, route }) {
   const [phoneVerificationResendSeconds, setPhoneVerificationResendSeconds] = useState(0);
   const [phoneVerificationRequestsRemaining, setPhoneVerificationRequestsRemaining] = useState(3);
   const [phoneVerificationStep, setPhoneVerificationStep] = useState('choice');
+  const [verificationMethod, setVerificationMethod] = useState(null);
   const [phoneVerificationReviewSaving, setPhoneVerificationReviewSaving] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(false);
   const [setupSigningOut, setSetupSigningOut] = useState(false);
@@ -252,6 +254,7 @@ export default function LoginScreen({ navigation, route }) {
         setPhoneVerificationCode('');
         phoneVerificationAttemptRef.current = '';
         setPhoneVerificationError('');
+        setVerificationMethod(null);
         const verificationStatus = String(res.user?.phoneVerificationStatus || '').toUpperCase();
         setPhoneVerificationStep(verificationStatus === 'PENDING_VERIFICATION'
           && res.user?.phoneVerificationRequestedAt
@@ -714,11 +717,9 @@ export default function LoginScreen({ navigation, route }) {
                 <View style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 12 }}>
                   <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}><Text style={{ fontWeight: '900' }}>{t('first_smart_tnt_title')} </Text>{t('first_smart_tnt_help')}</Text>
                 </View>
-                <TouchableOpacity style={s.modalSaveBtn} onPress={handleChooseSmsVerification} disabled={phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut}>
-                  {phoneVerificationResending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.modalSaveText}>{t('first_choose_sms')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={[s.modalCancelBtn, { paddingVertical: 12 }]} onPress={handleRequestPhoneVerificationReview} disabled={phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut}>
-                  {phoneVerificationReviewSaving ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={s.modalCancelText}>{t('first_choose_review')}</Text>}
+                <VerificationMethodChoices value={verificationMethod} onChange={setVerificationMethod} disabled={phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut} />
+                <TouchableOpacity accessibilityRole="button" style={[s.modalSaveBtn, { minHeight: 48, opacity: !verificationMethod || phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut ? 0.5 : 1 }]} onPress={() => verificationMethod === 'sms' ? handleChooseSmsVerification() : handleRequestPhoneVerificationReview()} disabled={!verificationMethod || phoneVerificationResending || phoneVerificationReviewSaving || setupSigningOut}>
+                  {phoneVerificationResending || phoneVerificationReviewSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.modalSaveText}>{t('reg_btn_continue', 'Continue')}</Text>}
                 </TouchableOpacity>
               </View>}
               {phoneVerificationStep === 'review' && <View style={{ borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FFFBEB', borderRadius: RADIUS.md, padding: 14, gap: 5 }}>

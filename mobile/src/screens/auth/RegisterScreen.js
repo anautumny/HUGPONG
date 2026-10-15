@@ -1,3 +1,4 @@
+import VerificationMethodChoices from '../../components/VerificationMethodChoices';
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -105,6 +106,7 @@ export default function RegisterScreen({ navigation }) {
   const [codeRequestsRemaining, setCodeRequestsRemaining] = useState(3);
   const [phoneVerificationRequestToken, setPhoneVerificationRequestToken] = useState('');
   const [phoneVerificationRequested, setPhoneVerificationRequested] = useState(false);
+  const [verificationMethod, setVerificationMethod] = useState(null);
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [registeredAccount, setRegisteredAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -541,34 +543,10 @@ export default function RegisterScreen({ navigation }) {
                       {t('reg_smart_tnt_choice_help', 'Using Smart or TNT? Choose authorized verification because SMS code delivery is unavailable for those networks.')}
                     </Text>
                   </View>
-                  <View style={s.verificationChoiceList}>
-                    <TouchableOpacity
-                      style={[s.verificationChoice, s.verificationChoicePrimary]}
-                      onPress={handleSendCode}
-                      disabled={loading}
-                      activeOpacity={0.8}
-                    >
-                      {loading
-                        ? <ActivityIndicator size="small" color="#fff" />
-                        : <Ionicons name="chatbubble-ellipses-outline" size={20} color="#fff" />}
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.verificationChoicePrimaryTitle}>{t('reg_btn_send_code', 'Send Code via SMS')}</Text>
-                        <Text style={s.verificationChoicePrimaryText}>{t('reg_sms_supported_networks', 'Choose this for supported mobile networks.')}</Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.verificationChoice}
-                      onPress={() => continueWithPhoneVerificationReview()}
-                      disabled={loading}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="people-outline" size={20} color={COLORS.primary} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.verificationChoiceTitle}>{t('reg_phone_verification_action', 'Request Phone Verification Review')}</Text>
-                        <Text style={s.verificationChoiceText}>{t('reg_smart_tnt_review_help', 'Choose this for Smart/TNT or when you cannot receive an SMS code.')}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
+                  <VerificationMethodChoices value={verificationMethod} onChange={setVerificationMethod} disabled={loading} />
+                  <TouchableOpacity accessibilityRole="button" style={[s.btn, (!verificationMethod || loading) && s.btnDisabled]} disabled={!verificationMethod || loading} onPress={() => verificationMethod === 'sms' ? handleSendCode() : continueWithPhoneVerificationReview()} activeOpacity={0.8}>
+                    {loading ? <ActivityIndicator size="small" color="#fff" /> : <><Text style={s.btnText}>{t('reg_btn_continue', 'Continue')}</Text><Ionicons name="arrow-forward" size={18} color="#fff" /></>}
+                  </TouchableOpacity>
                 </>
               ) : !codeVerified ? (
                 <>
@@ -628,13 +606,17 @@ export default function RegisterScreen({ navigation }) {
                   {phoneVerificationRequestToken ? (
                     <TouchableOpacity
                       onPress={() => continueWithPhoneVerificationReview(phoneVerificationRequestToken)}
-                      style={s.phoneVerificationBtn}
+                      accessibilityRole="button"
+                      disabled={loading}
+                      activeOpacity={0.75}
+                      style={[s.phoneVerificationBtn, { borderWidth: 2, borderColor: COLORS.primary, backgroundColor: '#fff', minHeight: 64, elevation: 2 }, loading && { opacity: 0.55 }]}
                     >
                       <Ionicons name="people-outline" size={16} color={COLORS.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={s.phoneVerificationTitle}>{t('reg_phone_verification_action', 'Request Phone Verification Review')}</Text>
                         <Text style={s.phoneVerificationText}>{t('reg_phone_verification_help', 'Use this if Smart/TNT or another network did not deliver the code. A reviewer authorized for your selected Block Farm can verify it.')}</Text>
                       </View>
+                      <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
                     </TouchableOpacity>
                   ) : null}
                 </>

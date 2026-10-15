@@ -100,7 +100,8 @@ test('provisioned users choose phone verification before entering the manual-rev
   assert.match(webUsersService, /record\.reviewQueueEligible === true/);
   assert.match(mobileStore, /user\.reviewQueueEligible === true/);
   assert.match(webVerification, /Smart or TNT SIM\?/);
-  assert.match(webVerification, /Request authorized verification review/);
+  assert.match(read('web/react-app/src/components/auth/VerificationMethodChoices.jsx'), /Request authorized verification review/);
+  assert.match(webVerification, /disabled=\{!verificationMethod \|\| isResending \|\| isRequestingReview\}/);
   assert.match(webVerification, /onComplete=\{handleVerifyCode\}/);
   assert.doesNotMatch(webVerification, /Verify & Continue/);
   assert.match(mobileLogin, /first_smart_tnt_help/);

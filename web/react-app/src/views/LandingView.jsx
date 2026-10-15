@@ -6,8 +6,8 @@ import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
 import androidRelease from '../config/androidRelease.json';
 
-// A published release travels with this Web build; older host overrides cannot pin the previous APK.
-const ANDROID_APK_URL = String(androidRelease.downloadUrl || import.meta.env.VITE_ANDROID_APK_URL || '').trim();
+// Same-origin attachment response starts the download without navigating away.
+const ANDROID_APK_URL = androidRelease.downloadUrl ? `/downloads/android/${encodeURIComponent(androidRelease.version)}` : '';
 
 export default function LandingView() {
   const { isAuthenticated } = useAuth();
