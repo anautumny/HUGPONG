@@ -6,88 +6,79 @@ const { sessionSecret } = require('../config');
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESEND_DELAY_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
-const challenges = new Map();
+const { COLLECTIONS } = require('../schema/firestoreSchema');
 
-function challengeKey(purpose, subject) {
-  return `${purpose}:${String(subject || '').trim()}`;
-}
+function createOtpService(database) {
+  function reference(purpose, subject) {
+    if (!database) throw Object.assign(new Error('Verification storage is temporarily unavailable.'), { status: 503, code: 'OTP_STORAGE_UNAVAILABLE' });
+    const key = crypto.createHash('sha256').update(JSON.stringify([String(purpose), String(subject).trim()])).digest('hex');
+    return database.collection(COLLECTIONS.OTP_CHALLENGES).doc(key);
+  }
+  const digest = (code, purpose, subject, challengeId) => crypto.createHmac('sha256', sessionSecret)
+    .update(JSON.stringify([purpose, String(subject).trim(), challengeId, String(code).trim()])).digest('hex');
 
-function digest(code, purpose, subject) {
-  return crypto
-    .createHmac('sha256', sessionSecret)
-    .update(`${purpose}:${subject}:${code}`)
-    .digest('hex');
-}
-
-function issueOtp(purpose, subject, phone, now = Date.now()) {
-  const key = challengeKey(purpose, subject);
-  const previous = challenges.get(key);
-  if (previous && now - previous.issuedAt < RESEND_DELAY_MS) {
-    const error = new Error('Please wait before requesting another verification code.');
-    error.code = 'OTP_RATE_LIMITED';
-    throw error;
+  async function issueOtp(purpose, subject, phone, now = Date.now()) {
+    const ref = reference(purpose, subject);
+    const code = String(crypto.randomInt(100000, 1000000));
+    const challengeId = crypto.randomBytes(16).toString('hex');
+    await database.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (snapshot.exists && now - Number(snapshot.data().issuedAt) < RESEND_DELAY_MS) {
+        throw Object.assign(new Error('Please wait before requesting another verification code.'), { status: 429, code: 'OTP_RATE_LIMITED' });
+      }
+      transaction.set(ref, { phone, purpose, challengeId, codeHash: digest(code, purpose, subject, challengeId),
+        issuedAt: now, expiresAt: now + OTP_TTL_MS, attempts: 0, status: 'PENDING',
+        deleteAfter: new Date(now + OTP_TTL_MS + 24 * 60 * 60 * 1000) });
+    });
+    return { code, challengeId, expiresAt: now + OTP_TTL_MS };
   }
 
-  const code = String(crypto.randomInt(100000, 1000000));
-  challenges.set(key, {
-    phone,
-    codeHash: digest(code, purpose, subject),
-    issuedAt: now,
-    expiresAt: now + OTP_TTL_MS,
-    attempts: 0,
-    verified: false
-  });
-  return { code, expiresAt: now + OTP_TTL_MS };
-}
-
-function verifyOtp(purpose, subject, phone, code, now = Date.now()) {
-  const key = challengeKey(purpose, subject);
-  const challenge = challenges.get(key);
-  if (!challenge || challenge.phone !== phone) return { success: false, error: 'No matching verification request was found.' };
-  if (now >= challenge.expiresAt) {
-    challenges.delete(key);
-    return { success: false, error: 'The verification code has expired.' };
-  }
-  if (challenge.attempts >= MAX_ATTEMPTS) {
-    challenges.delete(key);
-    return { success: false, error: 'Too many incorrect verification attempts.' };
+  async function verify(purpose, subject, phone, code, now, consume) {
+    const ref = reference(purpose, subject);
+    return database.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      const challenge = snapshot.exists ? snapshot.data() : null;
+      if (!challenge || challenge.phone !== phone || ['USED', 'REVOKED'].includes(challenge.status)) return { success: false, error: 'No matching verification request was found.' };
+      if (now >= challenge.expiresAt) {
+        transaction.update(ref, { status: 'EXPIRED', codeHash: null });
+        return { success: false, error: 'The verification code has expired.' };
+      }
+      if (challenge.attempts >= MAX_ATTEMPTS || challenge.status === 'LOCKED') return { success: false, error: 'Too many incorrect verification attempts.' };
+      const expected = Buffer.from(String(challenge.codeHash || ''), 'hex');
+      const supplied = Buffer.from(digest(code, purpose, subject, challenge.challengeId), 'hex');
+      if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) {
+        const attempts = challenge.attempts + 1;
+        transaction.update(ref, { attempts, ...(attempts >= MAX_ATTEMPTS ? { status: 'LOCKED', codeHash: null } : {}) });
+        return { success: false, error: 'The verification code is incorrect.' };
+      }
+      transaction.update(ref, { status: consume ? 'USED' : 'VERIFIED', ...(consume ? { codeHash: null } : {}) });
+      return { success: true };
+    });
   }
 
-  challenge.attempts += 1;
-  const expected = Buffer.from(challenge.codeHash, 'hex');
-  const supplied = Buffer.from(digest(String(code || '').trim(), purpose, subject), 'hex');
-  if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) {
-    return { success: false, error: 'The verification code is incorrect.' };
+  async function consumeVerifiedOtp(purpose, subject, phone, now = Date.now()) {
+    const ref = reference(purpose, subject);
+    return database.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return false;
+      const challenge = snapshot.data();
+      if (challenge.phone !== phone || challenge.status !== 'VERIFIED' || now >= challenge.expiresAt) return false;
+      transaction.update(ref, { status: 'USED', codeHash: null });
+      return true;
+    });
   }
-  challenge.verified = true;
-  return { success: true };
+
+  async function discardOtp(purpose, subject, challengeId = null) {
+    const ref = reference(purpose, subject);
+    await database.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (snapshot.exists && (!challengeId || snapshot.data().challengeId === challengeId)) transaction.update(ref, { status: 'REVOKED', codeHash: null });
+    });
+  }
+  return { issueOtp, verifyOtp: (purpose, subject, phone, code, now = Date.now()) => verify(purpose, subject, phone, code, now, false),
+    verifyAndConsumeOtp: (purpose, subject, phone, code, now = Date.now()) => verify(purpose, subject, phone, code, now, true), consumeVerifiedOtp, discardOtp };
 }
 
-function consumeVerifiedOtp(purpose, subject, phone, now = Date.now()) {
-  const key = challengeKey(purpose, subject);
-  const challenge = challenges.get(key);
-  if (!challenge || challenge.phone !== phone || !challenge.verified || now >= challenge.expiresAt) return false;
-  challenges.delete(key);
-  return true;
-}
-
-function verifyAndConsumeOtp(purpose, subject, phone, code, now = Date.now()) {
-  const result = verifyOtp(purpose, subject, phone, code, now);
-  if (!result.success) return result;
-  challenges.delete(challengeKey(purpose, subject));
-  return { success: true };
-}
-
-function discardOtp(purpose, subject) {
-  challenges.delete(challengeKey(purpose, subject));
-}
-
-module.exports = {
-  OTP_TTL_MS,
-  issueOtp,
-  verifyOtp,
-  consumeVerifiedOtp,
-  verifyAndConsumeOtp,
-  discardOtp,
-  _test: { challenges }
-};
+const methods = Object.fromEntries(['issueOtp', 'verifyOtp', 'verifyAndConsumeOtp', 'consumeVerifiedOtp', 'discardOtp']
+  .map(name => [name, (...args) => createOtpService(require('../firebase-admin').db)[name](...args)]));
+module.exports = { OTP_TTL_MS, createOtpService, ...methods };

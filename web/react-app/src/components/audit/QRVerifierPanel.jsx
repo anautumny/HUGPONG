@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Camera, ImageUp, Inbox, Keyboard, QrCode, ShieldCheck, X } from 'lucide-react';
+import React, { useCallback, useRef, useState } from 'react';
+import { AlertCircle, ImageUp, Inbox, Keyboard, QrCode, ShieldCheck } from 'lucide-react';
 import Button from '../ui/Button';
 import {
   verifyAuditQr,
@@ -26,23 +26,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
   const [pendingPayload, setPendingPayload] = useState('');
   const [alreadyImported, setAlreadyImported] = useState(false);
   const fileInputRef = useRef(null);
-  const videoRef = useRef(null);
-  const scannerControlsRef = useRef(null);
-  const cameraScanLockedRef = useRef(false);
   const transferPartsRef = useRef(new Map());
-
-  const resetReceiver = useCallback(() => {
-    scannerControlsRef.current?.stop();
-    scannerControlsRef.current = null;
-    cameraScanLockedRef.current = false;
-    setMode('choice');
-    setInputCode('');
-    setDecodedReport(null);
-    setPendingPayload('');
-    setAlreadyImported(false);
-    setFeedback(null);
-    transferPartsRef.current.clear();
-  }, []);
 
   const showPreview = useCallback((report, payload, duplicate = false) => {
     setDecodedReport(report);
@@ -67,6 +51,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
       let report;
       let payload = raw;
       let duplicate = false;
+      let serverVerified = false;
 
       try {
         const part = decodeAuditQrPart(raw);
@@ -76,7 +61,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
         const collected = transferPartsRef.current.get(part.transferId);
         collected.set(part.partNumber, raw);
         if (collected.size < part.partCount) {
-          const message = `${collected.size} of ${part.partCount} QR parts captured. Keep scanning.`;
+          const message = `${collected.size} of ${part.partCount} QR parts received. Upload the next QR image.`;
           setFeedback({ type: 'info', message });
           return { continueScanning: true, message };
         }
@@ -95,9 +80,16 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
           }
           report = verified.data.report;
           duplicate = Boolean(verified.data.alreadyImported);
+          serverVerified = true;
         }
       }
 
+      if (!serverVerified) {
+        const verified = await verifyAuditQr(payload);
+        if (!verified.data?.integrityVerified || !verified.data?.authoritativeFound || !verified.data?.report) throw new Error('The authoritative audit report could not be retrieved.');
+        report = verified.data.report;
+        duplicate = Boolean(verified.data.alreadyImported);
+      }
       if (!await verifyAuditReportIntegrity(report)) {
         throw new Error('The audit QR integrity check failed.');
       }
@@ -116,50 +108,6 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
       setIsProcessing(false);
     }
   }, [showPreview]);
-
-  useEffect(() => {
-    if (mode !== 'camera' || !videoRef.current) return undefined;
-    let active = true;
-    let localControls = null;
-    cameraScanLockedRef.current = false;
-    setFeedback({ type: 'info', message: 'Camera ready. Align the complete QR square inside the frame.' });
-
-    import('@zxing/browser')
-      .then(async ({ BrowserQRCodeReader }) => {
-        const reader = new BrowserQRCodeReader();
-        localControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, async result => {
-          if (!active || !result || cameraScanLockedRef.current) return;
-          cameraScanLockedRef.current = true;
-          const outcome = await readQrPayload(result.getText());
-          if (active && outcome?.continueScanning) cameraScanLockedRef.current = false;
-        });
-        if (!active) {
-          localControls.stop();
-          return;
-        }
-        scannerControlsRef.current = localControls;
-      })
-      .catch(error => {
-        if (!active) return;
-        setFeedback({
-          type: 'error',
-          message: /permission|notallowed/i.test(String(error?.name || error?.message || ''))
-            ? 'Camera permission was denied. Allow camera access in the browser, or upload a QR image.'
-            : 'The HUGPONG camera scanner could not start. Upload a QR image instead.'
-        });
-        setMode('choice');
-      });
-
-    return () => {
-      active = false;
-      localControls?.stop();
-      if (scannerControlsRef.current && scannerControlsRef.current !== localControls) {
-        scannerControlsRef.current.stop();
-      }
-      scannerControlsRef.current = null;
-      cameraScanLockedRef.current = false;
-    };
-  }, [mode, readQrPayload]);
 
   const handleImageUpload = async event => {
     const file = event.target.files?.[0];
@@ -187,6 +135,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
 
   const handleManualSubmit = async event => {
     event.preventDefault();
+    if (isProcessing) return;
     const code = inputCode.trim().toUpperCase();
     if (!TRANSFER_CODE_PATTERN.test(code)) {
       setFeedback({ type: 'error', message: 'Enter a valid AUD-, RPT-, or HUG- code.' });
@@ -247,6 +196,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
   };
 
   const cancelPreview = () => {
+    setInputCode('');
     setDecodedReport(null);
     setPendingPayload('');
     setAlreadyImported(false);
@@ -264,57 +214,19 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
           <h3 className="text-base font-bold text-hug-text tracking-tight">Receive Audit Report</h3>
         </div>
         <p className="text-xs text-hug-muted leading-relaxed">
-          Receive a Farm Manager report with the HUGPONG camera scanner, a QR image, or its report code.
+          Attach a QR code image or enter its report code to receive a Farm Manager report. Camera scanning is available in the mobile app.
         </p>
       </div>
 
       {mode === 'choice' && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-          <Button variant="primary" size="md" className="w-full" icon={Camera} onClick={() => { setFeedback(null); setMode('camera'); }} disabled={isProcessing}>
-            Scan QR
+          <Button variant="primary" size="md" className="w-full" icon={ImageUp} onClick={() => fileInputRef.current?.click()} disabled={isProcessing} isLoading={isProcessing} loadingText="Reading QR...">
+            Attach QR Image
           </Button>
-          <Button variant="secondary" size="md" className="w-full" icon={ImageUp} onClick={() => fileInputRef.current?.click()} disabled={isProcessing} isLoading={isProcessing} loadingText="Reading QR...">
-            Upload QR
-          </Button>
-          <Button variant="secondary" size="md" className="w-full" icon={Keyboard} onClick={() => { setFeedback(null); setMode('manual'); }}>
+          <Button variant="secondary" size="md" className="w-full" icon={Keyboard} onClick={() => { setFeedback(null); setMode('manual'); }} disabled={isProcessing}>
             Input Code
           </Button>
-        </div>
-      )}
-
-      {mode === 'camera' && (
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0D1E14] text-white shadow-lg">
-          <div className="flex items-center justify-between border-b border-white/10 bg-[#10291A] px-4 py-3">
-            <div>
-              <p className="text-[9px] font-black tracking-[0.2em] text-[#9EE493]">HUGPONG</p>
-              <p className="text-sm font-extrabold">Secure QR Scanner</p>
-            </div>
-            <button type="button" onClick={resetReceiver} className="rounded-full bg-white/10 p-2 text-white transition hover:bg-white/20" aria-label="Close scanner">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="px-4 pb-5 pt-4 text-center">
-            <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[#9EE493]/30 bg-[#9EE493]/10 px-3 py-1 text-[9px] font-black tracking-wider text-[#9EE493]">
-              <ShieldCheck className="h-3.5 w-3.5" /> HUGPONG SECURE SCANNER
-            </div>
-            <p className="mb-4 text-xs text-white/65">Place the complete audit QR inside the frame. Scanning happens automatically.</p>
-            <div className="relative mx-auto aspect-square w-full max-w-[360px] overflow-hidden rounded-[28px] border border-white/20 bg-black">
-              <video ref={videoRef} muted playsInline className="h-full w-full object-cover" />
-              <div className="pointer-events-none absolute inset-8">
-                <span className="absolute left-0 top-0 h-10 w-10 rounded-tl-xl border-l-4 border-t-4 border-[#9EE493]" />
-                <span className="absolute right-0 top-0 h-10 w-10 rounded-tr-xl border-r-4 border-t-4 border-[#9EE493]" />
-                <span className="absolute bottom-0 left-0 h-10 w-10 rounded-bl-xl border-b-4 border-l-4 border-[#9EE493]" />
-                <span className="absolute bottom-0 right-0 h-10 w-10 rounded-br-xl border-b-4 border-r-4 border-[#9EE493]" />
-                <span className="absolute left-4 right-4 top-1/2 h-0.5 rounded bg-[#9EE493]/80" />
-              </div>
-              {isProcessing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                  <span className="rounded-full bg-[#EAF6E7] px-4 py-2 text-xs font-black text-[#173D24]">Validating audit report...</span>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
@@ -334,7 +246,7 @@ export default function QRVerifierPanel({ reports = [], onSelectReport, classNam
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" size="md" onClick={resetReceiver} disabled={isProcessing}>Cancel</Button>
+            <Button type="button" variant="secondary" size="md" onClick={cancelPreview} disabled={isProcessing}>Cancel</Button>
             <Button type="submit" variant="primary" size="md" isLoading={isProcessing} loadingText="Looking up...">Submit</Button>
           </div>
         </form>

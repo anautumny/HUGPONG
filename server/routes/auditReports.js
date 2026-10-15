@@ -138,17 +138,15 @@ async function resolveQrInput(rawPayload) {
   try {
     let payload = decodeQrPayload(rawPayload);
     const snapshot = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId).get();
-    // Current reference QRs and legacy v1 lookup codes resolve exclusively to
-    // the server-owned report. The integrity hash in a current QR must match
-    // before any report data is returned.
-    if (payload.referenceOnly || payload.legacyLookupOnly) {
-      if (!snapshot.exists) throw Object.assign(new Error('The authoritative audit report is not available.'), { status: 404 });
-      const authoritative = validateCanonicalAuditReport(normalizedReport(snapshot));
-      if (payload.referenceOnly && payload.integrityHash !== authoritative.integrityHash) {
-        throw Object.assign(new Error('The audit QR reference does not match the authoritative report.'), { status: 422 });
-      }
-      payload = authoritative;
+    // Every QR version is a lookup, including legacy embedded transfers.
+    // A sender can recompute an unkeyed hash; embedded data is never authority.
+    if (!snapshot.exists) throw Object.assign(new Error('The authoritative audit report is not available. Ask the Farm Manager to synchronize it before scanning again.'), { status: 404, code: 'AUDIT_REPORT_NOT_FOUND' });
+    const authoritative = validateCanonicalAuditReport(normalizedReport(snapshot));
+    const expectedHash = createAuditHash(snapshot.id, authoritative.blockFarmId, authoritative.periodKey, authoritative.operationSnapshots);
+    if (expectedHash !== authoritative.integrityHash || (!payload.legacyLookupOnly && payload.integrityHash !== authoritative.integrityHash)) {
+      throw Object.assign(new Error('The audit QR reference does not match the authoritative report.'), { status: 422, code: 'AUDIT_INTEGRITY_FAILED' });
     }
+    payload = authoritative;
     return { payload, snapshot };
   } catch (decodeError) {
     const code = String(rawPayload || '').trim().toUpperCase();
@@ -467,7 +465,6 @@ router.post('/qr/verify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
     const { payload, snapshot } = await resolveQrInput(req.body.payload);
     const transferHash = createAuditHash(payload.reportId, payload.blockFarmId, payload.periodKey, payload.operationSnapshots || []);
     if (transferHash !== payload.integrityHash) return res.status(422).json({ success: false, code: 'AUDIT_INTEGRITY_FAILED', error: 'The transferred audit data does not match its integrity hash.' });
-    if (!snapshot.exists) return res.json({ success: true, data: { report: payload, integrityVerified: true, authoritativeFound: false, alreadyImported: false } });
     const report = validateCanonicalAuditReport(normalizedReport(snapshot));
     const expectedHash = createAuditHash(snapshot.id, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
     const identityMatches = report.blockFarmId === payload.blockFarmId && report.periodKey === payload.periodKey
@@ -490,37 +487,7 @@ router.post('/qr/import', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (re
     const result = await db.runTransaction(async transaction => {
       const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(payload.reportId);
       const snapshot = await transaction.get(ref);
-      if (!snapshot.exists) {
-        const { reportId, ...canonicalPayload } = validateCanonicalAuditReport(payload);
-        const imported = {
-          ...canonicalPayload,
-          rootReportId: canonicalPayload.rootReportId || rootAuditReportId(canonicalPayload.blockFarmId, canonicalPayload.periodKey),
-          status: AUDIT_STATUS.PENDING_REVIEW,
-          reviewStatus: 'pending_review',
-          certificationStatus: 'not_certified',
-          qrSchemaVersion: QR_SCHEMA_VERSION,
-          integrityHash: canonicalPayload.integrityHash,
-          qrHash: canonicalPayload.qrHash || canonicalPayload.integrityHash,
-          integrityAlgorithm: 'SHA-256',
-          submissionMethod: AUDIT_DELIVERY_METHOD.QR,
-          submissionMethods: [AUDIT_DELIVERY_METHOD.QR],
-          deliveryMethod: AUDIT_DELIVERY_METHOD.QR,
-          deliveryStatus: AUDIT_DELIVERY_STATUS.RECEIVED,
-          submittedAt: now,
-          submittedByUserId: canonicalPayload.compiledByUserId,
-          importedAt: now,
-          importedByUserId: actorId,
-          createdAt: canonicalPayload.createdAt || canonicalPayload.compiledAt,
-          updatedAt: now
-        };
-        transaction.create(ref, imported);
-        queueAuditEvent(transaction, db, {
-          eventType: 'AUDIT_REPORT_QR_IMPORTED', actorUserId: actorId,
-          entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: imported.blockFarmId,
-          details: `Imported audit report ${reportId} by QR transfer.`, createdAt: now
-        });
-        return { report: { id: reportId, reportId, ...imported }, integrityVerified: true, alreadyImported: false };
-      }
+      if (!snapshot.exists) throw Object.assign(new Error('The authoritative audit report is no longer available.'), { status: 404, code: 'AUDIT_REPORT_NOT_FOUND' });
       const report = validateCanonicalAuditReport(normalizedReport(snapshot));
       const expectedHash = createAuditHash(snapshot.id, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
       if (expectedHash !== payload.integrityHash || expectedHash !== (report.integrityHash || report.qrHash)) throw Object.assign(new Error('The audit QR integrity check failed.'), { status: 422 });

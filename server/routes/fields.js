@@ -29,6 +29,7 @@ const { normalizeCustomOperationsPlan } = require('../domain/operationPlan');
 const { normalizeOperationSchedule } = require('../domain/operationSchedule');
 const { normalizeCustomStages } = require('../domain/customStages');
 const { assertFieldFitsBlockFarm } = require('../domain/landArea');
+const { creationReceipt } = require('../services/creationReceipt');
 
 function withoutLegacySoilType(value = {}) {
   const { soilType: _removedSoilType, ...field } = value;
@@ -112,7 +113,7 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    readMutationContext(req);
+    const mutationContext = readMutationContext(req);
     const developmentSeedId = readDevelopmentSeedId(req);
     if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'fieldId'], 'Field');
     if (String(req.body.variety || '').trim()) {
@@ -169,7 +170,12 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       archivedByUserId: null,
       completedAt: null
     };
-    await db.runTransaction(async transaction => {
+    const receipt = developmentSeedId ? null : creationReceipt(db, req.session.user.employeeId || req.session.user.userId, mutationContext,
+      { blockFarmId, memberUserId, areaHa, cropType: cycle.cropType, elapsedMonths: cycle.elapsedMonths, batchNumber: cycle.batchNumber,
+        customStages: field.customStages, customOperations: field.customOperations });
+    const result = await db.runTransaction(async transaction => {
+      const previous = receipt ? await receipt.read(transaction) : null;
+      if (previous) return { replayed: true, data: previous };
       const farmRef = db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId);
       const [farmSnapshot, farmFieldsSnapshot] = await Promise.all([
         transaction.get(farmRef),
@@ -195,8 +201,11 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
         details: `Created field ${fieldId} and its first Crop Year Cycle.`,
         createdAt: now
       });
+      const data = { field: { id: fieldId, ...field }, cycle: { id: cycleId, ...cycle } };
+      receipt?.write(transaction, data, now);
+      return { replayed: false, data };
     });
-    return res.status(201).json({ success: true, data: { field: { id: fieldId, ...field }, cycle: { id: cycleId, ...cycle } } });
+    return res.status(result.replayed ? 200 : 201).json({ success: true, ...result });
   } catch (error) {
     const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
     return res.status(status).json({ success: false, error: error.message });

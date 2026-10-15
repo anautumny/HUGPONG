@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Layers } from 'lucide-react';
 import { createField } from '../../services/fieldsService';
+import { useAuth } from '../../context/AuthContext';
+import { fieldEnrollmentIntent } from '../../services/enrollmentIntentService';
 
 const currentYear = new Date().getFullYear();
 const CROP_YEAR_PREVIEW = `${currentYear}–${currentYear + 1}`;
@@ -15,6 +17,7 @@ export default function FieldEnrollmentModal({
   defaultBlockFarmId = '',
   onSuccess
 }) {
+  const { user } = useAuth();
   const [blockFarmId, setBlockFarmId] = useState(defaultBlockFarmId);
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
@@ -64,8 +67,6 @@ export default function FieldEnrollmentModal({
     const numHa = Number(areaHa);
     if (!areaHa || isNaN(numHa) || numHa <= 0) {
       validation.areaHa = 'Enter a valid area in hectares (> 0).';
-    } else if (remainingAreaHa != null && numHa > remainingAreaHa + 0.0001) {
-      validation.areaHa = `Only ${remainingAreaHa.toFixed(2)} ha remains available in this Block Farm.`;
     }
 
     if (Object.keys(validation).length > 0) {
@@ -81,7 +82,9 @@ export default function FieldEnrollmentModal({
         areaHa: numHa
       };
 
-      await createField(payload);
+      const intent = await fieldEnrollmentIntent(user?.employeeId || user?.userId || user?.id, payload);
+      await createField(payload, intent.mutation);
+      localStorage.removeItem(intent.storageKey);
       setIsSubmitting(false);
       if (onSuccess) onSuccess();
       onClose();

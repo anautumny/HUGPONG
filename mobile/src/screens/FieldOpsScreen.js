@@ -2211,6 +2211,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       let report;
       let payload = rawStr;
       let duplicate = false;
+      let serverVerified = false;
       try {
         const suppliedParts = rawStr.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
         if (suppliedParts.length > 1) {
@@ -2248,9 +2249,23 @@ export default function FieldOpsScreen({ navigation, route }) {
           if (!verified.data?.integrityVerified || !verified.data?.report) throw new Error('The server could not verify this audit report.');
           report = verified.data.report;
           duplicate = Boolean(verified.data.alreadyImported);
+          serverVerified = true;
         }
       }
 
+      if (!serverVerified) {
+        if (!getNetworkStatus()) {
+          const reference = createAuditQrPayload(report);
+          await queueAuditReferenceForRetry(reference, { reportId: report.reportId || report.id, integrityHash: report.integrityHash });
+          setShowScanner(false);
+          Alert.alert('Audit QR Saved', 'The reference is saved for server verification when the connection returns.');
+          return { continueScanning: false };
+        }
+        const verified = await verifyAuditQr(payload);
+        if (!verified.data?.integrityVerified || !verified.data?.authoritativeFound || !verified.data?.report) throw new Error('The authoritative audit report could not be retrieved.');
+        report = verified.data.report;
+        duplicate = Boolean(verified.data.alreadyImported);
+      }
       const canonical = validateCanonicalAuditReport(report);
       if (!await verifyLocalAuditIntegrity(canonical)) throw new Error('The audit QR integrity check failed.');
       setPendingScannedPayload(payload);

@@ -28,7 +28,7 @@ jobs:
       VITE_FIREBASE_STORAGE_BUCKET: hugpong-ci.firebasestorage.app
       VITE_FIREBASE_MESSAGING_SENDER_ID: '100000000001'
       VITE_FIREBASE_APP_ID: '1:100000000001:web:ci-web-app'
-      EXPO_PUBLIC_API_BASE_URL: https://api.example.invalid
+      EXPO_PUBLIC_API_BASE_URL: https://hugpong-beta.onrender.com
       EXPO_PUBLIC_FIREBASE_API_KEY: ci-mobile-api-key
       EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: hugpong-ci.firebaseapp.com
       EXPO_PUBLIC_FIREBASE_PROJECT_ID: hugpong-ci

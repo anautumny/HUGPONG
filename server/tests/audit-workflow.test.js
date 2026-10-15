@@ -239,8 +239,8 @@ test('audit route exposes separate idempotent delivery selection, submit, QR imp
   assert.match(source, /reviewStatus: 'complete', certificationStatus: 'certified'/);
   assert.match(source, /expectedHash !== \(report\.integrityHash \|\| report\.qrHash\)/);
   assert.match(source, /payload\.integrityHash !== authoritative\.integrityHash/);
-  assert.match(source, /transaction\.create\(ref, imported\)/);
-  assert.match(source, /validateCanonicalAuditReport\(payload\)/);
+  assert.doesNotMatch(source, /transaction\.create\(ref, imported\)/);
+  assert.match(source, /AUDIT_REPORT_NOT_FOUND/);
   assert.match(source, /router\.get\('\/readiness'/);
   assert.match(source, /AUDIT_MONTH_INCOMPLETE/);
   assert.doesNotMatch(source, /fields:\s*\[\],\s*operations:\s*\[\]/);

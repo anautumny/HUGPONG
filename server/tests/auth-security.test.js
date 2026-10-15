@@ -14,7 +14,8 @@ const { buildFirebaseClaims } = require('../security/firebaseClaims');
 const { issueToken, verifyToken } = require('../security/token');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roleGuard');
-const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp');
+const { memoryFirestore } = require('./helpers/memoryFirestore');
+const { issueOtp, verifyOtp, consumeVerifiedOtp, verifyAndConsumeOtp } = require('../security/otp').createOtpService(memoryFirestore());
 const { _test: rateLimitTestHelpers } = require('../middleware/rateLimit');
 const { ROLES, publicRoleLabel, ROLE_ALLOWED_PLATFORMS, isRoleAllowedOnPlatform } = require('../schema/firestoreSchema');
 const { assertDevelopmentBootstrapAllowed } = require('../services/developmentBootstrap');
@@ -240,40 +241,40 @@ test('server-scoped users subscription updates the directory but never the authe
   assert.doesNotMatch(usersService, /hugpong_user|setUser\(|saveSession\(|localStorage/);
 });
 
-test('OTP values remain server-side, enforce matching context, and are single-use', () => {
+test('OTP values remain server-side, enforce matching context, and are single-use', async () => {
   const subject = `registration-${Date.now()}`;
-  const challenge = issueOtp('registration', subject, '09171234567');
-  assert.equal(verifyOtp('registration', subject, '09170000000', challenge.code).success, false);
-  assert.equal(verifyOtp('registration', subject, '09171234567', '000000').success, false);
-  assert.equal(verifyOtp('registration', subject, '09171234567', challenge.code).success, true);
-  assert.equal(consumeVerifiedOtp('registration', subject, '09171234567'), true);
-  assert.equal(consumeVerifiedOtp('registration', subject, '09171234567'), false);
+  const challenge = await issueOtp('registration', subject, '09171234567');
+  assert.equal((await verifyOtp('registration', subject, '09170000000', challenge.code)).success, false);
+  assert.equal((await verifyOtp('registration', subject, '09171234567', '000000')).success, false);
+  assert.equal((await verifyOtp('registration', subject, '09171234567', challenge.code)).success, true);
+  assert.equal(await consumeVerifiedOtp('registration', subject, '09171234567'), true);
+  assert.equal(await consumeVerifiedOtp('registration', subject, '09171234567'), false);
 
   const loginSubject = `first-login-${Date.now()}`;
-  const loginChallenge = issueOtp('first-login', loginSubject, '09181234567');
-  assert.equal(verifyAndConsumeOtp('first-login', loginSubject, '09181234567', loginChallenge.code).success, true);
-  assert.equal(verifyAndConsumeOtp('first-login', loginSubject, '09181234567', loginChallenge.code).success, false);
+  const loginChallenge = await issueOtp('first-login', loginSubject, '09181234567');
+  assert.equal((await verifyAndConsumeOtp('first-login', loginSubject, '09181234567', loginChallenge.code)).success, true);
+  assert.equal((await verifyAndConsumeOtp('first-login', loginSubject, '09181234567', loginChallenge.code)).success, false);
 });
 
-test('OTP resend cooldown, expiry, and attempt cap remain enforced independently of delivery provider', () => {
+test('OTP resend cooldown, expiry, and attempt cap remain enforced independently of delivery provider', async () => {
   const issuedAt = Date.now();
   const cooldownSubject = `cooldown-${issuedAt}`;
-  const first = issueOtp('delivery-test', cooldownSubject, '09171234567', issuedAt);
-  assert.throws(
+  const first = await issueOtp('delivery-test', cooldownSubject, '09171234567', issuedAt);
+  await assert.rejects(
     () => issueOtp('delivery-test', cooldownSubject, '09171234567', issuedAt + 1),
     error => error.code === 'OTP_RATE_LIMITED'
   );
 
   const expirySubject = `expiry-${issuedAt}`;
-  const expiring = issueOtp('delivery-test', expirySubject, '09171234567', issuedAt);
-  assert.match(verifyOtp('delivery-test', expirySubject, '09171234567', expiring.code, expiring.expiresAt).error, /expired/i);
+  const expiring = await issueOtp('delivery-test', expirySubject, '09171234567', issuedAt);
+  assert.match((await verifyOtp('delivery-test', expirySubject, '09171234567', expiring.code, expiring.expiresAt)).error, /expired/i);
 
   const attemptsSubject = `attempts-${issuedAt}`;
-  const attempted = issueOtp('delivery-test', attemptsSubject, '09171234567', issuedAt);
+  const attempted = await issueOtp('delivery-test', attemptsSubject, '09171234567', issuedAt);
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    assert.equal(verifyOtp('delivery-test', attemptsSubject, '09171234567', '000000', issuedAt + 10 + attempt).success, false);
+    assert.equal((await verifyOtp('delivery-test', attemptsSubject, '09171234567', '000000', issuedAt + 10 + attempt)).success, false);
   }
-  assert.match(verifyOtp('delivery-test', attemptsSubject, '09171234567', attempted.code, issuedAt + 20).error, /too many/i);
+  assert.match((await verifyOtp('delivery-test', attemptsSubject, '09171234567', attempted.code, issuedAt + 20)).error, /too many/i);
   assert.equal(first.code.length, 6);
 });
 

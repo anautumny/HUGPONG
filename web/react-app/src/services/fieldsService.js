@@ -77,8 +77,8 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
   });
 }
 
-export async function createField(payload) {
-  return authenticatedRequest('/api/fields', { method: 'POST', body: payload });
+export async function createField(payload, mutation) {
+  return authenticatedRequest('/api/fields', { method: 'POST', body: { ...payload, _mutation: mutation } });
 }
 
 export async function updateField(fieldId, payload) {

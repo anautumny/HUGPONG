@@ -500,7 +500,7 @@ test('audit QR cards show HUGPONG identity and report context without covering t
   assert.match(webAuditCompilation, /canvas\.toDataURL\('image\/png'\)/);
 });
 
-test('SRA receive workflow separates real scanning from online transfer-code lookup', () => {
+test('SRA receives QR images and codes on Web with camera scanning on Mobile', () => {
   assert.match(fieldOps, /Receive Audit Report/);
   assert.match(fieldOps, />Scan QR</);
   assert.match(fieldOps, />Input Code</);
@@ -517,11 +517,11 @@ test('SRA receive workflow separates real scanning from online transfer-code loo
   assert.match(fieldOps, /await importAuditQr\(pendingScannedPayload\)/);
   assert.match(webQrVerifier, /BrowserQRCodeReader/);
   assert.match(webQrVerifier, /decodeFromImageUrl/);
-  assert.match(webQrVerifier, /decodeFromVideoDevice/);
-  assert.match(webQrVerifier, /HUGPONG SECURE SCANNER/);
-  assert.match(webQrVerifier, />\s*Upload QR\s*</);
+  assert.match(webQrVerifier, />\s*Attach QR Image\s*</);
+  assert.match(webQrVerifier, /type="file" accept="image\/\*"/);
   assert.match(webQrVerifier, />\s*Input Code\s*</);
-  assert.match(webQrVerifier, />\s*Scan QR\s*</);
+  assert.match(webQrVerifier, /await verifyAuditQr\(code\)/);
+  assert.doesNotMatch(webQrVerifier, /decodeFromVideoDevice|<video|mode === 'camera'|Scan QR/);
   assert.doesNotMatch(webQrVerifier, /textarea/);
   assert.doesNotMatch(fieldOps, /commitExplicitMutation\('audit_qr_import'/);
   assert.doesNotMatch(fieldOps, /STRUCTURE_VALID_CLOUD_PENDING|CACHED_AUTHORITY_MATCH|offline structural verification/);

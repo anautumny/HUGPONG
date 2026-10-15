@@ -16,6 +16,8 @@ The installed Mobile app does not discover a Metro host and does not probe emula
 
 After changing the environment, restart Metro for development or create a new installed build for production. Do not add host arrays or runtime fallback probing.
 
+The current beta preview and production profiles in `mobile/eas.json` use `https://hugpong-beta.onrender.com`. Release configuration is checked by `mobile/app.config.js` and the full release gate: HTTP/local/missing origins and missing Firebase client values fail the build. The EAS environment must still supply the matching Firebase client variables. Development `.env` values remain separate. The API now requires Node.js 22 or newer after the Firebase Admin update.
+
 ## Express deployment contract
 
 Deploy the repository to a managed Node.js host or container behind a public TLS endpoint. Use these commands from the repository root:

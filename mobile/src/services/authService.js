@@ -295,8 +295,8 @@ export async function completePasswordRecoveryReview(reviewId, claimToken, newPa
   return publicAuthRequest('/auth/password-recovery-review/complete', { reviewId, claimToken, newPassword });
 }
 
-export async function fetchPasswordRecoveryReviews() {
-  return authenticatedRequest('/api/recovery-reviews');
+export async function fetchPasswordRecoveryReviews({ cursor = null } = {}) {
+  return authenticatedRequest(`/api/recovery-reviews${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
 }
 
 export async function decidePasswordRecoveryReview(reviewId, approve) {

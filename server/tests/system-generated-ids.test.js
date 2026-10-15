@@ -163,8 +163,8 @@ test('Field and Block Farm create endpoints return distinct server IDs and rejec
 
   const fieldBody = { blockFarmId: 'BF-EXISTING', memberUserId: null, areaHa: 1.25 };
   const [fieldA, fieldB] = await Promise.all([
-    invoke(fieldPost, fieldBody, manager),
-    invoke(fieldPost, fieldBody, manager)
+    invoke(fieldPost, { ...fieldBody, _mutation: { mutationId: 'MUT-CREATE-FIELD-A', idempotencyKey: 'MUT-CREATE-FIELD-A', entityKey: 'fields/new' } }, manager),
+    invoke(fieldPost, { ...fieldBody, _mutation: { mutationId: 'MUT-CREATE-FIELD-B', idempotencyKey: 'MUT-CREATE-FIELD-B', entityKey: 'fields/new' } }, manager)
   ]);
   assert.equal(fieldA.statusCode, 201);
   assert.equal(fieldB.statusCode, 201);

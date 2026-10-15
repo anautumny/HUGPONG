@@ -8,7 +8,7 @@ const isDevelopmentBuild = typeof __DEV__ !== 'undefined'
 function isPrivateOrLocalHostname(hostname) {
   const normalized = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) return true;
-  if (normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized)) return true;
+  if (normalized.includes(':') && (normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized))) return true;
 
   const octets = normalized.split('.').map(Number);
   if (octets.length !== 4 || octets.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return false;

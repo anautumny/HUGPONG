@@ -2,7 +2,13 @@
 // HUGPONG Backend — Firebase Admin SDK Initializer
 // ══════════════════════════════════════════════════════════════
 
-const admin = require('firebase-admin');
+const { initializeApp, cert, getApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
+const { getFirestore, FieldPath, FieldValue } = require('firebase-admin/firestore');
+// Local compatibility facade for existing routes/scripts. All SDK entry points
+// are modular; Firebase Admin 14 removed the legacy root namespace.
+const admin = { initializeApp, credential: { cert }, app: getApp,
+  firestore: Object.assign(getFirestore, { FieldPath, FieldValue }), auth: getAuth };
 const { cleanText } = require('./services/diagnosticService');
 const fs = require('fs');
 const path = require('path');

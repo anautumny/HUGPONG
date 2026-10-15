@@ -31,7 +31,8 @@ const {
   classifyMutationError,
   queuePressure,
   createSingleFlightRunner,
-  drainMutationQueue
+  drainMutationQueue,
+  responseVersion
 } = require('./mutationOutboxCore');
 
 let outboxQueue = [];
@@ -176,7 +177,8 @@ export function getSemanticDatePrefix() {
  * Format: LOG-{FIELD}-{TIMESTAMP_HEX}-{RAND} e.g. LOG-FLDNCY001-M7A9X2-8F2A
  */
 export function generateDeterministicLogId(fieldId) {
-  const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const cleanField = String(fieldId || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!cleanField) throw new Error('A Field identity is required before creating an operation.');
   return createClientRecordId('LOG', cleanField);
 }
 
@@ -189,7 +191,8 @@ export function generateLogId(fieldId) {
  * Format: DFT-{FIELD}-{TIMESTAMP_HEX}-{RAND}
  */
 export function generateDraftId(fieldId) {
-  const cleanField = (fieldId || (fields[0]?.id || '')).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const cleanField = String(fieldId || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!cleanField) throw new Error('A Field identity is required before creating a draft.');
   return createClientRecordId('DFT', cleanField);
 }
 

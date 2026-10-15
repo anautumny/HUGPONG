@@ -9,6 +9,7 @@ const { COLLECTIONS, ROLES, canonicalRole, publicRoleLabel } = require('../schem
 const { assertPhoneVerificationAuthority, resolvePhoneVerificationReason } = require('../domain/phoneVerificationPolicy');
 const { decideAssistedRecovery } = require('../services/assistedPasswordRecoveryService');
 const { deliverRecoveryDecisionNotification } = require('../services/mobilePushService');
+const { pageLimit, decodeCursor, encodeCursor } = require('../services/cursorPagination');
 
 const REVIEW_ROLES = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN];
 
@@ -70,17 +71,33 @@ router.get('/', requireAuth, requireRole(REVIEW_ROLES), async (req, res) => {
     const actorId = String(req.session.user.employeeId || '').trim();
     const actorRole = canonicalRole(req.session.user.canonicalRole || req.session.user.role);
     const managerFarms = actorRole === ROLES.FARM_MANAGER ? await actorFarmIds(actorId) : new Set();
-    const snapshot = await db.collection(COLLECTIONS.PASSWORD_RECOVERY_REVIEWS)
-      .where('status', '==', 'PENDING')
-      .limit(100)
-      .get();
     const now = Date.now();
-    const data = snapshot.docs
-      .filter(document => Number(document.data().expiresAtMs || 0) > now)
+    const limit = pageLimit(req.query?.limit, 50);
+    const cursor = decodeCursor(req.query?.cursor);
+    let query = db.collection(COLLECTIONS.PASSWORD_RECOVERY_REVIEWS)
+      .where('status', '==', 'PENDING').where('expiresAtMs', '>', now);
+    if (actorRole === ROLES.FARM_MANAGER) {
+      if (!managerFarms.size) return res.json({ success: true, count: 0, data: [], hasMore: false, nextCursor: null });
+      if (managerFarms.size > 30) throw Object.assign(new Error('Recovery review scope exceeds the supported Block Farm limit.'), { status: 409 });
+      query = query.where('role', '==', ROLES.MEMBER_FARMER).where('blockFarmId', 'in', [...managerFarms]);
+    } else if (actorRole === ROLES.SRA_ADMIN) {
+      query = query.where('role', 'in', [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]);
+    }
+    query = query.orderBy('expiresAtMs', 'asc').orderBy('__name__', 'asc');
+    if (cursor) {
+      if (!Number.isFinite(Number(cursor.value))) throw Object.assign(new Error('Recovery review cursor is invalid.'), { status: 400 });
+      query = query.startAfter(Number(cursor.value), cursor.id);
+    }
+    const snapshot = await query.limit(limit + 1).get();
+    const page = snapshot.docs.slice(0, limit);
+    const data = page
       .filter(document => canListReview(actorRole, actorId, document.data(), managerFarms))
       .map(publicReview)
       .sort((left, right) => String(left.requestedAt).localeCompare(String(right.requestedAt)));
-    return res.json({ success: true, count: data.length, data });
+    const hasMore = snapshot.docs.length > limit;
+    const last = page.at(-1);
+    return res.json({ success: true, count: data.length, data, hasMore,
+      nextCursor: hasMore && last ? encodeCursor(String(last.data().expiresAtMs), last.id) : null });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message });
   }

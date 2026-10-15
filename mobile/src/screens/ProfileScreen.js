@@ -351,7 +351,7 @@ export default function ProfileScreen({ navigation }) {
               activeOpacity={0.7}
             >
               <Ionicons name="file-tray-full-outline" size={14} color={ticketTab === 'active' ? COLORS.primary : COLORS.textMuted} />
-              <Text style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]}>
+                <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78} style={[s.ticketTabText, ticketTab === 'active' && s.ticketTabTextActive]}>
                 {t('ticket_tab_my', 'My Tickets')} ({activeTickets.length})
               </Text>
             </TouchableOpacity>
@@ -361,7 +361,7 @@ export default function ProfileScreen({ navigation }) {
               activeOpacity={0.7}
             >
               <Ionicons name="time-outline" size={14} color={ticketTab === 'history' ? COLORS.primary : COLORS.textMuted} />
-              <Text style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]}>
+                <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78} style={[s.ticketTabText, ticketTab === 'history' && s.ticketTabTextActive]}>
                 {t('ticket_tab_history', 'History')}
               </Text>
             </TouchableOpacity>

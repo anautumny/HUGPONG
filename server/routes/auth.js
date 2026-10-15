@@ -593,11 +593,11 @@ router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) =
     const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
     const phoneVerificationRequest = createPhoneVerificationRequestToken(phone);
-    const challenge = issueOtp('registration', phone, phone);
+    const challenge = await issueOtp('registration', phone, phone);
     try {
       await sendVerificationCode(phone, challenge.code, String(req.body?.displayName || '').trim(), 'registration');
     } catch (error) {
-      discardOtp('registration', phone);
+      await discardOtp('registration', phone, challenge.challengeId);
       throw error;
     }
     return res.json({
@@ -679,9 +679,14 @@ router.post('/registration-otp/verify', otpVerifyRateLimit, async (req, res) => 
   if (!/^09\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) {
     return res.status(400).json({ success: false, error: 'A valid mobile number and 6-digit code are required.' });
   }
-  const result = verifyOtp('registration', phone, phone, code);
-  if (!result.success) return res.status(400).json(result);
-  return res.json({ success: true, verified: true });
+  try {
+    const result = await verifyOtp('registration', phone, phone, code);
+    if (!result.success) return res.status(400).json(result);
+    return res.json({ success: true, verified: true });
+  } catch (error) {
+    res.locals.diagnosticError = error;
+    return res.status(503).json({ success: false, error: 'Phone verification is temporarily unavailable.', code: 'OTP_STORAGE_UNAVAILABLE' });
+  }
 });
 
 router.post('/register', registrationRateLimit, async (req, res) => {
@@ -707,7 +712,7 @@ router.post('/register', registrationRateLimit, async (req, res) => {
     const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
     if (!duplicate.empty) return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
     const now = nowIso();
-    const smsVerified = consumeVerifiedOtp('registration', phone, phone);
+    const smsVerified = await consumeVerifiedOtp('registration', phone, phone);
     const phoneVerificationRequested = !smsVerified
       && verifyPhoneVerificationRequestToken(
         req.body?.phoneVerificationRequestToken,
@@ -784,11 +789,11 @@ router.post('/request-phone-verification', requireAuth, otpRequestRateLimit, asy
     }
     const phone = normalizeContact(user.phone);
     if (!/^09\d{9}$/.test(phone)) return res.status(400).json({ success: false, error: 'The account does not have a valid mobile number.' });
-    const challenge = issueOtp('first-login', employeeId, phone);
+    const challenge = await issueOtp('first-login', employeeId, phone);
     try {
       await sendVerificationCode(phone, challenge.code, user.displayName, 'first-login');
     } catch (error) {
-      discardOtp('first-login', employeeId);
+      await discardOtp('first-login', employeeId, challenge.challengeId);
       throw error;
     }
     const requestedAt = nowIso();
@@ -842,7 +847,7 @@ router.post('/request-phone-verification-review', requireAuth, async (req, res) 
     }
 
     const requestedAt = nowIso();
-    discardOtp('first-login', employeeId);
+    await discardOtp('first-login', employeeId);
     const batch = db.batch();
     batch.update(snapshot.ref, {
       phoneVerificationStatus: 'PENDING_VERIFICATION',
@@ -881,7 +886,7 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
     const snapshot = await db.collection(COLLECTIONS.USERS).doc(employeeId).get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Authenticated account was not found.' });
     const phone = normalizeContact(snapshot.data().phone);
-    const verification = verifyAndConsumeOtp('first-login', employeeId, phone, code);
+    const verification = await verifyAndConsumeOtp('first-login', employeeId, phone, code);
     if (!verification.success) return res.status(403).json(verification);
     const phoneVerifiedAt = nowIso();
     const batch = db.batch();
@@ -1022,11 +1027,11 @@ router.post('/change-phone', requireAuth, passwordRateLimit, otpRequestRateLimit
   }
 
   try {
-    const challenge = issueOtp('change-phone', employeeId, phone);
+    const challenge = await issueOtp('change-phone', employeeId, phone);
     try {
       await sendVerificationCode(phone, challenge.code, snapshot.data().displayName, 'phone-change');
     } catch (error) {
-      discardOtp('change-phone', employeeId);
+      await discardOtp('change-phone', employeeId, challenge.challengeId);
       throw error;
     }
     return res.status(202).json({
@@ -1054,11 +1059,16 @@ router.post('/change-phone/verify', requireAuth, otpVerifyRateLimit, async (req,
 
   const duplicate = await db.collection(COLLECTIONS.USERS).where('phone', '==', phone).limit(1).get();
   if (!duplicate.empty && duplicate.docs[0].id !== employeeId) {
-    discardOtp('change-phone', employeeId);
+    await discardOtp('change-phone', employeeId);
     return res.status(409).json({ success: false, error: 'This mobile number is already registered.' });
   }
 
-  const verification = verifyAndConsumeOtp('change-phone', employeeId, phone, code);
+  let verification;
+  try { verification = await verifyAndConsumeOtp('change-phone', employeeId, phone, code); }
+  catch (error) {
+    res.locals.diagnosticError = error;
+    return res.status(503).json({ success: false, error: 'Phone verification is temporarily unavailable.', code: 'OTP_STORAGE_UNAVAILABLE' });
+  }
   if (!verification.success) {
     return res.status(400).json({ success: false, error: verification.error });
   }

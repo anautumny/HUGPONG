@@ -23,6 +23,8 @@ const COLLECTIONS = Object.freeze({
   BACKUP_OPERATIONS: 'backup_operations',
   SERVER_SESSIONS: 'server_sessions',
   SECURITY_RATE_LIMITS: 'security_rate_limits',
+  OTP_CHALLENGES: 'otp_challenges',
+  MUTATION_RECEIPTS: 'mutation_receipts',
   PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges',
   PASSWORD_RECOVERY_REVIEWS: 'password_recovery_reviews',
   SYSTEM_METADATA: 'system_metadata'

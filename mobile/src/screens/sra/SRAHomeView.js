@@ -57,7 +57,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       <View style={s.summaryCard}>
         <Text style={s.eyebrow}>{t('sra_workspace_eyebrow', 'SRA REGULATORY WORKSPACE')}</Text>
         <Text style={s.districtName}>{session?.district || session?.location || t('district_name_title', 'Regulatory District')}</Text>
-        <Text style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || t('sra_admin', 'SRA Admin')}</Text>
+        <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75} style={s.adminName}>{t('profile_admin_role', 'Administrator')}: {session?.name || t('sra_admin', 'SRA Admin')}</Text>
         <View style={s.metrics}>
           <Metric value={blockFarmsList.length} label={t('block_farms_count_lbl', 'Block Farms')} />
           <Metric

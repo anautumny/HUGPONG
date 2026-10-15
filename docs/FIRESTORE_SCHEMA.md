@@ -21,12 +21,14 @@ Compatibility policy: existing records must pass the Phase 4 legacy-data audit a
 13. User, Block Farm, Field, and Crop Year Cycle document IDs are server-issued and immutable. Relationship forms select scoped entities; they never accept a new canonical document ID as user input.
 14. Offline-capable operation, report, ticket, and mutation IDs are non-editable idempotency identifiers. A client may generate them once, but every retry must reuse the same value.
 15. Every account carries an `authVersion`. Password, phone, role, and status changes increment it so old server and Firebase credentials are rejected immediately.
-16. `account_identifiers`, `server_sessions`, `security_rate_limits`, `password_recovery_challenges`, `password_recovery_reviews`, `diagnostic_events`, and `backup_operations` are server-only operational collections. Web and Mobile never read or write them directly.
+16. `account_identifiers`, `server_sessions`, `security_rate_limits`, `otp_challenges`, `mutation_receipts`, `password_recovery_challenges`, `password_recovery_reviews`, `diagnostic_events`, and `backup_operations` are server-only operational collections. Web and Mobile never read or write them directly.
 17. A normalized phone number is reserved atomically in `account_identifiers` when an account is created or its phone changes. This prevents concurrent requests from creating duplicate login identifiers.
 18. Every Firestore collection is client-denied. Web and Mobile access application data only through the authenticated Express API; Firebase Admin is the sole database authority.
 19. Request objects are never written directly. The server validates transport structure first and then constructs each Firestore document through collection-specific canonicalizers; unknown fields are discarded or rejected before persistence.
 
 ## 2. Relationship model
+
+OTP challenges now persist shared verification/attempt/expiry/consumption state in `otp_challenges`. New field creation records actor-scoped idempotency receipts in `mutation_receipts` atomically with the field, first cycle, and audit event. Both collections are client-denied, have retention timestamps, and are excluded from logical backups. See [BETA_FIXES_2026-10-15.md](BETA_FIXES_2026-10-15.md) for the collection contracts and rollout requirements.
 
 ```text
 users/{userId}

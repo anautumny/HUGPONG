@@ -41,7 +41,7 @@ function createScopedReadCache({
     if (String(req.method || '').toUpperCase() !== 'GET') return next();
     // SRA explicitly refreshes certified sources before saving a crop-year
     // snapshot. Keep these infrequent, bounded reads live across API instances.
-    if (/^\/api\/crop-year-compilations(?:[/?]|$)/.test(String(req.originalUrl || req.url || ''))) {
+    if (/^\/api\/(?:crop-year-compilations|recovery-reviews)(?:[/?]|$)/.test(String(req.originalUrl || req.url || ''))) {
       res.set('Cache-Control', 'private, no-store');
       return next();
     }

@@ -1,5 +1,7 @@
 # Beta readiness audit — 15 October 2026
 
+**Follow-up:** application findings 1–8 have now been remediated in the working tree and the release gate passes. Dependency updates are partially complete, with two unpatched Mobile build-tool dependencies still open. See [BETA_FIXES_2026-10-15.md](BETA_FIXES_2026-10-15.md) for current status. The assessment below records the original findings.
+
 **Verdict: hold a wider beta release until the high-priority issues below are resolved.** The current working tree builds for Web and Android, but builds and the existing contract tests miss reproducible security and synchronization defects.
 
 This audit includes the existing uncommitted changes. Application source, dependencies, credentials, and live data were not changed. Verification generated a Web build and temporary local audit artifacts. No live Firestore writes, SMS sends, or cloud deployments were performed.
@@ -95,13 +97,13 @@ The review list selects the first 100 `PENDING` documents globally, then filters
 
 **Fix:** apply reviewer scope and live expiry in the database query, with required indexes and cursor pagination. Alternatively, iterate bounded pages until a useful scoped page is assembled, exposing continuation explicitly. Transition expired statuses consistently.
 
-### 7. Medium — server policy disables the Web QR camera
+### 7. Medium — Web QR input does not match the intended platform workflow
 
 **References:** `server/server.js:71`, `web/react-app/src/components/audit/QRVerifierPanel.jsx:130`.
 
 The server sends `Permissions-Policy: camera=()` for the served SPA. The Web audit scanner then requests camera video. Browsers enforcing this policy reject the request even when the user otherwise permits camera access. The current UI can misleadingly tell users to allow browser camera access, which cannot override the response policy.
 
-**Fix:** allow the same-origin application's camera capability, keep the user permission prompt, and verify the scanner on the actual HTTPS deployment. Keep the native Mobile camera flow working.
+**Resolution after product clarification:** Web accepts QR image attachments and manual report-code lookup. Remove browser camera scanning, retain `camera=()`, and keep native Mobile camera scanning. Allowing browser camera access was an incorrect remediation for the intended workflow.
 
 Browser behavior is documented in [MDN's camera policy reference](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Permissions-Policy/camera). This was established from the policy and scanner code, not a physical camera test.
 
@@ -150,7 +152,7 @@ Expo's compatibility check requests these installed → expected versions:
 | Sync reconciliation | No schema change required for the missing helper | Retain authoritative acknowledgements and conflict responses | Add equivalent edit-during-sync coverage to Web outbox behavior | Correct helper visibility; preserve concurrent queue state; test acknowledgement races |
 | Enrollment retries | Add server-only mutation receipts with bounded retention | Atomically deduplicate field and cycle creation by actor/key | Reuse a stable creation key after a timeout | Reuse a stable creation key after a timeout; reconcile returned canonical IDs |
 | Recovery visibility | Add scoped expiry/pagination indexes as needed | Query eligible scoped reviews before limiting; return cursor; handle expiration | Render pages and accurate pending/empty states | Same paging and expiration behavior |
-| Camera policy | None | Permit same-origin camera use for the SPA | Test HTTPS camera start, denial, upload fallback | Regression-check native camera and image upload |
+| QR input by platform | None | Keep browser camera denied; verify QR data and report codes on the server | Accept QR image attachments and manual report codes | Retain native camera and image upload |
 | Release configuration | No schema change; verify deployed rules/indexes separately | Enforce production readiness checks and correct hosted origin | Build against the intended server deployment | Set EAS preview/production HTTPS API and matching Firebase values |
 
 ## Remaining beta acceptance work

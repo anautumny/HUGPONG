@@ -341,7 +341,7 @@ function decodeQrPayload(rawPayload) {
   }
   let report;
   try {
-    report = JSON.parse(zlib.inflateRawSync(Buffer.from(String(parsed.data), 'base64')).toString('utf8'));
+    report = JSON.parse(zlib.inflateRawSync(Buffer.from(String(parsed.data), 'base64'), { maxOutputLength: 1024 * 1024 }).toString('utf8'));
   } catch {
     throw new Error('The compressed audit QR package is malformed.');
   }

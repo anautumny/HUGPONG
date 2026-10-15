@@ -9,12 +9,15 @@ export default function RecoveryReviewQueue() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
+  const [cursor, setCursor] = useState(null);
 
-  const load = async () => {
+  const load = async ({ append = false } = {}) => {
     setLoading(true);
     try {
-      const response = await fetchPasswordRecoveryReviews();
-      setReviews(Array.isArray(response.data) ? response.data : []);
+      const response = await fetchPasswordRecoveryReviews({ cursor: append ? cursor : null });
+      const next = Array.isArray(response.data) ? response.data : [];
+      setReviews(current => append ? [...current, ...next.filter(item => !current.some(existing => existing.id === item.id))] : next);
+      setCursor(response.nextCursor || null);
     } catch (error) {
       Alert.alert('Recovery reviews unavailable', error.message || 'Pending recovery reviews could not be loaded.');
     } finally {
@@ -68,7 +71,7 @@ export default function RecoveryReviewQueue() {
           {loading ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="refresh" size={18} color={COLORS.primary} />}
         </TouchableOpacity>
       </View>
-      {!loading && reviews.length === 0 && <Text style={s.empty}>No password recovery reviews are waiting in your scope.</Text>}
+      {!loading && reviews.length === 0 && !cursor && <Text style={s.empty}>No password recovery reviews are waiting in your scope.</Text>}
       {reviews.map(review => (
         <View key={review.id} style={s.review}>
           <Text style={s.name}>{review.displayName} · {review.userId}</Text>
@@ -83,6 +86,7 @@ export default function RecoveryReviewQueue() {
           </View>
         </View>
       ))}
+      {cursor && <TouchableOpacity accessibilityRole="button" disabled={loading || Boolean(processingId)} onPress={() => load({ append: true })} style={[s.approve, { flex: 0, marginTop: 12, padding: 12 }]}><Text style={s.approveText}>{loading ? 'Loading…' : 'Load more recovery reviews'}</Text></TouchableOpacity>}
     </View>
   );
 }

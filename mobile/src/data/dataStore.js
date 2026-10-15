@@ -1,6 +1,7 @@
 import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
+import { fieldEnrollmentIntent } from '../services/enrollmentIntentService';
 import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync, resetMobileTelemetryState } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -547,7 +548,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
     return { success: false, error: 'BLOCK_FARM_NOT_FOUND', message: 'Select an existing block farm before saving the field.' };
   }
   const declaredAreaHa = Number(resolvedBlockFarm.declaredAreaHa ?? resolvedBlockFarm.declaredHa);
-  if (Number.isFinite(declaredAreaHa)) {
+  if (!isNew && Number.isFinite(declaredAreaHa)) {
     const allocatedAreaHa = fields
       .filter(field => field.id !== targetId && field.blockFarmId === resolvedBlockFarmId && String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
       .reduce((sum, field) => {
@@ -578,16 +579,19 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
 
   if (isNew) {
     try {
+      const enrollmentPayload = {
+        blockFarmId: resolvedBlockFarmId,
+        memberUserId: matchedUser ? (matchedUser.employeeId || matchedUser.id) : null,
+        areaHa: validation.parsedHa,
+        cropType: fieldData.cycleType || 'Plant Cane (New Plant)',
+        elapsedMonths: 0,
+        batchNumber: 1
+      };
+      const ownerId = CURRENT_SESSION.employeeId || CURRENT_SESSION.id;
+      const intent = await fieldEnrollmentIntent(ownerId, enrollmentPayload);
       const response = await authenticatedRequest('/api/fields', {
         method: 'POST',
-        body: {
-          blockFarmId: resolvedBlockFarmId,
-          memberUserId: matchedUser ? (matchedUser.employeeId || matchedUser.id) : null,
-          areaHa: validation.parsedHa,
-          cropType: fieldData.cycleType || 'Plant Cane (New Plant)',
-          elapsedMonths: 0,
-          batchNumber: 1
-        }
+        body: { ...enrollmentPayload, _mutation: intent.mutation }
       });
       const serverField = response?.data?.field;
       const serverCycle = response?.data?.cycle;
@@ -604,9 +608,14 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
         synced: true,
         lastSync: 'Just now'
       };
-      fields.push(localField);
-      cropCycles.push(authoritativeCycle);
+      const existingFieldIndex = fields.findIndex(field => field.id === localField.id);
+      if (existingFieldIndex >= 0) fields[existingFieldIndex] = localField;
+      else fields.push(localField);
+      const existingCycleIndex = cropCycles.findIndex(cycle => cycle.id === authoritativeCycle.id);
+      if (existingCycleIndex >= 0) cropCycles[existingCycleIndex] = authoritativeCycle;
+      else cropCycles.push(authoritativeCycle);
       await saveItem(STORAGE_KEYS.FIELDS, fields);
+      await removeItems([intent.storageKey]);
       notifyDataUpdate();
       return { success: true, field: localField, cycle: authoritativeCycle };
     } catch (error) {

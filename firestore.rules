@@ -78,6 +78,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /otp_challenges/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /mutation_receipts/{documentId} {
+      allow read, write: if false;
+    }
+
     match /password_recovery_challenges/{documentId} {
       allow read, write: if false;
     }

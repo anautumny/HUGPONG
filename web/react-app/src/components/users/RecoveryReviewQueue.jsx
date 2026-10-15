@@ -12,13 +12,16 @@ export default function RecoveryReviewQueue() {
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
   const [error, setError] = useState('');
+  const [cursor, setCursor] = useState(null);
 
-  const load = async ({ force = false } = {}) => {
+  const load = async ({ force = false, append = false } = {}) => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetchRecoveryReviews({ force });
-      setReviews(Array.isArray(response.data) ? response.data : []);
+      const response = await fetchRecoveryReviews({ force, cursor: append ? cursor : null });
+      const next = Array.isArray(response.data) ? response.data : [];
+      setReviews(current => append ? [...current, ...next.filter(item => !current.some(existing => existing.id === item.id))] : next);
+      setCursor(response.nextCursor || null);
     } catch (loadError) {
       setError(loadError.message || 'Recovery reviews could not be loaded.');
     } finally {
@@ -57,7 +60,7 @@ export default function RecoveryReviewQueue() {
         </button>
       </div>
       {error && <div className="m-4 flex gap-2 rounded-xl border border-danger/30 bg-danger-bg/40 p-3 text-xs font-semibold text-danger"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
-      {!loading && reviews.length === 0 && (
+      {!loading && reviews.length === 0 && !cursor && (
         <div className="p-8 text-center text-xs text-hug-muted"><CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-success" /><p className="font-bold text-hug-text">No recovery reviews pending</p></div>
       )}
       <div className="divide-y divide-border/60">
@@ -78,6 +81,7 @@ export default function RecoveryReviewQueue() {
           </article>
         ))}
       </div>
+      {cursor && <button type="button" disabled={loading || Boolean(processingId)} onClick={() => void load({ force: true, append: true })} className="m-4 rounded-xl border border-border px-4 py-2 text-xs font-bold text-primary disabled:opacity-50">{loading ? 'Loading…' : 'Load more recovery reviews'}</button>}
     </section>
   );
 }

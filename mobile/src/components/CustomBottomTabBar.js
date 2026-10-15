@@ -187,6 +187,7 @@ export default function CustomBottomTabBar({
 
             {/* Localized Label */}
             <Text
+              numberOfLines={2}
               style={[
                 styles.tabLabel,
                 {

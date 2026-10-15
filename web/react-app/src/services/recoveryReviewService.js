@@ -1,7 +1,8 @@
 import { authenticatedRead, authenticatedRequest } from './apiClient';
 
-export async function fetchRecoveryReviews({ force = false } = {}) {
-  return authenticatedRead('/api/recovery-reviews', { force, maxAgeMs: 30 * 1000 });
+export async function fetchRecoveryReviews({ force = false, cursor = null } = {}) {
+  const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return authenticatedRead(`/api/recovery-reviews${suffix}`, { force, maxAgeMs: 30 * 1000 });
 }
 
 export async function decideRecoveryReview(reviewId, approve) {

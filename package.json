@@ -10,6 +10,7 @@
     "audit:deployment-config": "npm --prefix server run audit:deployment-config",
     "audit:secrets": "npm --prefix server run audit:secrets",
     "audit:runtime-authority": "npm --prefix server run audit:runtime-authority",
+    "audit:client-bindings": "node server/scripts/auditClientBindings.js",
     "bootstrap:production-super-admin": "npm --prefix server run bootstrap:production-super-admin",
     "measure:hosting": "npm --prefix server run measure:hosting",
     "measure:application": "npm --prefix server run measure:application",

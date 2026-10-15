@@ -384,5 +384,6 @@ module.exports = {
   retryDelayMs,
   createSingleFlightRunner,
   getPendingOperationPayloads,
-  drainMutationQueue
+  drainMutationQueue,
+  responseVersion
 };
