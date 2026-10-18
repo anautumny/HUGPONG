@@ -2,9 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { roleKeyFromUser } from '../utils/authRouting';
 import { getWebClientInstanceId, reportWebActivity, resetWebTelemetryState } from '../services/telemetryService';
 import { clearAuthenticatedReadState, responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
+import { API_STARTUP_TIMEOUT_MS } from '../services/connectivityPolicy';
 
 const AuthContext = createContext(null);
-const LOGIN_REQUEST_TIMEOUT_MS = 15000;
+const LOGIN_REQUEST_TIMEOUT_MS = API_STARTUP_TIMEOUT_MS;
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {

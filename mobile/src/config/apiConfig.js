@@ -58,6 +58,9 @@ try {
 
 export const API_BASE_URL = configuredApiBaseUrl;
 export const API_REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
+// A suspended host can need about a minute before it accepts the first request.
+// Only readiness checks get this budget; business writes keep their normal limit.
+export const API_STARTUP_TIMEOUT_MS = 75000;
 export const API_ENVIRONMENT = isDevelopmentBuild ? 'development' : 'production';
 export const API_UNAVAILABLE_MESSAGE = 'The HUGPONG server is temporarily unavailable. Please try again.';
 export const NO_INTERNET_MESSAGE = 'No internet connection. Connect to the internet and try again.';

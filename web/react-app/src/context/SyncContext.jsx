@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { useAuth } from './AuthContext';
 import { announceConnectionRestored } from '../services/apiClient';
 import { flushCropStageOutbox } from '../services/cropStageOutbox';
+import { API_STARTUP_TIMEOUT_MS, API_RECOVERY_RETRY_MS } from '../services/connectivityPolicy';
 
 const SyncContext = createContext({
   isOnline: true,
@@ -28,6 +29,8 @@ export function SyncProvider({ children }) {
   useEffect(() => {
     let active = true;
     let inFlight = false;
+    let retryTimer = null;
+    let activeController = null;
 
     async function finishReconnect() {
       const startedAt = Date.now();
@@ -58,19 +61,22 @@ export function SyncProvider({ children }) {
     }
 
     async function probeApi() {
+      if (!active) return;
       if (!navigator.onLine) {
         reconnectPendingRef.current = true;
         if (active) setApiReachable(false);
         return;
       }
       if (inFlight) return;
+      window.clearTimeout(retryTimer);
       inFlight = true;
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 8000);
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), API_STARTUP_TIMEOUT_MS);
       try {
         const response = await fetch('/health/ready', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         const result = await response.json().catch(() => ({}));
-        const reachable = response.ok && result.success === true;
+        const reachable = response.ok && result.success === true && result.status === 'ready';
         if (active) setApiReachable(reachable);
         if (reachable && reconnectPendingRef.current) {
           reconnectPendingRef.current = false;
@@ -87,7 +93,11 @@ export function SyncProvider({ children }) {
         }
       } finally {
         window.clearTimeout(timeout);
+        activeController = null;
         inFlight = false;
+        if (active && navigator.onLine && reconnectPendingRef.current) {
+          retryTimer = window.setTimeout(probeApi, API_RECOVERY_RETRY_MS);
+        }
       }
     }
 
@@ -112,6 +122,8 @@ export function SyncProvider({ children }) {
 
     return () => {
       active = false;
+      activeController?.abort();
+      window.clearTimeout(retryTimer);
       window.clearInterval(interval);
       if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
       window.removeEventListener('online', handleOnline);

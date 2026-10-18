@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import {
   API_BASE_URL,
   API_REQUEST_TIMEOUT_MS,
+  API_STARTUP_TIMEOUT_MS,
   getApiBaseUrl,
   logApiDiagnostic
 } from '../config/apiConfig';
@@ -31,10 +32,10 @@ function mobileNetworkReference() {
   return createClientRecordId('MOB', day).replace(/-([A-Z0-9]{10})[A-Z0-9]+$/, '-$1');
 }
 
-async function fetchFromApi(path, options = {}) {
+async function fetchFromApi(path, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) {
   const origin = getApiBaseUrl();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(`${origin}${path}`, { ...options, signal: controller.signal });
   } catch (cause) {
@@ -61,14 +62,25 @@ export async function getMobileClientInstanceId() {
   return value;
 }
 
-export async function probeServerConnectivity() {
+let serverProbePromise = null;
+
+export function probeServerConnectivity() {
+  // Login, foreground events, and the monitor share one readiness request.
+  if (!serverProbePromise) {
+    serverProbePromise = checkServerReadiness().finally(() => { serverProbePromise = null; });
+  }
+  return serverProbePromise;
+}
+
+async function checkServerReadiness() {
   try {
     const clientInstanceId = await getMobileClientInstanceId();
     const response = await fetchFromApi('/health/ready', {
       method: 'GET',
       headers: mobileHeaders(clientInstanceId)
-    });
-    return response.ok;
+    }, API_STARTUP_TIMEOUT_MS);
+    const result = await response.json().catch(() => ({}));
+    return response.ok && result.success === true && result.status === 'ready';
   } catch {
     return false;
   }

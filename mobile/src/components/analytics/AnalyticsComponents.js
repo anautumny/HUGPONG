@@ -105,7 +105,6 @@ export function AnalyticsScopeModal({
     <AnimatedBottomSheet
       visible={visible}
       onClose={onClose}
-      closeOnBackdropPress={false}
       backdropColor="rgba(0, 0, 0, 0.45)"
       sheetStyle={styles.modalSheet}
     >

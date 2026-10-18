@@ -12,7 +12,6 @@ export default function Modal({
   size = 'md', // 'sm' | 'md' | 'lg'
   children,
   footer,
-  preventBackdropClose = false,
   preventEscapeClose = false,
   isLoading = false,
   className = ''
@@ -99,15 +98,9 @@ export default function Modal({
 
   if (!isOpen) return null;
 
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !preventBackdropClose && !isLoading && onClose) {
-      onClose();
-    }
-  };
-
+  // Dialogs close through their controls or Escape, never through the backdrop.
   return createPortal(
     <div
-      onClick={handleBackdropClick}
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity animate-in fade-in duration-150"
     >
       <div

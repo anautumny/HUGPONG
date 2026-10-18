@@ -9308,7 +9308,6 @@ export default function FieldOpsScreen({ navigation, route }) {
       <AnimatedBottomSheet
         visible={showIncompleteAuditFields}
         onClose={() => setShowIncompleteAuditFields(false)}
-        closeOnBackdropPress={false}
         backdropColor="rgba(0, 0, 0, 0.52)"
         sheetStyle={{ maxHeight: '86%' }}
       >

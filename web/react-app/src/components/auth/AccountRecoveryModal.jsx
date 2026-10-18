@@ -307,9 +307,6 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
       aria-modal="true"
       aria-label="Reset password"
       className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !isSubmitting) onClose();
-      }}
     >
       <div className="bg-white dark:bg-surface rounded-3xl max-w-md w-full max-h-[92vh] overflow-y-auto p-6 sm:p-7 shadow-2xl border border-border flex flex-col gap-4 relative animate-in zoom-in-95 duration-200">
         <button

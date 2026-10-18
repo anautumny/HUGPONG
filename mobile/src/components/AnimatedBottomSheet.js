@@ -5,7 +5,6 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -24,7 +23,6 @@ export default function AnimatedBottomSheet({
   children,
   sheetStyle,
   backdropColor = 'rgba(0, 0, 0, 0.5)',
-  closeOnBackdropPress = true,
   keyboardAvoiding = false,
   testID,
 }) {
@@ -133,15 +131,7 @@ export default function AnimatedBottomSheet({
       testID={testID}
     >
       <View style={styles.root} pointerEvents={phase === 'open' ? 'auto' : 'none'}>
-        <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]}>
-          <Pressable
-            accessibilityRole={closeOnBackdropPress ? 'button' : undefined}
-            accessibilityLabel={closeOnBackdropPress ? 'Close bottom sheet' : undefined}
-            disabled={!closeOnBackdropPress}
-            onPress={requestClose}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
+        <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]} />
 
         <KeyboardAvoidingView
           pointerEvents="box-none"

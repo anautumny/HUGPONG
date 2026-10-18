@@ -58,6 +58,12 @@ The Mobile monitor combines operating-system internet reachability with the conf
 
 Cached records, drafts, and the durable mutation outbox remain local during either unavailable state. A network change, foreground transition, manual retry, or scheduled gateway retry performs a fresh health check. Successful recovery triggers the existing idempotent synchronization path without requiring an app restart.
 
+Readiness checks in both clients allow up to 75 seconds for a suspended host to start. Mobile shares an in-flight readiness request across login and network events and requires the API's JSON readiness response, so a hosting-provider HTML loading page is never considered online. Web login also allows the startup budget and failed Web health checks retry after 15 seconds instead of waiting for the normal two-minute interval. Ordinary API mutation timeouts remain unchanged; this policy never automatically retries login or business writes.
+
+Mobile recovery timers pause while a readiness check is running. If a native network event supersedes a login check, that login check waits for the newer result rather than returning an old offline flag. This prevents overlapping checks from reporting the server unavailable immediately before the latest check marks it online.
+
+For deployed connectivity problems, confirm the exact website URL and installed APK version before editing any local LAN settings. Check the public `/health/ready` response and the deployment's exact `CORS_ORIGINS`; EAS preview/production use the HTTPS origin in `mobile/eas.json`, independently of the ignored local development `.env`. Deploy Web/server changes and build/install a new signed APK for Mobile changes to take effect. Client timeouts cannot restore a suspended, crashed, or misconfigured hosting service; inspect the hosting logs when health remains unavailable.
+
 ## Release verification checklist
 
 Before publishing an installed build:

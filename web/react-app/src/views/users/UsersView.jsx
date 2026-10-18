@@ -143,7 +143,7 @@ export default function UsersView() {
       return {
         badge: 'SRA Supervision',
         title: 'District Personnel & Farm Manager Directory',
-        subtitle: 'Regulatory oversight of Farm Managers and cooperative personnel across district Block Farms.'
+        subtitle: 'Edit Farm Manager accounts and oversee district personnel. Farm Member profiles are read-only here.'
       };
     } else {
       return {

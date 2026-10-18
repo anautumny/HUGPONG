@@ -117,7 +117,7 @@ function applyConnectivity(next, forceReconnect = false) {
     reconnectPending = true;
   }
 
-  if (online) clearGatewayRetry();
+  if (online || currentConnectivity.status === CONNECTIVITY_STATUS.CHECKING) clearGatewayRetry();
   else scheduleGatewayRetry();
 
   if (wasOnline !== online || previousStatus !== currentConnectivity.status) notifyListeners();
@@ -149,6 +149,9 @@ export const setNetworkStatus = (newStatus, forceTrigger = false) => applyConnec
 }, forceTrigger);
 
 async function evaluateNetworkState(state, generation) {
+  if (generation !== connectivityCheckGeneration) {
+    return connectivityCheckPromise || getNetworkStatus();
+  }
   if (state && !networkStateHasInternet(state)) {
     if (generation === connectivityCheckGeneration) {
       applyConnectivity({
@@ -170,7 +173,11 @@ async function evaluateNetworkState(state, generation) {
   }
 
   const serverReachable = await probeServerConnectivity();
-  if (generation !== connectivityCheckGeneration) return getNetworkStatus();
+  if (generation !== connectivityCheckGeneration) {
+    // A newer native-network check owns the result. Login must await that
+    // result instead of returning the previous offline flag while it finishes.
+    return connectivityCheckPromise || getNetworkStatus();
+  }
   return applyConnectivity({
     status: serverReachable ? CONNECTIVITY_STATUS.ONLINE : CONNECTIVITY_STATUS.SERVER_UNAVAILABLE,
     internetReachable: true,

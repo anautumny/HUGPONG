@@ -92,7 +92,7 @@ export default function UserTable({
   // Check if current user can edit a given user
   const canEditUser = (target) => {
     if (isSuperAdmin) return true;
-    if (isSraAdmin) return target.canonicalRole === 'FARM_MANAGER' || target.canonicalRole === 'MEMBER_FARMER';
+    if (isSraAdmin) return target.canonicalRole === 'FARM_MANAGER';
     if (isFarmManager) return target.canonicalRole === 'MEMBER_FARMER';
     return false;
   };
@@ -101,7 +101,7 @@ export default function UserTable({
   const canToggleUser = (target) => {
     if (target.id === currentUser?.id || target.id === currentUser?.employeeId) return false;
     if (isSuperAdmin) return target.canonicalRole !== 'SUPER_ADMIN';
-    if (isSraAdmin) return target.canonicalRole === 'FARM_MANAGER' || target.canonicalRole === 'MEMBER_FARMER';
+    if (isSraAdmin) return target.canonicalRole === 'FARM_MANAGER';
     if (isFarmManager) return target.canonicalRole === 'MEMBER_FARMER';
     return false;
   };
@@ -303,7 +303,12 @@ export default function UserTable({
                         )}
 
                         {!canEdit && !canToggle && (
-                          <span className="text-[10px] text-hug-muted italic px-2">Read Only</span>
+                          <span
+                            className="text-[10px] text-hug-muted italic px-2"
+                            title={isSraAdmin && u.canonicalRole === 'MEMBER_FARMER'
+                              ? 'Farm Member profiles are managed by their Farm Manager or a Super Admin.'
+                              : undefined}
+                          >Read Only</span>
                         )}
                       </div>
                     </td>
