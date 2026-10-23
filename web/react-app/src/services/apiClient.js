@@ -7,6 +7,7 @@
  */
 
 import { friendlyErrorMessage } from '../domain/presentationContract';
+import { fetchOperationPages } from './operationPages';
 
 // Most HUGPONG records change only after an explicit server mutation. Keep a
 // short shared cache for route changes/focus churn, then revalidate in the
@@ -263,7 +264,10 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
   if (inFlightReads.has(path)) return inFlightReads.get(path);
 
   const requestGeneration = authenticatedReadGeneration;
-  const request = authenticatedRequest(path)
+  const isFullOperationsRead = /^\/api\/logs(?:\?|$)/.test(path) && !/[?&](limit|cursor)=/.test(path);
+  const request = (isFullOperationsRead
+    ? fetchOperationPages(authenticatedRequest, () => requestGeneration === authenticatedReadGeneration, path)
+    : authenticatedRequest(path))
     .then(value => {
       if (requestGeneration !== authenticatedReadGeneration) {
         const error = new Error('The authenticated account changed while this request was loading.');

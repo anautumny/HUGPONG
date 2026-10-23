@@ -13,7 +13,8 @@ import QRCode from 'qrcode';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { compileAuditReport, fetchNextAuditPeriod, selectAuditDeliveryMethod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
+import { compileAuditReport, fetchAuditReadiness, fetchNextAuditPeriod, selectAuditDeliveryMethod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
+import AuditMemberReview from './AuditMemberReview';
 import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, reportedOperationIds } from '../../domain/auditWorkflow';
 
 export default function AuditCompilationModal({
@@ -38,6 +39,8 @@ export default function AuditCompilationModal({
   const [compiledResult, setCompiledResult] = useState(null);
   const [periodInfo, setPeriodInfo] = useState(null);
   const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
+  const [memberReview, setMemberReview] = useState(null);
+  const [isCheckingMembers, setIsCheckingMembers] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreparingQr, setIsPreparingQr] = useState(false);
   const [isSavingQr, setIsSavingQr] = useState(false);
@@ -47,10 +50,11 @@ export default function AuditCompilationModal({
   const initialReportKey = initialReport
     ? `${initialReport.id || initialReport.reportId}:${initialReport.status || ''}:${initialReport.updatedAt || ''}`
     : '';
-  const isBusy = isCompiling || isSubmitting || isPreparingQr || isSavingQr;
+  const isBusy = isCompiling || isCheckingMembers || isSubmitting || isPreparingQr || isSavingQr;
 
   useEffect(() => {
     if (!isOpen || !blockFarm?.id) return;
+    setMemberReview(null);
     const initialStatus = initialReport ? canonicalAuditStatus(initialReport.status) : null;
     if (initialReport && [AUDIT_STATUS.COMPILED, AUDIT_STATUS.PENDING_SUBMISSION].includes(initialStatus)) {
       const periodKey = initialReport.periodKey || initialReport.period;
@@ -96,12 +100,12 @@ export default function AuditCompilationModal({
   // Submitted logs remain audit-eligible after their production cycle is archived.
   const matchingMonthLogs = useMemo(() => {
     return operations.filter(log => {
-      if (!farmFieldIds.has(log.fieldId)) return false;
+      if (log.blockFarmId ? log.blockFarmId !== blockFarm?.id : !farmFieldIds.has(log.fieldId)) return false;
       if (!['ACTIVE', 'ARCHIVED'].includes(String(log.status || '').toUpperCase())) return false;
       const performed = String(log.performedOn || log.isoDate || log.date || '');
       return performed.startsWith(`${selectedPeriod}-`);
     });
-  }, [operations, farmFieldIds, selectedPeriod]);
+  }, [operations, farmFieldIds, selectedPeriod, blockFarm?.id]);
 
   const periodReports = useMemo(
     () => auditReportsForFarmPeriod(existingReports, blockFarm?.id, selectedPeriod),
@@ -120,7 +124,6 @@ export default function AuditCompilationModal({
     AUDIT_STATUS.PENDING_REVIEW
   ].includes(latestStatus);
   const incompleteFields = Array.isArray(periodInfo?.incompleteFields) ? periodInfo.incompleteFields : [];
-  const compilationBlockedByIncompleteFields = incompleteFields.length > 0;
 
   useEffect(() => {
     const periodReady = periodInfo?.periodKey === selectedPeriod
@@ -175,8 +178,28 @@ export default function AuditCompilationModal({
     return stages;
   }, [eligibleLogs]);
 
+  const handleReviewMembers = async () => {
+    if (isBusy || !blockFarm?.id) return;
+    setIsCheckingMembers(true);
+    setCompileError(null);
+    try {
+      const response = await fetchAuditReadiness(blockFarm.id, selectedPeriod);
+      if (!response.success || !Array.isArray(response.data?.memberFollowUps)) throw new Error('The member review is unavailable. Refresh the application and try again.');
+      setPeriodInfo(current => ({ ...current, ...response.data }));
+      setMemberReview(response.data);
+    } catch (error) {
+      setCompileError(error.message || 'Unable to check monthly member activity.');
+    } finally { setIsCheckingMembers(false); }
+  };
+
   const handleCompile = async () => {
     if (isCompiling) return;
+    if (!memberReview) { await handleReviewMembers(); return; }
+    if (memberReview.blockFarmId !== blockFarm?.id || memberReview.periodKey !== selectedPeriod) {
+      setMemberReview(null);
+      setCompileError('The farm or month changed. Review the current members before compiling.');
+      return;
+    }
     if (!blockFarm?.id) {
       setCompileError('No assigned Block Farm identified for your account.');
       return;
@@ -187,11 +210,7 @@ export default function AuditCompilationModal({
         : 'Submit the existing compiled report before creating another version.');
       return;
     }
-    if (compilationBlockedByIncompleteFields) {
-      setCompileError(`Cannot compile: ${incompleteFields.length} active field${incompleteFields.length === 1 ? '' : 's'} still need a submitted operation. Contact the listed members first.`);
-      return;
-    }
-    if (eligibleLogs.length === 0) {
+    if (Number(memberReview.operationCount || 0) === 0) {
       setCompileError(`Cannot compile: No uncompiled submitted operations found for ${selectedPeriod}.`);
       return;
     }
@@ -227,6 +246,7 @@ export default function AuditCompilationModal({
   const handleClose = () => {
     if (isBusy) return;
     setStep(1);
+    setMemberReview(null);
     setCompileError(null);
     setCompiledResult(null);
     setPeriodInfo(null);
@@ -377,19 +397,19 @@ export default function AuditCompilationModal({
 
   const footer = step === 1 ? (
     <>
-      <Button variant="secondary" size="md" onClick={handleClose} disabled={isCompiling}>
-        Cancel
+      <Button variant="secondary" size="md" onClick={memberReview ? () => setMemberReview(null) : handleClose} disabled={isBusy}>
+        {memberReview ? 'Back' : 'Cancel'}
       </Button>
       <Button
         variant="primary"
         size="md"
         onClick={handleCompile}
-        disabled={isCompiling || isLoadingPeriod || eligibleLogs.length === 0 || compilationBlockedByActiveReport || compilationBlockedByIncompleteFields}
-        isLoading={isCompiling}
-        loadingText="Compiling report..."
+        disabled={isBusy || isLoadingPeriod || compilationBlockedByActiveReport || (memberReview && !memberReview.canCompile)}
+        isLoading={isCompiling || isCheckingMembers}
+        loadingText={isCheckingMembers ? 'Checking members...' : 'Compiling report...'}
         icon={FileCheck2}
       >
-        Compile Report
+        {memberReview ? 'Compile Available Operations' : 'Review & Compile'}
       </Button>
     </>
   ) : step === 2 && !deliveryMessage ? (
@@ -428,8 +448,10 @@ export default function AuditCompilationModal({
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
           <div>
             <p className="text-xs font-black">
-              {isCompiling
-                ? `Compiling ${eligibleLogs.length} operation record(s)...`
+              {isCheckingMembers
+                ? 'Checking member operations and account activity...'
+                : isCompiling
+                ? 'Compiling available operation records...'
                 : isSubmitting
                   ? 'Submitting the report to the SRA Audit Inbox...'
                   : isPreparingQr
@@ -440,7 +462,12 @@ export default function AuditCompilationModal({
           </div>
         </div>
       )}
-      {step === 1 ? (
+      {step === 1 && memberReview ? (
+        <>
+          {compileError && <p role="alert" className="text-sm text-danger">{compileError}</p>}
+          <AuditMemberReview key={`${memberReview.blockFarmId}:${memberReview.periodKey}`} data={memberReview} />
+        </>
+      ) : step === 1 ? (
         <div className="flex flex-col gap-4 text-xs">
           {/* Header Context Banner */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-bg p-3.5 rounded-xl border border-border">
@@ -488,14 +515,13 @@ export default function AuditCompilationModal({
             </span>
           </div>
 
-          {compilationBlockedByIncompleteFields && (
-            <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-3">
+          {incompleteFields.length > 0 && (
+            <details className="rounded-xl border border-border bg-bg p-3">
+              <summary className="cursor-pointer font-bold text-hug-text">{incompleteFields.length} plots with no recorded operations</summary>
               <div className="mb-2 flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
                 <div>
-                  <p className="font-black text-hug-text">Member submissions still needed</p>
                   <p className="mt-0.5 text-[11px] text-hug-muted">
-                    Contact these members and ask them to submit and synchronize their {selectedPeriod} operation before compiling.
+                    You can compile the available operations for {selectedPeriod}. Plots do not need an operation every month. Follow up only if work was recorded but has not been synchronized.
                   </p>
                 </div>
               </div>
@@ -514,12 +540,12 @@ export default function AuditCompilationModal({
                         Contact Member
                       </a>
                     ) : (
-                      <span className="shrink-0 text-[10px] font-bold text-amber-700 dark:text-amber-400">Update member contact</span>
+                      <span className="shrink-0 text-[10px] text-hug-muted">Contact unavailable</span>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
+            </details>
           )}
 
           {/* Summary Metric Cards */}
@@ -626,6 +652,7 @@ export default function AuditCompilationModal({
           </div>
 
           {/* Result Statistics */}
+          {compiledResult?.remainingOperationCount > 0 && <p className="text-sm text-amber-700">{compiledResult.remainingOperationCount} more operations were available at compilation. Complete this version's review, then compile the next version for the remaining activity.</p>}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full text-center text-xs">
             <div className="p-2 rounded-xl bg-bg border border-border">
               <span className="text-[10px] text-hug-muted block">Period</span>

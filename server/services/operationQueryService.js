@@ -3,6 +3,42 @@
 const { COLLECTIONS, ROLES, canonicalRole } = require('../schema/firestoreSchema');
 const { sortOperationsNewestFirst } = require('./recordOrdering');
 const { presentOperationRecord } = require('../domain/presentationContract');
+const { decodeCursor, pageLimit, pageEnvelope } = require('./cursorPagination');
+const { scanScopedDocumentIds } = require('./scopedQueryFallback');
+
+async function listOperationPage(database, user, options = {}) {
+  const scope = await getOperationActorScope(database, user);
+  const limit = pageLimit(options.limit, 100);
+  const cursor = decodeCursor(options.cursor);
+  const chunks = scope.all ? [null] : Array.from({ length: Math.ceil(scope.fieldIds.length / 10) }, (_, index) => scope.fieldIds.slice(index * 10, index * 10 + 10));
+  const status = String(options.status || '').toUpperCase();
+  const documents = [];
+  for (const ids of chunks) {
+    let query = database.collection(COLLECTIONS.OPERATION_LOGS);
+    if (ids) query = query.where('fieldId', 'in', ids);
+    const authorizedQuery = query;
+    if (['ACTIVE', 'ARCHIVED'].includes(status)) query = query.where('status', '==', status);
+    // Stable identity ordering needs no historical date backfill. Clients only
+    // publish their complete, newest-first projection after following all pages.
+    query = query.orderBy('__name__', 'asc');
+    if (cursor) query = query.startAfter(cursor.id);
+    let snapshot;
+    try {
+      snapshot = await query.limit(limit + 1).get();
+    } catch (error) {
+      if (!isMissingIndexError(error)) throw error;
+      snapshot = { docs: await scanScopedDocumentIds(authorizedQuery, {
+        after: cursor?.id, maximum: limit + 1,
+        accept: doc => !['ACTIVE', 'ARCHIVED'].includes(status) || doc.data().status === status,
+      }) };
+    }
+    documents.push(...snapshot.docs);
+  }
+  documents.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const selected = pageEnvelope(documents, limit, document => document.id);
+  const records = await enrichAmendmentEditors(database, selected.documents.map(doc => ({ id: doc.id, ...doc.data() })));
+  return { data: records.map(presentOperationRecord), page: selected.page };
+}
 
 function normalizeOperationLimit(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -87,8 +123,8 @@ async function enrichAmendmentEditors(database, records) {
       const editor = usersById.get(String(amendment.amendedByUserId || '').trim());
       return {
         ...amendment,
-        amendedByName: editor?.displayName || editor?.name || amendment.amendedByName || '',
-        amendedByRole: editor?.role || amendment.amendedByRole || ''
+        amendedByName: amendment.amendedByName || editor?.displayName || editor?.name || '',
+        amendedByRole: amendment.amendedByRole || editor?.role || ''
       };
     })
   }));
@@ -120,6 +156,7 @@ async function listOperationRecords(database, user, options = {}) {
 }
 
 module.exports = {
+  listOperationPage,
   getOperationActorScope,
   getBoundedOperationSnapshot,
   isMissingIndexError,

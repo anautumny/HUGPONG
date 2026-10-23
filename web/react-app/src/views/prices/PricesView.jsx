@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TrendingUp, PlusCircle, Download, RefreshCw, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { subscribeToPrices } from '../../services/pricesService';
+import { subscribeToPrices, fetchPrices } from '../../services/pricesService';
+import { fromPrice } from '../../services/firestoreSchema';
+import { sortNewestFirst } from '../../utils/recordOrdering';
 import CurrentPriceBanner from '../../components/prices/CurrentPriceBanner';
 import PriceHistoryTable from '../../components/prices/PriceHistoryTable';
 import PublishPriceModal from '../../components/prices/PublishPriceModal';
 import Button from '../../components/ui/Button';
 
 export default function PricesView() {
-  const { roleKey } = useAuth();
+  const { roleKey, user } = useAuth();
+  const ownerId = user?.employeeId || user?.id;
   const isSraAdmin = roleKey === 'admin';
 
   const [prices, setPrices] = useState([]);
@@ -16,29 +19,64 @@ export default function PricesView() {
   const [previousPrice, setPreviousPrice] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [historyPage, setHistoryPage] = useState(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const historyExtended = useRef(false);
+  const ownerRef = useRef(ownerId);
+  ownerRef.current = ownerId;
 
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
+    setPrices([]);
+    setHistoryPage(null);
+    setLoadingOlder(false);
+    historyExtended.current = false;
+    let active = true;
     const unsubscribe = subscribeToPrices({
-      onUpdate: ({ prices, currentPrice, previousPrice, isLoading, error }) => {
-        setPrices(prices || []);
+      onUpdate: ({ prices, page, currentPrice, previousPrice, isLoading, error }) => {
+        if (!active) return;
+        setPrices(previous => historyExtended.current
+          ? sortNewestFirst([...new Map([...previous, ...prices].map(row => [row.id, row])).values()], ['effectiveDate'])
+          : prices || []);
+        if (!historyExtended.current) setHistoryPage(page);
         setCurrentPrice(currentPrice);
         setPreviousPrice(previousPrice);
         setIsLoading(isLoading);
         setError(error);
       },
       onError: (err) => {
+        if (!active) return;
         setError(err.message || 'Failed to load SRA prices.');
         setIsLoading(false);
       }
     });
 
     return () => {
+      active = false;
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, []);
+  }, [ownerId]);
+
+  const loadOlder = async () => {
+    if (loadingOlder || !historyPage?.nextCursor) return;
+    const owner = ownerId;
+    setLoadingOlder(true);
+    try {
+      const response = await fetchPrices({ cursor: historyPage.nextCursor });
+      if (ownerRef.current !== owner) return;
+      const older = (response.data || []).map(row => fromPrice(row.id, row));
+      historyExtended.current = true;
+      setPrices(previous => sortNewestFirst([...new Map([...previous, ...older].map(row => [row.id, row])).values()], ['effectiveDate']));
+      setHistoryPage(response.page);
+      setError(null);
+    } catch (err) {
+      if (ownerRef.current === owner) setError(err.message || 'Could not load older prices.');
+    } finally {
+      if (ownerRef.current === owner) setLoadingOlder(false);
+    }
+  };
 
   const handleExportCSV = () => {
     if (!prices || prices.length === 0) return;
@@ -140,6 +178,11 @@ export default function PricesView() {
         prices={prices}
         isLoading={isLoading}
       />
+      {historyPage?.hasMore && (
+        <Button onClick={loadOlder} disabled={loadingOlder}>
+          {loadingOlder ? 'Loading older records…' : 'Load older price records'}
+        </Button>
+      )}
 
       {/* Publish Price Modal (SRA Admin only) */}
       {isSraAdmin && (

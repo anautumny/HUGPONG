@@ -220,6 +220,7 @@ export default function PrintableAuditReport({
           </div>
         )}
       </div>
+      <p className="mb-2 text-[8px] normal-case">Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
 
       {/* ── Master SRA Compilation Grid Table ───────────────────────────── */}
       <div className="w-full overflow-x-auto print:overflow-visible">

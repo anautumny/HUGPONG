@@ -63,6 +63,11 @@ export async function fetchNextAuditPeriod(blockFarmId = null) {
 /**
  * Farm Manager: Compile active operations for a block farm and period into an audit report
  */
+export async function fetchAuditReadiness(blockFarmId, periodKey) {
+  const query = new URLSearchParams({ blockFarmId, periodKey });
+  return authenticatedRequest(`/api/audit-reports/readiness?${query}`);
+}
+
 export async function compileAuditReport({ blockFarmId, periodKey, operationLogIds = [], id = null }) {
   const canonicalPeriodKey = reportPeriod(periodKey);
   if (!canonicalPeriodKey) throw new Error('Select a valid audit month and year before compiling.');

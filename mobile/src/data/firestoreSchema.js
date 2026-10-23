@@ -577,6 +577,7 @@ export function toAuditReportDocument(value = {}, context = {}) {
     rootReportId: value.rootReportId || '',
     integrityHash: value.integrityHash || qrHash,
     operationCount: Number(value.operationCount || operationSnapshots.length),
+    remainingOperationCount: Number(value.remainingOperationCount || 0),
     fieldCount: Number(value.fieldCount || new Set(operationSnapshots.map(item => item.fieldId)).size),
     memberCount: Number(value.memberCount || 0),
     hectaresAudited: Number(value.hectaresAudited || 0),

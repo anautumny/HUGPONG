@@ -19,6 +19,8 @@ function memoryFirestore(seed = {}) {
             if (op === '==') return value === expected;
             if (op === 'in') return expected.includes(value);
             if (op === '>') return value > expected;
+            if (op === '>=') return value >= expected;
+            if (op === '<') return value < expected;
             if (op === '<=') return value <= expected;
             throw new Error(`Unsupported test query operator ${op}`);
           })).map(([key]) => snapshot(database.collection(name).doc(key.slice(name.length + 1))));

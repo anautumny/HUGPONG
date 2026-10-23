@@ -471,6 +471,7 @@ export const toReport = (value, context = {}) => {
     rootReportId: value.rootReportId || '',
     integrityHash: value.integrityHash || qrHash,
     operationCount: Number(value.operationCount || operations.length),
+    remainingOperationCount: Number(value.remainingOperationCount || 0),
     fieldCount: Number(value.fieldCount || new Set(operations.map(item => item.fieldId)).size),
     memberCount: Number(value.memberCount || 0),
     hectaresAudited: Number(value.hectaresAudited || 0),

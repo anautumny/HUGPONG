@@ -1007,6 +1007,6 @@ test('web and mobile cache reconciliation defer to canonical server lifecycle st
   assert.doesNotMatch(mobileSource, /const localOnly/);
   assert.match(mobileSource, /authenticatedRequest\('\/api\/crop-cycles'\)/);
   assert.match(mobileSource, /authenticatedRequest\('\/api\/fields'\)/);
-  assert.match(mobileSource, /authenticatedRequest\('\/api\/logs'\)/);
+  assert.match(mobileSource, /fetchOperationPages\(authenticatedRequest/);
   assert.doesNotMatch(mobileSource, /onSnapshot|collection\(db/);
 });

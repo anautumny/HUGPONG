@@ -156,10 +156,10 @@ export default function FarmFieldRegistryView() {
   const currentActorId = String(user?.employeeId || user?.id || user?.userId || '').trim();
   const assignedBlockFarm = useMemo(() => {
     if (!isFarmManager) return null;
-    return blockFarmsState.blockFarms.find(bf => bf.managerUserId === currentActorId || bf.id === user?.blockFarmId)
-      || fieldsState.blockFarms.find(bf => bf.managerUserId === currentActorId || bf.id === user?.blockFarmId)
+    return blockFarmsState.blockFarms.find(bf => bf.managerUserId === currentActorId)
+      || fieldsState.blockFarms.find(bf => bf.managerUserId === currentActorId)
       || null;
-  }, [isFarmManager, blockFarmsState.blockFarms, fieldsState.blockFarms, currentActorId, user?.blockFarmId]);
+  }, [isFarmManager, blockFarmsState.blockFarms, fieldsState.blockFarms, currentActorId]);
 
   // Farm Manager scoped fields (enforce strict single-farm isolation)
   const managerScopedFields = useMemo(() => {
@@ -879,10 +879,9 @@ export default function FarmFieldRegistryView() {
         <FieldEnrollmentModal
           isOpen={enrollFieldModalOpen}
           onClose={() => setEnrollFieldModalOpen(false)}
-          blockFarms={assignedBlockFarm ? [assignedBlockFarm] : fieldsState.blockFarms}
+          assignedBlockFarm={assignedBlockFarm}
           fields={managerScopedFields}
           memberUsers={fieldsState.memberUsers}
-          defaultBlockFarmId={assignedBlockFarm?.id || user?.blockFarmId || ''}
           onSuccess={() => {}}
         />
       )}

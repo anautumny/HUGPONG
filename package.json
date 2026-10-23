@@ -2,6 +2,9 @@
   "name": "hugpong-root",
   "version": "1.0.0",
   "description": "HUGPONG Farm Management System",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
   "scripts": {
     "start": "node server/server.js",
     "server": "node server/server.js",
@@ -11,6 +14,8 @@
     "audit:secrets": "npm --prefix server run audit:secrets",
     "audit:runtime-authority": "npm --prefix server run audit:runtime-authority",
     "audit:client-bindings": "node server/scripts/auditClientBindings.js",
+    "prepare:database": "node server/scripts/prepareFirestoreIndexes.js",
+    "verify:database-indexes": "node server/scripts/prepareFirestoreIndexes.js --check",
     "bootstrap:production-super-admin": "npm --prefix server run bootstrap:production-super-admin",
     "measure:hosting": "npm --prefix server run measure:hosting",
     "measure:application": "npm --prefix server run measure:application",

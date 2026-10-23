@@ -18,6 +18,9 @@ import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { formatCurrency, formatHectares } from '../../utils/formatters';
 import { createClientRecordId } from '../../utils/secureId';
+import { createOperationSubmission } from '../../domain/operationSubmission';
+import { useAuth } from '../../context/AuthContext';
+import UnconfirmedOperationNotice from './UnconfirmedOperationNotice';
 import {
   Plus,
   Trash2,
@@ -45,6 +48,8 @@ export default function AddOperationModal({
   validateBeforeSubmit = null,
   submittedOperations = []
 }) {
+  const { user } = useAuth();
+  const submissionOwnerId = user?.employeeId || user?.id || '';
   const [selectedStageNumber, setSelectedStageNumber] = useState(1);
   const [selectedOpId, setSelectedOpId] = useState('SRA-02');
   const [selectedChildOpId, setSelectedChildOpId] = useState('');
@@ -78,6 +83,9 @@ export default function AddOperationModal({
   const [validationErrors, setValidationErrors] = useState({});
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const submissionLockRef = useRef(false);
+  const operationSubmission = useMemo(() => createOperationSubmission(createOperation, () => createClientRecordId('LOG'), {
+    storageKey: submissionOwnerId && field?.id ? `hugpong_operation_${submissionOwnerId}_${field.id}` : null,
+  }), [submissionOwnerId, field?.id]);
 
   const isLineItemSubmitted = (operationId, lineItemId) => {
     const cycleId = String(field?.currentCycleId || field?.cropCycle?.id || '').trim().toUpperCase();
@@ -456,7 +464,7 @@ export default function AddOperationModal({
         } : null
       };
 
-      await createOperation(payload, takeoverGrant);
+      await operationSubmission.submit(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
       if (advanceStage && !isSingleItemSubmission) {
@@ -638,6 +646,10 @@ export default function AddOperationModal({
       }
     >
       <form onSubmit={inputMode === 'direct' ? handleSubmit : event => event.preventDefault()} className="space-y-4">
+        <UnconfirmedOperationNotice submission={operationSubmission} grant={takeoverGrant}
+          canRetry={!isSubmitting && (!isTakeOver || Boolean(takeoverGrant))}
+          onBusyChange={busy => { submissionLockRef.current = busy; setIsSubmitting(busy); }}
+          onRecovered={payload => { onSuccess?.(payload, { recovered: true }); onClose(); }} />
         {/* Supervisor Context Indicator */}
         {isTakeOver && (
           <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-300">

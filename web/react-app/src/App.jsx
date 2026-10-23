@@ -8,8 +8,8 @@ import { ROLE_KEYS } from './utils/authRouting';
 import UsersView from './views/users/UsersView';
 import { createClientReference, reportClientDiagnostic } from './services/clientDiagnostics';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
+import LandingView from './views/LandingView';
 
-const LandingView = lazyWithRecovery(() => import('./views/LandingView'), 'landing');
 const LoginView = lazyWithRecovery(() => import('./views/LoginView'), 'login');
 const PrivacyPolicyView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })), 'privacy-policy');
 const TermsView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })), 'terms');
@@ -31,26 +31,15 @@ const SettingsView = lazyWithRecovery(() => import('./views/settings/SettingsVie
 
 function RouteLoadingState() {
   return (
-    <div className="flex min-h-[40vh] items-center justify-center text-sm font-semibold text-hug-muted">
-      Loading workspace…
+    <div role="status" className="flex min-h-[40vh] items-center justify-center text-sm text-hug-muted">
+      Loading page…
     </div>
   );
 }
 
 function RootRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-bg dark:bg-[#0C1015] text-hug-text">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-white border border-border p-1.5 flex items-center justify-center shadow-xs">
-            <img src="/icon-foreground.png" alt="HUGPONG" className="w-full h-full object-contain animate-pulse" />
-          </div>
-          <p className="text-xs font-semibold text-hug-muted">Loading HUGPONG...</p>
-        </div>
-      </div>
-    );
-  }
+  // The public website can render while the server checks a saved session.
+  // Protected routes keep their own authentication guard in AppShell.
   return <LandingView />;
 }
 

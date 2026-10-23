@@ -107,6 +107,27 @@ test('backup rejects wrong passphrases, tampering, and another Firebase project'
   );
 });
 
+test('encrypted backups preserve private notification acknowledgement records and accept both older manifests', async () => {
+  const crypto = require('node:crypto');
+  const { _test } = require('../services/backupService');
+  const seed = businessSeed();
+  seed[COLLECTIONS.NOTIFICATION_STATES] = { 'STATE-1': { userId: 'MEM-1', notificationId: 'notif-price-1', read: true, dismissed: true } };
+  const source = fakeDatabase(seed);
+  const archive = await createBackupArchive(source, { passphrase, projectId: 'hugpong-test', actorUserId: '01000001' });
+  const decrypted = await decryptBackupArchive(source, archive.archiveBase64, passphrase, 'hugpong-test');
+  assert.equal(decrypted.payload.schemaVersion, '2026-10-24');
+  assert.equal(decrypted.payload.collections[COLLECTIONS.NOTIFICATION_STATES][0].data.dismissed, true);
+  const target = fakeDatabase();
+  await restoreMissingRecords(target, decrypted.payload);
+  assert.equal(target.stores.get(COLLECTIONS.NOTIFICATION_STATES).get('STATE-1').notificationId, 'notif-price-1');
+  for (const schemaVersion of ['2026-09-28', '2026-10-15']) {
+    const includedCollections = BACKUP_COLLECTIONS.filter(name => name !== COLLECTIONS.NOTIFICATION_STATES && !(schemaVersion === '2026-09-28' && name === COLLECTIONS.CROP_YEAR_COMPILATIONS));
+    const core = { format: 'HUGPONG_LOGICAL_BACKUP', formatVersion: 1, schemaVersion, sourceProjectId: 'hugpong-test', includedCollections, collections: Object.fromEntries(includedCollections.map(name => [name, []])), documentCount: 0 };
+    const checksumSha256 = crypto.createHash('sha256').update(JSON.stringify(core)).digest('hex');
+    assert.deepEqual(_test.validateBackupPayload({ ...core, checksumSha256 }, 'hugpong-test').collections[COLLECTIONS.NOTIFICATION_STATES], []);
+  }
+});
+
 test('recovery plan and execution create missing records without overwriting existing data', async () => {
   const source = fakeDatabase(businessSeed());
   const result = await createBackupArchive(source, {

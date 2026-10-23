@@ -123,8 +123,9 @@ test('price reads are bounded on the server and explicit on both clients', () =>
   const webPrices = source('../../web/react-app/src/services/pricesService.js');
   const mobile = source('../../mobile/src/data/dataStore.js');
   assert.match(pricesRoute, /DEFAULT_PRICE_HISTORY_LIMIT = 52/);
-  assert.match(pricesRoute, /orderBy\('effectiveDate', 'desc'\)[\s\S]{0,80}\.limit\(requestedLimit\)/);
+  assert.match(pricesRoute, /query\.limit\(requestedLimit \+ 1\)/);
+  assert.match(pricesRoute, /pageEnvelope\(snapshot.docs, requestedLimit/);
   assert.match(webPrices, /subscribeToAuthenticatedResource\('\/api\/prices\?limit=52'/);
-  assert.match(webPrices, /authenticatedRequest\('\/api\/prices\?limit=100'\)/);
+  assert.match(webPrices, /fetchPrices\(\{ cursor, limit = 100 \}/);
   assert.match(mobile, /authenticatedRequest\('\/api\/prices\?limit=52'\)/);
 });

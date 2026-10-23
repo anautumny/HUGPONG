@@ -96,6 +96,7 @@ function HugpongApp() {
       const returnedToForeground = /inactive|background/.test(previousState || '') && nextState === 'active';
       previousState = nextState;
       if (returnedToForeground) {
+        requestApplicationNotificationPermission().catch(() => {});
         reportMobileActivity('FOREGROUND').catch(() => {});
         checkConnectivity()
           .then(online => online && performMobileSync('APP_FOREGROUND'))
@@ -145,6 +146,7 @@ function HugpongApp() {
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
+          requestApplicationNotificationPermission().catch(() => {});
           if (pendingRecoveryReview.current && navigationRef.getCurrentRoute()?.name !== 'Splash') {
             pendingRecoveryReview.current = false;
             navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });

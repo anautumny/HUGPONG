@@ -91,6 +91,7 @@ export default function UserTable({
 
   // Check if current user can edit a given user
   const canEditUser = (target) => {
+    if (target.accountActions) return target.accountActions.canEdit === true;
     if (isSuperAdmin) return true;
     if (isSraAdmin) return target.canonicalRole === 'FARM_MANAGER';
     if (isFarmManager) return target.canonicalRole === 'MEMBER_FARMER';

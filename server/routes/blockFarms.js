@@ -18,6 +18,7 @@ const { createBlockFarmId, assertNoClientIdentity, readDevelopmentSeedId } = req
 const { uniqueRecordsById } = require('../domain/recordIdentity');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { queueAuditEvent } = require('../services/auditWriter');
+const { creationReceipt } = require('../services/creationReceipt');
 const {
   assertDeclaredAreaCoversFields,
   attachBlockFarmAreaSummaries,
@@ -78,12 +79,6 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
     const name = requiredString(req.body.name, 'name', { max: 200 });
     const blockFarmId = developmentSeedId || createBlockFarmId();
     const managerUserId = nullableId(req.body.managerUserId);
-    if (managerUserId) {
-      const manager = await db.collection(COLLECTIONS.USERS).doc(managerUserId).get();
-      if (!manager.exists || manager.data().role !== ROLES.FARM_MANAGER) {
-        throw new Error('managerUserId must reference a Farm Manager.');
-      }
-    }
     const now = nowIso();
     const payload = {
       code: blockFarmId,
@@ -96,9 +91,27 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
       updatedAt: now,
       archivedAt: null
     };
-    const batch = db.batch();
-    batch.create(db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId), payload);
-    queueAuditEvent(batch, db, {
+    const actorId = req.session.user.employeeId || req.session.user.userId;
+    const receipt = developmentSeedId ? null : creationReceipt(db, actorId, readMutationContext(req), {
+      name, address: payload.address, declaredAreaHa: payload.declaredAreaHa, managerUserId,
+    }, 'BLOCK_FARM_CREATION');
+    const result = await db.runTransaction(async transaction => {
+      const prior = receipt && await receipt.read(transaction);
+      if (prior) return { data: prior, replayed: true };
+      if (managerUserId) {
+        const managerRef = db.collection(COLLECTIONS.USERS).doc(managerUserId);
+        const manager = await transaction.get(managerRef);
+        const assigned = await transaction.get(db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', managerUserId));
+        if (!manager.exists || canonicalRole(manager.data().role) !== ROLES.FARM_MANAGER || manager.data().status !== 'ACTIVE') {
+          throw Object.assign(new Error('managerUserId must reference an ACTIVE Farm Manager.'), { status: 400 });
+        }
+        if (assigned.docs.some(doc => doc.id !== blockFarmId)) {
+          throw Object.assign(new Error('This Farm Manager already manages a Block Farm. Use Edit to explicitly reassign them.'), { status: 409 });
+        }
+        transaction.update(managerRef, { farmAssignmentUpdatedAt: now });
+      }
+      transaction.create(db.collection(COLLECTIONS.BLOCK_FARMS).doc(blockFarmId), payload);
+      queueAuditEvent(transaction, db, {
       eventType: 'BLOCK_FARM_CREATED',
       actorUserId: req.session.user.employeeId || req.session.user.userId,
       entityType: 'BLOCK_FARM',
@@ -106,14 +119,18 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
       blockFarmId,
       details: `Created block farm ${name}.`,
       createdAt: now
+      });
+      const data = { id: blockFarmId, ...payload, ...blockFarmAreaSummary(payload, []) };
+      receipt?.write(transaction, data, now);
+      return { data, replayed: false };
     });
-    await batch.commit();
-    return res.status(201).json({
+    return res.status(result.replayed ? 200 : 201).json({
       success: true,
-      data: { id: blockFarmId, ...payload, ...blockFarmAreaSummary(payload, []) }
+      replayed: result.replayed,
+      data: result.data || result
     });
   } catch (error) {
-    const status = /already exists/i.test(error.message) ? 409 : 400;
+    const status = error.status || (/already exists/i.test(error.message) ? 409 : 400);
     return res.status(status).json({ success: false, error: error.message });
   }
 });
@@ -176,6 +193,7 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
         updatedAt,
         archivedAt: latest.archivedAt || null
       };
+      if (managerUserId) transaction.update(db.collection(COLLECTIONS.USERS).doc(managerUserId), { farmAssignmentUpdatedAt: updatedAt });
       managerFarms?.docs
         .filter(doc => doc.id !== blockFarmId)
         .forEach(doc => transaction.update(doc.ref, { managerUserId: null, updatedAt }));

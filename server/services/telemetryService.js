@@ -380,6 +380,18 @@ async function buildSystemMonitor(db, identity, { limit = 50, cursor = null } = 
   };
 }
 
+async function readAccountActivities(db, users, now = Date.now()) {
+  const records = await telemetryByUserIds(db, users.map(user => user.id));
+  const byUser = new Map();
+  for (const record of records) {
+    if (!byUser.has(record.userId)) byUser.set(record.userId, []);
+    byUser.get(record.userId).push(record);
+  }
+  return new Map(users.map(user => [user.id, aggregateSubjectTelemetry({
+    userId: user.id, accountCreatedAt: user.createdAt || null,
+  }, byUser.get(user.id) || [], now).activity]));
+}
+
 module.exports = {
   SYNC_STATES,
   CONNECTION_STATES,
@@ -389,6 +401,7 @@ module.exports = {
   recordActivity,
   recordSyncTelemetry,
   classifyAccountActivity,
+  readAccountActivities,
   aggregateSubjectTelemetry,
   buildAgriculturalMonitor,
   buildSystemMonitor

@@ -8,6 +8,7 @@ import { useTranslation } from '../../services/i18n';
 import { fetchAgriculturalSyncMonitor } from '../../services/telemetryService';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
 import { AppText as Text } from '../../components/Typography';
+import Pagination, { usePagination } from '../../components/ui/Pagination';
 
 function summarizeCropStages(cycles) {
   const counts = new Map();
@@ -45,7 +46,8 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
     && log.isDraft !== true
     && managedFieldIds.has(log.fieldId)
   ));
-  const visibleLogs = showAllLogs ? logs : logs.slice(0, 3);
+  const logPage = usePagination(logs, { resetKey: `${managerUserId}:${showAllLogs}` });
+  const visibleLogs = showAllLogs ? logPage.items : logs.slice(0, 3);
   const farmName = managedFarms.map(farm => farm.name).filter(Boolean).join(', ') || `${t('unassigned', 'Unassigned')} ${t('block_farm', 'Block Farm')}`;
   const activeCropCycles = cropCycles.filter(cycle => (
     cycle.status === 'ACTIVE' && managedFields.some(field => field.currentCycleId === cycle.id)
@@ -146,9 +148,10 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
         );
       })}
 
+      {showAllLogs && <Pagination {...logPage} label="operations" />}
       {logs.length > 3 ? (
         <TouchableOpacity style={s.showButton} onPress={() => setShowAllLogs(value => !value)}>
-          <Text style={s.showText}>{showAllLogs ? t('show_latest_three', 'Show Latest 3') : `${t('show_all_logs', 'Show All')} (${logs.length})`}</Text>
+          <Text style={s.showText}>{showAllLogs ? t('show_latest_three', 'Show Latest 3') : `Browse Logs (${logs.length})`}</Text>
         </TouchableOpacity>
       ) : null}
     </View>

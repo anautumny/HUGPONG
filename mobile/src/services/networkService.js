@@ -60,7 +60,9 @@ export const subscribeToNetwork = (listener) => {
 
 export const subscribeToReconnectStatus = (listener) => {
   reconnectListeners.push(listener);
-  listener({ ...reconnectStatus });
+  // Reconnection notices are events, not persistent account state. A newly
+  // mounted dashboard must not replay a completion from a previous login.
+  listener({ phase: 'IDLE', result: null });
   return () => {
     reconnectListeners = reconnectListeners.filter(item => item !== listener);
   };
@@ -152,7 +154,7 @@ async function evaluateNetworkState(state, generation) {
   if (generation !== connectivityCheckGeneration) {
     return connectivityCheckPromise || getNetworkStatus();
   }
-  if (state && !networkStateHasInternet(state)) {
+  if (state && (state.isConnected === false || state.isInternetReachable === false)) {
     if (generation === connectivityCheckGeneration) {
       applyConnectivity({
         status: CONNECTIVITY_STATUS.NO_INTERNET,

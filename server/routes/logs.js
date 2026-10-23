@@ -11,7 +11,7 @@ const {
   amendOperationRecord,
   archiveOperationRecords
 } = require('../services/cropCycleOperations');
-const { listOperationRecords } = require('../services/operationQueryService');
+const { listOperationPage, listOperationRecords } = require('../services/operationQueryService');
 const { listArchivedOperationPage } = require('../services/archiveQueryService');
 const { readMutationContext } = require('../services/mutationContext');
 const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthorization');
@@ -19,11 +19,18 @@ const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthoriza
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const data = await listOperationRecords(db, req.session.user, {
+    // Keep installed older APKs and explicit newest-N dashboard reads complete.
+    // Current clients opt into cursors and assemble all pages before publishing.
+    if (req.query.paged !== '1') {
+      const data = await listOperationRecords(db, req.session.user, { status: req.query.status, limit: req.query.limit });
+      return res.json({ success: true, count: data.length, data });
+    }
+    const result = await listOperationPage(db, req.session.user, {
       status: req.query.status,
-      limit: req.query.limit
+      limit: req.query.limit,
+      cursor: req.query.cursor
     });
-    return res.json({ success: true, count: data.length, data });
+    return res.json({ success: true, count: result.data.length, ...result });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message });
   }

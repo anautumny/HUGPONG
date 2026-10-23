@@ -9,7 +9,7 @@ const { COLLECTIONS } = require('../schema/firestoreSchema');
 const scrypt = promisify(crypto.scrypt);
 const BACKUP_FORMAT = 'HUGPONG_ENCRYPTED_LOGICAL_BACKUP';
 const BACKUP_FORMAT_VERSION = 1;
-const BACKUP_SCHEMA_VERSION = '2026-10-15';
+const BACKUP_SCHEMA_VERSION = '2026-10-24';
 const MAX_BACKUP_DOCUMENTS = 10000;
 const MAX_PLAINTEXT_BYTES = 24 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
@@ -26,7 +26,8 @@ const BACKUP_COLLECTIONS = Object.freeze([
   COLLECTIONS.AUDIT_LOGS,
   COLLECTIONS.SRA_PRICES,
   COLLECTIONS.SUPPORT_TICKETS,
-  COLLECTIONS.CROP_YEAR_COMPILATIONS
+  COLLECTIONS.CROP_YEAR_COMPILATIONS,
+  COLLECTIONS.NOTIFICATION_STATES
 ]);
 const EXCLUDED_SECURITY_COLLECTIONS = Object.freeze([
   COLLECTIONS.USER_CREDENTIALS,
@@ -267,7 +268,8 @@ function validateEnvelope(envelope) {
 function validateBackupPayload(payload, projectId) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw serviceError('Backup payload is invalid.');
   const legacySchema = payload.schemaVersion === '2026-09-28';
-  if (payload.format !== 'HUGPONG_LOGICAL_BACKUP' || payload.formatVersion !== BACKUP_FORMAT_VERSION || (!legacySchema && payload.schemaVersion !== BACKUP_SCHEMA_VERSION)) {
+  const previousSchema = payload.schemaVersion === '2026-10-15';
+  if (payload.format !== 'HUGPONG_LOGICAL_BACKUP' || payload.formatVersion !== BACKUP_FORMAT_VERSION || (!legacySchema && !previousSchema && payload.schemaVersion !== BACKUP_SCHEMA_VERSION)) {
     throw serviceError('Backup schema is not supported.', 400, 'BACKUP_SCHEMA_UNSUPPORTED');
   }
   if (String(payload.sourceProjectId || '') !== String(projectId || '')) {
@@ -276,7 +278,8 @@ function validateBackupPayload(payload, projectId) {
   if (payload.exportOperationId != null && !/^BKP-[A-F0-9]{20}$/.test(String(payload.exportOperationId))) {
     throw serviceError('Backup export reference is invalid.', 400, 'BACKUP_EXPORT_REFERENCE_INVALID');
   }
-  const expectedCollections = legacySchema ? BACKUP_COLLECTIONS.filter(name => name !== COLLECTIONS.CROP_YEAR_COMPILATIONS) : BACKUP_COLLECTIONS;
+  const expectedCollections = BACKUP_COLLECTIONS.filter(name => !(legacySchema && name === COLLECTIONS.CROP_YEAR_COMPILATIONS)
+    && !((legacySchema || previousSchema) && name === COLLECTIONS.NOTIFICATION_STATES));
   if (!Array.isArray(payload.includedCollections) || payload.includedCollections.length !== expectedCollections.length
     || payload.includedCollections.some((name, index) => name !== expectedCollections[index])) {
     throw serviceError('Backup collection manifest is invalid.');
@@ -307,7 +310,7 @@ function validateBackupPayload(payload, projectId) {
     throw serviceError('Backup integrity verification failed.', 400, 'BACKUP_INTEGRITY_FAILED');
   }
   // Verify the original checksum before extending a historical manifest.
-  return legacySchema ? { ...payload, collections: { ...payload.collections, [COLLECTIONS.CROP_YEAR_COMPILATIONS]: [] } } : payload;
+  return { ...payload, collections: Object.fromEntries(BACKUP_COLLECTIONS.map(name => [name, payload.collections[name] || []])) };
 }
 
 async function decryptBackupArchive(database, archiveBase64, passphrase, projectId) {

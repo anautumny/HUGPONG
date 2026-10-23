@@ -13,6 +13,7 @@ import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/da
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 import { uniqueRecordsById } from '../../utils/dataHelpers';
 import { AppText as Text } from '../../components/Typography';
+import Pagination, { usePagination } from '../../components/ui/Pagination';
 
 function SRAHomeView({ session = {}, fields = [], navigation }) {
   const { t } = useTranslation();
@@ -35,6 +36,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       status: resolvedMgr === 'Unassigned' ? 'Manager Unassigned' : null
     };
   });
+  const farmPage = usePagination(blockFarmsList, { resetKey: session.id || session.employeeId });
 
   const totalDistrictHa = React.useMemo(() => {
     return blockFarmsList.reduce((sum, f) => sum + (Number(f.ha) || 0), 0);
@@ -82,7 +84,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
       </View>
 
       <View style={{ gap: 8, marginBottom: SPACING.md }}>
-        {blockFarmsList.map(farm => (
+        {farmPage.items.map(farm => (
           <TouchableOpacity
             key={farm.id}
             style={s.plotItem}
@@ -104,6 +106,7 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
         ))}
+        <Pagination {...farmPage} label="farms" />
       </View>
 
     </View>

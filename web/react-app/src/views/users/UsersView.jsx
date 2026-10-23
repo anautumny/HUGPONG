@@ -94,7 +94,7 @@ export default function UsersView() {
     if (!toggleConfirmTarget) return;
     setIsTogglingStatus(true);
     try {
-      await toggleUserStatus(toggleConfirmTarget.id, toggleConfirmTarget.status);
+      await toggleUserStatus(toggleConfirmTarget.id, toggleConfirmTarget.status, toggleConfirmTarget.updatedAt || null);
       setToggleConfirmTarget(null);
     } catch (err) {
       alert(`Failed to update account status: ${err.message}`);

@@ -2,6 +2,7 @@ import { normalizeActorId } from '../domain/operationAuthorization.js';
 import { createClientRecordId } from '../utils/secureId.js';
 
 const PREFIX = 'hugpong_operation_drafts_v1:';
+const activeClaims = new Set();
 
 function storageFor(storage) {
   return storage || globalThis.localStorage;
@@ -18,9 +19,13 @@ export function listLocalOperationDrafts(user, storage) {
   if (!actorId) return [];
   try {
     const parsed = JSON.parse(storageFor(storage).getItem(draftStorageKey(user)) || '[]');
-    return Array.isArray(parsed)
+    const drafts = Array.isArray(parsed)
       ? parsed.filter(draft => draft?.createdByUserId === actorId && draft.status === 'DRAFT')
       : [];
+    const recovered = drafts.map(draft => draft.submitting && !activeClaims.has(`${actorId}:${draft.id}`)
+      ? { ...draft, submitting: false, submissionClaimedAt: null } : draft);
+    if (recovered.some((draft, index) => draft !== drafts[index])) persist(user, recovered, storage);
+    return recovered;
   } catch {
     return [];
   }
@@ -56,6 +61,7 @@ export function saveLocalOperationDraft(user, field, form, existingId = null, st
 }
 
 export function deleteLocalOperationDraft(user, draftId, storage) {
+  activeClaims.delete(`${normalizeActorId(user)}:${draftId}`);
   return persist(user, listLocalOperationDrafts(user, storage).filter(draft => draft.id !== draftId), storage);
 }
 
@@ -77,15 +83,19 @@ export function claimLocalDraftSubmission(user, field, draftId, storage) {
   if (!validation.valid) throw new Error(validation.error);
   if (draft.submitting) throw new Error('This draft submission is already in progress.');
   const claimed = { ...draft, submitting: true, submissionClaimedAt: new Date().toISOString() };
-  persist(user, drafts.map(item => item.id === draftId ? claimed : item), storage);
+  activeClaims.add(`${normalizeActorId(user)}:${draftId}`);
+  try { persist(user, drafts.map(item => item.id === draftId ? claimed : item), storage); }
+  catch (error) { activeClaims.delete(`${normalizeActorId(user)}:${draftId}`); throw error; }
   return claimed;
 }
 
 export function releaseLocalDraftSubmission(user, draftId, storage) {
+  activeClaims.delete(`${normalizeActorId(user)}:${draftId}`);
   const drafts = listLocalOperationDrafts(user, storage);
   persist(user, drafts.map(item => item.id === draftId ? { ...item, submitting: false, submissionClaimedAt: null } : item), storage);
 }
 
 export function completeLocalDraftSubmission(user, draftId, storage) {
+  activeClaims.delete(`${normalizeActorId(user)}:${draftId}`);
   deleteLocalOperationDraft(user, draftId, storage);
 }

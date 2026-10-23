@@ -1,13 +1,14 @@
 import PriceReferenceCard from '../components/PriceReferenceCard';
 import { priceText } from '../utils/pricePresentation';
-import React, { useState, useEffect } from 'react';
-import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert, Linking, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../theme';
 import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, cropCycles, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
+import Pagination, { usePagination } from '../components/ui/Pagination';
 import { ScreenHeader } from '../components/ui';
 import OfflineBanner from '../components/OfflineBanner';
 import {
@@ -17,7 +18,10 @@ import {
   checkConnectivity,
   CONNECTIVITY_STATUS
 } from '../services/networkService';
-import { getItem, saveItem, STORAGE_KEYS } from '../services/storageService';
+import { createAccountNotificationState } from '../services/notificationStateService';
+import { requestApplicationNotificationPermission } from '../services/recoveryNotificationService';
+import { notificationEventId } from '../domain/notificationIdentity';
+import { getOutboxQueue } from '../services/syncEngine';
 import { safeAlert } from '../utils/dialogs';
 import { sortNewestFirst } from '../utils/dataHelpers';
 
@@ -100,10 +104,11 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
   }
 
   const offlineLogsCount = getPendingSyncCount(session);
-  if (offlineLogsCount > 0 && !dismissedIds.has('notif-offline-sync')) {
+  const pendingId = notificationEventId('offline-sync', (getOutboxQueue?.() || []).map(item => ({ id: item.mutationId, createdAt: item.createdAt })));
+  if (offlineLogsCount > 0 && !dismissedIds.has(pendingId)) {
     const latestPending = sortNewestFirst(scopedLogs.filter(log => log.synced === false || log.isOffline === true), ['createdAt', 'localCreatedAt', 'timestamp'])[0];
     notifs.push({
-      id: 'notif-offline-sync',
+      id: pendingId,
       type: 'sync',
       icon: 'cloud-offline-outline',
       color: '#D97706',
@@ -112,7 +117,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
       time: 'Ready to sync',
       createdAt: latestPending?.createdAt || latestPending?.localCreatedAt || latestPending?.timestamp || null,
       badgeText: 'Tap to Sync',
-      unread: !readIds.has('notif-offline-sync'),
+      unread: !readIds.has(pendingId),
       actionType: 'sync'
     });
   }
@@ -146,10 +151,11 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
       ? allDrafts.filter(d => fields.some(field => field.memberUserId === userId && field.id === d.fieldId))
       : allDrafts.filter(d => managerFieldIds.includes(d.fieldId) || d.authorName === session?.name);
 
-    if (scopedDrafts.length > 0 && !dismissedIds.has('notif-unsubmitted-drafts')) {
+    const draftId = notificationEventId('unsubmitted-drafts', scopedDrafts);
+    if (scopedDrafts.length > 0 && !dismissedIds.has(draftId)) {
       const latestDraft = sortNewestFirst(scopedDrafts, ['createdAt', 'timestamp', 'date'])[0];
       notifs.push({
-        id: 'notif-unsubmitted-drafts',
+        id: draftId,
         type: 'draft',
         icon: 'document-text-outline',
         color: '#0284C7',
@@ -158,7 +164,7 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
         time: `${scopedDrafts.length} draft${scopedDrafts.length !== 1 ? 's' : ''}`,
         createdAt: latestDraft?.createdAt || latestDraft?.timestamp || latestDraft?.date || null,
         badgeText: 'Review Drafts',
-        unread: !readIds.has('notif-unsubmitted-drafts'),
+        unread: !readIds.has(draftId),
         actionType: 'drafts'
       });
     }
@@ -171,12 +177,16 @@ export default function HomeScreen({ navigation }) {
   const { t, formatSyncTime } = useTranslation();
   const [chartMode, setChartMode] = useState('weekly');
   const [showNotifs, setShowNotifs] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState(null);
   const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
   const [fieldsState, setFieldsState] = useState([...fields]);
   const [readNotifIds, setReadNotifIds] = useState(new Set());
   const [dismissedNotifIds, setDismissedNotifIds] = useState(new Set());
+  const [pendingNotificationChanges, setPendingNotificationChanges] = useState(0);
+  const notificationClientRef = useRef(null);
   const [notifs, setNotifs] = useState(() => generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs));
+  const notificationPage = usePagination(notifs, { resetKey: showNotifs });
   
   const [isOnline, setIsOnline] = useState(getNetworkStatus());
   const [priceData, setPriceData] = useState({
@@ -194,24 +204,40 @@ export default function HomeScreen({ navigation }) {
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
 
-  // Hydrate persistent read and dismissed notification states from AsyncStorage
+  // Keep notification state per account and reconcile it with the API. A late
+  // response from a signed-out account cannot replace the current projection.
   useEffect(() => {
-    (async () => {
-      try {
-        const [savedRead, savedDismissed] = await Promise.all([
-          getItem(STORAGE_KEYS.READ_NOTIF_IDS, []),
-          getItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, [])
-        ]);
-        const readSet = new Set(Array.isArray(savedRead) ? savedRead : []);
-        const dismissedSet = new Set(Array.isArray(savedDismissed) ? savedDismissed : []);
-        setReadNotifIds(readSet);
-        setDismissedNotifIds(dismissedSet);
-        setNotifs(generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs, readSet, dismissedSet));
-      } catch (e) {
-        console.warn('[HomeScreen] Saved notification state could not be loaded.');
-      }
-    })();
-  }, []);
+    let active = true;
+    const userId = session?.employeeId || session?.id || '';
+    setReadNotifIds(new Set());
+    setDismissedNotifIds(new Set());
+    setPendingNotificationChanges(0);
+    const isCurrent = () => active && userId === (getCurrentSession()?.employeeId || getCurrentSession()?.id || '');
+    const ids = () => generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs).map(item => item.id);
+    const client = createAccountNotificationState(userId, isCurrent, state => {
+      setReadNotifIds(new Set(state.read));
+      setDismissedNotifIds(new Set(state.dismissed));
+    }, setPendingNotificationChanges);
+    notificationClientRef.current = client;
+    client.refresh(ids(), { force: true });
+    const unsubData = subscribe(() => { if (isCurrent()) client.refresh(ids()); });
+    const unsubNet = subscribeToNetwork(online => { if (online && isCurrent()) client.refresh(ids(), { force: true }); });
+    return () => {
+      active = false;
+      unsubData(); unsubNet();
+      if (notificationClientRef.current === client) notificationClientRef.current = null;
+    };
+  }, [session?.employeeId, session?.id]);
+
+  useEffect(() => {
+    setNotifs(generateDynamicNotifications(session, draftLogs, operationLogs, readNotifIds, dismissedNotifIds));
+  }, [session, readNotifIds, dismissedNotifIds]);
+
+  const updateNotificationState = (ids, action) => {
+    notificationClientRef.current?.mark(ids, action).catch(() => {
+      safeAlert('Notification Update', 'The change could not be saved on this device. Please try again.');
+    });
+  };
 
   const handleCheckNetConnection = async () => {
     if (isCheckingNet) return;
@@ -277,12 +303,7 @@ export default function HomeScreen({ navigation }) {
   }, [readNotifIds, dismissedNotifIds]);
 
   const handleDismissNotif = React.useCallback((id) => {
-    setDismissedNotifIds(prev => {
-      const next = new Set([...prev, id]);
-      saveItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, Array.from(next));
-      return next;
-    });
-    setNotifs(prev => prev.filter(n => n.id !== id));
+    updateNotificationState([id], 'dismiss');
   }, []);
 
   const handleClearAllNotifs = () => {
@@ -297,12 +318,7 @@ export default function HomeScreen({ navigation }) {
           style: 'destructive', 
           onPress: () => {
             const allIds = notifs.map(n => n.id);
-            setDismissedNotifIds(prev => {
-              const next = new Set([...prev, ...allIds]);
-              saveItem(STORAGE_KEYS.DISMISSED_NOTIF_IDS, Array.from(next));
-              return next;
-            });
-            setNotifs([]);
+            updateNotificationState(allIds, 'dismiss');
           } 
         }
       ]
@@ -311,26 +327,36 @@ export default function HomeScreen({ navigation }) {
 
   const handleMarkAllRead = () => {
     const allIds = notifs.map(n => n.id);
-    setReadNotifIds(prev => {
-      const next = new Set([...prev, ...allIds]);
-      saveItem(STORAGE_KEYS.READ_NOTIF_IDS, Array.from(next));
-      return next;
-    });
-    setNotifs(prev => prev.map(n => ({ ...n, unread: false })));
+    updateNotificationState(allIds, 'read');
   };
 
-  const openNotifs = () => setShowNotifs(true);
+  const openNotifs = () => {
+    notificationClientRef.current?.refresh(generateDynamicNotifications(session, draftLogs, operationLogs).map(item => item.id), { force: true });
+    setShowNotifs(true);
+  };
   const closeNotifs = () => setShowNotifs(false);
+
+  useEffect(() => {
+    if (!showNotifs) return;
+    let active = true;
+    const refresh = () => requestApplicationNotificationPermission().then(result => { if (active) setNotificationPermission(result); });
+    refresh();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refresh(); });
+    return () => { active = false; subscription.remove(); };
+  }, [showNotifs]);
+
+  const enableNotificationPermission = async () => {
+    const result = await requestApplicationNotificationPermission({ userInitiated: true });
+    setNotificationPermission(result);
+    if (!result.granted && result.supported && !result.canAskAgain) {
+      Linking.openSettings().catch(() => safeAlert('Notifications', 'Open your phone settings and enable notifications for HUGPONG.'));
+    }
+  };
 
   const handleNotifPress = (notif) => {
     setShowNotifs(false);
     // Mark this notification as read and persist to storage
-    setReadNotifIds(prev => {
-      const next = new Set([...prev, notif.id]);
-      saveItem(STORAGE_KEYS.READ_NOTIF_IDS, Array.from(next));
-      return next;
-    });
-    setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, unread: false } : n));
+    updateNotificationState([notif.id], 'read');
 
     if (notif.actionType === 'sync') {
       handleHomeSync();
@@ -433,6 +459,19 @@ export default function HomeScreen({ navigation }) {
           }
         />
 
+        {pendingNotificationChanges > 0 && (
+          <View style={{ padding: SPACING.md, backgroundColor: COLORS.surfaceSubtle }}>
+            <Text accessibilityLiveRegion="polite">{pendingNotificationChanges} notification changes saved on this device, waiting for server confirmation.</Text>
+          </View>
+        )}
+        {notificationPermission?.supported && !notificationPermission.granted && (
+          <View style={{ padding: SPACING.md, backgroundColor: COLORS.surfaceSubtle, gap: 8 }}>
+            <Text>Device notifications are turned off. Your in-app notifications are still available.</Text>
+            <TouchableOpacity accessibilityRole="button" onPress={enableNotificationPermission}>
+              <Text style={{ color: COLORS.primary, fontWeight: '700' }}>Enable Device Notifications</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {notifs.length === 0 ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: 12 }}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.surfaceSubtle, alignItems: 'center', justifyContent: 'center' }}>
@@ -445,7 +484,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         ) : (
           <ScrollView contentContainerStyle={{ padding: SPACING.md, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-            {notifs.map(n => (
+            {notificationPage.items.map(n => (
               <TouchableOpacity
                 key={n.id}
                 style={[s.notifItem, { backgroundColor: n.unread ? COLORS.background : COLORS.surface, padding: 14, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: n.unread ? n.color + '40' : COLORS.border, marginBottom: 10, ...SHADOW.card }]}
@@ -485,6 +524,7 @@ export default function HomeScreen({ navigation }) {
                 </View>
               </TouchableOpacity>
             ))}
+            <Pagination {...notificationPage} label="notifications" />
           </ScrollView>
         )}
       </SafeAreaView>

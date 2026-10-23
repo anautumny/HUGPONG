@@ -167,6 +167,9 @@ export default function AuditDossierCard({
         </div>
       </div>
 
+      <p className="text-xs text-hug-muted">This report covers its recorded operations only. Plots without monthly records are not counted as audited.</p>
+      {report.remainingOperationCount > 0 && <p className="text-sm text-amber-700">{report.remainingOperationCount} more operations were available when this version was compiled. Complete its review, then compile the next version for the remaining activity.</p>}
+
       {/* Metadata Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-bg border border-border rounded-xl p-4">
         <div className="min-w-0">

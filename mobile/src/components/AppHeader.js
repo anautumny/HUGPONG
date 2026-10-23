@@ -204,8 +204,10 @@ function AppHeader({ right }) {
   return (
     <View style={s.header}>
       <View style={s.brand}>
-        <Image source={LOGO} style={s.logoImg} resizeMode="contain" />
-        <Text style={s.logoText}>HUGPONG</Text>
+        <View style={s.logoFrame}>
+          <Image source={LOGO} style={s.logoImg} resizeMode="contain" accessibilityIgnoresInvertColors />
+        </View>
+        <Text style={s.logoText} numberOfLines={1}>HUGPONG</Text>
       </View>
       <View style={s.rightActions}>
         {(isFieldRole || isSraAdmin) && (
@@ -270,13 +272,25 @@ const s = StyleSheet.create({
     gap: 8,
   },
   logoImg: {
-    width: 32,
-    height: 32,
+    // The launcher asset includes transparent padding around the emblem.
+    width: 64,
+    height: 64,
+    flexShrink: 0,
+  },
+  logoFrame: {
+    width: 36,
+    height: 36,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   logoText: {
     flexShrink: 1,
     fontFamily: FONT_FAMILY.display,
     fontSize: 18,
+    lineHeight: 26,
+    includeFontPadding: false,
     fontWeight: '800',
     color: COLORS.primary,
     letterSpacing: 1.5,

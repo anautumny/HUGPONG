@@ -50,19 +50,24 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
 /**
  * Server-authoritative mutation to register a new block farm
  */
-export async function createBlockFarm(payload) {
-  return authenticatedRequest('/api/block-farms', {
+export async function createBlockFarm(payload, ownerId) {
+  const { creationIntent } = await import('./enrollmentIntentService');
+  const intent = await creationIntent(ownerId, payload, 'block-farms');
+  const result = await authenticatedRequest('/api/block-farms', {
     method: 'POST',
-    body: payload
+    body: { ...payload, _mutation: intent.mutation }
   });
+  localStorage.removeItem(intent.storageKey);
+  return result;
 }
 
 /**
  * Server-authoritative mutation to update an existing block farm
  */
-export async function updateBlockFarm(farmId, payload) {
+export async function updateBlockFarm(farmId, payload, baseVersion = null) {
   return authenticatedRequest(`/api/block-farms/${encodeURIComponent(farmId)}`, {
     method: 'PUT',
-    body: payload
+    body: payload,
+    baseVersion
   });
 }

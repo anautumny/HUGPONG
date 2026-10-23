@@ -24,17 +24,30 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const scanRearmTimerRef = useRef(null);
   const lastScanRef = useRef({ data: '', scannedAt: 0 });
   const mountedRef = useRef(true);
+  const sessionRef = useRef(0);
+  const visibleRef = useRef(visible);
+  const uploadBusyRef = useRef(false);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    if (scanRearmTimerRef.current) clearTimeout(scanRearmTimerRef.current);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      sessionRef.current += 1;
+      if (scanRearmTimerRef.current) clearTimeout(scanRearmTimerRef.current);
+    };
   }, []);
+
+  useEffect(() => {
+    visibleRef.current = visible;
+    sessionRef.current += 1;
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) {
       closeRequestedRef.current = false;
       permissionRequestedRef.current = false;
       scanLockedRef.current = false;
+      uploadBusyRef.current = false;
       lastScanRef.current = { data: '', scannedAt: 0 };
       if (scanRearmTimerRef.current) clearTimeout(scanRearmTimerRef.current);
       setCameraError('');
@@ -54,13 +67,17 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const closeScanner = useCallback(() => {
     if (closeRequestedRef.current) return;
     closeRequestedRef.current = true;
+    sessionRef.current += 1;
     onClose?.();
   }, [onClose]);
 
   const handleBarcodeScanned = useCallback(async (result, source = 'camera') => {
     const event = result?.nativeEvent || result || {};
     const normalizedData = String(event.data || event.raw || '').trim();
-    if (scanLockedRef.current || !normalizedData) return;
+    if (!visibleRef.current || closeRequestedRef.current || scanLockedRef.current || !normalizedData
+      || (source === 'camera' && uploadBusyRef.current)) return;
+    const session = sessionRef.current;
+    const isCurrent = () => mountedRef.current && sessionRef.current === session;
     const scannedAt = Date.now();
     if (lastScanRef.current.data === normalizedData && scannedAt - lastScanRef.current.scannedAt < 1500) return;
     lastScanRef.current = { data: normalizedData, scannedAt };
@@ -69,19 +86,19 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     setScanMessage(t('qr_validating', 'Validating audit report...'));
     try {
       const outcome = await onCodeDetected?.(normalizedData, { source });
-      if (outcome?.continueScanning && mountedRef.current) {
+      if (outcome?.continueScanning && isCurrent()) {
         setScanMessage(outcome.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
         scanRearmTimerRef.current = setTimeout(() => {
-          if (!mountedRef.current) return;
+          if (!isCurrent()) return;
           scanLockedRef.current = false;
           setScanLocked(false);
         }, 650);
       }
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (!isCurrent()) return;
       setScanMessage(error.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
       scanRearmTimerRef.current = setTimeout(() => {
-        if (!mountedRef.current) return;
+        if (!isCurrent()) return;
         scanLockedRef.current = false;
         setScanLocked(false);
       }, 650);
@@ -98,7 +115,10 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   };
 
   const uploadQrImage = async () => {
-    if (uploadBusy || scanLockedRef.current) return;
+    if (uploadBusyRef.current || scanLockedRef.current || closeRequestedRef.current) return;
+    const session = sessionRef.current;
+    const isCurrent = () => mountedRef.current && sessionRef.current === session;
+    uploadBusyRef.current = true;
     setUploadBusy(true);
     setCameraError('');
     setScanMessage(t('qr_choose_crop', 'Choose the QR image and crop closely around the square code.'));
@@ -109,12 +129,14 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
         aspect: [1, 1],
         quality: 1,
       });
+      if (!isCurrent()) return;
       if (selection.canceled || !selection.assets?.[0]?.uri) {
         setScanMessage(t('qr_choose_or_camera', 'Choose a QR image or open the camera.'));
         return;
       }
       setScanMessage(t('qr_reading_upload', 'Reading uploaded QR image...'));
       const barcodes = await scanFromURLAsync(selection.assets[0].uri, ['qr']);
+      if (!isCurrent()) return;
       const qrCode = barcodes.find(barcode => Boolean(barcode.data));
       if (!qrCode) {
         setScanMessage(t('qr_not_found', 'No readable QR was found. Upload it again and crop tightly around the QR square.'));
@@ -122,11 +144,14 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       }
       await handleBarcodeScanned(qrCode, 'image');
     } catch (error) {
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setScanMessage(error.message || t('qr_image_read_failed', 'The QR image could not be read. Try a PNG or a clear screenshot.'));
       }
     } finally {
-      if (mountedRef.current) setUploadBusy(false);
+      if (isCurrent()) {
+        uploadBusyRef.current = false;
+        setUploadBusy(false);
+      }
     }
   };
 
@@ -188,7 +213,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
                   facing="back"
                   enableTorch={torchEnabled}
                   barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={scanLocked ? undefined : handleBarcodeScanned}
+                  onBarcodeScanned={scanLocked || uploadBusy ? undefined : handleBarcodeScanned}
                   onCameraReady={() => {
                     setCameraReady(true);
                     setCameraError('');

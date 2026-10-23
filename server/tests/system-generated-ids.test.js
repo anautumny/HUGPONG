@@ -177,8 +177,8 @@ test('Field and Block Farm create endpoints return distinct server IDs and rejec
 
   const farmBody = { name: 'Server ID Farm', location: 'Negros Occidental', declaredAreaHa: 5, managerUserId: null };
   const [farmA, farmB] = await Promise.all([
-    invoke(farmPost, farmBody, sra),
-    invoke(farmPost, farmBody, sra)
+    invoke(farmPost, { ...farmBody, _mutation: { mutationId: 'MUT-FARM-A', idempotencyKey: 'MUT-FARM-A', entityKey: 'block-farms/new' } }, sra),
+    invoke(farmPost, { ...farmBody, _mutation: { mutationId: 'MUT-FARM-B', idempotencyKey: 'MUT-FARM-B', entityKey: 'block-farms/new' } }, sra)
   ]);
   assert.equal(farmA.statusCode, 201);
   assert.equal(farmB.statusCode, 201);
@@ -186,6 +186,25 @@ test('Field and Block Farm create endpoints return distinct server IDs and rejec
   assert.equal(farmA.payload.data.code, farmA.payload.data.id);
   assert.equal((await invoke(farmPost, { ...farmBody, id: 'BF-MANUAL', code: 'BF-MANUAL' }, sra)).statusCode, 400);
   assert.equal((await invoke(farmPut, { code: 'BF-REWRITTEN' }, sra, { id: farmA.payload.data.id })).statusCode, 400);
+});
+
+test('plot enrollment rejects another manager\'s farm and missing assignments before writing any records', async () => {
+  const db = new MemoryDb({
+    block_farms: {
+      'BF-OWN': { name: 'Same farm name', managerUserId: '03000001', status: 'ACTIVE' },
+      'BF-OTHER': { name: 'Same farm name', managerUserId: '03000002', status: 'ACTIVE' }
+    }
+  });
+  const create = loadHandler('../routes/fields', db);
+  const manager = { employeeId: '03000001', role: 'FARM_MANAGER' };
+  const mutation = { mutationId: 'MUT-FARM-SCOPE', idempotencyKey: 'MUT-FARM-SCOPE', entityKey: 'fields/new' };
+  const request = blockFarmId => ({ blockFarmId, areaHa: 1, memberUserId: null, _mutation: mutation });
+  const before = JSON.stringify([...db.records].map(([collection, records]) => [collection, [...records]]));
+  assert.equal((await invoke(create, request('BF-OTHER'), manager)).statusCode, 403);
+  assert.equal((await invoke(create, request('BF-OWN'), { ...manager, employeeId: '03000003' })).statusCode, 403);
+  assert.equal((await invoke(create, request(''), manager)).statusCode, 400);
+  const after = JSON.stringify([...db.records].map(([collection, records]) => [collection, [...records]]));
+  assert.equal(after, before, 'rejected enrollment cannot write fields, cycles, receipts, or audit events');
 });
 
 test('server routes own create identity and reject identity changes on edit', () => {

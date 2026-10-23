@@ -40,6 +40,8 @@ import { ScreenHeader, Card, PrimaryButton, SecondaryButton } from '../component
 import PublishPriceModal from '../components/PublishPriceModal';
 import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
 import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
+import Pagination, { usePagination } from '../components/ui/Pagination';
+import PriceHistorySheet from '../components/PriceHistorySheet';
 
 export default function AnalyticsScreen({ navigation, route }) {
   const { t } = useTranslation();
@@ -78,6 +80,7 @@ export default function AnalyticsScreen({ navigation, route }) {
 
   // SRA Price Modal
   const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showFullPriceHistory, setShowFullPriceHistory] = useState(false);
   const [newSugarPrice, setNewSugarPrice] = useState('');
   const [newMolassesPrice, setNewMolassesPrice] = useState('');
   const [newEffectiveDate, setNewEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -251,6 +254,16 @@ export default function AnalyticsScreen({ navigation, route }) {
       timeframe: priceTimeframe
     });
   }, [pricesList, priceTimeframe]);
+
+  // API-computed trend points are chronological for charts; history reads newest first.
+  const priceHistory = useMemo(() => [...priceTrends.trendPoints].reverse(), [priceTrends]);
+  const pricePage = usePagination(priceHistory, { resetKey: priceTimeframe });
+  const entityPage = usePagination(productionCost.breakdownByEntity, {
+    resetKey: JSON.stringify([selectedSeason, selectedFarmId, selectedFieldId, selectedPeriod]),
+  });
+  const scopeFields = useMemo(() => selectedFarmId === 'ALL'
+    ? scopedFields
+    : scopedFields.filter(field => field.blockFarmId === selectedFarmId), [scopedFields, selectedFarmId]);
 
   // Handler to publish SRA price
   const handlePublishPrice = async () => {
@@ -496,7 +509,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                   {isManager || isMember ? 'EXPENDITURE BY PLOT PARCEL' : 'EXPENDITURE BY BLOCK FARM'}
                 </Text>
                 <View style={{ gap: 8, marginTop: 8 }}>
-                  {productionCost.breakdownByEntity.map((item) => (
+                  {entityPage.items.map((item) => (
                     <View key={item.id} style={s.entityRow}>
                       <View style={{ flexGrow: 1, flexBasis: 170, minWidth: 0 }}>
                         <Text style={s.entityName}>{item.name}</Text>
@@ -511,6 +524,7 @@ export default function AnalyticsScreen({ navigation, route }) {
                     </View>
                   ))}
                 </View>
+                <Pagination {...entityPage} label={isManager || isMember ? 'plots' : 'farms'} />
               </Card>
             )}
           </View>
@@ -586,8 +600,8 @@ export default function AnalyticsScreen({ navigation, route }) {
                 />
               ) : (
                 <View style={{ gap: 8 }}>
-                  {priceTrends.trendPoints.map((pt, idx) => (
-                    <View key={idx} style={s.priceHistoryRow}>
+                  {pricePage.items.map((pt) => (
+                    <View key={pt.date || pt.periodLabel} style={s.priceHistoryRow}>
                       <View>
                         <Text style={s.pricePeriodTitle}>{pt.periodLabel}</Text>
                         {priceTimeframe === 'monthly' && <Text style={s.pricePeriodDate}>Reported weeks: Sugar {pt.sugarReportedWeeks}/{pt.totalWeeks}, Molasses {pt.molassesReportedWeeks}/{pt.totalWeeks}</Text>}
@@ -598,12 +612,16 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                     </View>
                   ))}
+                  <Pagination {...pricePage} label={priceTimeframe === 'monthly' ? 'months' : 'weeks'} />
                 </View>
               )}
+              <SecondaryButton title="Browse all published price records" onPress={() => setShowFullPriceHistory(true)} />
             </Card>
           </View>
         )}
       </ScrollView>
+
+      <PriceHistorySheet visible={showFullPriceHistory} onClose={() => setShowFullPriceHistory(false)} ownerId={session?.employeeId || session?.id} />
 
       {/* ── Scope Filter Bottom Sheet Modal ── */}
       <AnalyticsScopeModal
@@ -612,14 +630,14 @@ export default function AnalyticsScreen({ navigation, route }) {
         seasons={['ALL', ...availableSeasons]}
         currentSeason={currentSeason}
         farms={allFarms}
-        fields={scopedFields}
+        fields={scopeFields}
         periods={availablePeriods}
         selectedSeason={selectedSeason}
         selectedFarmId={selectedFarmId}
         selectedFieldId={selectedFieldId}
         selectedPeriod={selectedPeriod}
-        onSelectSeason={setSelectedSeason}
-        onSelectFarm={setSelectedFarmId}
+        onSelectSeason={value => { setSelectedSeason(value); setSelectedPeriod('ALL'); }}
+        onSelectFarm={value => { setSelectedFarmId(value); setSelectedFieldId('ALL'); }}
         onSelectField={setSelectedFieldId}
         onSelectPeriod={setSelectedPeriod}
         onReset={() => {

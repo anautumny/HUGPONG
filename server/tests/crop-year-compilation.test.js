@@ -158,7 +158,7 @@ test('printable report escapes source and user names and retains source attribut
 test('backups include compilations and continue validating pre-feature archives', () => {
   const { BACKUP_COLLECTIONS, _test } = require('../services/backupService');
   assert.ok(BACKUP_COLLECTIONS.includes(COLLECTIONS.CROP_YEAR_COMPILATIONS));
-  const collections = BACKUP_COLLECTIONS.filter(name => name !== COLLECTIONS.CROP_YEAR_COMPILATIONS);
+  const collections = BACKUP_COLLECTIONS.filter(name => ![COLLECTIONS.CROP_YEAR_COMPILATIONS, COLLECTIONS.NOTIFICATION_STATES].includes(name));
   const core = { format: 'HUGPONG_LOGICAL_BACKUP', formatVersion: 1, schemaVersion: '2026-09-28', sourceProjectId: 'test-project', includedCollections: collections, collections: Object.fromEntries(collections.map(name => [name, []])), documentCount: 0 };
   const checksumSha256 = crypto.createHash('sha256').update(JSON.stringify(core)).digest('hex');
   const result = _test.validateBackupPayload({ ...core, checksumSha256 }, 'test-project');

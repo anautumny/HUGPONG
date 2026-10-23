@@ -15,6 +15,7 @@ import { getItem, saveItem, STORAGE_KEYS, lastScannedAuditStorageKey, pendingAud
 import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { fetchAuditReadiness, fetchAuditReport, importAuditQr, verifyAuditQr } from '../services/mutationService';
+import { archivedFields } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import CropYearCompilationScreen from '../components/CropYearCompilationScreen';
@@ -23,6 +24,8 @@ import LiveQRScanner from '../components/LiveQRScanner';
 import ProvisionUserModal from '../components/ProvisionUserModal';
 import RecoveryReviewQueue from '../components/RecoveryReviewQueue';
 import AnimatedBottomSheet from '../components/AnimatedBottomSheet';
+import AuditMemberReviewSheet from '../components/AuditMemberReviewSheet';
+import Pagination, { usePagination } from '../components/ui/Pagination';
 import {
   AUDIT_STATUS, AUDIT_QR_SCHEMA_VERSION, canonicalAuditStatus, createAuditQrPayload, createLegacyAuditQrPayload,
   decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts,
@@ -844,6 +847,9 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [session, setSessionLocal] = useState(() => getCurrentSession() || {});
   const [activeRole, setActiveRole] = useState(getCurrentSession().role);
   const [deviceOnline, setDeviceOnline] = useState(getNetworkStatus());
+  const pendingAuditPage = usePagination(auditReports.filter(report => canonicalAuditStatus(report.status) === AUDIT_STATUS.PENDING_REVIEW), {
+    resetKey: session?.employeeId || session?.id,
+  });
   const [managerFieldFilter, setManagerFieldFilter] = useState('all');
   const sessionUserId = session?.employeeId || session?.id || '';
 
@@ -1123,6 +1129,8 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [isCheckingAuditReadiness, setIsCheckingAuditReadiness] = useState(false);
   const [incompleteAuditFields, setIncompleteAuditFields] = useState([]);
   const [showIncompleteAuditFields, setShowIncompleteAuditFields] = useState(false);
+  const [auditCoverageContext, setAuditCoverageContext] = useState(null);
+  const [auditMemberReview, setAuditMemberReview] = useState(null);
   const [submittingAuditId, setSubmittingAuditId] = useState(null);
   const auditCompilationLockRef = useRef(false);
   const qrSvgRef = useRef(null);
@@ -1537,11 +1545,12 @@ export default function FieldOpsScreen({ navigation, route }) {
     isEditing: false
   });
   const [isAssigningPlot, setIsAssigningPlot] = useState(false);
-  const managerSelectedFarm = canonicalBlockFarms.find(farm => (
-    farm.id === managerAssignForm.blockFarmId
-    || farm.name === managerAssignForm.blockFarm
-    || farm.code === managerAssignForm.blockFarm
-  ));
+  const managerOwnedFarms = canonicalBlockFarms.filter(farm => farm.managerUserId === sessionUserId);
+  const managerSelectedFarm = managerAssignForm.blockFarmId
+    ? managerOwnedFarms.find(farm => farm.id === managerAssignForm.blockFarmId)
+    : (!managerAssignForm.isEditing && managerOwnedFarms.length === 1 ? managerOwnedFarms[0] : null);
+  const canSaveManagerPlot = Boolean(managerSelectedFarm?.id)
+    && String(managerSelectedFarm?.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
   const managerAvailableAreaHa = (() => {
     const declared = Number(managerSelectedFarm?.declaredAreaHa ?? managerSelectedFarm?.declaredHa);
     if (!Number.isFinite(declared)) return null;
@@ -1823,7 +1832,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (!getNetworkStatus()) {
       Alert.alert(
         'Connection Required',
-        'Connect to the internet before compiling so HUGPONG can verify every active member and field submission.'
+        'Connect to the internet before compiling so HUGPONG can verify the available monthly operation records.'
       );
       return;
     }
@@ -1831,27 +1840,46 @@ export default function FieldOpsScreen({ navigation, route }) {
     setIsCheckingAuditReadiness(true);
     try {
       const response = await fetchAuditReadiness(assignedFarm.id, periodKey);
+      if (!response?.success || !Array.isArray(response.data?.memberFollowUps)) {
+        throw new Error('The member review is unavailable. Refresh the application and try again.');
+      }
       const incomplete = Array.isArray(response?.data?.incompleteFields)
         ? response.data.incompleteFields
         : [];
-      if (incomplete.length > 0) {
-        setIncompleteAuditFields(incomplete);
-        setShowIncompleteAuditFields(true);
-        return;
-      }
-      await compileAndShow();
+      setIncompleteAuditFields(incomplete);
+      setAuditCoverageContext({ blockFarmId: assignedFarm.id, periodKey });
+      setAuditMemberReview(response.data);
     } catch (error) {
-      const incomplete = Array.isArray(error?.data?.incompleteFields)
-        ? error.data.incompleteFields
-        : [];
-      if (incomplete.length > 0) {
-        setIncompleteAuditFields(incomplete);
-        setShowIncompleteAuditFields(true);
-        return;
-      }
-      Alert.alert('Readiness Check Failed', error.message || 'HUGPONG could not verify all monthly member submissions.');
+      Alert.alert('Readiness Check Failed', error.message || 'HUGPONG could not verify the available monthly operation records.');
     } finally {
       setIsCheckingAuditReadiness(false);
+    }
+  };
+
+  const continueAuditMemberReview = async () => {
+    if (!auditMemberReview?.canCompile || isCompilingAudit) return;
+    const currentSession = getCurrentSession();
+    const actorId = currentSession?.employeeId || currentSession?.id || '';
+    const farm = blockFarms.find(item => item.managerUserId === actorId);
+    if (farm?.id !== auditMemberReview.blockFarmId || toReportPeriod(compileMonth) !== auditMemberReview.periodKey) {
+      setAuditMemberReview(null);
+      Alert.alert('Review Changed', 'The farm or month changed. Review the current members before compiling.');
+      return;
+    }
+    if (!getNetworkStatus()) {
+      Alert.alert('Connection Required', 'Reconnect before compiling the official report.');
+      return;
+    }
+    if (!getRelevantAuditSyncState(farm.id, auditMemberReview.periodKey).isSynced) {
+      Alert.alert('Sync Required', 'Synchronize the newly pending changes, then review members again.');
+      setAuditMemberReview(null);
+      return;
+    }
+    setAuditMemberReview(null);
+    try {
+      await compileAndShow();
+    } catch (error) {
+      Alert.alert('Audit Report Not Compiled', error.message || 'The report could not be compiled.');
     }
   };
 
@@ -1889,12 +1917,12 @@ export default function FieldOpsScreen({ navigation, route }) {
       safeAlert('Cannot Compile Audit', 'Select a valid audit month and year before compiling.');
       return;
     }
-    const farmFields = fields.filter(f => f.blockFarmId === targetFarmId);
+    const farmFields = [...fields, ...archivedFields].filter(f => f.blockFarmId === targetFarmId);
     const farmFieldIds = new Set(farmFields.map(field => field.id));
     const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
     
     // Archived production-cycle records remain eligible until an audit report covers them.
-    const auditEligibleLogs = logs.filter(l => farmFieldIds.has(l.fieldId)
+    const auditEligibleLogs = operationLogs.filter(l => (l.blockFarmId === targetFarmId || (!l.blockFarmId && farmFieldIds.has(l.fieldId)))
       && ['ACTIVE', 'ARCHIVED'].includes(String(l.status || '').toUpperCase())
       && Boolean(l.cycleId));
 
@@ -2055,11 +2083,6 @@ export default function FieldOpsScreen({ navigation, route }) {
         newReport.cloudQueuedAt = nowIso;
       }
     } catch (e) {
-      if (Array.isArray(e?.data?.incompleteFields) && e.data.incompleteFields.length > 0) {
-        setIncompleteAuditFields(e.data.incompleteFields);
-        setShowIncompleteAuditFields(true);
-        return;
-      }
       Alert.alert('Audit Report Not Compiled', e.message || 'The server rejected this report.');
       return;
     }
@@ -7319,71 +7342,23 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
                     Parent Block Farm <Text style={{ color: '#DC2626' }}>*</Text>
                   </Text>
-                  {managerAssignForm.isEditing && (
                     <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs }}>
                       <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.primary }}>Assigned Cluster</Text>
                     </View>
-                  )}
                 </View>
 
-                {managerAssignForm.isEditing ? (
                   <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1.2, borderColor: '#E5E7EB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                     <Ionicons name="business-outline" size={17} color={COLORS.primary} />
-                    <Text style={{ fontSize: 13.5, fontWeight: '700', color: COLORS.text }}>
-                      {managerAssignForm.blockFarm || 'No block farm selected'}
+                    <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '700', color: COLORS.text }}>
+                      {managerSelectedFarm
+                        ? `${managerSelectedFarm.name || managerSelectedFarm.id} (${managerSelectedFarm.code || managerSelectedFarm.id})`
+                        : 'Assigned Block Farm unavailable'}
                     </Text>
                   </View>
-                ) : (
-                  <View style={{ gap: 8 }}>
-                    {canonicalBlockFarms.map(bf => {
-                      const isSelected = managerAssignForm.blockFarm === bf.name;
-                      const codeDisplay = bf.code || bf.id ? `(${bf.code || bf.id})` : '';
-                      return (
-                        <TouchableOpacity
-                          key={bf.id}
-                          onPress={() => {
-                            setManagerAssignForm(prev => ({
-                              ...prev,
-                              blockFarm: bf.name,
-                              blockFarmId: bf.id || bf.code || ''
-                            }));
-                          }}
-                          activeOpacity={0.8}
-                          style={{
-                            padding: 12,
-                            borderRadius: RADIUS.md,
-                            borderWidth: 1.5,
-                            borderColor: isSelected ? COLORS.primary : '#E5E7EB',
-                            backgroundColor: isSelected ? '#F0F8EC' : '#FFFFFF',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 10,
-                            ...SHADOW.card
-                          }}
-                        >
-                          <View style={{ width: 34, height: 34, borderRadius: RADIUS.sm, backgroundColor: isSelected ? COLORS.primary : '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="business" size={16} color={isSelected ? '#fff' : COLORS.textMuted} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 13.5, fontWeight: isSelected ? '800' : '600', color: COLORS.text }}>
-                              {bf.name} {codeDisplay}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
-                              Cooperative Block Farm Cluster
-                            </Text>
-                          </View>
-                          <Ionicons
-                            name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-                            size={20}
-                            color={isSelected ? COLORS.primary : '#D1D5DB'}
-                          />
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                  Cooperative cluster to which this parcel is anchored.
+                  {canSaveManagerPlot
+                    ? 'Automatically assigned from your Farm Manager account.'
+                    : 'No active assigned Block Farm is available. Refresh or contact your SRA Admin.'}
                 </Text>
               </View>
 
@@ -7702,9 +7677,13 @@ export default function FieldOpsScreen({ navigation, route }) {
               <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.text }}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[s.submitBtn, isAssigningPlot && { opacity: 0.85, backgroundColor: COLORS.primaryDark }]}
-              disabled={isAssigningPlot}
+              style={[s.submitBtn, !canSaveManagerPlot && { opacity: 0.5 }, isAssigningPlot && { opacity: 0.85, backgroundColor: COLORS.primaryDark }]}
+              disabled={isAssigningPlot || !canSaveManagerPlot}
               onPress={async () => {
+                if (!canSaveManagerPlot) {
+                  Alert.alert('Assigned Block Farm Required', 'An active assigned Block Farm is required. Refresh or contact your SRA Admin.');
+                  return;
+                }
                 const rawInput = (managerAssignForm.userId || '').trim();
                 const rawFieldId = (managerAssignForm.fieldId || '').trim().toUpperCase();
                 const rawHa = (managerAssignForm.ha || '').trim();
@@ -7749,12 +7728,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                 }
 
                 const existingField = existingIdx >= 0 ? fields[existingIdx] : null;
-                const activeFarmName = managerAssignForm.blockFarm || '';
-                const matchedFarm = blockFarms.find(farm => farm.name === activeFarmName || farm.id === activeFarmName || farm.code === activeFarmName);
-                if (!matchedFarm) {
-                  Alert.alert('Block Farm Required', 'Select an existing block farm before saving the field.');
-                  return;
-                }
+                const matchedFarm = managerSelectedFarm;
+                const activeFarmName = matchedFarm.name || matchedFarm.id;
 
                 const fieldPayload = {
                   ...(existingField || {}),
@@ -8590,6 +8565,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.text }}>
                         {targetFarm}
                       </Text>
+                      {monthReport?.remainingOperationCount > 0 && <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 6 }}>{monthReport.remainingOperationCount} more operations were available at compilation. Complete this version's review, then compile the next version.</Text>}
                       <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
                         {t('audit_period_label', 'Period')}: <Text style={{ fontWeight: '700', color: COLORS.text }}>{compileMonth}</Text> · {totalHa.toFixed(2)} Ha
                       </Text>
@@ -8620,6 +8596,16 @@ export default function FieldOpsScreen({ navigation, route }) {
                     </View>
                   </View>
 
+                  <Text style={{ fontSize: 12, lineHeight: 18, color: COLORS.textMuted, marginBottom: 10 }}>
+                    Compiles available synchronized operations for this month. Plots with no recorded operations do not block compilation and are not counted as audited.
+                  </Text>
+                  {incompleteAuditFields.length > 0
+                    && auditCoverageContext?.blockFarmId === targetFarmId
+                    && auditCoverageContext?.periodKey === toReportPeriod(compileMonth) && (
+                    <TouchableOpacity onPress={() => setShowIncompleteAuditFields(true)} accessibilityRole="button" style={{ paddingVertical: 10, marginBottom: 8 }}>
+                      <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 12 }}>View {incompleteAuditFields.length} plots with no recorded operations</Text>
+                    </TouchableOpacity>
+                  )}
                   {/* 3 Metric Cards: Equal Width, Equal Height & Clean Typography */}
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     <View style={{ flexGrow: 1, flexBasis: 100, minHeight: 68, justifyContent: 'space-between', backgroundColor: '#F8FAF5', paddingVertical: 10, paddingHorizontal: 9, borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#E4EEE1' }}>
@@ -8673,19 +8659,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       } else if (monthReport && (isAwaitingReview || (auditStatus === AUDIT_STATUS.CERTIFIED && !needsCompilation))) {
                         handleViewHistoricalAuditQR(monthReport);
                       } else {
-                        const countToCompile = uncompiledLogs.length > 0 ? uncompiledLogs.length : farmLogs.length;
-                        safeAlert(
-                          t('confirm_compile_title', 'Compile Monthly SRA Audit Package?'),
-                          `Compile ${countToCompile} synchronized sugarcane field operation(s) for ${compileMonth} into an immutable monthly audit snapshot?\n\nCompilation does not submit the audit. You can review it first.`,
-                          [
-                            { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-                            { 
-                              text: t('btn_confirm_compile', 'Compile Monthly Audit'),
-                              style: 'default', 
-                              onPress: handleGenerateAudit
-                            }
-                          ]
-                        );
+                        handleGenerateAudit();
                       }
                     }}
                     activeOpacity={0.85}
@@ -9188,7 +9162,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </Text>
             </View>
 
-            {auditReports.filter(report => canonicalAuditStatus(report.status) === AUDIT_STATUS.PENDING_REVIEW).slice(0, 20).map(report => (
+            {pendingAuditPage.items.map(report => (
               <TouchableOpacity
                 key={report.reportId || report.id}
                 style={[s.auditCard, { marginBottom: 8 }]}
@@ -9211,6 +9185,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                 </View>
               </TouchableOpacity>
             ))}
+
+            <Pagination {...pendingAuditPage} label="reports awaiting review" />
 
             {/* Scanner Card */}
             <TouchableOpacity style={[s.scannerCard, { marginBottom: SPACING.xl }]} onPress={() => setShowAuditReceiveOptions(true)}>
@@ -9257,6 +9233,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Ionicons name="document-text" size={18} color={COLORS.primary} />
                     <Text style={s.auditTitle}>{repTitle}</Text>
                   </View>
+                  {activeReport.remainingOperationCount > 0 && (
+                    <Text style={{ color: COLORS.textMuted, fontSize: 13, marginBottom: 12 }}>
+                      {activeReport.remainingOperationCount} more operations were available when this version was compiled. Complete its review, then compile the next version for the remaining activity.
+                    </Text>
+                  )}
                   <View style={s.auditRow}>
                     <Text style={s.auditLabel}>{t('report_fields_reported', 'Total Fields Reported')}</Text>
                     <Text style={s.auditVal}>{repFields} {repFields === 1 ? 'field' : 'fields'}</Text>
@@ -9305,25 +9286,32 @@ export default function FieldOpsScreen({ navigation, route }) {
         onCreated={() => setPendingUsersList([...pendingUsers])}
       />
 
+      <AuditMemberReviewSheet
+        data={auditMemberReview}
+        onClose={() => setAuditMemberReview(null)}
+        onContinue={continueAuditMemberReview}
+        onCall={contactIncompleteMember}
+      />
+
       <AnimatedBottomSheet
         visible={showIncompleteAuditFields}
         onClose={() => setShowIncompleteAuditFields(false)}
         backdropColor="rgba(0, 0, 0, 0.52)"
         sheetStyle={{ maxHeight: '86%' }}
       >
-          <SafeAreaView style={{ backgroundColor: COLORS.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+          <SafeAreaView edges={[]} style={{ flexShrink: 1, backgroundColor: COLORS.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
               <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
                 <Ionicons name="people-outline" size={21} color="#B45309" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 17, fontWeight: '900', color: COLORS.text }}>Member Submissions Needed</Text>
+                <Text style={{ fontSize: 17, fontWeight: '900', color: COLORS.text }}>Plots With No Recorded Operations</Text>
                 <Text style={{ marginTop: 3, fontSize: 12, lineHeight: 17, color: COLORS.textMuted }}>
-                  Contact these members and ask them to submit and synchronize their {compileMonth} operation before compiling.
+                  These plots have no synchronized operations for {compileMonth}. This does not block compilation. Follow up only if recorded work is still waiting to sync.
                 </Text>
               </View>
               <TouchableOpacity
-                accessibilityLabel="Close incomplete member list"
+                accessibilityLabel="Close monthly coverage list"
                 onPress={() => setShowIncompleteAuditFields(false)}
                 style={{ width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.background }}
               >
@@ -9331,7 +9319,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ padding: 16, gap: 10 }} showsVerticalScrollIndicator={false}>
               {incompleteAuditFields.map(item => {
                 const hasContact = Boolean(String(item.contactNumber || '').trim());
                 return (
@@ -9967,6 +9955,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 </View>
               )}
             {/* Review actions follow the compiled data so the report is inspected first. */}
+            <Text style={{ fontSize: 12, lineHeight: 18, color: COLORS.textMuted }}>This report covers its recorded operations only. Plots without monthly records are not counted as audited.</Text>
             <View style={{ paddingTop: 4, paddingBottom: SPACING.lg, gap: 8, backgroundColor: COLORS.background }}>
               <Text style={{ fontSize: 12, fontWeight: '900', color: COLORS.text, marginTop: 2 }}>Review Decision</Text>
               {scannedAuditDuplicate && (

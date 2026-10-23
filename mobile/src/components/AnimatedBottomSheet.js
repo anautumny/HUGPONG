@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const OPEN_DURATION_MS = 250;
 const CLOSE_DURATION_MS = 230;
@@ -27,12 +28,12 @@ export default function AnimatedBottomSheet({
   testID,
 }) {
   const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const progress = useRef(new Animated.Value(0)).current;
   const animationRef = useRef(null);
   const frameRef = useRef(null);
   const phaseRef = useRef('closed');
   const visibleRef = useRef(Boolean(visible));
-  const closeRequestedRef = useRef(false);
   const [phase, setPhase] = useState('closed');
 
   const setAnimationPhase = useCallback((nextPhase) => {
@@ -51,11 +52,11 @@ export default function AnimatedBottomSheet({
 
   const openSheet = useCallback(() => {
     stopCurrentAnimation();
-    progress.setValue(0);
+    if (phaseRef.current === 'closed') progress.setValue(0);
     setAnimationPhase('opening');
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null;
-      if (!visibleRef.current || closeRequestedRef.current) return;
+      if (!visibleRef.current) return;
       animationRef.current = Animated.timing(progress, {
         toValue: 1,
         duration: OPEN_DURATION_MS,
@@ -65,14 +66,14 @@ export default function AnimatedBottomSheet({
       });
       animationRef.current.start(({ finished }) => {
         animationRef.current = null;
-        if (finished && visibleRef.current && !closeRequestedRef.current) {
+        if (finished && visibleRef.current) {
           setAnimationPhase('open');
         }
       });
     });
   }, [progress, setAnimationPhase, stopCurrentAnimation]);
 
-  const closeSheet = useCallback((afterClose) => {
+  const closeSheet = useCallback(() => {
     if (phaseRef.current === 'closed' || phaseRef.current === 'closing') return;
     stopCurrentAnimation();
     setAnimationPhase('closing');
@@ -87,25 +88,23 @@ export default function AnimatedBottomSheet({
       animationRef.current = null;
       if (!finished) return;
       setAnimationPhase('closed');
-      afterClose?.();
     });
   }, [progress, setAnimationPhase, stopCurrentAnimation]);
 
   const requestClose = useCallback(() => {
-    if (closeRequestedRef.current || phaseRef.current === 'closed' || phaseRef.current === 'closing') return;
-    closeRequestedRef.current = true;
-    closeSheet(onClose);
-  }, [closeSheet, onClose]);
+    // Let the owner handle Back first (a nested picker can return to its filters).
+    // The visible prop then drives the closing animation when the owner exits.
+    if (visibleRef.current) onClose?.();
+  }, [onClose]);
 
   useEffect(() => {
     visibleRef.current = Boolean(visible);
 
     if (visible) {
-      if (!closeRequestedRef.current && phaseRef.current === 'closed') openSheet();
+      if (phaseRef.current === 'closed' || phaseRef.current === 'closing') openSheet();
       return;
     }
 
-    closeRequestedRef.current = false;
     if (phaseRef.current !== 'closed' && phaseRef.current !== 'closing') closeSheet();
   }, [closeSheet, openSheet, visible]);
 
@@ -130,19 +129,27 @@ export default function AnimatedBottomSheet({
       onRequestClose={requestClose}
       testID={testID}
     >
-      <View style={styles.root} pointerEvents={phase === 'open' ? 'auto' : 'none'}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]} />
 
         <KeyboardAvoidingView
           pointerEvents="box-none"
-          style={styles.sheetLayer}
-          behavior={keyboardAvoiding && Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.sheetLayer, {
+            paddingTop: insets.top + 12,
+            paddingLeft: insets.left,
+            paddingRight: insets.right,
+          }]}
+          behavior={keyboardAvoiding ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}
+          enabled={keyboardAvoiding}
         >
           <Animated.View
             style={[
               styles.sheet,
               sheetStyle,
-              { transform: [{ translateY: sheetTranslateY }] },
+              {
+                paddingBottom: Math.max(StyleSheet.flatten(sheetStyle)?.paddingBottom || 0, insets.bottom, 12),
+                transform: [{ translateY: sheetTranslateY }],
+              },
             ]}
           >
             {children}
@@ -162,10 +169,14 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   sheetLayer: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
     justifyContent: 'flex-end',
   },
   sheet: {
     width: '100%',
+    maxHeight: '100%',
+    flexShrink: 1,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
 });

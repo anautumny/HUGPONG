@@ -11,24 +11,21 @@ const CROP_YEAR_PREVIEW = `${currentYear}–${currentYear + 1}`;
 export default function FieldEnrollmentModal({
   isOpen = false,
   onClose,
-  blockFarms = [],
+  assignedBlockFarm = null,
   fields = [],
   memberUsers = [],
-  defaultBlockFarmId = '',
   onSuccess
 }) {
   const { user } = useAuth();
-  const [blockFarmId, setBlockFarmId] = useState(defaultBlockFarmId);
+  const blockFarmId = assignedBlockFarm?.id || '';
+  const canEnroll = Boolean(blockFarmId) && String(assignedBlockFarm?.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState(null);
-  const selectedFarm = useMemo(
-    () => blockFarms.find(farm => farm.id === (blockFarmId || defaultBlockFarmId)) || null,
-    [blockFarms, blockFarmId, defaultBlockFarmId]
-  );
+  const selectedFarm = assignedBlockFarm;
   const remainingAreaHa = useMemo(() => {
     const declared = Number(selectedFarm?.declaredAreaHa ?? selectedFarm?.declaredHa);
     if (!Number.isFinite(declared)) return null;
@@ -43,25 +40,20 @@ export default function FieldEnrollmentModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    setBlockFarmId(defaultBlockFarmId);
     setMemberUserId('');
     setAreaHa('');
     setErrors({});
     setServerError(null);
-  }, [isOpen, defaultBlockFarmId]);
-
-  const handleBlockFarmChange = (e) => {
-    setBlockFarmId(e.target.value);
-  };
+  }, [isOpen, blockFarmId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setServerError(null);
 
     const validation = {};
-    const cleanBf = blockFarmId || defaultBlockFarmId;
-    if (!cleanBf) {
-      validation.blockFarmId = 'Parent Block Farm is required.';
+    const cleanBf = blockFarmId;
+    if (!canEnroll) {
+      validation.blockFarmId = 'An active assigned Block Farm is required. Refresh the registry or contact your SRA Admin.';
     }
 
     const numHa = Number(areaHa);
@@ -119,6 +111,7 @@ export default function FieldEnrollmentModal({
             variant="primary"
             onClick={handleSubmit}
             isLoading={isSubmitting}
+            disabled={!canEnroll}
             loadingText="Saving field..."
           >
             Enroll Field Plot
@@ -149,21 +142,18 @@ export default function FieldEnrollmentModal({
           </FormField>
 
           <FormField
-            id="block-farm-select"
+            id="assigned-block-farm"
             label="Parent Block Farm"
             required
             error={errors.blockFarmId}
+            helperText={canEnroll
+              ? 'Automatically assigned from your Farm Manager account.'
+              : 'No active assigned Block Farm is available. Refresh the registry or contact your SRA Admin.'}
           >
-            <Select
-              id="block-farm-select"
-              value={blockFarmId || defaultBlockFarmId}
-              onChange={handleBlockFarmChange}
-              disabled={isSubmitting || blockFarms.length === 0}
-              placeholder="Select Block Farm..."
-              options={blockFarms.map(bf => ({
-                value: bf.id,
-                label: `${bf.name} (${bf.code || bf.id})`
-              }))}
+            <Input
+              id="assigned-block-farm"
+              value={selectedFarm ? `${selectedFarm.name || selectedFarm.id} (${selectedFarm.code || selectedFarm.id})` : 'Assigned Block Farm unavailable'}
+              readOnly
             />
           </FormField>
         </div>

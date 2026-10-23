@@ -2,7 +2,7 @@
   "expo": {
     "name": "HUGPONG",
     "slug": "hugpong",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon-foreground.png",
     "userInterfaceStyle": "light",
@@ -13,7 +13,8 @@
       },
       "package": "com.hugpong.app",
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS"
       ]
     },
     "plugins": [

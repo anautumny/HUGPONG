@@ -15,6 +15,7 @@ const { resolveAccountAssignments } = require('../services/accountAuthorization'
 const root = path.resolve(__dirname, '..', '..');
 const routeMounts = Object.freeze({
   'prices.js': '/api/prices',
+  'notifications.js': '/api/notifications',
   'users.js': '/api/users',
   'blockFarms.js': '/api/block-farms',
   'fields.js': '/api/fields',

@@ -358,7 +358,7 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
 
   assert.match(source, /authenticatedRequest\('\/api\/crop-cycles'\)/);
   assert.match(source, /authenticatedRequest\('\/api\/fields'\)/);
-  assert.match(source, /authenticatedRequest\('\/api\/logs'\)/);
+  assert.match(source, /fetchOperationPages\(authenticatedRequest/);
   assert.doesNotMatch(source, /onSnapshot|collection\(db/);
   assert.doesNotMatch(source, /const localOnly/);
   assert.match(source, /pendingCreateOverlays/);

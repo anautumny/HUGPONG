@@ -28,7 +28,7 @@ Phase 6 makes the Phase 5 release gate reproducible outside one developer workst
 
 ## Continuous verification
 
-`.github/workflows/verify.yml` uses Windows and Node.js 22, installs locked dependencies for Server, Web, and Mobile, then runs:
+`.github/workflows/verify.yml` uses Windows and the Node.js version in `.node-version` (24.22.1 LTS), installs locked dependencies for Server, Web, and Mobile, then runs:
 
 ```powershell
 npm run verify:release

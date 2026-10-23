@@ -1,4 +1,5 @@
 'use strict';
+require('./services/runtimeVersionPolicy').assertSupportedNodeVersion();
 
 const fs = require('fs');
 const path = require('path');

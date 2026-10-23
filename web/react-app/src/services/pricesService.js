@@ -36,6 +36,7 @@ export function subscribeToPrices({ onUpdate, onError }) {
       const prices = sortNewestFirst((response.data || []).map(item => fromPrice(item.id, item)), ['effectiveDate']);
       onUpdate({
         prices,
+        page: response.page,
         currentPrice: prices[0] || null,
         previousPrice: prices[1] || null,
         isLoading: false,
@@ -51,8 +52,10 @@ export function subscribeToPrices({ onUpdate, onError }) {
 /**
  * Fetch historical prices via API
  */
-export async function fetchPrices() {
-  return authenticatedRequest('/api/prices?limit=100');
+export async function fetchPrices({ cursor, limit = 100 } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  return authenticatedRequest(`/api/prices?${query}`);
 }
 
 /**

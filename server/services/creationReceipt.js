@@ -5,9 +5,9 @@ const stable = value => Array.isArray(value) ? value.map(stable) : value && type
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
-function creationReceipt(database, actorId, context, input) {
+function creationReceipt(database, actorId, context, input, namespace = 'FIELD_ENROLLMENT') {
   if (!context) throw Object.assign(new Error('A stable enrollment request key is required. Update the app and try again.'), { status: 400, code: 'MUTATION_KEY_REQUIRED' });
-  const ref = database.collection(COLLECTIONS.MUTATION_RECEIPTS).doc(hash(['FIELD_ENROLLMENT', actorId, context.idempotencyKey]));
+  const ref = database.collection(COLLECTIONS.MUTATION_RECEIPTS).doc(hash([namespace, actorId, context.idempotencyKey]));
   const inputHash = hash(input);
   return {
     async read(transaction) {

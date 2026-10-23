@@ -9,6 +9,7 @@ import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
 import { AppText as Text } from '../components/Typography';
+import Pagination, { usePagination } from '../components/ui/Pagination';
 
 const MEMBER_PAGE_SIZE = 10;
 
@@ -134,6 +135,7 @@ export default function SyncMonitorScreen({ navigation }) {
   }, [navigation, refresh]);
 
   const outbox = React.useMemo(() => getOutboxDiagnostics(), [localRevision]);
+  const outboxPage = usePagination(outbox);
   const localPending = outbox.length;
   const queuePressure = React.useMemo(() => getOutboxPressure(), [localRevision]);
   const localFailed = outbox.filter(item => !['queued', 'retryable', 'syncing'].includes(item.status)).length;
@@ -232,7 +234,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <View>
                 <Text style={s.sectionTitle}>{t('sync_changes_waiting')}</Text>
                 <Text style={s.sectionSub}>{t('sync_changes_waiting_sub')}</Text>
-                {outbox.map((item, index) => (
+                {outboxPage.items.map((item, index) => (
                   <View key={item.mutationId || `${item.type}-${index}`} style={s.queueCard}>
                     <View style={s.queueHeading}>
                       <Text style={s.queueTitle}>{mutationTypeLabel(item.type, t)}</Text>
@@ -242,6 +244,7 @@ export default function SyncMonitorScreen({ navigation }) {
                     <Text style={s.queueMeta}>{t('sync_attempted')} {Number(item.retryCount || 0)} {Number(item.retryCount || 0) === 1 ? t('sync_time_singular') : t('sync_time_plural')}</Text>
                   </View>
                 ))}
+                <Pagination {...outboxPage} label="pending changes" />
               </View>
             ) : null}
 

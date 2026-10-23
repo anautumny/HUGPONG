@@ -1,7 +1,25 @@
 {
   "indexes": [
     {
-      "collectionGroup": "password_recovery_reviews", "queryScope": "COLLECTION",
+      "collectionGroup": "operation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fieldId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "operation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "blockFarmId", "order": "ASCENDING" },
+        { "fieldPath": "performedOn", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "password_recovery_reviews",
+      "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "expiresAtMs", "order": "ASCENDING" },
@@ -9,7 +27,8 @@
       ]
     },
     {
-      "collectionGroup": "password_recovery_reviews", "queryScope": "COLLECTION",
+      "collectionGroup": "password_recovery_reviews",
+      "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "role", "order": "ASCENDING" },
@@ -18,7 +37,8 @@
       ]
     },
     {
-      "collectionGroup": "password_recovery_reviews", "queryScope": "COLLECTION",
+      "collectionGroup": "password_recovery_reviews",
+      "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "role", "order": "ASCENDING" },

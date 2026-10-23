@@ -2,6 +2,10 @@
 
 HUGPONG is an offline-first sugarcane field-operations and regulatory oversight system for Block Farms in Silay City.
 
+## User manual
+
+See the [HUGPONG User Manual](docs/USER_MANUAL.md) for role-based Web and Android instructions, including accounts, field operations, audits, synchronization, support, and administration. A [printable PDF](output/pdf/HUGPONG_User_Manual.pdf) is also available.
+
 ## Canonical architecture
 
 - `server/`: Node.js and Express security gateway, authoritative mutation API, role/scope enforcement, and Firestore transactions.
@@ -14,6 +18,11 @@ HUGPONG is an offline-first sugarcane field-operations and regulatory oversight 
 The crop-cycle contract contains exactly six stages: Land Preparation, Planting, Basal, Weeding, Top-Dress, and Harvest. Submitted field operations use the `ACTIVE` / `ARCHIVED` lifecycle.
 
 ## Local development
+
+Use **Node.js 24.22.1 LTS** (or a newer patched Node 24 release). The repository's
+`.node-version`, package engines, CI, and EAS build profiles record this security
+baseline. See [Node runtime security upgrade](docs/NODE_RUNTIME_SECURITY_UPGRADE.md)
+for hosting and installation verification.
 
 1. Run `run-server.bat` for the backend API.
 2. Run `run-web.bat` to build and serve the React production console at `http://localhost:3000`.

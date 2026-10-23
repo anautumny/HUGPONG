@@ -1,8 +1,12 @@
 {
   "name": "mobile",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/patchForgeVerification.cjs",
     "start": "expo start",
     "presentation:hotspot": "node scripts/startHotspotPresentation.mjs",
     "presentation:usb": "node scripts/startUsbPresentation.mjs",

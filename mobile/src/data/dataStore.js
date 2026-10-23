@@ -2,6 +2,8 @@ import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpo
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
 import { fieldEnrollmentIntent } from '../services/enrollmentIntentService';
+import { fetchOperationPages } from '../services/operationPages';
+import { recoverAbandonedDraftClaims } from '../domain/draftRecovery';
 import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync, resetMobileTelemetryState } from '../services/telemetryService';
 import { auth } from '../firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -1012,7 +1014,8 @@ export const authenticateUser = async (contactOrId, password) => {
     if (roleUpper === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
     draftLogs.length = 0;
     const scopedDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), []);
-    if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(draft => draftLogs.push(draft));
+    draftLogs.push(...recoverAbandonedDraftClaims(scopedDrafts));
+    await persistCurrentUserDrafts();
     await restartCloudSyncIfReady();
     reportMobileActivity('LOGIN').catch(() => {});
     notify();
@@ -2647,7 +2650,7 @@ export const listenToCloudSync = () => {
         authenticatedRequest('/api/block-farms'),
         authenticatedRequest('/api/fields'),
         authenticatedRequest('/api/crop-cycles'),
-        authenticatedRequest('/api/logs'),
+        fetchOperationPages(authenticatedRequest, () => active && (getCurrentSession()?.employeeId || getCurrentSession()?.id) === sessionUserId && auth?.currentUser?.uid === sessionUserId),
         authenticatedRequest('/api/prices?limit=52'),
         includeExtended ? authenticatedRequest('/api/tickets') : Promise.resolve(null),
         includeExtended ? authenticatedRequest('/api/tickets?view=history&limit=20') : Promise.resolve(null),
@@ -3403,7 +3406,8 @@ export const initializeOfflineStorage = async () => {
     draftLogs.length = 0;
     const draftKey = currentDraftKey();
     const scopedDrafts = draftKey ? await getItem(draftKey, []) : [];
-    if (Array.isArray(scopedDrafts)) scopedDrafts.forEach(d => draftLogs.push(d));
+    draftLogs.push(...recoverAbandonedDraftClaims(scopedDrafts));
+    await persistCurrentUserDrafts();
     // Preserve legacy drafts in their original key. Only safe, attributable
     // drafts are copied into the current account scope; invalid drafts remain
     // untouched for inspection and never become submittable.

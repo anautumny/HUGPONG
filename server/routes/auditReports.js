@@ -1,6 +1,8 @@
 'use strict';
 
 const express = require('express');
+const { auditSnapshotBatch } = require('../domain/auditSnapshotBatch');
+const { scanScopedDocumentIds } = require('../services/scopedQueryFallback');
 const { cleanText } = require('../services/diagnosticService');
 const router = express.Router();
 const { db } = require('../firebase-admin');
@@ -12,6 +14,7 @@ const {
 } = require('../schema/firestoreSchema');
 const { readMutationContext, assertBaseVersion } = require('../services/mutationContext');
 const { queueAuditEvent } = require('../services/auditWriter');
+const { auditMemberFollowUps } = require('../services/auditMemberFollowUpService');
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots, monthlyAuditReadiness,
@@ -23,6 +26,24 @@ const {
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 let missingIndexFallbackLogged = false;
+
+async function scanAuditLogs(query) {
+  const documents = [];
+  let cursor;
+  do {
+    let page = query.orderBy('performedOn', 'asc').orderBy('__name__', 'asc').limit(200);
+    if (cursor) page = page.startAfter(cursor.data().performedOn, cursor.id);
+    let snapshot;
+    try { snapshot = await page.get(); }
+    catch (error) {
+      if (!isMissingIndexError(error)) throw error;
+      return scanScopedDocumentIds(query);
+    }
+    documents.push(...snapshot.docs);
+    cursor = snapshot.docs.length === 200 ? snapshot.docs.at(-1) : null;
+  } while (cursor);
+  return documents;
+}
 
 function isAuditEligibleOperation(log) {
   return ['ACTIVE', 'ARCHIVED'].includes(String(log?.status || '').toUpperCase())
@@ -75,10 +96,31 @@ async function resolveAssignedFarm(req) {
 
 async function loadFarmAuditData(blockFarmId, period) {
   const fieldSnapshot = await db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', blockFarmId).get();
-  const activeFields = fieldSnapshot.docs
-    .filter(document => String(document.data().status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-    .map(document => ({ id: document.id, ...document.data() }));
-  if (!activeFields.length) throw new Error('The assigned Block Farm has no active fields to audit.');
+  let logSnapshot;
+  const query = db.collection(COLLECTIONS.OPERATION_LOGS).where('blockFarmId', '==', blockFarmId);
+  const [year, month] = period.split('-').map(Number);
+  const nextPeriod = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 7);
+  try {
+    logSnapshot = await query.where('performedOn', '>=', `${period}-01`).where('performedOn', '<', `${nextPeriod}-01`).get();
+  } catch (error) {
+    if (!isMissingIndexError(error)) throw error;
+    logSnapshot = { docs: await scanScopedDocumentIds(query, {
+      accept: document => String(document.data().performedOn || '').startsWith(`${period}-`),
+    }) };
+  }
+  const eligibleLogDocuments = logSnapshot.docs.filter(document => isAuditEligibleOperation(document.data())
+    && String(document.data().performedOn || '').startsWith(`${period}-`));
+  const historicalIds = new Set(eligibleLogDocuments.map(document => document.data().fieldId));
+  const fieldMap = new Map(fieldSnapshot.docs.map(document => [document.id, { ...document.data(), id: document.id }]));
+  const missingIds = [...historicalIds].filter(id => !fieldMap.has(id));
+  if (missingIds.length) {
+    const historical = await db.getAll(...missingIds.map(id => db.collection(COLLECTIONS.FIELDS).doc(id)));
+    historical.filter(document => document.exists).forEach(document => fieldMap.set(document.id, { ...document.data(), id: document.id }));
+  }
+  // Historical farm identity is carried by the operation, regardless of the
+  // plot's present lifecycle or assignment. Idle archived plots add no rows.
+  const activeFields = [...fieldMap.values()].filter(field => historicalIds.has(field.id)
+    || (field.blockFarmId === blockFarmId && String(field.status || 'ACTIVE').toUpperCase() === 'ACTIVE'));
 
   const memberIds = Array.from(new Set(activeFields.map(field => field.memberUserId).filter(Boolean)));
   if (memberIds.length) {
@@ -113,17 +155,6 @@ async function loadFarmAuditData(blockFarmId, period) {
     }
   });
 
-  const logDocuments = [];
-  for (let index = 0; index < activeFields.length; index += 10) {
-    const fieldIds = activeFields.slice(index, index + 10).map(field => field.id);
-    const snapshot = await db.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', fieldIds).get();
-    logDocuments.push(...snapshot.docs);
-  }
-  const eligibleLogDocuments = logDocuments.filter(document => {
-    const log = document.data();
-    return isAuditEligibleOperation(log)
-      && String(log.performedOn || '').startsWith(`${period}-`);
-  });
   return { activeFields, eligibleLogDocuments };
 }
 
@@ -289,17 +320,7 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const farm = await resolveAssignedFarm(req);
     const currentPeriod = businessPeriod();
-    const fieldSnapshot = await db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', farm.id).get();
-    const activeFields = fieldSnapshot.docs
-      .filter(document => String(document.data().status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-      .map(document => ({ id: document.id, ...document.data() }));
-    const logDocuments = [];
-    for (let index = 0; index < activeFields.length; index += 10) {
-      const ids = activeFields.slice(index, index + 10).map(field => field.id);
-      if (!ids.length) continue;
-      const snapshot = await db.collection(COLLECTIONS.OPERATION_LOGS).where('fieldId', 'in', ids).get();
-      logDocuments.push(...snapshot.docs);
-    }
+    const logDocuments = await scanAuditLogs(db.collection(COLLECTIONS.OPERATION_LOGS).where('blockFarmId', '==', farm.id));
     const periods = Array.from(new Set(logDocuments
       .filter(document => isAuditEligibleOperation(document.data()))
       .map(document => String(document.data().performedOn || '').slice(0, 7))
@@ -321,6 +342,7 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
     } = await loadFarmAuditData(farm.id, periodKey);
     const snapshots = readinessLogDocuments.map(document => buildOperationSnapshot(document.id, document.data()));
     const readiness = monthlyAuditReadiness(snapshots, readinessFields);
+    const followUps = await auditMemberFollowUps(db, { blockFarmId: farm.id, activeFields: readinessFields, operationSnapshots: snapshots });
     return res.json({ success: true, data: {
       blockFarmId: farm.id,
       blockFarmName: farm.name || farm.code || farm.id,
@@ -328,6 +350,7 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       currentPeriod,
       isCarryover: periodKey < currentPeriod,
       ...readiness,
+      ...followUps,
       ...summarizeSnapshots(snapshots, readinessFields)
     } });
   } catch (error) {
@@ -343,6 +366,7 @@ router.get('/readiness', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (
     if (periodKey > businessPeriod()) throw new Error('A future reporting period cannot be checked.');
     const { activeFields, eligibleLogDocuments } = await loadFarmAuditData(farm.id, periodKey);
     const operationSnapshots = eligibleLogDocuments.map(document => buildOperationSnapshot(document.id, document.data()));
+    const followUps = await auditMemberFollowUps(db, { blockFarmId: farm.id, activeFields, operationSnapshots });
     return res.json({
       success: true,
       data: {
@@ -350,6 +374,7 @@ router.get('/readiness', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (
         blockFarmName: farm.name || farm.code || farm.id,
         periodKey,
         ...monthlyAuditReadiness(operationSnapshots, activeFields),
+        ...followUps,
         ...summarizeSnapshots(operationSnapshots, activeFields)
       }
     });
@@ -383,36 +408,21 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     if (period > businessPeriod()) throw new Error('A future reporting period cannot be compiled.');
     const { actorId, actorName } = identity(req);
     const { activeFields, eligibleLogDocuments } = await loadFarmAuditData(farm.id, period);
-    const readiness = monthlyAuditReadiness(
-      eligibleLogDocuments.map(document => buildOperationSnapshot(document.id, document.data())),
-      activeFields
-    );
-    if (!readiness.isComplete) {
-      throw Object.assign(
-        new Error(`${readiness.incompleteFieldCount} active field${readiness.incompleteFieldCount === 1 ? '' : 's'} still need a submitted operation for ${period}. Contact the listed members before compiling.`),
-        {
-          status: 409,
-          data: { code: 'AUDIT_MONTH_INCOMPLETE', periodKey: period, ...readiness }
-        }
-      );
-    }
+    // Compile recorded monthly activity. Active plots without an operation do
+    // not block other plots, and never receive fabricated zero-activity logs.
     if (!eligibleLogDocuments.length) throw new Error(`No synchronized eligible operation logs were found for ${period} in the assigned Block Farm.`);
     const existing = await reportsForFarmPeriod(farm.id, period);
     const batch = selectAuditCompilationBatch(eligibleLogDocuments, existing);
     const latest = batch.latest;
     if (batch.replay) return res.json({ success: true, replayed: true, data: batch.replay });
     if (!batch.operations.length) throw new Error(`No new eligible operation logs were found for ${period}.`);
-    if (batch.operations.length > 500) throw new Error('A report cannot contain more than 500 operation logs.');
 
     const version = latest ? latest.reportVersion + 1 : 1;
     const reportId = versionedAuditReportId(farm.id, period, version);
     if (req.body.id && String(req.body.id) !== reportId) return res.status(409).json({ success: false, error: `The canonical report identity for this audit is ${reportId}.` });
-    const operationSnapshots = batch.operations.sort((left, right) => left.id.localeCompare(right.id))
-      .map(document => buildOperationSnapshot(document.id, document.data()));
-    const fieldSnapshots = buildFieldSnapshots(operationSnapshots, activeFields);
+    const { operationSnapshots, fieldSnapshots, sourceLogIds, remainingOperationCount } = auditSnapshotBatch(batch.operations, activeFields);
     const cropYearCycles = auditCropYearCycles({}, operationSnapshots, fieldSnapshots);
     if (!cropYearCycles.length) throw new Error('Eligible operation records are missing their Crop Year Cycle. Correct the source records before compiling this audit.');
-    const sourceLogIds = operationSnapshots.map(operation => operation.operationLogId);
     const now = nowIso();
     const integrityHash = createAuditHash(reportId, farm.id, period, operationSnapshots);
     const report = {
@@ -422,6 +432,7 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
       continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
       status: AUDIT_STATUS.COMPILED, reviewStatus: 'not_submitted', certificationStatus: 'not_certified',
       operationSnapshots, fieldSnapshots, sourceLogIds,
+      remainingOperationCount,
       memberCount: new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size,
       ...summarizeSnapshots(operationSnapshots, activeFields),
       compiledByUserId: actorId, compiledByName: actorName, compiledAt: now,

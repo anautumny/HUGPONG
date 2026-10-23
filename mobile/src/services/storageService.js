@@ -33,6 +33,8 @@ export const STORAGE_KEYS = {
   SYSTEM_HISTORY: '@hugpong_system_history',
   READ_NOTIF_IDS: '@hugpong_read_notif_ids',
   DISMISSED_NOTIF_IDS: '@hugpong_dismissed_notif_ids',
+  NOTIFICATION_STATE: '@hugpong_notification_state',
+  NOTIFICATION_PERMISSION_REQUESTED: '@hugpong_notification_permission_requested',
   ARCHIVE_VIEW_PREFERENCES: '@hugpong_archive_view_preferences',
 };
 
@@ -40,6 +42,7 @@ const PRESERVED_INSTALLATION_KEYS = new Set([
   '@hugpong_language',
   '@hugpong_lang_chosen',
   '@hugpong_onboarded',
+  '@hugpong_notification_permission_requested',
   '@hugpong_client_instance_id'
 ]);
 

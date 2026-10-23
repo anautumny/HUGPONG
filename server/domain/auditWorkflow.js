@@ -83,6 +83,9 @@ function monthlyAuditReadiness(operationSnapshots = [], activeFields = []) {
     .sort((left, right) => left.memberName.localeCompare(right.memberName)
       || left.fieldId.localeCompare(right.fieldId));
   return {
+    // Coverage is informative: a plot may legitimately have no monthly work.
+    // Keep the older coverage keys for clients reading previous API shapes.
+    canCompile: operationSnapshots.length > 0,
     isComplete: incompleteFields.length === 0,
     activeFieldCount: activeFields.length,
     submittedFieldCount: submittedFieldIds.size,
@@ -109,8 +112,8 @@ function buildFieldSnapshots(operationSnapshots = [], activeFields = []) {
       memberId,
       memberName,
       areaHa: Number(field.areaHa || field.ha || operations[0]?.areaHa || 0),
-      cropYearCycle: field.cropYearCycle || field.cropYear || operations[0]?.cropYearCycle || null,
-      cycleId: field.currentCycleId || operations[0]?.cycleId || null,
+      cropYearCycle: operations[0]?.cropYearCycle || field.cropYearCycle || field.cropYear || null,
+      cycleId: operations[0]?.cycleId || field.currentCycleId || null,
       operationLogIds: operations.map(operationId),
       operationCount: operations.length,
       totalCost: Number(operations.reduce((sum, operation) => sum + Number(operation.totalCost || 0), 0).toFixed(2))
@@ -174,6 +177,7 @@ function canonicalAuditReport(report = {}) {
     fieldSnapshots,
     sourceLogIds,
     operationCount: Number(report.operationCount || operationSnapshots.length),
+    remainingOperationCount: Number(report.remainingOperationCount || 0),
     fieldCount: Number(report.fieldCount || fieldSnapshots.length),
     memberCount: Number(report.memberCount || new Set(fieldSnapshots.map(field => field.memberId).filter(Boolean)).size),
     hectaresAudited: Number(report.hectaresAudited || 0),

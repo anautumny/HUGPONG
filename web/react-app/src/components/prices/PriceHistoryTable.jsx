@@ -58,6 +58,7 @@ export default function PriceHistoryTable({
   }, [filteredPrices, validCurrentPage, pageSize]);
 
   const handleSort = (field) => {
+    setCurrentPage(1);
     if (sortField === field) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
@@ -276,7 +277,7 @@ export default function PriceHistoryTable({
       </div>
 
       {/* Pagination Footer — always rendered, matches Table card footer */}
-      <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-t border-border/60 bg-bg/30 dark:bg-black/10 text-sm">
         <div className="text-hug-text2 font-medium">
           <span>
             Showing page <strong className="text-hug-text">{validCurrentPage}</strong> of{' '}

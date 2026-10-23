@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, FormField, Input, Select, Button } from '../ui';
 import { Building2, AlertCircle } from 'lucide-react';
 import { createBlockFarm, updateBlockFarm } from '../../services/blockFarmsService';
+import { useAuth } from '../../context/AuthContext';
 
 export default function BlockFarmModal({
   isOpen = false,
@@ -11,6 +12,7 @@ export default function BlockFarmModal({
   onSuccess
 }) {
   const isEditing = Boolean(farm?.id);
+  const { user } = useAuth();
 
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -74,14 +76,14 @@ export default function BlockFarmModal({
           address: cleanAddress,
           declaredAreaHa: parsedArea,
           managerUserId: managerUserId.trim() || null
-        });
+        }, farm.updatedAt || null);
       } else {
         await createBlockFarm({
           name: cleanName,
           address: cleanAddress,
           declaredAreaHa: parsedArea,
           managerUserId: managerUserId.trim() || null
-        });
+        }, user?.employeeId || user?.id);
       }
 
       setIsSubmitting(false);
@@ -186,7 +188,8 @@ export default function BlockFarmModal({
           >
             <option value="">-- Unassigned (No Manager Assigned) --</option>
             {farmManagers.map(mgr => (
-              <option key={mgr.id || mgr.employeeId} value={mgr.id || mgr.employeeId}>
+              <option key={mgr.id || mgr.employeeId} value={mgr.id || mgr.employeeId}
+                disabled={!isEditing && Boolean(mgr.assignment?.blockFarmId)}>
                 {mgr.displayName || mgr.name || mgr.employeeId} ({mgr.employeeId || mgr.id})
                 {mgr.phone ? ` · ${mgr.phone}` : ''}
                 {mgr.assignment?.blockFarmName && mgr.assignment.blockFarmId !== farm?.id

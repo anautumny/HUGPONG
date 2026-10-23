@@ -32,7 +32,7 @@ function responseCapture() {
   };
 }
 
-function loadAuditListHandler(db) {
+function loadAuditListHandler(db, method = 'get', routePathValue = '/') {
   const firebasePath = require.resolve('../firebase-admin');
   const routePath = require.resolve('../routes/auditReports');
   const previousFirebase = require.cache[firebasePath];
@@ -41,7 +41,7 @@ function loadAuditListHandler(db) {
   const router = require('../routes/auditReports');
   if (previousFirebase) require.cache[firebasePath] = previousFirebase;
   else delete require.cache[firebasePath];
-  return router.stack.find(layer => layer.route?.path === '/' && layer.route.methods.get).route.stack.at(-1).handle;
+  return router.stack.find(layer => layer.route?.path === routePathValue && layer.route.methods[method]).route.stack.at(-1).handle;
 }
 
 test('audit lifecycle keeps compilation, submission, review, return, and certification distinct', () => {
@@ -73,7 +73,7 @@ test('snapshot summary counts each operation once and each audited field once', 
   assert.deepEqual(summary, { operationCount: 3, fieldCount: 2, hectaresAudited: 3.75, totalCost: 450 });
 });
 
-test('monthly audit readiness identifies incomplete members, fields, and contact numbers', () => {
+test('monthly audit readiness reports uncovered plots without requiring activity on every plot', () => {
   const readiness = monthlyAuditReadiness([
     { operationLogId: 'LOG-1', fieldId: 'FLD-1' }
   ], [
@@ -83,6 +83,8 @@ test('monthly audit readiness identifies incomplete members, fields, and contact
   ]);
 
   assert.equal(readiness.isComplete, false);
+  assert.equal(readiness.canCompile, true);
+  assert.equal(monthlyAuditReadiness([], [{ id: 'FLD-1' }]).canCompile, false);
   assert.equal(readiness.activeFieldCount, 3);
   assert.equal(readiness.submittedFieldCount, 1);
   assert.equal(readiness.incompleteFieldCount, 2);
@@ -98,6 +100,163 @@ test('monthly audit readiness identifies incomplete members, fields, and contact
       reason: 'No synchronized submitted operation was found for this reporting month.'
     }
   ]);
+});
+
+function availableActivityFixture() {
+  const { memoryFirestore } = require('./helpers/memoryFirestore');
+  const operation = (fieldId, overrides = {}) => ({
+    fieldId, blockFarmId: 'BF-1', cycleId: `CYC-${fieldId}`, cropYearCycle: '2026-2027',
+    operationDefinitionId: 'OP-1', operationName: 'Weeding', category: 'MAINTENANCE',
+    stageNumberAtRecord: 4, stageNumber: 4, performedOn: '2026-09-10', areaHa: 1.25,
+    peopleCount: 1, totalCost: 100, status: 'ACTIVE', ...overrides,
+  });
+  const db = memoryFirestore({
+    'block_farms/BF-1': { name: 'Assigned farm', managerUserId: 'MGR-1', status: 'ACTIVE' },
+    'block_farms/BF-2': { name: 'Other farm', managerUserId: 'MGR-2', status: 'ACTIVE' },
+    'fields/FLD-1': { blockFarmId: 'BF-1', areaHa: 1.25, status: 'ACTIVE', memberUserId: 'MEM-1', cropYear: '2026-2027' },
+    'fields/FLD-2': { blockFarmId: 'BF-1', areaHa: 2.5, status: 'ACTIVE', memberUserId: 'MEM-2', cropYear: '2026-2027' },
+    'fields/FLD-3': { blockFarmId: 'BF-1', areaHa: 3, status: 'ACTIVE', memberUserId: null },
+    'fields/FLD-OTHER': { blockFarmId: 'BF-2', areaHa: 9, status: 'ACTIVE' },
+    'operation_logs/LOG-1': operation('FLD-1'),
+    'operation_logs/LOG-ARCHIVED': operation('FLD-1', { status: 'ARCHIVED', totalCost: 200 }),
+    'operation_logs/LOG-DRAFT': operation('FLD-2', { status: 'DRAFT', totalCost: 999 }),
+    'operation_logs/LOG-OTHER-MONTH': operation('FLD-2', { performedOn: '2026-08-10' }),
+    'operation_logs/LOG-OTHER-FARM': operation('FLD-OTHER', { blockFarmId: 'BF-2', totalCost: 999 }),
+  });
+  db.batch = () => {
+    const writes = [];
+    return {
+      create: (ref, value) => writes.push([ref.path, structuredClone(value)]),
+      async commit() {
+        for (const [key] of writes) if (db.records.has(key)) throw new Error('already exists');
+        for (const [key, value] of writes) db.records.set(key, value);
+      },
+    };
+  };
+  const request = (body = {}, query = {}) => ({
+    body, query, session: { user: { employeeId: 'MGR-1', role: 'FARM_MANAGER', name: 'Manager One' } },
+  });
+  return { db, operation, request };
+}
+
+test('API compiles available monthly activity, excludes idle plots from totals, and versions later submissions', async () => {
+  const { db, operation, request } = availableActivityFixture();
+  const readinessHandler = loadAuditListHandler(db, 'get', '/readiness');
+  const compile = loadAuditListHandler(db, 'post');
+  const readiness = responseCapture();
+  await readinessHandler(request({}, { blockFarmId: 'BF-1', periodKey: '2026-09' }), readiness);
+  assert.equal(readiness.payload.data.canCompile, true);
+  assert.equal(readiness.payload.data.incompleteFieldCount, 2);
+  const response = responseCapture();
+  // The client cannot inject other-farm or draft records into the snapshot.
+  const input = request({ blockFarmId: 'BF-1', periodKey: '2026-09', operationLogIds: ['LOG-DRAFT', 'LOG-OTHER-FARM'] });
+  await compile(input, response);
+  assert.equal(response.statusCode, 201, response.payload.error);
+  const report = response.payload.data;
+  assert.deepEqual(report.sourceLogIds, ['LOG-1', 'LOG-ARCHIVED']);
+  assert.equal(report.fieldCount, 1);
+  assert.equal(report.operationCount, 2);
+  assert.equal(report.hectaresAudited, 1.25);
+  assert.equal(report.totalCost, 300);
+  assert.deepEqual(report.fieldSnapshots.map(field => field.fieldId), ['FLD-1']);
+  assert.doesNotThrow(() => validateCanonicalAuditReport(report));
+  const repeated = responseCapture();
+  await compile(input, repeated);
+  assert.equal(repeated.payload.replayed, true);
+  assert.equal(repeated.payload.data.id, report.id);
+  db.records.set(`audit_reports/${report.id}`, { ...db.records.get(`audit_reports/${report.id}`), status: 'CERTIFIED' });
+  const certifiedSnapshot = structuredClone(db.records.get(`audit_reports/${report.id}`));
+  db.records.set('operation_logs/LOG-LATE', operation('FLD-2', { areaHa: 2.5, totalCost: 50 }));
+  const later = responseCapture();
+  await compile(input, later);
+  assert.equal(later.statusCode, 201, later.payload.error);
+  assert.equal(later.payload.data.reportVersion, 2);
+  assert.deepEqual(later.payload.data.sourceLogIds, ['LOG-LATE']);
+  assert.equal(later.payload.data.hectaresAudited, 2.5);
+  assert.equal(later.payload.data.totalCost, 50);
+  assert.deepEqual(db.records.get(`audit_reports/${report.id}`), certifiedSnapshot);
+});
+
+test('available-activity compilation still rejects an empty month and another manager\'s farm without writes', async () => {
+  const { db, request } = availableActivityFixture();
+  const compile = loadAuditListHandler(db, 'post');
+  const before = structuredClone([...db.records]);
+  const empty = responseCapture();
+  await compile(request({ blockFarmId: 'BF-1', periodKey: '2026-07' }), empty);
+  assert.equal(empty.statusCode, 400);
+  assert.match(empty.payload.error, /No synchronized eligible operation logs/);
+  const outside = responseCapture();
+  await compile(request({ blockFarmId: 'BF-2', periodKey: '2026-09' }), outside);
+  assert.equal(outside.statusCode, 403);
+  assert.deepEqual([...db.records], before);
+});
+
+test('archiving every plot does not hide its uncompiled operations or its original cycle', async () => {
+  const { db, request } = availableActivityFixture();
+  for (const [key, value] of db.records) if (key.startsWith('fields/') && value.blockFarmId === 'BF-1') {
+    db.records.set(key, { ...value, status: 'ARCHIVED', cropYear: '2028-2029', currentCycleId: 'CYC-NEW' });
+  }
+  const compiled = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ blockFarmId: 'BF-1', periodKey: '2026-09' }), compiled);
+  assert.equal(compiled.statusCode, 201, compiled.payload.error);
+  assert.deepEqual(compiled.payload.data.sourceLogIds, ['LOG-1', 'LOG-ARCHIVED']);
+  assert.equal(compiled.payload.data.fieldSnapshots[0].cropYearCycle, '2026-2027');
+  assert.equal(compiled.payload.data.fieldSnapshots[0].cycleId, 'CYC-FLD-1');
+});
+
+test('audit discovery and compilation use bounded farm-scoped fallbacks while an index is unavailable', async () => {
+  const { db, request } = availableActivityFixture();
+  const collection = db.collection.bind(db), reads = [];
+  const wrap = (query, scoped = false, indexed = false, limit) => new Proxy(query, { get(target, key) {
+    if (key === 'get') return async () => {
+      assert.equal(scoped, true);
+      if (indexed) throw Object.assign(new Error('Query requires an index'), { code: 9 });
+      reads.push(limit); return target.get();
+    };
+    if (key === 'doc') return target.doc.bind(target);
+    if (typeof target[key] !== 'function') return target[key];
+    return (...args) => wrap(target[key](...args), scoped || key === 'where' && args[0] === 'blockFarmId',
+      indexed || ['where', 'orderBy'].includes(key) && args[0] === 'performedOn', key === 'limit' ? args[0] : limit);
+  } });
+  db.collection = name => name === 'operation_logs' ? wrap(collection(name)) : collection(name);
+  const next = responseCapture();
+  await loadAuditListHandler(db, 'get', '/next-period')(request({}, { blockFarmId: 'BF-1' }), next);
+  assert.equal(next.statusCode, 200, next.payload.error);
+  assert.equal(next.payload.data.periodKey, '2026-08');
+  const compiled = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ blockFarmId: 'BF-1', periodKey: '2026-09' }), compiled);
+  assert.equal(compiled.statusCode, 201, compiled.payload.error);
+  assert.deepEqual(compiled.payload.data.sourceLogIds, ['LOG-1', 'LOG-ARCHIVED']);
+  assert.ok(reads.length >= 2 && reads.every(limit => limit <= 200));
+});
+
+test('large months compile in disjoint stable versions instead of rejecting all activity', async () => {
+  const { db, request, operation } = availableActivityFixture();
+  for (const key of [...db.records.keys()]) if (key.startsWith('operation_logs/')) db.records.delete(key);
+  for (let index = 0; index < 650; index++) db.records.set(`operation_logs/LOG-${String(index).padStart(4, '0')}`, operation('FLD-1'));
+  const compile = loadAuditListHandler(db, 'post'), input = request({ blockFarmId: 'BF-1', periodKey: '2026-09' });
+  const first = responseCapture(); await compile(input, first);
+  assert.equal(first.statusCode, 201, first.payload.error);
+  assert.equal(first.payload.data.operationCount, 500);
+  assert.equal(first.payload.data.remainingOperationCount, 150);
+  const replay = responseCapture(); await compile(input, replay);
+  assert.equal(replay.payload.data.id, first.payload.data.id);
+  db.records.get(`audit_reports/${first.payload.data.id}`).status = 'CERTIFIED';
+  const second = responseCapture(); await compile(input, second);
+  assert.equal(second.statusCode, 201, second.payload.error);
+  assert.equal(second.payload.data.operationCount, 150);
+  assert.equal(second.payload.data.remainingOperationCount, 0);
+  assert.equal(new Set([...first.payload.data.sourceLogIds, ...second.payload.data.sourceLogIds]).size, 650);
+});
+
+test('snapshot batches respect serialized byte size and reject an oversized single operation', () => {
+  const { auditSnapshotBatch, SNAPSHOT_BYTE_BUDGET } = require('../domain/auditSnapshotBatch');
+  const { operation } = availableActivityFixture();
+  const documents = Array.from({ length: 20 }, (_, index) => ({ id: `LOG-${index}`, data: () => operation('FLD-1', { lineItems: [{ description: 'é'.repeat(30000) }] }) }));
+  const result = auditSnapshotBatch(documents, []);
+  assert.ok(result.remainingOperationCount > 0);
+  assert.ok(Buffer.byteLength(JSON.stringify({ operationSnapshots: result.operationSnapshots, fieldSnapshots: result.fieldSnapshots, sourceLogIds: result.sourceLogIds })) <= SNAPSHOT_BYTE_BUDGET);
+  assert.throws(() => auditSnapshotBatch([{ id: 'LOG-HUGE', data: () => operation('FLD-1', { lineItems: [{ description: 'x'.repeat(800000) }] }) }], []), error => error.status === 422);
 });
 
 test('a certified monthly report starts a new version only for newly eligible logs', () => {
@@ -242,22 +401,25 @@ test('audit route exposes separate idempotent delivery selection, submit, QR imp
   assert.doesNotMatch(source, /transaction\.create\(ref, imported\)/);
   assert.match(source, /AUDIT_REPORT_NOT_FOUND/);
   assert.match(source, /router\.get\('\/readiness'/);
-  assert.match(source, /AUDIT_MONTH_INCOMPLETE/);
+  assert.doesNotMatch(source, /AUDIT_MONTH_INCOMPLETE|if \(!readiness\.isComplete\)/);
   assert.doesNotMatch(source, /fields:\s*\[\],\s*operations:\s*\[\]/);
 });
 
-test('Web and Mobile show incomplete members with contact actions before compilation', () => {
+test('Web and Mobile show optional coverage and contact actions without blocking available operations', () => {
   const webCompiler = fs.readFileSync(path.join(repositoryRoot, 'web', 'react-app', 'src', 'components', 'audit', 'AuditCompilationModal.jsx'), 'utf8');
   const mobileFieldOps = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'screens', 'FieldOpsScreen.js'), 'utf8');
   const mobileMutations = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'mutationService.js'), 'utf8');
 
-  assert.match(webCompiler, /Member submissions still needed/);
+  assert.match(webCompiler, /plots with no recorded operations/);
   assert.match(webCompiler, /href=\{`tel:/);
-  assert.match(webCompiler, /compilationBlockedByIncompleteFields/);
+  assert.doesNotMatch(webCompiler, /compilationBlockedByIncompleteFields/);
   assert.match(mobileMutations, /audit-reports\/readiness/);
-  assert.match(mobileFieldOps, /Member Submissions Needed/);
+  assert.match(mobileFieldOps, /Plots With No Recorded Operations/);
+  assert.doesNotMatch(mobileFieldOps, /if \(incomplete\.length > 0\)/);
   assert.match(mobileFieldOps, /Linking\.openURL\(url\)/);
-  assert.match(mobileFieldOps, /onPress: handleGenerateAudit/);
+  assert.match(mobileFieldOps, /handleGenerateAudit\(\)/);
+  assert.match(mobileFieldOps, /setAuditMemberReview\(response\.data\)/);
+  assert.match(webCompiler, /fetchAuditReadiness\(blockFarm\.id, selectedPeriod\)/);
 });
 
 test('Web and Mobile present one current QR and Mobile queues offline references by SRA account', () => {

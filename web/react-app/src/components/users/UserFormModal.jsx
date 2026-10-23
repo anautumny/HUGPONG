@@ -54,7 +54,7 @@ export default function UserFormModal({
       { value: 'SRA_ADMIN', label: 'SRA Admin (Web & Mobile)' },
       { value: 'SUPER_ADMIN', label: 'Super Admin (Web Console Only)' }
     ] : [])
-  ];
+  ].filter(option => !isEditing || (initialUser.accountActions?.allowedRoles || (isSraAdmin ? ['FARM_MANAGER'] : isFarmManager ? ['MEMBER_FARMER'] : ['MEMBER_FARMER', 'FARM_MANAGER', 'SRA_ADMIN', 'SUPER_ADMIN'])).includes(option.value));
 
   const farmOptions = [
     { value: '', label: 'Not assigned yet' },
@@ -155,7 +155,7 @@ export default function UserFormModal({
           role: selectedRole,
           ...(selectedRole === 'FARM_MANAGER' ? { blockFarmId } : {})
         };
-        const res = await updateUser(initialUser.id, payload);
+        const res = await updateUser(initialUser.id, payload, initialUser.updatedAt || null);
         if (res.success) {
           if (onSaved) onSaved(res.data);
           onClose();

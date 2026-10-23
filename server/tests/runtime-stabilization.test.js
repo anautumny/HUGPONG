@@ -435,7 +435,8 @@ test('mobile canonical reads use role-scoped server APIs without direct Firestor
     '/api/audit-reports',
     '/api/audit-events'
   ]) {
-    assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
+    if (endpoint === '/api/logs') assert.match(dataStore, /fetchOperationPages\(authenticatedRequest/);
+    else assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
   }
   assert.doesNotMatch(dataStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
 });

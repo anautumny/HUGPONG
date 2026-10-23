@@ -118,17 +118,21 @@ export default function AppShell() {
     }
   };
 
-  // Show clean loading skeleton while session resolves
+  // Keep private content behind the session check without a logo splash screen.
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-bg text-hug-text">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-surface border border-border p-1.5 flex items-center justify-center shadow-xs">
-            <img src="/icon-foreground.png" alt="HUGPONG" className="w-full h-full object-contain animate-pulse" />
+      <main className="min-h-screen bg-bg px-4 py-8 text-hug-text sm:px-8">
+        <div className="mx-auto max-w-7xl">
+          <p role="status" className="mb-6 text-sm text-hug-muted">Checking your session…</p>
+          <div aria-hidden="true" className="space-y-5 motion-safe:animate-pulse">
+            <div className="h-8 w-52 rounded-lg bg-surface-subtle" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[0, 1, 2].map(item => <div key={item} className="h-28 rounded-xl border border-border bg-surface" />)}
+            </div>
+            <div className="h-64 rounded-xl border border-border bg-surface" />
           </div>
-          <p className="text-xs font-semibold text-hug-muted">Resolving HUGPONG Security Session...</p>
         </div>
-      </div>
+      </main>
     );
   }
 

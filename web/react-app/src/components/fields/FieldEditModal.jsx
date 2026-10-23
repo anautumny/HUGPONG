@@ -13,7 +13,7 @@ export default function FieldEditModal({
   memberUsers = [],
   onSuccess
 }) {
-  const [blockFarmId, setBlockFarmId] = useState('');
+  const blockFarmId = field?.blockFarmId || '';
   const [memberUserId, setMemberUserId] = useState('');
   const [areaHa, setAreaHa] = useState('');
 
@@ -38,7 +38,6 @@ export default function FieldEditModal({
 
   useEffect(() => {
     if (field) {
-      setBlockFarmId(field.blockFarmId || '');
       setMemberUserId(field.memberUserId || '');
       setAreaHa(String(field.areaHa || field.ha || ''));
       setErrors({});
@@ -144,16 +143,12 @@ export default function FieldEditModal({
             label="Parent Block Farm"
             required
             error={errors.blockFarmId}
+            helperText="This plot stays within its assigned Block Farm."
           >
-            <Select
+            <Input
               id="edit-block-farm"
-              value={blockFarmId}
-              onChange={(e) => setBlockFarmId(e.target.value)}
-              disabled={isSubmitting}
-              options={blockFarms.map(bf => ({
-                value: bf.id,
-                label: `${bf.name} (${bf.code || bf.id})`
-              }))}
+              value={`${selectedFarm?.name || field.blockFarmName || blockFarmId} (${selectedFarm?.code || blockFarmId})`}
+              readOnly
             />
           </FormField>
 

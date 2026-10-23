@@ -26,9 +26,10 @@ function issueTakeoverGrant({ actorId, fieldId }, now = Date.now()) {
 }
 
 function verifyTakeoverGrant(rawGrant, { actorId, fieldId, now = Date.now() } = {}) {
-  if (typeof rawGrant !== 'string') return null;
+  if (typeof rawGrant !== 'string' || rawGrant.length > 4096) return null;
   const parts = rawGrant.split('.');
   if (parts.length !== 3 || parts[0] !== 'HUGPONG_TAKEOVER') return null;
+  if (!/^[a-f0-9]{64}$/.test(parts[2])) return null;
   const expected = Buffer.from(sign(parts[1]), 'hex');
   const supplied = Buffer.from(parts[2], 'hex');
   if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) return null;

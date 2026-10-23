@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import { subscribeToFieldsData } from '../../services/fieldsService';
@@ -11,6 +11,8 @@ import { OPERATION_UNITS } from '../../domain/operationUnits';
 import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { createClientRecordId } from '../../utils/secureId';
+import { createOperationSubmission } from '../../domain/operationSubmission';
+import UnconfirmedOperationNotice from '../../components/operations/UnconfirmedOperationNotice';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import {
   FormField,
@@ -56,6 +58,7 @@ export default function TakeOverView() {
   const [selectedFieldId, setSelectedFieldId] = useState(initialFieldId);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [takeoverGrant, setTakeoverGrant] = useState(null);
+  const [takeoverExpiresAt, setTakeoverExpiresAt] = useState(0);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // Manager Takeover form state
@@ -88,6 +91,32 @@ export default function TakeOverView() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [pendingSubmission, setPendingSubmission] = useState(null);
+  const submissionLockRef = useRef(false);
+  const operationSubmission = useMemo(() => createOperationSubmission(createOperation, () => createClientRecordId('LOG'), {
+    storageKey: (user?.employeeId || user?.id) && selectedFieldId ? `hugpong_operation_${user.employeeId || user.id}_${selectedFieldId}` : null,
+  }), [user?.employeeId, user?.id, selectedFieldId]);
+
+  useEffect(() => {
+    setIsAuthorized(false);
+    setTakeoverGrant(null);
+    setTakeoverExpiresAt(0);
+    setPendingSubmission(null);
+  }, [selectedFieldId, user?.employeeId, user?.id]);
+
+  useEffect(() => {
+    if (!takeoverExpiresAt) return undefined;
+    const expire = () => {
+      setIsAuthorized(false);
+      setTakeoverGrant(null);
+      setTakeoverExpiresAt(0);
+      setPendingSubmission(null);
+      setServerError('Manager Takeover authorization expired. Verify your password again to continue.');
+    };
+    const remaining = takeoverExpiresAt - Date.now();
+    if (remaining <= 0) { expire(); return undefined; }
+    const timer = setTimeout(expire, remaining);
+    return () => clearTimeout(timer);
+  }, [takeoverExpiresAt]);
 
   // Exit confirmation
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
@@ -121,7 +150,7 @@ export default function TakeOverView() {
 
   // Find active field
   const currentField = useMemo(() => {
-    return fieldsData.fields.find(f => f.id === selectedFieldId) || fieldsData.fields[0] || null;
+    return fieldsData.fields.find(f => f.id === selectedFieldId) || null;
   }, [fieldsData.fields, selectedFieldId]);
 
   // Synchronize stage and area from currentField when field changes
@@ -246,7 +275,11 @@ export default function TakeOverView() {
   // Submit Manager Takeover log
   const handleSubmit = async (e, submissionTarget = null, confirmed = false) => {
     e?.preventDefault?.();
-    if (isSubmitting) return;
+    if (isSubmitting || submissionLockRef.current) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setServerError('Manager Takeover requires a live server connection. Reconnect before recording this operation.');
+      return;
+    }
     const singleLineItem = submissionTarget?.type === 'lineItem' ? subItems[submissionTarget.index] : null;
     const isSingleItemSubmission = Boolean(singleLineItem);
     const submittedLineItems = singleLineItem ? [singleLineItem] : (isSingleItemSubmission ? [] : (inputMode === 'group' ? subItems : []));
@@ -269,7 +302,8 @@ export default function TakeOverView() {
     setServerError(null);
 
     // If supervisor is not authorized yet, prompt auth modal first!
-    if (!isAuthorized) {
+    if (!isAuthorized || !takeoverGrant || takeoverExpiresAt <= Date.now()) {
+      setIsAuthorized(false);
       setAuthModalOpen(true);
       return;
     }
@@ -308,6 +342,7 @@ export default function TakeOverView() {
       return;
     }
 
+    submissionLockRef.current = true;
     setIsSubmitting(true);
     try {
       const submittedComponentCost = submittedLineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
@@ -350,7 +385,7 @@ export default function TakeOverView() {
         } : null
       };
 
-      await createOperation(payload, takeoverGrant);
+      await operationSubmission.submit(payload, takeoverGrant);
 
       // Advance crop cycle stage if checked
       if (advanceStage && !isSingleItemSubmission) {
@@ -367,6 +402,7 @@ export default function TakeOverView() {
       }
 
       setIsSubmitting(false);
+      submissionLockRef.current = false;
       setSubmitSuccess(true);
       if (singleLineItem) setSubItems(previous => previous.filter((_, index) => index !== submissionTarget.index));
       if (isSingleItemSubmission) {
@@ -379,6 +415,7 @@ export default function TakeOverView() {
       console.warn('[TakeOver] Submission failed; see the displayed reference ID.');
       setServerError(err.message || 'Unable to record Manager Takeover operation.');
       setIsSubmitting(false);
+      submissionLockRef.current = false;
     }
   };
 
@@ -440,7 +477,7 @@ export default function TakeOverView() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs sm:text-sm font-black text-amber-950 dark:text-amber-200">
-                Manager Takeover Active
+                {isAuthorized ? 'Manager Takeover Active' : 'Manager Takeover Authorization Required'}
               </span>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white dark:bg-surface border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300">
                 {currentField?.id || 'No Parcel Selected'}
@@ -485,6 +522,7 @@ export default function TakeOverView() {
               setSelectedFieldId(e.target.value);
               setIsAuthorized(false);
               setTakeoverGrant(null);
+              setTakeoverExpiresAt(0);
             }}
             options={fieldsData.fields.map(f => {
               const isPersonal = f.memberUserId && (f.memberUserId === user?.id || f.memberUserId === user?.employeeId);
@@ -512,6 +550,10 @@ export default function TakeOverView() {
         </div>
       )}
 
+      <UnconfirmedOperationNotice submission={operationSubmission} grant={takeoverGrant}
+        canRetry={!isSubmitting && isAuthorized && Boolean(takeoverGrant) && takeoverExpiresAt > Date.now()}
+        onBusyChange={busy => { submissionLockRef.current = busy; setIsSubmitting(busy); }}
+        onRecovered={() => navigate('/operations')} />
       {serverError && (
         <div className="p-4 rounded-xl bg-danger-bg dark:bg-danger/20 border border-danger/30 flex items-center gap-2.5 text-xs font-bold text-danger">
           <AlertCircle className="w-5 h-5 shrink-0" />
@@ -928,8 +970,10 @@ export default function TakeOverView() {
         onClose={() => setAuthModalOpen(false)}
         field={currentField}
         user={user}
-        onAuthorized={(_field, grant) => {
+        onAuthorized={(authorizedField, grant, expiresAt) => {
+          if (authorizedField?.id !== selectedFieldId || !Number.isFinite(Number(expiresAt)) || Number(expiresAt) <= Date.now()) return;
           setTakeoverGrant(grant);
+          setTakeoverExpiresAt(Number(expiresAt));
           setIsAuthorized(true);
           setAuthModalOpen(false);
         }}

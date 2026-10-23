@@ -100,20 +100,22 @@ export async function verifyUserPhone(userId, payload) {
 /**
  * Update user details
  */
-export async function updateUser(userId, payload) {
+export async function updateUser(userId, payload, baseVersion = null) {
   return authenticatedRequest(`/api/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
-    body: payload
+    body: payload,
+    baseVersion
   });
 }
 
 /**
  * Toggle user account status (ACTIVE <-> DISABLED)
  */
-export async function toggleUserStatus(userId, currentStatus) {
+export async function toggleUserStatus(userId, currentStatus, baseVersion = null) {
   const newStatus = currentStatus === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
   return authenticatedRequest(`/api/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
-    body: { status: newStatus }
+    body: { status: newStatus },
+    baseVersion
   });
 }

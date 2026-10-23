@@ -21,6 +21,7 @@ const { createRateLimit } = require('../middleware/rateLimit');
 const { authVersionOf, nextAuthVersion, revokeFirebaseSessions, setFirebaseAccountDisabled } = require('../security/accountSecurity');
 const { createUserAccount, phoneIdentifierId } = require('../services/accountProvisioningService');
 const { queueAuditEvent } = require('../services/auditWriter');
+const { accountUpdateActions, assertAccountUpdateAllowed } = require('../domain/accountUpdatePolicy');
 const { normalizeStructuredName, hasStructuredNameInput } = require('../domain/personName');
 const { pageLimit, decodeCursor, encodeCursor } = require('../services/cursorPagination');
 const {
@@ -147,7 +148,7 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
     }
     const scopedUsers = documents
       .filter(doc => actorRole !== ROLES.SRA_ADMIN || canonicalRole(doc.data().role) !== ROLES.SUPER_ADMIN)
-      .map(doc => publicUser(doc.data(), doc.id))
+      .map(doc => ({ ...publicUser(doc.data(), doc.id), accountActions: accountUpdateActions(actorRole, doc.data().role) }))
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')) || String(left.id || '').localeCompare(String(right.id || '')));
     const data = await resolveDirectoryAssignmentsFromDatabase(db, scopedUsers);
     return res.json({ success: true, count: data.length, data, page });
@@ -466,6 +467,8 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
     const current = targetSnapshot.data();
     const targetRole = canonicalRole(req.body.role || current.role);
     if (!targetRole) throw new Error('role must be a canonical HUGPONG role.');
+    assertAccountUpdateAllowed(actorRole, current.role, targetRole);
+    const mutationContext = readMutationContext(req);
     if (actorRole === ROLES.FARM_MANAGER && targetRole !== ROLES.MEMBER_FARMER) {
       return res.status(403).json({ success: false, error: 'Farm Managers may update only Farm Member accounts.' });
     }
@@ -534,11 +537,30 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       const liveSnapshot = await transaction.get(targetRef);
       if (!liveSnapshot.exists) throw Object.assign(new Error('User was not found.'), { status: 404 });
       const live = liveSnapshot.data();
+      assertAccountUpdateAllowed(actorRole, live.role, targetRole);
+      assertBaseVersion(live.updatedAt, mutationContext, targetSnapshot.id, publicUser(live, targetSnapshot.id));
       if (live.updatedAt !== current.updatedAt) {
         throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
       }
       let managedFarmsSnapshot = null;
       let selectedFarmSnapshot = null;
+      if (actorRole === ROLES.FARM_MANAGER) {
+        const farms = await transaction.get(db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', actorId));
+        const farmIds = new Set(farms.docs.map(doc => doc.id));
+        const ownedFields = await transaction.get(db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', targetSnapshot.id));
+        if (!farmIds.has(live.affiliatedBlockFarmId || live.requestedBlockFarmId)
+          && !ownedFields.docs.some(doc => farmIds.has(doc.data().blockFarmId))) {
+          throw Object.assign(new Error('Member account is outside your assigned block farm.'), { status: 403 });
+        }
+      }
+      if (targetRole !== currentRole && ![ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER].includes(targetRole)) {
+        const ownedFields = await transaction.get(db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', targetSnapshot.id));
+        if (ownedFields.docs.some(doc => doc.data().status === 'ACTIVE')) {
+          throw Object.assign(new Error('Reassign this account\'s active field plots before changing it to an administrative role.'), { status: 409 });
+        }
+        update.affiliatedBlockFarmId = null;
+        update.requestedBlockFarmId = null;
+      }
       if (shouldUpdateManagerAssignment && currentRole === ROLES.FARM_MANAGER) {
         managedFarmsSnapshot = await transaction.get(
           db.collection(COLLECTIONS.BLOCK_FARMS).where('managerUserId', '==', targetSnapshot.id)
@@ -604,7 +626,7 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       : updatedUser;
     return res.json({ success: true, data });
   } catch (error) {
-    return res.status(error.status || 400).json({ success: false, error: error.message });
+    return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }
 });
 

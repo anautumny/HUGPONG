@@ -8,6 +8,7 @@ const OPERATIONAL_READ_ROLES = Object.freeze([...AGRICULTURAL_ROLES, ROLES.SRA_A
 
 const API_PERMISSION_POLICIES = Object.freeze([
   { methods: ['GET'], path: /^\/api\/data$/, roles: ALL_ROLES },
+  { methods: ['POST'], path: /^\/api\/notifications\/state(?:\/query)?$/, roles: ALL_ROLES },
   { methods: ['GET'], path: /^\/api\/prices$/, roles: OPERATIONAL_READ_ROLES },
   { methods: ['POST'], path: /^\/api\/prices$/, roles: [ROLES.SRA_ADMIN] },
   { methods: ['GET'], path: /^\/api\/users$/, roles: [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN] },

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+require('../services/runtimeVersionPolicy').assertSupportedNodeVersion();
 
 const root = path.resolve(__dirname, '..', '..');
 const { collectDeploymentEnvironment, buildDeploymentReadinessReport, assertDeploymentReady } = require('../services/deploymentReadinessService');
@@ -42,6 +43,7 @@ run('Deployment configuration parity', process.execPath, ['server/scripts/auditD
 run('Tracked secret exposure audit', process.execPath, ['server/scripts/auditSecretExposure.js']);
 run('Runtime authority audit', process.execPath, ['server/scripts/auditRuntimeAuthority.js']);
 run('Client unresolved identifier audit', process.execPath, ['server/scripts/auditClientBindings.js']);
+run('Mobile dependency verification mitigation', process.execPath, ['mobile/scripts/patchForgeVerification.cjs', '--check']);
 const serverTests = packageCommand('npm', ['test']);
 run('Server contract and integration tests', serverTests.command, serverTests.args, path.join(root, 'server'));
 const webTests = packageCommand('npm', ['test']);

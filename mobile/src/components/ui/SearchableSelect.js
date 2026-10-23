@@ -1,12 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { View, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { AppText as Text, AppTextInput as TextInput } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
 
-export function SearchableSelectModal({
-  visible,
+export function SearchableSelectContent({
   onClose,
   options = [],
   selectedValue,
@@ -16,15 +15,14 @@ export function SearchableSelectModal({
   searchPlaceholder = 'Search options...',
   emptyMessage = 'No matching options found',
   enableSearch = true,
+  closeLabel = 'Close selection',
+  back = false,
+  resetKey,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Reset search when modal opens/closes
   React.useEffect(() => {
-    if (visible) {
-      setSearchQuery('');
-    }
-  }, [visible]);
+    setSearchQuery('');
+  }, [resetKey]);
 
   // Normalize options to a uniform structure
   const normalizedOptions = useMemo(() => {
@@ -56,20 +54,26 @@ export function SearchableSelectModal({
     );
   }, [normalizedOptions, searchQuery]);
 
-  return (
-    <AnimatedBottomSheet
-      visible={visible}
-      onClose={onClose}
-      keyboardAvoiding
-      backdropColor="rgba(15, 23, 42, 0.5)"
-      sheetStyle={styles.sheetContainer}
+  const closeButton = (
+    <TouchableOpacity
+      onPress={onClose}
+      style={styles.closeBtn}
+      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+      accessibilityRole="button"
+      accessibilityLabel={closeLabel}
     >
-        <View>
+      <Ionicons name={back ? 'arrow-back' : 'close'} size={22} color={COLORS.text} />
+    </TouchableOpacity>
+  );
+
+  return (
+    <>
           {/* Drag Handle Indicator */}
           <View style={styles.handleBar} />
 
           {/* Modal Header */}
           <View style={styles.sheetHeader}>
+            {back && closeButton}
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.sheetTitle}>{title}</Text>
               {subtitle ? (
@@ -80,15 +84,7 @@ export function SearchableSelectModal({
                 </Text>
               )}
             </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={styles.closeBtn}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityRole="button"
-              accessibilityLabel="Close selection"
-            >
-              <Ionicons name="close-circle" size={26} color={COLORS.textMuted} />
-            </TouchableOpacity>
+            {!back && closeButton}
           </View>
 
           {/* Search Bar for Quick Filtering */}
@@ -113,19 +109,22 @@ export function SearchableSelectModal({
           )}
 
           {/* Vertical Options Scroll List */}
-          <ScrollView
+          <FlatList
             style={styles.optionsList}
             contentContainerStyle={styles.optionsListContent}
+            data={filteredOptions}
+            keyExtractor={item => item.id}
+            extraData={selectedValue}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator
-          >
-            {filteredOptions.length === 0 ? (
+            ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <Ionicons name="search-outline" size={36} color={COLORS.textMuted} />
                 <Text style={styles.emptyText}>{emptyMessage}</Text>
               </View>
-            ) : (
-              filteredOptions.map((item) => {
+            }
+            renderItem={({ item }) => {
                 const isSelected = String(selectedValue ?? '') === item.id;
                 return (
                   <TouchableOpacity
@@ -139,6 +138,9 @@ export function SearchableSelectModal({
                       onClose();
                     }}
                     activeOpacity={0.7}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: isSelected }}
+                    accessibilityLabel={[item.label, item.sublabel].filter(Boolean).join(', ')}
                   >
                     <View style={styles.optionLeft}>
                       {item.isSynced !== undefined && (
@@ -194,10 +196,22 @@ export function SearchableSelectModal({
                     </View>
                   </TouchableOpacity>
                 );
-              })
-            )}
-          </ScrollView>
-        </View>
+              }}
+          />
+    </>
+  );
+}
+
+export function SearchableSelectModal({ visible, onClose, ...props }) {
+  return (
+    <AnimatedBottomSheet
+      visible={visible}
+      onClose={onClose}
+      keyboardAvoiding
+      backdropColor="rgba(15, 23, 42, 0.5)"
+      sheetStyle={styles.sheetContainer}
+    >
+      <SearchableSelectContent {...props} resetKey={visible} onClose={onClose} />
     </AnimatedBottomSheet>
   );
 }
@@ -217,6 +231,7 @@ export function SearchableSelect({
   triggerStyle,
   disabled = false,
   helperText,
+  onOpen,
 }) {
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -233,15 +248,16 @@ export function SearchableSelect({
   }, [options, selectedValue]);
 
   const displayLabel = useMemo(() => {
-    if (!selectedItem) return placeholder;
+    if (selectedItem == null) return placeholder;
     if (typeof selectedItem === 'string' || typeof selectedItem === 'number') {
       return String(selectedItem);
     }
-    return selectedItem.label || selectedItem.name || selectedItem.title || selectedItem.id || placeholder;
+    return selectedItem.label || selectedItem.name || selectedItem.title
+      || String(selectedItem.id ?? selectedItem.value ?? selectedItem.key ?? selectedItem.code ?? placeholder);
   }, [selectedItem, placeholder]);
 
   const displaySublabel = useMemo(() => {
-    if (!selectedItem || typeof selectedItem !== 'object') return null;
+    if (selectedItem == null || typeof selectedItem !== 'object') return null;
     return selectedItem.sublabel || selectedItem.subtitle || (selectedItem.ha ? `${selectedItem.ha} Ha` : null);
   }, [selectedItem]);
 
@@ -254,7 +270,18 @@ export function SearchableSelect({
           triggerStyle,
           disabled && styles.triggerDisabled
         ]}
-        onPress={() => !disabled && setModalVisible(true)}
+        onPress={() => {
+          if (disabled) return;
+          if (onOpen) {
+            onOpen({ options, selectedValue, onSelect, title: modalTitle || label || 'Select Option', subtitle, searchPlaceholder });
+          } else {
+            setModalVisible(true);
+          }
+        }}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={[label, displayLabel].filter(Boolean).join(', ')}
+        accessibilityState={{ disabled, expanded: modalVisible }}
         activeOpacity={0.75}
       >
         <View style={styles.triggerContent}>
@@ -262,7 +289,7 @@ export function SearchableSelect({
             <Ionicons
               name={leftIcon}
               size={20}
-              color={selectedItem ? COLORS.primary : COLORS.textMuted}
+              color={selectedItem != null ? COLORS.primary : COLORS.textMuted}
               style={styles.triggerLeftIcon}
             />
           )}
@@ -270,7 +297,7 @@ export function SearchableSelect({
             <Text
               style={[
                 styles.triggerText,
-                !selectedItem && styles.triggerPlaceholder
+                selectedItem == null && styles.triggerPlaceholder
               ]}
             >
               {displayLabel}
@@ -319,13 +346,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: RADIUS.md,
     paddingHorizontal: 14,
     paddingVertical: 12,
     minHeight: 52,
-    ...SHADOW.card,
   },
   triggerDisabled: {
     backgroundColor: '#F3F4F6',
@@ -354,7 +380,7 @@ const styles = StyleSheet.create({
   triggerSubtext: {
     flexShrink: 1,
     fontSize: 12.5,
-    fontWeight: '600',
+    fontWeight: '400',
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -373,8 +399,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: RADIUS.xl,
     borderTopRightRadius: RADIUS.xl,
-    maxHeight: '82%',
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    maxHeight: '85%',
+    paddingBottom: 12,
     ...SHADOW.lg,
   },
   handleBar: {
@@ -390,6 +416,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.sm + 2,
     borderBottomWidth: 1,
@@ -413,7 +440,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   closeBtn: {
-    padding: 2,
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surfaceSubtle,
   },
   searchBox: {
     flexDirection: 'row',
@@ -437,7 +470,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   optionsList: {
-    maxHeight: 400,
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
   optionsListContent: {
     paddingHorizontal: SPACING.lg,
@@ -446,7 +481,7 @@ const styles = StyleSheet.create({
   },
   optionRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -459,11 +494,10 @@ const styles = StyleSheet.create({
   optionRowSelected: {
     backgroundColor: COLORS.primaryBg,
     borderColor: COLORS.primary,
-    borderWidth: 1.5,
   },
   optionLeft: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     flex: 1,
     minWidth: 0,
   },

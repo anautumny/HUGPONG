@@ -1,11 +1,13 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { getItem, saveItem, STORAGE_KEYS } from './storageService';
 
 const CHANNEL_ID = 'account-recovery';
 const MANAGED_TYPE = 'password-recovery-review';
 const TOKEN_TIMEOUT_MS = 10_000;
 let notificationModule = null;
 let notificationHandlerReady = false;
+let applicationPermissionRequest = null;
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -70,10 +72,11 @@ export async function getRecoveryPushToken() {
   }
 }
 
-export async function requestApplicationNotificationPermission() {
-  const Notifications = getNotificationModule();
-  if (!Notifications) return { supported: false, granted: false, reason: 'EXPO_GO' };
+async function requestPermissionWhenActive({ userInitiated = false } = {}) {
   try {
+    const Notifications = getNotificationModule();
+    if (!Notifications) return { supported: false, granted: false, reason: 'EXPO_GO' };
+    if (AppState.currentState !== 'active') return { supported: true, granted: false, reason: 'APP_INACTIVE' };
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
         name: 'Account recovery',
@@ -84,13 +87,24 @@ export async function requestApplicationNotificationPermission() {
       });
     }
     let permission = await Notifications.getPermissionsAsync();
-    if (permission.status === 'undetermined') {
-      permission = await Notifications.requestPermissionsAsync();
+    const alreadyRequested = await getItem(STORAGE_KEYS.NOTIFICATION_PERMISSION_REQUESTED, false);
+    // Android 13+ may report DENIED before the first request. canAskAgain,
+    // rather than UNDETERMINED alone, determines whether a dialog is possible.
+    if (permission.status !== 'granted' && permission.canAskAgain !== false && (!alreadyRequested || userInitiated)) {
+      permission = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: true } });
+      await saveItem(STORAGE_KEYS.NOTIFICATION_PERMISSION_REQUESTED, true);
     }
-    return { supported: true, granted: permission.status === 'granted', status: permission.status };
+    return { supported: true, granted: permission.status === 'granted', status: permission.status, canAskAgain: permission.canAskAgain !== false };
   } catch {
     return { supported: true, granted: false, reason: 'PERMISSION_UNAVAILABLE' };
   }
+}
+
+export function requestApplicationNotificationPermission(options = {}) {
+  if (!applicationPermissionRequest) {
+    applicationPermissionRequest = requestPermissionWhenActive(options).finally(() => { applicationPermissionRequest = null; });
+  }
+  return applicationPermissionRequest;
 }
 
 export function recoveryNotificationData(response) {

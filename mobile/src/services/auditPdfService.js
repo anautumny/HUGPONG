@@ -301,6 +301,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
             <div class="qr-code">${escapeHtml(hash)}</div>
           </div>
         </section>
+        <p>Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
 
         <table>
           <thead>

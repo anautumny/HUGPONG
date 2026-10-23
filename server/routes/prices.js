@@ -11,9 +11,10 @@ const {
   buildSraPrice
 } = require('../schema/firestoreSchema');
 const { publishSraPrice } = require('../services/priceService');
-const { decoratePriceHistory } = require('../services/priceAnalyticsService');
+const { decoratePriceHistory, buildPriceAnalytics } = require('../services/priceAnalyticsService');
 const { sortNewestFirst } = require('../services/recordOrdering');
 const { readMutationContext } = require('../services/mutationContext');
+const { decodeCursor, pageEnvelope } = require('../services/cursorPagination');
 
 const DEFAULT_PRICE_HISTORY_LIMIT = 52;
 
@@ -24,17 +25,21 @@ router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGE
     if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
       return res.status(400).json({ success: false, error: 'limit must be an integer between 1 and 100.' });
     }
-    const query = db.collection(COLLECTIONS.SRA_PRICES)
+    let query = db.collection(COLLECTIONS.SRA_PRICES)
       .orderBy('effectiveDate', 'desc')
-      .limit(requestedLimit);
-    const snapshot = await query.get();
+      .orderBy('__name__', 'desc');
+    const cursor = decodeCursor(req.query.cursor);
+    if (cursor) query = query.startAfter(cursor.value, cursor.id);
+    const snapshot = await query.limit(requestedLimit + 1).get();
+    const { documents, page } = pageEnvelope(snapshot.docs, requestedLimit, document => document.data().effectiveDate);
     const data = decoratePriceHistory(sortNewestFirst(
       snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })),
       ['effectiveDate']
-    ));
-    return res.json({ success: true, count: data.length, data });
+    )).filter(row => documents.some(document => document.id === row.id));
+    if (data.length) data[0].priceAnalytics = buildPriceAnalytics(data);
+    return res.json({ success: true, count: data.length, data, page });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(error.status || 500).json({ success: false, error: error.message });
   }
 });
 

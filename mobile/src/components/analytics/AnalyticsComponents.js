@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { Card, PrimaryButton, SecondaryButton, SearchableSelect } from '../ui';
 import { AppText as Text } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
+import { SearchableSelectContent } from '../ui/SearchableSelect';
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -101,26 +102,42 @@ export function AnalyticsScopeModal({
   isMember,
   isManager
 }) {
+  const [picker, setPicker] = useState(null);
+  useEffect(() => {
+    if (!visible) setPicker(null);
+  }, [visible]);
+
   return (
     <AnimatedBottomSheet
       visible={visible}
-      onClose={onClose}
+      onClose={() => picker ? setPicker(null) : onClose()}
+      keyboardAvoiding
       backdropColor="rgba(0, 0, 0, 0.45)"
       sheetStyle={styles.modalSheet}
     >
+      {picker ? (
+        <SearchableSelectContent
+          {...picker}
+          onClose={() => setPicker(null)}
+          closeLabel="Back to analytics filters"
+          back
+        />
+      ) : (
+        <>
           <View style={styles.modalHeader}>
-            <View>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.modalTitle}>Filter Analytics Scope</Text>
               <Text style={styles.modalSub}>Select Crop Year Cycle, farm, parcel, or period</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
+            <TouchableOpacity onPress={onClose} style={styles.modalClose} accessibilityRole="button" accessibilityLabel="Close analytics filters">
               <Ionicons name="close" size={22} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 14, paddingVertical: 10 }}>
+          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ gap: 4, paddingVertical: 10, paddingHorizontal: SPACING.lg }} keyboardShouldPersistTaps="handled">
             {/* Season Selector */}
             <SearchableSelect
+              onOpen={setPicker}
               label="CROP YEAR CYCLE"
               options={seasons.map(s => ({
                 id: s,
@@ -138,6 +155,7 @@ export function AnalyticsScopeModal({
             {/* Farm Selector (if not member) */}
             {!isMember && farms.length > 0 && (
               <SearchableSelect
+                onOpen={setPicker}
                 label="BLOCK FARM"
                 options={[
                   { id: 'ALL', label: 'All Farms', sublabel: `${farms.length} block farms in district`, icon: 'business-outline' },
@@ -160,6 +178,7 @@ export function AnalyticsScopeModal({
 
             {/* Field / Plot Selector */}
             <SearchableSelect
+              onOpen={setPicker}
               label="PARCEL / PLOT"
               options={[
                 { id: 'ALL', label: `All Plots (${fields.length})`, sublabel: 'Aggregate analytics across all field plots', icon: 'grid-outline' },
@@ -178,10 +197,10 @@ export function AnalyticsScopeModal({
             />
 
             {/* Period Selector */}
-            {periods.length > 0 && (
               <SearchableSelect
+                onOpen={setPicker}
                 label="REPORTING PERIOD / MONTH"
-                options={periods.map(p => ({
+                options={['ALL', ...periods.filter(p => p !== 'ALL')].map(p => ({
                   id: p,
                   label: p === 'ALL' ? 'All Months' : p,
                   sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
@@ -193,7 +212,6 @@ export function AnalyticsScopeModal({
                 searchPlaceholder="Search period (e.g. 2026-03)..."
                 leftIcon="time"
               />
-            )}
           </ScrollView>
 
           <View style={styles.modalFooter}>
@@ -208,6 +226,8 @@ export function AnalyticsScopeModal({
               style={{ flex: 2 }}
             />
           </View>
+        </>
+      )}
     </AnimatedBottomSheet>
   );
 }
@@ -501,18 +521,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: RADIUS.xl,
     borderTopRightRadius: RADIUS.xl,
-    padding: SPACING.lg,
-    paddingBottom: 32,
-    gap: 12
+    maxHeight: '90%',
+    paddingBottom: 12,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 10,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: 16,
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border
+  },
+  modalClose: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   modalTitle: {
     fontSize: 16,
@@ -561,7 +589,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginTop: 8
+    marginTop: 8,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
 
   // Primary Metric

@@ -144,6 +144,17 @@ html.dark .brand-logo-box img {
   background-color: #FFFFFF !important;
 }
 
+/* Compensate for the launcher asset's transparent border without altering it. */
+.brand-logo-box {
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.brand-logo-box img {
+  transform: scale(1.7);
+  flex-shrink: 0;
+}
+
 /* Single-line sidebar navigation tab prevention */
 .nav-item {
   white-space: nowrap;

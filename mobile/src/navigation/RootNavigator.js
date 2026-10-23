@@ -171,6 +171,7 @@ function MainTabs({ navigation }) {
   const [reconnectNotice, setReconnectNotice] = React.useState(null);
   const hasShownOfflineNoticeRef = React.useRef(false);
   const reconnectStartedAtRef = React.useRef(0);
+  const observedOfflineRef = React.useRef(false);
   React.useEffect(() => {
     let reconnectTimer = null;
     const unsubSession = subscribe(() => {
@@ -183,6 +184,7 @@ function MainTabs({ navigation }) {
         hasShownOfflineNoticeRef.current = false;
         setShowOfflineNotice(false);
       } else if (details.status !== CONNECTIVITY_STATUS.CHECKING) {
+        observedOfflineRef.current = true;
         const activeSession = getCurrentSession();
         if (activeSession?.role === 'SRA Admin') {
           activateSraOfflineSnapshot().catch(error => {
@@ -199,7 +201,7 @@ function MainTabs({ navigation }) {
       }
     });
     const unsubReconnect = subscribeToReconnectStatus(status => {
-      if (!status || status.phase === 'IDLE') return;
+      if (!status || status.phase === 'IDLE' || !observedOfflineRef.current) return;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -210,6 +212,7 @@ function MainTabs({ navigation }) {
         return;
       }
       const minimumLoadingMs = 700;
+      observedOfflineRef.current = false;
       const elapsed = Date.now() - reconnectStartedAtRef.current;
       reconnectTimer = setTimeout(() => {
         setReconnectNotice(status);

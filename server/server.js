@@ -222,7 +222,7 @@ app.use('/api', (req, res, next) => {
   } else if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     res.once('finish', () => {
       if (res.statusCode < 200 || res.statusCode >= 400) return;
-      if (['terminal-diagnostics', 'diagnostics'].includes(resource)) {
+      if (['terminal-diagnostics', 'diagnostics', 'notifications'].includes(resource)) {
         scopedReadCache.invalidate([resource]);
       } else {
         scopedReadCache.invalidate();
@@ -232,6 +232,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api/prices', priceRoutes);
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/users', userRoutes);
 app.use('/api/recovery-reviews', recoveryReviewRoutes);
 app.use('/api/block-farms', blockFarmRoutes);
@@ -319,6 +320,7 @@ const server = app.listen(port, host, () => {
   }
   console.log('══════════════════════════════════════════════════════════');
 console.log(`  HUGPONG Security Gateway & Express Backend`);
+console.log(`  Node.js runtime: ${process.version}`);
 console.log(`  Server listening on ${host}:${port}`);
 console.log(`  Authentication & Role Protection: ACTIVE`);
   console.log('══════════════════════════════════════════════════════════');

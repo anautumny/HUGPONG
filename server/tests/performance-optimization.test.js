@@ -93,7 +93,8 @@ test('Firestore-heavy background work is bounded and coalesced across clients an
   assert.match(diagnostics, /collection\(COLLECTIONS\.FIELDS\)\.count\(\)\.get\(\)/);
   assert.match(diagnostics, /collection\(COLLECTIONS\.CROP_CYCLES\)\.count\(\)\.get\(\)/);
   assert.doesNotMatch(diagnostics, /collection\(COLLECTIONS\.FIELDS\)\.get\(\)/);
-  assert.match(prices, /orderBy\('effectiveDate', 'desc'\)[\s\S]{0,40}\.limit\(requestedLimit\)/);
+  assert.match(prices, /query\.limit\(requestedLimit \+ 1\)/);
+  assert.match(prices, /pageEnvelope\(snapshot.docs, requestedLimit/);
   assert.match(auth, /inFlightAccountReads/);
   assert.doesNotMatch(serverTelemetry, /const current = await ref\.get\(\)/);
   assert.ok(server.indexOf("app.get('/health'") < server.indexOf('app.use(session({'));

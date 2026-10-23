@@ -21,6 +21,14 @@ export function SyncProvider({ children }) {
   const userRef = useRef(user);
   const reconnectPendingRef = useRef(false);
   const noticeTimerRef = useRef(null);
+  const accountGenerationRef = useRef(0);
+
+  useEffect(() => {
+    accountGenerationRef.current += 1;
+    reconnectPendingRef.current = false;
+    setReconnectNotice(null);
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+  }, [user?.employeeId, user?.id]);
 
   useEffect(() => {
     userRef.current = user;
@@ -33,6 +41,11 @@ export function SyncProvider({ children }) {
     let activeController = null;
 
     async function finishReconnect() {
+      const accountGeneration = accountGenerationRef.current;
+      if (!userRef.current) {
+        announceConnectionRestored();
+        return;
+      }
       const startedAt = Date.now();
       setReconnectNotice({ phase: 'reconnecting' });
       let outboxResult = { processed: 0, remaining: 0, failedEntry: null };
@@ -41,12 +54,12 @@ export function SyncProvider({ children }) {
       } catch (error) {
         outboxResult = { processed: 0, remaining: 1, failedEntry: { lastError: error.message } };
       }
-      if (!active) return;
+      if (!active || accountGeneration !== accountGenerationRef.current) return;
       const remainingLoadingMs = Math.max(0, 600 - (Date.now() - startedAt));
       if (remainingLoadingMs > 0) {
         await new Promise(resolve => window.setTimeout(resolve, remainingLoadingMs));
       }
-      if (!active) return;
+      if (!active || accountGeneration !== accountGenerationRef.current) return;
       announceConnectionRestored();
       const needsAttention = Number(outboxResult.remaining || 0) > 0 || Boolean(outboxResult.failedEntry);
       setReconnectNotice({
