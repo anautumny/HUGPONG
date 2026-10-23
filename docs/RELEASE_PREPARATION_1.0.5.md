@@ -1,6 +1,6 @@
 # Release preparation: HUGPONG 1.0.5
 
-The new Mobile candidate is **1.0.5** in `mobile/app.json`. EAS continues to increment the Android build version remotely. The existing Web download remains the available 1.0.4 artifact until a replacement APK is built and published. No website/APK deployment was performed during preparation.
+The new Mobile candidate is **1.0.5** in `mobile/app.json`. EAS continues to increment the Android build version remotely. No website/APK deployment was performed during preparation. Deployment was subsequently authorized; see the [October 24 deployment record](DEPLOYMENT_1.0.5_2026-10-24.md) for the published Web/API release, database rules, signed APK checks, and remaining physical-device acceptance.
 
 ## Database / schema
 
