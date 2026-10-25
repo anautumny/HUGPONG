@@ -359,7 +359,7 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
   assert.match(source, /authenticatedRequest\('\/api\/crop-cycles'\)/);
   assert.match(source, /authenticatedRequest\('\/api\/fields'\)/);
   assert.match(source, /fetchOperationPages\(authenticatedRequest/);
-  assert.doesNotMatch(source, /onSnapshot|collection\(db/);
+  assert.doesNotMatch(source, /\bonSnapshot\b|collection\(db/);
   assert.doesNotMatch(source, /const localOnly/);
   assert.match(source, /pendingCreateOverlays/);
   assert.match(syncSource, /enqueueAndFlushMutation/);
@@ -372,7 +372,7 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);
   assert.match(webSource, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
   assert.match(webSource, /fromOperation\(item\.id, item\)/);
-  assert.doesNotMatch(webSource, /onSnapshot|collection\(db/);
+  assert.doesNotMatch(webSource, /\bonSnapshot\b|collection\(db/);
 });
 
 test('runtime outbox replay uses bounded batches without losing remaining mutations', async () => {

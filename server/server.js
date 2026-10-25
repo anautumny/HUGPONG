@@ -104,8 +104,8 @@ app.use(cors({
 // Firestore document limit while allowing one compact JPEG attachment.
 // Encrypted logical backup uploads are explicitly bounded and validated by the
 // backup service. Keep the larger parser isolated from every other endpoint.
-app.use('/api/backups', express.json({ limit: '12mb' }));
-app.use(express.json({ limit: '1mb' }));
+app.use('/api/backups', express.json({ limit: '12mb', inflate: false }));
+app.use(express.json({ limit: '1mb', inflate: false }));
 app.use(malformedJsonHandler);
 app.use(validateRequestInput);
 

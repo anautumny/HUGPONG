@@ -58,8 +58,8 @@ async function loadMobileAnalytics() {
 async function loadMobileAuditWorkflow() {
   const pakoUrl = pathToFileURL(path.resolve(testDir, '../../../mobile/node_modules/pako/dist/pako.mjs')).href;
   return importSource('../../../mobile/src/domain/auditWorkflow.js', source => source.replace(
-    "import { deflateRaw, inflateRaw } from 'pako';",
-    `const { deflateRaw, inflateRaw } = await import('${pakoUrl}');`
+    "import { deflateRaw, Inflate } from 'pako';",
+    `const { deflateRaw, Inflate } = await import('${pakoUrl}');`
   ));
 }
 

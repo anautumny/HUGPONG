@@ -12,7 +12,7 @@ import { auditLogs, blockFarms, getCurrentSession } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { sortNewestFirst } from '../utils/dataHelpers';
 import { exportAuditReportPdf } from '../services/auditPdfService';
-import { SearchableSelect } from './ui';
+import { SearchableSelect, ScreenHeader } from './ui';
 import { AppText as Text } from './Typography';
 
 const fmt = n => (Number.isFinite(n) ? n.toLocaleString('en-PH') : '0');
@@ -101,24 +101,7 @@ export default function AuditHistoryModal({
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      {/* Standard Header matching My Sync Status */}
-      <View style={s.header}>
-        <TouchableOpacity
-          onPress={onClose}
-          style={s.backBtn}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <View style={s.headerCopy}>
-          <Text style={s.headerTitle}>{t('monthly_audit_history_title', 'Monthly Audit History')}</Text>
-          <Text style={s.headerSub}>{t('audit_history_sub', 'Monthly operation breakdowns & SRA compliance records')}</Text>
-        </View>
-        <View style={{ width: 38 }} />
-      </View>
+      <ScreenHeader title="Reports" subtitle="Monthly audits" onBackPress={onClose} />
 
         <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
           {onOpenCropYear && <TouchableOpacity onPress={onOpenCropYear} accessibilityRole="button" style={{ padding: 14, borderWidth: 1, borderColor: COLORS.primary, borderRadius: RADIUS.md, marginBottom: 12 }}><Text style={{ color: COLORS.primary, fontWeight: '800' }}>Crop Year Compilations</Text><Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 4 }}>Combine certified monthly reports into a yearly overview.</Text></TouchableOpacity>}

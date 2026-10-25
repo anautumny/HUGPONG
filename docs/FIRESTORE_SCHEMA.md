@@ -284,6 +284,7 @@ Legacy field documents may still contain `variety`. It is read-only compatibilit
   cropYearStart: number,
   cropYearEnd: number,
   currentStageNumber: 1 | 2 | 3 | 4 | 5 | 6,
+  operationWriteRevision?: number, // server transaction counter; absent means zero
   elapsedMonths: number,
   batchNumber: number,
   status: "ACTIVE" | "ARCHIVED",
@@ -353,7 +354,14 @@ Sugarcane variety is owned by the Crop Year Cycle. A new cycle starts with an em
   updatedAt: string,
   archivedAt: string | null,
   archivedByUserId: string | null,
-  archivedReason: "CYCLE_COMPLETED" | null
+  archivedReason: "CYCLE_COMPLETED" | "CROP_YEAR_CORRECTED" | "CROP_YEAR_RESET" | null,
+  auditLockReportId?: string | null,
+  reconciliation?: {
+    recordVersions: { [operationLogId: string]: string },
+    reason: string,
+    reviewedByUserId: string,
+    reviewedAt: string
+  }
 }
 ```
 
@@ -647,9 +655,9 @@ Create composite indexes only when the corresponding query is deployed:
 - Cycle rollover requires the caller's `previousCycleId` and runs in one transaction: verify it is still `fields.currentCycleId`, archive that cycle, archive only logs whose explicit `cycleId` matches it and whose status is ACTIVE, create the next cycle at stage 1 with zero elapsed months, and update `fields.currentCycleId`.
 - Operation creation, amendment, and stage updates validate the field pointer, cycle status, and canonical stage-operation relation inside their write transaction. Planting variety is written to both the operation snapshot and owning active cycle. A stale device cannot create against, amend, reactivate, or advance an ARCHIVED cycle or operation.
 - Field archival is also transactional with archival of its ACTIVE cycle and ACTIVE submitted operations; submitted records remain present with their original `fieldId` and `cycleId`.
-- Audit compilation resolves the authenticated manager's canonical Block Farm, re-queries eligible ACTIVE logs, and creates one deterministic `COMPILED` version. It does not submit or modify source logs. If a prior version is certified, only newly eligible operation IDs are included in the next version; the certified snapshot is never overwritten or duplicated.
+- Audit compilation resolves the authenticated manager's canonical Block Farm, re-queries eligible logs, and creates one deterministic `COMPILED` version. It verifies the selected source records and writes their `auditLockReportId` pointers in the same transaction; operation amounts and details remain unchanged. A report is limited to 498 operations to leave room for its report and audit-event writes. If a prior version is certified, only newly eligible operation IDs are included in the next version; the certified snapshot is never overwritten or duplicated.
 - Submission is a separate idempotent transition from `COMPILED` to `PENDING_REVIEW`; Cloud and QR update the same report identity.
-- Return changes `PENDING_REVIEW` to `RETURNED` with a required reason. Recompilation creates the next version and preserves the returned snapshot.
+- Return changes `PENDING_REVIEW` to `RETURNED` with a required reason and clears matching source lock pointers atomically. Sources of non-returned reports cannot be amended or manually archived. Recompilation creates the next version and preserves the returned snapshot. Legacy reports enforce the same locks through server report queries even without persisted pointers.
 - Certification revalidates the snapshot integrity hash, changes only `PENDING_REVIEW` to `CERTIFIED`, and appends an `audit_logs` event. Only an SRA Admin may perform it, and final certification requires server acknowledgement.
 - Support ticket creation accepts only Farm Member, Farm Manager, and SRA Admin identities. The server snapshots requester identity, canonical tickets start `OPEN`, messages and status changes append history, and only Super Admin may advance `OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED`.
 
@@ -671,3 +679,13 @@ Clients may derive compatibility-shaped view data in memory while the UI is incr
 `crop_year_compilations` stores immutable SRA-generated aggregates of certified monthly report snapshots. The server selects operations by their Crop Year Cycle, deduplicates operation IDs, counts field area once, and records source report fingerprints and certification attribution. The collection is client-denied and included in logical backups. Monthly `audit_reports` remain the certification records; yearly summaries use status `COMPILED` and coverage `CERTIFIED_REPORTS_TO_DATE`.
 
 See [CROP_YEAR_COMPILATIONS.md](CROP_YEAR_COMPILATIONS.md) for the schema, API, Web/Mobile workflows, accounting rules, limits, and deployment requirements.
+
+## 8. Operation concurrency and audit locks
+
+HTTP updates guarded by record versions require `_mutation.baseVersion`, including a version for each record in batch operations. Missing or malformed preconditions return 428; a mismatched version returns 409. `UNVERSIONED` matches only legacy records without a stored version and is never a wildcard.
+
+Operation creation increments `crop_cycles.operationWriteRevision` atomically. Cross-user matching work is held for explicit reconciliation before it can become another cost-bearing record. When general/custom work is confirmed as separate, the server persists the acknowledged record versions and review reason in `operation_logs.reconciliation`, with server-derived actor/time. Same-ID retries remain idempotent. Queue records and takeover credentials are not Firestore business entities.
+
+Operation API reads derive `auditLockReportId` for legacy report coverage and expose `analyticsEligible` as a read projection. `analyticsEligible` is not persisted by client writers. Completed-cycle and corrected crop-year archived production remains eligible; abandoned reset history does not. See [SYSTEM_AUDIT_FIXES.md](SYSTEM_AUDIT_FIXES.md) for both client implementations, validation, and release coordination.
+
+Account approval and authorized phone verification recheck their target account and the responsible Block Farm inside the write transaction. Version preconditions and document update preconditions prevent approving a concurrently disabled account or verifying a concurrently changed phone number. Approval and phone-verification receipt retries check current role/farm scope before returning account data. Both clients send the inspected account version for a new phone verification; successful authorized retries remain idempotent.

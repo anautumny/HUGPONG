@@ -7,9 +7,14 @@ function mutationError(message, status = 400, data) {
   return error;
 }
 
-function readMutationContext(req) {
+// Internal maintenance services may omit context. HTTP updates must opt into
+// requireVersion, so a caller cannot disable optimistic concurrency control.
+function readMutationContext(req, { requireVersion = ['PATCH', 'PUT', 'DELETE'].includes(req?.method) } = {}) {
   const value = req?.body?._mutation;
-  if (value == null) return null;
+  if (value == null) {
+    if (requireVersion) throw mutationError('Reload the record before saving: a version precondition is required.', 428);
+    return null;
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw mutationError('_mutation must be an object.');
   }
@@ -23,11 +28,19 @@ function readMutationContext(req) {
     throw mutationError('idempotencyKey contains unsupported characters.');
   }
   if (!entityKey || entityKey.length > 500) throw mutationError('Queued mutations require entityKey.');
+  const version = value.baseVersion;
+  const validVersion = item => typeof item === 'string' && item.trim().length > 0 && item.length <= 100;
+  const validMap = version && typeof version === 'object' && !Array.isArray(version)
+    && Object.keys(version).length > 0 && Object.values(version).every(validVersion);
+  if ((version != null && !validVersion(version) && !validMap) || (requireVersion && !validVersion(version) && !validMap)) {
+    throw mutationError('Reload the record before saving: a valid version precondition is required.', 428);
+  }
   return {
     mutationId,
     idempotencyKey,
     entityKey,
-    baseVersion: value.baseVersion === undefined ? null : value.baseVersion
+    baseVersion: value.baseVersion === undefined ? null : value.baseVersion,
+    requireVersion
   };
 }
 
@@ -45,8 +58,11 @@ function expectedVersion(context, entityId = null) {
 
 function assertBaseVersion(actualVersion, context, entityId, currentRecord) {
   const expected = expectedVersion(context, entityId);
-  if (expected == null) return;
-  const actual = actualVersion == null ? null : String(actualVersion);
+  if (expected == null) {
+    if (context?.requireVersion) throw mutationError('A version precondition is required for every updated record.', 428);
+    return;
+  }
+  const actual = actualVersion == null ? 'UNVERSIONED' : String(actualVersion);
   if (actual !== expected) {
     throw mutationError('Mutation conflicts with a newer server version.', 409, {
       entityId,

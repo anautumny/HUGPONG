@@ -90,7 +90,7 @@ test('language persistence and long-label layouts are guarded against regression
   assert.match(profile, /ticketTabBtn:\s*\{[^}]*minWidth:\s*0/);
   assert.doesNotMatch(profile, />\s*History\s*</);
   assert.match(liveQrScanner, /useTranslation\(\)/);
-  assert.match(liveQrScanner, /t\('qr_upload_image',\s*'Upload QR Image'\)/);
+  assert.match(liveQrScanner, /t\('qr_upload_short',\s*'Upload QR'\)/);
   assert.doesNotMatch(liveQrScanner, />\s*Upload QR Image\s*</);
   assert.match(home, /t\('cloud_device_sync',\s*'Cloud & Device Sync'\)/);
   assert.match(read('mobile/src/components/PriceReferenceCard.js'), /t\('post_official_price'/);

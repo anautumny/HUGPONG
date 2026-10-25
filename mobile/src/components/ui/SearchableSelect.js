@@ -68,9 +68,6 @@ export function SearchableSelectContent({
 
   return (
     <>
-          {/* Drag Handle Indicator */}
-          <View style={styles.handleBar} />
-
           {/* Modal Header */}
           <View style={styles.sheetHeader}>
             {back && closeButton}
@@ -84,7 +81,6 @@ export function SearchableSelectContent({
                 </Text>
               )}
             </View>
-            {!back && closeButton}
           </View>
 
           {/* Search Bar for Quick Filtering */}
@@ -170,6 +166,7 @@ export function SearchableSelectContent({
                         </Text>
                         {Boolean(item.sublabel) && (
                           <Text
+                            numberOfLines={2}
                             style={[
                               styles.optionSublabel,
                               isSelected && styles.optionSublabelSelected
@@ -205,6 +202,8 @@ export function SearchableSelectContent({
 export function SearchableSelectModal({ visible, onClose, ...props }) {
   return (
     <AnimatedBottomSheet
+      dismissible
+      expandable
       visible={visible}
       onClose={onClose}
       keyboardAvoiding
@@ -303,7 +302,7 @@ export function SearchableSelect({
               {displayLabel}
             </Text>
             {displaySublabel && (
-              <Text style={styles.triggerSubtext}>
+              <Text style={styles.triggerSubtext} numberOfLines={2}>
                 {displaySublabel}
               </Text>
             )}
@@ -445,8 +444,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.surfaceSubtle,
   },
   searchBox: {
     flexDirection: 'row',
@@ -484,11 +481,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     minHeight: 56,
   },
   optionRowSelected: {

@@ -34,7 +34,7 @@ test('web block-farm selectors already use canonical IDs', () => {
   const analytics = read('web/react-app/src/components/analytics/AnalyticsFilters.jsx');
 
   assert.match(registry, /value: bf\.id/);
-  assert.match(analytics, /value: f\.id/);
+  assert.match(analytics, /value: farm\.id/);
 });
 
 test('server and web reads remove duplicate canonical block-farm identities', () => {

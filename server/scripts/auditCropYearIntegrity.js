@@ -9,7 +9,7 @@ function canonicalStoredCropYear(value) {
   return `${match[1]}-${match[2]}`;
 }
 
-function buildCropYearIntegrityReport({ cycles = [], operations = [], fields = [] }) {
+function buildCropYearIntegrityReport({ cycles = [], operations = [], fields = [], reports = [] }) {
   const cyclesByFieldYear = new Map();
   const uniqueCropYears = new Set();
 
@@ -41,6 +41,7 @@ function buildCropYearIntegrityReport({ cycles = [], operations = [], fields = [
       fieldId: cycle.fieldId || null,
       cropYear: cycle.cropYear ?? null,
       status: cycle.status || null,
+      archivedReason: cycle.archivedReason || null,
       sequenceNumber: cycle.sequenceNumber ?? null
     })),
     fieldRecords: fields.map(field => ({
@@ -58,6 +59,19 @@ function buildCropYearIntegrityReport({ cycles = [], operations = [], fields = [
       groups.set(key, (groups.get(key) || 0) + 1);
       return groups;
     }, new Map()).entries()).map(([key, count]) => ({ ...JSON.parse(key), count })),
+    reportRecords: reports.map(report => ({
+      id: report.id,
+      status: report.status,
+      period: report.periodKey || report.period,
+      cropYearCycle: report.cropYearCycle || null,
+      cropYearCycles: report.cropYearCycles || [],
+      operations: (report.operationSnapshots || []).map(operation => ({
+        id: operation.operationLogId || operation.id,
+        cycleId: operation.cycleId,
+        cropYearCycle: operation.cropYearCycle,
+        performedOn: operation.performedOn
+      }))
+    })),
     duplicateFieldYearCycles,
     invalidOrMissingCycleYears: cycles
       .filter(cycle => !canonicalStoredCropYear(cycle.cropYear))
@@ -109,12 +123,13 @@ async function readCollection(database, collectionName) {
 
 async function auditCropYearIntegrity(database = db) {
   if (!database) throw new Error('Database is unavailable.');
-  const [cycles, operations, fields] = await Promise.all([
+  const [cycles, operations, fields, reports] = await Promise.all([
     readCollection(database, COLLECTIONS.CROP_CYCLES),
     readCollection(database, COLLECTIONS.OPERATION_LOGS),
-    readCollection(database, COLLECTIONS.FIELDS)
+    readCollection(database, COLLECTIONS.FIELDS),
+    readCollection(database, COLLECTIONS.AUDIT_REPORTS)
   ]);
-  return buildCropYearIntegrityReport({ cycles, operations, fields });
+  return buildCropYearIntegrityReport({ cycles, operations, fields, reports });
 }
 
 if (require.main === module) {

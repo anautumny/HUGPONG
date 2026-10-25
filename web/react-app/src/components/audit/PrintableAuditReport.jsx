@@ -2,8 +2,9 @@ import React from 'react';
 import { Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
+import { auditReportLayout, operationMonth } from '../../utils/auditReportLayout';
 import { formatCropYearDisplay } from '../../utils/formatters';
-import { auditCropYearCycles, nextCropYearCycle } from '../../domain/auditWorkflow';
+import { auditCropYearCycles } from '../../domain/auditWorkflow';
 
 /**
  * Format currency / numeric value with 2 decimals
@@ -95,47 +96,11 @@ export default function PrintableAuditReport({
   const auditedAreaStr = totalAuditedHa.toFixed(4);
 
   // Use stored cycle context only; never relabel historical reports from today's year.
-  const periodStr = String(report.period || report.month || '');
-  const match = periodStr.match(/^(\d{4})-(\d{2})$/);
-  const firstOperationDate = String(operationLogs.find(log => log.performedOn)?.performedOn || '');
-  const operationDateMatch = firstOperationDate.match(/^(\d{4})-(\d{2})/);
-  const reportYear = match
-    ? parseInt(match[1], 10)
-    : (operationDateMatch ? parseInt(operationDateMatch[1], 10) : 0);
-  const reportMonth = match
-    ? parseInt(match[2], 10)
-    : (operationDateMatch ? parseInt(operationDateMatch[2], 10) : 1);
+  const periodStr = String(report.periodKey || report.period || report.month || '');
   const fieldSnapshots = Array.isArray(report.fieldSnapshots) ? report.fieldSnapshots : [];
   const cropYearCycles = auditCropYearCycles(report, operationLogs, fieldSnapshots);
   const cropYearDisplay = cropYearCycles.map(formatCropYearDisplay).join(' / ');
-  const storedStartYear = Number(cropYearCycles[0]?.slice(0, 4));
-  const cycleStartYear = Number.isInteger(storedStartYear) ? storedStartYear : reportYear;
-  const currentCY = cropYearCycles.length
-    ? `${cropYearCycles.length === 1 ? 'Crop Year Cycle' : 'Crop Year Cycles'} ${cropYearDisplay}`
-    : 'Crop Year Cycle not recorded';
-  const continuationCropYear = nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]);
-  const continuationCY = continuationCropYear
-    ? `Crop Year Cycle ${formatCropYearDisplay(continuationCropYear)}`
-    : 'Crop Year Cycle not recorded';
-
-  // Helper to determine which month column to activate for a log
-  const getMonthCol = (performedOn, isMilling = false) => {
-    if (!performedOn) {
-      return isMilling ? { isNextCY: true, monthNum: 1 } : { isNextCY: false, monthNum: reportMonth };
-    }
-    try {
-      const parts = String(performedOn).split('-');
-      if (parts.length >= 2) {
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        if (isMilling || year > cycleStartYear + 1 || (year === cycleStartYear + 1 && month >= 9)) {
-          return { isNextCY: true, monthNum: Math.min(Math.max(month - 8, 1), 3) };
-        }
-        return { isNextCY: false, monthNum: month };
-      }
-    } catch {}
-    return isMilling ? { isNextCY: true, monthNum: 1 } : { isNextCY: false, monthNum: reportMonth };
-  };
+  const layout = auditReportLayout(report, operationLogs);
 
   // ── 3. Categorize System Operations: Direct vs Milling ────────────
   const directOps = [];
@@ -181,6 +146,7 @@ export default function PrintableAuditReport({
       className="w-full max-w-[297mm] min-h-[210mm] bg-white text-black p-6 sm:p-8 rounded-none shadow-none print:p-0 print:m-0 mx-auto text-[8.5px] leading-tight font-sans"
       style={{ color: '#000000', backgroundColor: '#ffffff' }}
     >
+      {report.supersededByCorrectionId && <p className="mb-3 border border-black p-2 text-[9px]"><strong>Superseded report.</strong> Use corrected report {report.supersededByCorrectionId}. This original snapshot is retained for history.</p>}
       {/* ── Audit compilation header (top metadata) ───────────────────── */}
       <div className="mb-3 flex items-start justify-between gap-5 text-[9px] font-sans font-bold leading-snug uppercase text-black">
         <div className="grid flex-1 grid-cols-[220px_1fr] gap-x-3 gap-y-0.5">
@@ -230,28 +196,22 @@ export default function PrintableAuditReport({
             <tr className="bg-[#edd446] text-black uppercase font-bold text-center border-b border-black">
               <th rowSpan={2} className="border border-black p-1 w-6">NO</th>
               <th rowSpan={2} className="border border-black p-1 text-left min-w-[150px] max-w-[220px]">OPERATION</th>
-              <th colSpan={12} className="border border-black p-0.5 font-bold tracking-wider">{currentCY}</th>
-              <th colSpan={3} className="border border-black p-0.5 font-bold tracking-wider">{continuationCY}</th>
+              {layout.years.map(year => <th key={year} colSpan={12} className="border border-black p-0.5 font-bold tracking-wider">Calendar year {year}</th>)}
               <th rowSpan={2} className="border border-black p-1 w-12">TOTAL</th>
               <th rowSpan={2} className="border border-black p-1 w-8">QTY</th>
               <th rowSpan={2} className="border border-black p-1 w-8">UNIT</th>
               <th rowSpan={2} className="border border-black p-1 w-14">UNIT COST</th>
               <th rowSpan={2} className="border border-black p-1 w-16">COST PER HECTARE</th>
             </tr>
-            {/* Monthly Timeline Sub-headers (1-12 for Current CY, 1-3 for Next CY) */}
+            {/* Months are grouped by their recorded calendar year. */}
             <tr className="bg-[#edd446] text-black font-bold text-center border-b border-black text-[8px]">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
-                <th key={`cy1-m${m}`} className="border border-black p-0.5 w-5 font-bold">{m}</th>
-              ))}
-              {[1, 2, 3].map(m => (
-                <th key={`cy2-m${m}`} className="border border-black p-0.5 w-5 font-bold">{m}</th>
-              ))}
+              {layout.columns.map(month => <th key={month} className="border border-black p-0.5 w-5 font-bold">{Number(month.slice(5))}</th>)}
             </tr>
           </thead>
           <tbody>
             {operationLogs.length === 0 ? (
               <tr>
-                <td colSpan={22} className="border border-black p-4 text-center text-gray-500 italic">
+                <td colSpan={layout.columnCount} className="border border-black p-4 text-center text-gray-500 italic">
                   No operational records compiled in this audit dossier.
                 </td>
               </tr>
@@ -274,7 +234,7 @@ export default function PrintableAuditReport({
                   const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
                   const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
 
-                  const colPlacement = getMonthCol(log.performedOn, false);
+                  const colPlacement = operationMonth(log, periodStr);
                   const hasChildren = Array.isArray(log.lineItems) && log.lineItems.length > 0;
 
                   if (hasChildren) {
@@ -283,7 +243,7 @@ export default function PrintableAuditReport({
                         {/* Group Header Row */}
                         <tr className="border-t border-black bg-gray-50">
                           <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
-                          <td className="border border-black p-0.5 text-left font-bold" colSpan={21}>
+                          <td className="border border-black p-0.5 text-left font-bold" colSpan={layout.columnCount - 1}>
                             {operationLabel}
                           </td>
                         </tr>
@@ -299,16 +259,7 @@ export default function PrintableAuditReport({
                             <tr key={`${idx}-${cIdx}`} className="border-t border-gray-300">
                               <td className="border border-black p-0.5 text-center"></td>
                               <td className="border border-black p-0.5 text-left pl-3">{si.description || si.name || `Item ${cIdx + 1}`}</td>
-                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
-                                <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
-                                  {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                                </td>
-                              ))}
-                              {[1, 2, 3].map(m => (
-                                <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
-                                  {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                                </td>
-                              ))}
+                              {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
                               <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
                               <td className="border border-black p-0.5 text-center font-mono">{childQty}</td>
                               <td className="border border-black p-0.5 text-center">{childUnit}</td>
@@ -326,16 +277,7 @@ export default function PrintableAuditReport({
                     <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
                       <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
                       <td className="border border-black p-0.5 text-left font-bold">{operationLabel}</td>
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
-                        <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
-                          {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                        </td>
-                      ))}
-                      {[1, 2, 3].map(m => (
-                        <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
-                          {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                        </td>
-                      ))}
+                      {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
                       <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
                       <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
                       <td className="border border-black p-0.5 text-center">{logUnit}</td>
@@ -347,7 +289,7 @@ export default function PrintableAuditReport({
 
                 {/* TOTAL DIRECT COST ROW */}
                 <tr className="border-t-2 border-black font-extrabold bg-white text-[9px]">
-                  <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wide">
+                  <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wide">
                     TOTAL DIRECT COST
                   </td>
                   <td className="border border-black p-1 text-right font-mono font-black text-black">
@@ -359,7 +301,7 @@ export default function PrintableAuditReport({
                 {millingOps.length > 0 && (
                   <>
                     <tr className="border-t border-black bg-white">
-                      <td colSpan={22} className="border border-black p-0.5 text-left font-bold pl-2">
+                      <td colSpan={layout.columnCount} className="border border-black p-0.5 text-left font-bold pl-2">
                         Milling Expenses
                       </td>
                     </tr>
@@ -373,22 +315,13 @@ export default function PrintableAuditReport({
                       const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
                       const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
 
-                      const colPlacement = getMonthCol(log.performedOn, true);
+                      const colPlacement = operationMonth(log, periodStr);
 
                       return (
                         <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
                           <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
                           <td className="border border-black p-0.5 text-left font-bold">{opName}</td>
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
-                            <td key={`cy1-${m}`} className="border border-black p-0.5 text-right font-mono">
-                              {!colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                            </td>
-                          ))}
-                          {[1, 2, 3].map(m => (
-                            <td key={`cy2-${m}`} className="border border-black p-0.5 text-right font-mono">
-                              {colPlacement.isNextCY && colPlacement.monthNum === m ? logArea : ''}
-                            </td>
-                          ))}
+                          {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
                           <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
                           <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
                           <td className="border border-black p-0.5 text-center">{logUnit}</td>
@@ -400,7 +333,7 @@ export default function PrintableAuditReport({
 
                     {/* TOTAL MILLING EXPENSES ROW */}
                     <tr className="border-t border-black font-extrabold bg-white text-[9px]">
-                      <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wide">
+                      <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wide">
                         TOTAL MILLING EXPENSES
                       </td>
                       <td className="border border-black p-1 text-right font-mono font-black text-black">
@@ -412,7 +345,7 @@ export default function PrintableAuditReport({
 
                 {/* ── GRAND TOTAL: TOTAL COST OF PRODUCTION ───────────── */}
                 <tr className="border-t-2 border-black font-black bg-white text-[9.5px]">
-                  <td colSpan={21} className="border border-black p-1 text-left uppercase tracking-wider">
+                  <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wider">
                     TOTAL COST OF PRODUCTION
                   </td>
                   <td className="border border-black p-1 text-right font-mono font-black text-black">

@@ -54,6 +54,7 @@ router.post('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAG
     return res.status(result.replayed ? 200 : 201).json({
       success: true,
       replayed: result.replayed,
+      cycleVersion: result.cycleVersion,
       data: { id: result.id, ...result.record }
     });
   } catch (error) {
@@ -71,7 +72,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_M
       req.body.amendment,
       req.session.user,
       undefined,
-      readMutationContext(req)
+      readMutationContext(req, { requireVersion: true })
     );
     return res.json({ success: true, replayed: result.replayed, data: { id: result.id, ...result.record } });
   } catch (error) {
@@ -82,7 +83,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_M
 router.post('/archive', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER]), attachTakeoverAuthorization, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const result = await archiveOperationRecords(db, req.body.ids, req.session.user, undefined, readMutationContext(req));
+    const result = await archiveOperationRecords(db, req.body.ids, req.session.user, undefined, readMutationContext(req, { requireVersion: true }));
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message });

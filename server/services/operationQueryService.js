@@ -108,6 +108,17 @@ async function getOperationActorScope(database, user) {
 }
 
 async function enrichAmendmentEditors(database, records) {
+  // Legacy reports may predate the persisted lock pointer. Derive the read
+  // projection from authoritative reports as well, including returned unlocks.
+  const auditLocks = new Map();
+  for (const farmId of new Set(records.map(record => record.blockFarmId).filter(Boolean))) {
+    const reports = await database.collection(COLLECTIONS.AUDIT_REPORTS).where('blockFarmId', '==', farmId).get();
+    reports.docs.filter(doc => String(doc.data().status || '').toUpperCase() !== 'RETURNED').forEach(doc => {
+      const report = doc.data();
+      const sources = report.sourceLogIds?.length ? report.sourceLogIds : report.operationSnapshots || report.operations || [];
+      sources.forEach(source => auditLocks.set(String(source?.operationLogId || source?.id || source), doc.id));
+    });
+  }
   const editorIds = Array.from(new Set(records.flatMap(record =>
     (record.amendments || []).map(amendment => String(amendment.amendedByUserId || '').trim())
   ).filter(Boolean)));
@@ -119,6 +130,7 @@ async function enrichAmendmentEditors(database, records) {
   }
   return records.map(record => ({
     ...record,
+    auditLockReportId: auditLocks.get(String(record.id)) || null,
     amendments: (record.amendments || []).map(amendment => {
       const editor = usersById.get(String(amendment.amendedByUserId || '').trim());
       return {

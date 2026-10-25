@@ -3,10 +3,9 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import QRCode from 'qrcode';
 import { formatCropYearDisplay } from '../utils/dataHelpers';
-import { auditCropYearCycles, nextCropYearCycle } from '../domain/auditWorkflow';
+import { auditCropYearCycles } from '../domain/auditWorkflow';
 
-const CURRENT_CYCLE_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
-const FOLLOWING_PERIOD_MONTHS = [1, 2, 3];
+import { auditReportLayout, operationMonth } from '../utils/auditReportLayout';
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -79,35 +78,11 @@ function createQrSvg(value) {
   }
 }
 
-function getMonthPlacement(performedOn, isMilling, reportMonth, cycleStartYear) {
-  if (!performedOn) {
-    return isMilling
-      ? { isNextCycle: true, month: 1 }
-      : { isNextCycle: false, month: reportMonth };
-  }
-  const parts = String(performedOn).split('-');
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  if (!Number.isFinite(year) || !Number.isFinite(month)) {
-    return { isNextCycle: Boolean(isMilling), month: isMilling ? 1 : reportMonth };
-  }
-  if (isMilling || year > cycleStartYear + 1 || (year === cycleStartYear + 1 && month >= 9)) {
-    return { isNextCycle: true, month: Math.min(Math.max(month - 8, 1), 3) };
-  }
-  return { isNextCycle: false, month };
+function monthCells(placement, area, layout) {
+  return layout.columns.map(month => '<td class="number month">' + (placement === month ? escapeHtml(area) : '') + '</td>').join('');
 }
 
-function monthCells(placement, area) {
-  const current = CURRENT_CYCLE_MONTHS.map(month => (
-    `<td class="number month">${!placement.isNextCycle && placement.month === month ? escapeHtml(area) : ''}</td>`
-  )).join('');
-  const next = FOLLOWING_PERIOD_MONTHS.map(month => (
-    `<td class="number month">${placement.isNextCycle && placement.month === month ? escapeHtml(area) : ''}</td>`
-  )).join('');
-  return current + next;
-}
-
-function operationRow(log, operationNumber, placement, totalAuditedHa) {
+function operationRow(log, operationNumber, placement, totalAuditedHa, layout) {
   const operationName = log.operationName || log.name || `Operation ${operationNumber}`;
   const operationNameHtml = log.childOperationName
     ? `${escapeHtml(operationName)}<br><span style="font-size:8px;font-weight:600">Child operation: ${escapeHtml(log.childOperationName)}</span>`
@@ -120,7 +95,7 @@ function operationRow(log, operationNumber, placement, totalAuditedHa) {
   const costPerHa = Number(log.areaHa) > 0 ? totalCost / Number(log.areaHa) : totalCost;
 
   if (Array.isArray(log.lineItems) && log.lineItems.length > 0) {
-    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td colspan="21" class="bold">${operationNameHtml}</td></tr>`;
+    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td colspan="${layout.columnCount - 1}" class="bold">${operationNameHtml}</td></tr>`;
     const children = log.lineItems.map((item, childIndex) => {
       const childQuantity = item.quantity != null ? item.quantity : 1;
       const childUnit = item.unit || 'bag';
@@ -130,7 +105,7 @@ function operationRow(log, operationNumber, placement, totalAuditedHa) {
       return `<tr>
         <td></td>
         <td class="indent">${escapeHtml(item.description || item.name || `Item ${childIndex + 1}`)}</td>
-        ${monthCells(placement, area)}
+        ${monthCells(placement, area, layout)}
         <td class="number bold">${area}</td>
         <td class="center">${escapeHtml(childQuantity)}</td>
         <td class="center">${escapeHtml(childUnit)}</td>
@@ -144,7 +119,7 @@ function operationRow(log, operationNumber, placement, totalAuditedHa) {
   return `<tr>
     <td class="center bold">${operationNumber}</td>
     <td class="bold">${operationNameHtml}</td>
-    ${monthCells(placement, area)}
+    ${monthCells(placement, area, layout)}
     <td class="number bold">${area}</td>
     <td class="center">${escapeHtml(quantity)}</td>
     <td class="center">${escapeHtml(unit)}</td>
@@ -180,21 +155,13 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const auditedArea = totalAuditedHa.toFixed(4);
 
   const period = String(report.periodKey || report.period || report.month || '');
-  const periodMatch = period.match(/^(\d{4})-(\d{2})$/);
-  const operationDateMatch = String(operations.find(log => log.performedOn)?.performedOn || '').match(/^(\d{4})-(\d{2})/);
-  const reportYear = periodMatch ? Number(periodMatch[1]) : (operationDateMatch ? Number(operationDateMatch[1]) : 0);
-  const reportMonth = periodMatch ? Number(periodMatch[2]) : (operationDateMatch ? Number(operationDateMatch[2]) : 1);
   const fieldSnapshots = Array.isArray(report.fieldSnapshots) ? report.fieldSnapshots : [];
   const cropYearCycles = auditCropYearCycles(report, operations, fieldSnapshots);
   if (!cropYearCycles.length) {
     throw new Error('This audit report has no recorded Crop Year Cycle. Correct or recompile the report before exporting it.');
   }
   const cropYearDisplay = cropYearCycles.map(formatCropYearDisplay).join(' / ');
-  const storedStartYear = Number(cropYearCycles[0].slice(0, 4));
-  const cycleStartYear = Number.isInteger(storedStartYear) ? storedStartYear : reportYear;
-  const currentCycle = `${cropYearCycles.length === 1 ? 'Crop Year Cycle' : 'Crop Year Cycles'} ${cropYearDisplay}`;
-  const continuationCropYear = nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]);
-  const continuationCycle = `Crop Year Cycle ${formatCropYearDisplay(continuationCropYear)}`;
+  const layout = auditReportLayout(report, operations);
 
   const directOperations = operations.filter(log => !isMillingOperation(log));
   const millingOperations = operations.filter(isMillingOperation);
@@ -211,25 +178,25 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const directRows = directOperations.map((log, index) => operationRow(
     log,
     index + 1,
-    getMonthPlacement(log.performedOn || log.date, false, reportMonth, cycleStartYear),
-    totalAuditedHa
+    operationMonth(log, period),
+    totalAuditedHa, layout
   )).join('');
   const millingRows = millingOperations.map((log, index) => operationRow(
     log,
     directOperations.length + index + 1,
-    getMonthPlacement(log.performedOn || log.date, true, reportMonth, cycleStartYear),
-    totalAuditedHa
+    operationMonth(log, period),
+    totalAuditedHa, layout
   )).join('');
 
   const rows = operations.length === 0
-    ? '<tr><td colspan="22" class="empty">No operational records compiled in this audit dossier.</td></tr>'
+    ? `<tr><td colspan="${layout.columnCount}" class="empty">No operational records compiled in this audit dossier.</td></tr>`
     : `${directRows}
-      <tr class="total-row"><td colspan="21">TOTAL DIRECT COST</td><td class="number">${formatNumber(directCostPerHa)}</td></tr>
-      ${millingOperations.length > 0 ? `<tr class="section-row"><td colspan="22">Milling Expenses</td></tr>${millingRows}<tr class="total-row"><td colspan="21">TOTAL MILLING EXPENSES</td><td class="number">${formatNumber(millingCostPerHa)}</td></tr>` : ''}
-      <tr class="grand-row"><td colspan="21">TOTAL COST OF PRODUCTION</td><td class="number">${formatNumber(grandTotalPerHa)}</td></tr>`;
+      <tr class="total-row"><td colspan="${layout.columnCount - 1}">TOTAL DIRECT COST</td><td class="number">${formatNumber(directCostPerHa)}</td></tr>
+      ${millingOperations.length > 0 ? `<tr class="section-row"><td colspan="${layout.columnCount}">Milling Expenses</td></tr>${millingRows}<tr class="total-row"><td colspan="${layout.columnCount - 1}">TOTAL MILLING EXPENSES</td><td class="number">${formatNumber(millingCostPerHa)}</td></tr>` : ''}
+      <tr class="grand-row"><td colspan="${layout.columnCount - 1}">TOTAL COST OF PRODUCTION</td><td class="number">${formatNumber(grandTotalPerHa)}</td></tr>`;
 
-  const currentMonthHeaders = CURRENT_CYCLE_MONTHS.map(month => `<th>${month}</th>`).join('');
-  const nextMonthHeaders = FOLLOWING_PERIOD_MONTHS.map(month => `<th>${month}</th>`).join('');
+  const yearHeaders = layout.years.map(year => '<th colspan="12">Calendar year ' + year + '</th>').join('');
+  const monthHeaders = layout.columns.map(month => '<th>' + Number(month.slice(5)) + '</th>').join('');
   const managerId = String(report.compiledByUserId || '').trim();
   const managerName = reportActorName(report.compiledByName, managerId, currentUser, 'Farm Manager');
   const inspectorId = isCertified ? String(report.certifiedByUserId || '').trim() : '';
@@ -286,6 +253,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
     </head>
     <body>
       <main class="sheet">
+        ${report.supersededByCorrectionId ? `<p class="footnote"><strong>Superseded report.</strong> Use corrected report ${escapeHtml(report.supersededByCorrectionId)}. This original snapshot is retained for history.</p>` : ''}
         <section class="report-header">
           <div class="meta">
             <div>REPORT ID</div><div class="value">${escapeHtml(reportId)}</div>
@@ -308,15 +276,14 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
             <tr>
               <th class="no" rowspan="2">NO</th>
               <th class="operation" rowspan="2">OPERATION</th>
-              <th colspan="12">${escapeHtml(currentCycle)}</th>
-              <th colspan="3">${escapeHtml(continuationCycle)}</th>
+              ${yearHeaders}
               <th class="total" rowspan="2">TOTAL</th>
               <th class="qty" rowspan="2">QTY</th>
               <th class="unit" rowspan="2">UNIT</th>
               <th class="unit-cost" rowspan="2">UNIT COST</th>
               <th class="cost-ha" rowspan="2">COST PER HECTARE</th>
             </tr>
-            <tr>${currentMonthHeaders}${nextMonthHeaders}</tr>
+            <tr>${monthHeaders}</tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>

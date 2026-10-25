@@ -12,9 +12,11 @@ const babel = mobileRequire('@babel/core');
 const flatten = value => Array.isArray(value)
   ? Object.assign({}, ...value.filter(Boolean).map(flatten)) : value || {};
 const native = {
+  AppState: { addEventListener: () => ({ remove() {} }) }, Linking: { openSettings: async () => {} },
   View: 'View', TouchableOpacity: 'TouchableOpacity', FlatList: 'FlatList', ScrollView: 'ScrollView',
-  Modal: 'Modal', KeyboardAvoidingView: 'KeyboardAvoidingView',
-  Platform: { OS: 'ios' }, useWindowDimensions: () => ({ height: 640, width: 320 }),
+  Modal: 'Modal', KeyboardAvoidingView: 'KeyboardAvoidingView', Pressable: 'Pressable',
+  PanResponder: { create: handlers => ({ panHandlers: handlers }) },
+  Platform: { OS: 'ios' }, useWindowDimensions: () => ({ height: 640, width: 320, fontScale: 1 }),
   StyleSheet: { create: value => value, flatten, absoluteFillObject: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } },
 };
 
@@ -187,13 +189,14 @@ test('Web takeover authorization expires and resets when changing fields or acco
   assert.equal(hasActiveBanner(render()), false);
 });
 
-function scannerHarness({ permission = { granted: true }, pickImage, readImage } = {}) {
+function scannerHarness({ permission = { granted: true }, pickImage, readImage, onSettings = async () => {}, onPermissionRefresh = async () => permission, appState = native.AppState } = {}) {
   const runtime = harness();
   const Scanner = runtime.load('components/LiveQRScanner.js', {
+    'react-native': { ...native, AppState: appState, Linking: { openSettings: onSettings } },
     '../theme': { FONT_FAMILY: {} },
-    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     'expo-camera': {
-      CameraView: 'Camera', useCameraPermissions: () => [permission, async () => permission],
+      CameraView: 'Camera', useCameraPermissions: () => [permission, async () => permission, onPermissionRefresh],
       scanFromURLAsync: readImage || (async () => [{ data: 'image-payload' }]),
     },
     'expo-image-picker': { launchImageLibraryAsync: pickImage || (async () => ({ assets: [{ uri: 'test-image' }] })) },
@@ -436,16 +439,21 @@ test('selection searches IDs and descriptions, preserves raw values, and resets 
   assert.equal(list.props.style.flexShrink, 1, 'long lists shrink within the sheet');
 });
 
-test('analytics selections reuse the open sheet, Back returns to filters, and All Months is selectable', () => {
+test('analytics filters reuse their sheet and apply drafts only after explicit Apply', () => {
   const runtime = harness();
   const { AnalyticsScopeModal } = runtime.load('components/analytics/AnalyticsComponents.js', {
     '../AnimatedBottomSheet': 'Sheet',
     '../ui': { SearchableSelect: 'Select', Card: 'Card', PrimaryButton: 'Primary', SecondaryButton: 'Secondary' },
     '../ui/SearchableSelect': { SearchableSelectContent: 'Picker' },
     '../PriceReferenceCard': 'PriceReferenceCard',
+    '../../services/analyticsSelectors': { filterOperationsByCropYearCycle: ({ operations }) => operations },
   });
   let closed = 0;
-  const props = { visible: true, onClose: () => closed++, periods: [], selectedPeriod: 'ALL' };
+  const applied = [];
+  const props = { visible: true, onClose: () => closed++, onApply: value => applied.push(value),
+    selectedSeason: '2026-2027', selectedFarmId: 'ALL', selectedFieldId: 'ALL', selectedPeriod: 'ALL',
+    fields: [{ id: 'PLOT-1', blockFarmId: 'BF-1' }], operations: [{ fieldId: 'PLOT-1', performedOn: '2026-10-01' }],
+  };
   let tree = runtime.render(AnalyticsScopeModal, props);
   const selector = find(tree, node => node.type === 'Select' && node.props.label === 'REPORTING PERIOD / MONTH');
   assert.equal(selector.props.options[0].id, 'ALL');
@@ -460,6 +468,16 @@ test('analytics selections reuse the open sheet, Back returns to filters, and Al
   assert.ok(find(tree, node => node.type === 'Select'));
   tree.props.onClose();
   assert.equal(closed, 1);
+  assert.deepEqual(applied, [], 'dismissing does not apply anything');
+  find(tree, node => node.type === 'Select' && node.props.label === 'REPORTING PERIOD / MONTH').props.onSelect({ id: '2026-10' });
+  tree = runtime.render(AnalyticsScopeModal, props);
+  assert.deepEqual(applied, [], 'changing a draft does not refresh analytics');
+  find(tree, node => node.type === 'Primary').props.onPress();
+  assert.equal(applied[0].period, '2026-10');
+  assert.equal(closed, 2);
+  runtime.render(AnalyticsScopeModal, { ...props, visible: false });
+  tree = runtime.render(AnalyticsScopeModal, props);
+  assert.equal(find(tree, node => node.type === 'Select' && node.props.label === 'REPORTING PERIOD / MONTH').props.selectedValue, 'ALL', 'reopening starts from applied props');
 });
 
 test('a native sheet respects safe edges, blocks backdrop dismissal, and reopens during a close', () => {
@@ -470,6 +488,8 @@ test('a native sheet respects safe edges, blocks backdrop dismissal, and reopens
   global.requestAnimationFrame = callback => { frames.set(++nextFrame, callback); return nextFrame; };
   global.cancelAnimationFrame = id => frames.delete(id);
   const Animated = {
+    add: () => 0,
+    spring: () => ({ start() {} }),
     View: 'AnimatedView',
     Value: class { setValue() {} interpolate() { return 0; } },
     timing: (_value, config) => {
@@ -502,6 +522,17 @@ test('a native sheet respects safe edges, blocks backdrop dismissal, and reopens
     assert.equal(animations.at(-1).config.toValue, 1);
     animations.at(-1).callback({ finished: true });
     assert.ok(runtime.render(Sheet, props), 'sheet remains visible after interrupted close');
+    tree = runtime.render(Sheet, { ...props, dismissible: true, expandable: true });
+    find(tree, node => node.type === 'Pressable').props.onPress();
+    assert.equal(closed, 2, 'filter sheets support background-tap dismissal');
+    const handle = find(tree, node => node.props.accessibilityLabel === 'Sheet controls');
+    assert.equal(handle.props.onMoveShouldSetPanResponder(null, { dx: 60, dy: 8 }), false);
+    assert.equal(handle.props.onMoveShouldSetPanResponder(null, { dx: 0, dy: 60 }), true);
+    handle.props.onPanResponderRelease(null, { dy: -60, vy: -1 });
+    tree = runtime.render(Sheet, { ...props, dismissible: true, expandable: true });
+    assert.equal(flatten(find(tree, node => node.type === 'KeyboardAvoidingView').props.children[0].props.style).height, 535);
+    handle.props.onPanResponderRelease(null, { dy: 120, vy: 1 });
+    assert.equal(closed, 3, 'downward drags dismiss the sheet');
   } finally {
     global.requestAnimationFrame = oldRequest; global.cancelAnimationFrame = oldCancel;
   }
@@ -593,4 +624,47 @@ test('web compilation first refreshes member review and writes only after explic
   assert.ok(continuation.props.children.includes('Compile Available Operations'));
   await continuation.props.onClick();
   assert.deepEqual(calls, ['readiness', 'compile']);
+});
+
+
+test('web filter draft rerenders keep focus and Escape uses the latest callback', async () => {
+  const runtime = harness();
+  const Modal = runtime.load('../../web/react-app/src/components/ui/Modal.jsx', { 'react-dom': { createPortal: value => value }, 'lucide-react': { X: 'X' } }).default;
+  const originalDocument = global.document, originalWindow = global.window;
+  let keyHandler, closeCalls = 0, staleCalls = 0, initialFocuses = 0;
+  const trigger = { focus() { global.document.activeElement = this; } };
+  const close = { focus() { initialFocuses++; global.document.activeElement = this; } };
+  const select = { focus() { global.document.activeElement = this; } };
+  global.document = { activeElement: trigger, body: { style: { overflow: '' } } };
+  global.window = { addEventListener(_event, handler) { keyHandler = handler; }, removeEventListener() {} };
+  try {
+    const tree = runtime.render(Modal, { isOpen: true, onClose: () => staleCalls++ });
+    tree.props.children[0].props.ref.current = { querySelectorAll: () => [close, select] };
+    await new Promise(resolve => setTimeout(resolve, 70));
+    select.focus();
+    runtime.render(Modal, { isOpen: true, onClose: () => closeCalls++ });
+    await new Promise(resolve => setTimeout(resolve, 70));
+    assert.equal(global.document.activeElement, select);
+    assert.equal(initialFocuses, 1);
+    keyHandler({ key: 'Escape', preventDefault() {} });
+    assert.equal(closeCalls, 1); assert.equal(staleCalls, 0);
+    runtime.render(Modal, { isOpen: false });
+    assert.equal(global.document.activeElement, trigger);
+    assert.equal(global.document.body.style.overflow, '');
+  } finally { global.document = originalDocument; global.window = originalWindow; }
+});
+
+test('a permanently denied scanner opens Settings and rechecks permission on return', async () => {
+  let onAppState, settings = 0, refreshed = 0;
+  const permission = { granted: false, canAskAgain: false };
+  const runtime = scannerHarness({ permission, onSettings: async () => settings++, onPermissionRefresh: async () => { refreshed++; return permission; }, appState: { addEventListener(_event, handler) { onAppState = handler; return { remove() {} }; } } });
+  const props = { visible: true, onClose() {} };
+  const tree = runtime.render(props);
+  function textContains(node, value) { return JSON.stringify(node).includes(value); }
+  const button = find(tree, node => node.type === 'TouchableOpacity' && textContains(node, 'Open Settings'));
+  assert.ok(button);
+  await button.props.onPress(); assert.equal(settings, 1);
+  onAppState('active'); await new Promise(resolve => setImmediate(resolve)); assert.equal(refreshed, 1);
+  permission.granted = true;
+  assert.ok(find(runtime.render(props), node => node.type === 'Camera'));
 });

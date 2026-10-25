@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, ScrollView, TouchableOpacity, StyleSheet, Modal, Dimensions, Alert, ActivityIndicator, Platform, Linking } from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Modal, Dimensions, Alert, ActivityIndicator, Platform, Linking, BackHandler } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
@@ -19,7 +19,8 @@ import { archivedFields } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import CropYearCompilationScreen from '../components/CropYearCompilationScreen';
-import OfflineQRCode from '../components/OfflineQRCode';
+import AuditQrSheet from '../components/AuditQrSheet';
+import ArchiveFilters from '../components/ArchiveFilters';
 import LiveQRScanner from '../components/LiveQRScanner';
 import ProvisionUserModal from '../components/ProvisionUserModal';
 import RecoveryReviewQueue from '../components/RecoveryReviewQueue';
@@ -1265,6 +1266,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [expandedLogId, setExpandedLogId] = useState(null);
   const [expandedStageCards, setExpandedStageCards] = useState({});
   const [logCurrentPage, setLogCurrentPage] = useState(1);
+  const [showArchiveFilters, setShowArchiveFilters] = useState(false);
   const [archiveFilters, setArchiveFilters] = useState({ cropYearCycle: '', fieldId: '', operationDefinitionId: '', search: '' });
   const [archiveSearchDraft, setArchiveSearchDraft] = useState('');
   const [archiveState, setArchiveState] = useState({
@@ -1650,7 +1652,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         const outcome = await commitExplicitMutation('audit_delivery_selection', {
           id: reportId,
           deliveryMethod: 'QR'
-        }, { baseVersion: audit.updatedAt || null });
+        }, { baseVersion: audit.updatedAt || 'UNVERSIONED' });
         selectedAudit = outcome.response?.data || {
           ...audit,
           deliveryMethod: 'qr',
@@ -2155,7 +2157,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
     setSubmittingAuditId(reportId);
     try {
-      const outcome = await commitExplicitMutation('audit_submission', { id: reportId, submissionMethod: 'CLOUD' }, { baseVersion: report.updatedAt || null });
+      const outcome = await commitExplicitMutation('audit_submission', { id: reportId, submissionMethod: 'CLOUD' }, { baseVersion: report.updatedAt || 'UNVERSIONED' });
       const next = outcome.response?.data || {
         ...report,
         status: AUDIT_STATUS.PENDING_SUBMISSION,
@@ -2484,7 +2486,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       const outcome = await commitExplicitMutation('audit_certification', {
         id: report.reportId || report.id,
         certificationNotes: report.certificationNotes || ''
-      }, { baseVersion: report.updatedAt || null });
+      }, { baseVersion: report.updatedAt || 'UNVERSIONED' });
       const certifiedReport = outcome.response?.data;
       if (!certifiedReport) throw new Error('The server did not confirm certification.');
 
@@ -2765,7 +2767,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       const outcome = await commitExplicitMutation('audit_return', {
         id: report.reportId || report.id,
         returnReason: auditReturnReason.trim()
-      }, { baseVersion: report.updatedAt || null });
+      }, { baseVersion: report.updatedAt || 'UNVERSIONED' });
       const returned = outcome.response?.data;
       if (!returned) throw new Error('The server did not confirm the returned audit.');
       const index = auditReports.findIndex(item => (item.reportId || item.id) === (report.reportId || report.id));
@@ -3411,6 +3413,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     const hasUnsavedWork = Boolean(
       (logForm.operationName && logForm.operationName !== 'Land Preparation') ||
       logForm.notes ||
+      Number(logForm.cost || 0) || Number(logForm.inputQty || 0) || Number(logForm.people || 0) || logForm.variety ||
       (logForm.subItems && logForm.subItems.length > 0)
     );
     if (hasUnsavedWork) {
@@ -4785,7 +4788,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
   const pastLogs = archiveState.records;
   const accessibleArchiveFieldIds = new Set(accessibleFields.map(field => field.id));
-  const authorizedArchiveCycles = cropCycles.filter(cycle => accessibleArchiveFieldIds.has(cycle.fieldId));
+  const authorizedArchiveCycles = cropCycles.filter(cycle => accessibleArchiveFieldIds.has(cycle.fieldId) && cycle.archivedReason !== 'CROP_YEAR_RESET');
   const archiveCropYears = uniqueCropYears(authorizedArchiveCycles);
   const invalidArchiveCycles = authorizedArchiveCycles.filter(cycle => !canonicalStoredCropYear(cycle.cropYear));
   const orderedArchiveFields = React.useMemo(
@@ -5887,6 +5890,27 @@ export default function FieldOpsScreen({ navigation, route }) {
     );
   };
 
+  // Match hardware Back to the visible local sub-screen, including the editor's
+  // existing unsaved-work confirmation. Native Modal handles its own Back.
+  const localBackAction = useRef(null);
+  localBackAction.current = () => {
+    if (showHistoryModal) { handleCloseHistoryModal(); return true; }
+    if (showLog) { closeLog(); return true; }
+    if (showCropYearCompilation) return false;
+    if (showAuditHistoryModal) { setShowAuditHistoryModal(false); return true; }
+    if (showFieldsModal) { setShowFieldsModal(false); setFieldSearch(''); return true; }
+    if (showLogAuditModal) { closeLogAuditTrail(); return true; }
+    if (showManagerAssignModal) { setShowOwnerDropdown(false); setShowManagerAssignModal(false); return true; }
+    if (showPendingModal) { setShowPendingModal(false); return true; }
+    if (showCycleModal) { if (!isStartingCycle) setShowCycleModal(false); return true; }
+    if (showStageEditor) { setShowStageEditor(false); return true; }
+    return false;
+  };
+  useFocusEffect(useCallback(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => localBackAction.current?.() || false);
+    return () => subscription.remove();
+  }, []));
+
   // ── In-App Sub-Screen: Field Activity & Operational Ledger ──
   if (showHistoryModal) {
     return (
@@ -5894,9 +5918,9 @@ export default function FieldOpsScreen({ navigation, route }) {
         <ScreenHeader
           title={
             activeRole === 'SRA Admin'
-              ? t('district_audit_records_title', 'District Audit History Records') 
+              ? 'District audits'
               : activeRole === 'Farm Manager'
-              ? t('farm_manager_ledger_title', 'Farm Operations & Regulatory Ledger')
+              ? 'Farm ledger'
               : t('ledger_title', 'Field History & Ledger')
           }
           subtitle={
@@ -6195,67 +6219,17 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </View>
 
-                <SearchableSelect
-                  label="Crop Year Cycle"
-                  options={[
-                    { id: '', label: 'All Crop Year Cycles', sublabel: 'Show archived records across all years', icon: 'calendar-outline' },
-                    ...archiveCropYears.map(cropYear => ({
-                      id: cropYear,
-                      label: formatCropYearDisplay(cropYear),
-                      sublabel: `Archived cycle records for ${cropYear}`,
-                      icon: 'calendar-outline'
-                    }))
-                  ]}
-                  selectedValue={archiveFilters.cropYearCycle || ''}
-                  onSelect={(opt) => updateArchiveFilter('cropYearCycle', opt.id)}
-                  modalTitle="Filter by Crop Year Cycle"
-                  searchPlaceholder="Search crop year..."
-                  leftIcon="calendar"
-                />
-                {invalidArchiveCycles.length > 0 && (
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 10, padding: 9, borderRadius: RADIUS.sm, backgroundColor: '#FFF7ED' }}>
-                    <Ionicons name="warning-outline" size={15} color="#B45309" />
-                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: '#92400E', fontWeight: '600' }}>
-                      Data integrity notice: {invalidArchiveCycles.length} Crop Year Cycle record{invalidArchiveCycles.length === 1 ? '' : 's'} with an invalid stored year {invalidArchiveCycles.length === 1 ? 'is' : 'are'} excluded from this filter.
-                    </Text>
-                  </View>
-                )}
-
-                <SearchableSelect
-                  label="Field Filter"
-                  options={[
-                    { id: '', label: 'All Fields', sublabel: 'Show records across all assigned plots' },
-                    ...orderedArchiveFields.map(field => ({
-                      id: field.id,
-                      label: field.id,
-                      sublabel: field.memberName || field.farmerName || `${field.ha || 0} Ha`,
-                      icon: 'leaf-outline',
-                    }))
-                  ]}
-                  selectedValue={archiveFilters.fieldId || ''}
-                  onSelect={(opt) => updateArchiveFilter('fieldId', opt.id)}
-                  modalTitle="Filter by Field Plot"
-                  searchPlaceholder="Search plot ID or member..."
-                  leftIcon="leaf"
-                />
-
-                <SearchableSelect
-                  label="Operation Activity Filter"
-                  options={[
-                    { id: '', label: 'All Operations', sublabel: 'Show records across all activity types' },
-                    ...SRA_OPERATIONS_CATALOGUE.map(operation => ({
-                      id: operation.id,
-                      label: operation.name,
-                      sublabel: `Stage ${operation.stageNumber || 1} · ${operation.category || 'General Care'}`,
-                      icon: 'construct-outline',
-                    }))
-                  ]}
-                  selectedValue={archiveFilters.operationDefinitionId || ''}
-                  onSelect={(opt) => updateArchiveFilter('operationDefinitionId', opt.id)}
-                  modalTitle="Filter by SRA Operation"
-                  searchPlaceholder="Search operation name or stage..."
-                  leftIcon="construct"
-                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <Text style={{ flex: 1, fontSize: 12, lineHeight: 18, color: COLORS.textSecondary }}>
+                    {[archiveFilters.cropYearCycle || 'All crop years', archiveFilters.fieldId || 'All plots', archiveFilters.operationDefinitionId && (SRA_OPERATIONS_CATALOGUE.find(op => op.id === archiveFilters.operationDefinitionId)?.name || archiveFilters.operationDefinitionId)].filter(Boolean).join(' · ')}
+                  </Text>
+                  <TouchableOpacity accessibilityRole="button" onPress={() => setShowArchiveFilters(true)} style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: 10, backgroundColor: COLORS.primaryBg, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="filter-outline" size={17} color={COLORS.primary} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>Filters{[archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length ? ' (' + [archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length + ')' : ''}</Text>
+                  </TouchableOpacity>
+                </View>
+                <ArchiveFilters visible={showArchiveFilters} onClose={() => setShowArchiveFilters(false)} filters={archiveFilters} onApply={setArchiveFilters} cropYears={archiveCropYears} fields={orderedArchiveFields} operations={SRA_OPERATIONS_CATALOGUE} />
+                {invalidArchiveCycles.length > 0 && <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10 }}>{invalidArchiveCycles.length} cycle(s) need a recorded crop year.</Text>}
 
                 {archiveState.isLoading ? (
                   <View style={[s.emptyCard, { gap: 8 }]}>
@@ -8105,7 +8079,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 value={formatCropYearDisplay(cycleTypeForm.cropYear)}
                 editable={false}
               />
-              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Preview only. The server validates the canonical year when the cycle is created.</Text>
+              <Text style={{ fontSize: 12, lineHeight: 18, color: COLORS.textMuted }}>The next annual cycle becomes available when its starting year begins. Your completed cycle and records remain available.</Text>
             </View>
 
             <View style={s.responsiveActionRow}>
@@ -8324,21 +8298,10 @@ export default function FieldOpsScreen({ navigation, route }) {
       <AppHeader
         right={
           activeRole === 'SRA Admin' ? (
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={s.topbarLedgerBtn} onPress={() => setShowCropYearCompilation(true)} accessibilityRole="button" accessibilityLabel="Crop Year Compilations" accessibilityHint="Combine certified monthly reports for a Crop Year">
-              <Ionicons name="calendar-outline" size={22} color={COLORS.primary} />
+            <TouchableOpacity style={{ minHeight: 44, paddingHorizontal: 8, flexDirection: 'row', gap: 5, alignItems: 'center' }} onPress={openSraAuditHistory} accessibilityRole="button" accessibilityLabel="Reports" accessibilityHint="Monthly audits and Crop Year compilations">
+              <Ionicons name="documents-outline" size={21} color={COLORS.primary} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>Reports</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={s.topbarLedgerBtn}
-              onPress={openSraAuditHistory}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="Monthly Audit History"
-              accessibilityHint="Opens certified monthly audit reports"
-            >
-              <Ionicons name="receipt-outline" size={22} color={COLORS.primary} />
-            </TouchableOpacity>
-            </View>
           ) : activeRole === 'Farm Manager' ? (
             <TouchableOpacity
               style={s.topbarLedgerBtn}
@@ -9362,155 +9325,11 @@ export default function FieldOpsScreen({ navigation, route }) {
           </SafeAreaView>
       </AnimatedBottomSheet>
 
-      <Modal visible={showQR} transparent animationType="fade" onRequestClose={closeAuditQr}>
-        <View style={s.qrOverlay}>
-          <ScrollView
-            style={s.auditQrModalScroll}
-            contentContainerStyle={s.auditQrModalContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={s.qrModalTitle}>Share Audit QR</Text>
-            <Text style={s.qrModalSub}>Show this HUGPONG card to the SRA scanner</Text>
-
-            <View style={s.auditQrCard}>
-              <View style={s.auditQrCardHeader}>
-                <View style={s.auditQrBrandMark}>
-                  <Ionicons name="leaf" size={20} color="#173D24" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.auditQrBrand}>HUGPONG</Text>
-                  <Text style={s.auditQrCardType}>OFFICIAL AUDIT TRANSFER</Text>
-                </View>
-                <Ionicons name="shield-checkmark" size={25} color="#9EE493" />
-              </View>
-
-              <View style={s.auditQrDetails}>
-                <View style={s.auditQrDetailFull}>
-                  <Text style={s.auditQrDetailLabel}>FARM MANAGER</Text>
-                  <Text style={s.auditQrDetailValue}>{activeQRData?.managerName || 'Farm Manager'}</Text>
-                </View>
-                <View style={s.auditQrDetailFull}>
-                  <Text style={s.auditQrDetailLabel}>BLOCK FARM</Text>
-                  <Text style={s.auditQrDetailValue}>{activeQRData?.blockFarm || 'Block farm not provided'}</Text>
-                </View>
-                <View style={s.auditQrDetailRow}>
-                  <View style={s.auditQrDetailHalf}>
-                    <Text style={s.auditQrDetailLabel}>REPORTING MONTH</Text>
-                    <Text style={s.auditQrDetailValueSmall}>{activeQRData?.month || 'Not specified'}</Text>
-                  </View>
-                  <View style={s.auditQrDetailHalf}>
-                    <Text style={s.auditQrDetailLabel}>CROP YEAR CYCLE</Text>
-                    <Text style={s.auditQrDetailValueSmall}>{activeQRData?.cropYearCycle || 'Not specified'}</Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={s.auditQrCodeShell}>
-                <OfflineQRCode
-                  ref={qrSvgRef}
-                  value={activeQRData?.qrPayload || ''}
-                  size={Math.min(236, width - 124)}
-                  color="#000000"
-                />
-              </View>
-              <View style={s.auditQrVerifiedRow}>
-                <Ionicons name="lock-closed" size={12} color="#2F6B3B" />
-                <Text style={s.auditQrVerifiedText}>SECURE SERVER-VERIFIED REFERENCE</Text>
-              </View>
-              <Text selectable style={s.auditQrReportId}>{activeQRData?.reportId || ''}</Text>
-            </View>
-            <Text style={s.qrNote}>{activeQRData?.totalFields || uniqueFieldsCount} field{(activeQRData?.totalFields || uniqueFieldsCount) !== 1 ? 's' : ''} · {activeQRData?.totalLogs || totalLogsCount} log{(activeQRData?.totalLogs || totalLogsCount) !== 1 ? 's' : ''} · Total: Php {(activeQRData?.totalCost || totalOperationalCost).toLocaleString()}</Text>
-            {canonicalAuditStatus(activeQRData?.report?.status) === AUDIT_STATUS.COMPILED && (
-              <View style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: RADIUS.md, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
-                <Ionicons name="information-circle-outline" size={17} color="#1D4ED8" />
-                <Text style={{ flex: 1, fontSize: 11, lineHeight: 16, color: '#1E3A8A', fontWeight: '600' }}>
-                  QR Transfer is selected. If SRA cannot scan it, copy the report ID for online lookup or send the same report through Cloud instead.
-                </Text>
-              </View>
-            )}
-            <View style={{ flexDirection: 'column', gap: 8, marginTop: 14, width: '100%' }}>
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  backgroundColor: '#F0F8EC',
-                  borderWidth: 1,
-                  borderColor: COLORS.primary,
-                  paddingVertical: 12,
-                  borderRadius: RADIUS.md
-                }}
-                onPress={saveCurrentQrImage}
-                disabled={isSavingQrImage}
-                activeOpacity={0.8}
-              >
-                {isSavingQrImage ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="download-outline" size={16} color={COLORS.primary} />}
-                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
-                  {isSavingQrImage ? 'Saving QR Image...' : 'Save QR Image'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  backgroundColor: '#F0F8EC',
-                  borderWidth: 1,
-                  borderColor: COLORS.primary,
-                  paddingVertical: 12,
-                  borderRadius: RADIUS.md
-                }}
-                onPress={async () => {
-                  const reportReference = activeQRData?.reportId;
-                  if (!reportReference) return;
-                  await Clipboard.setStringAsync(reportReference);
-                  Alert.alert('Report ID Copied', 'The report ID was copied. The report ID and QR both require the HUGPONG server to retrieve the authoritative report.');
-                }}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
-                <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary }}>
-                  Copy Report ID (Online Lookup)
-                </Text>
-              </TouchableOpacity>
-
-              {canonicalAuditStatus(activeQRData?.report?.status) === AUDIT_STATUS.COMPILED && (
-                <TouchableOpacity
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                    backgroundColor: COLORS.primary,
-                    paddingVertical: 12,
-                    borderRadius: RADIUS.md,
-                    opacity: submittingAuditId ? 0.6 : 1
-                  }}
-                  disabled={Boolean(submittingAuditId)}
-                  onPress={() => {
-                    const report = activeQRData?.report;
-                    closeAuditQr();
-                    handleSubmitAuditReport(report);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  {submittingAuditId ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="cloud-upload-outline" size={17} color="#fff" />}
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff' }}>
-                    Send Through Cloud Instead
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity style={[s.qrCloseBtn, { marginTop: 0 }]} onPress={closeAuditQr}>
-                <Text style={s.qrCloseBtnText}>{t('btn_close', 'Close')}</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+      <AuditQrSheet
+        visible={showQR} onClose={closeAuditQr} data={activeQRData} qrRef={qrSvgRef}
+        saving={isSavingQrImage} onSave={saveCurrentQrImage} submitting={submittingAuditId}
+        onSendCloud={() => { const report = activeQRData?.report; closeAuditQr(); handleSubmitAuditReport(report); }}
+      />
 
       {/* ── Custom Calendar Modal ── */}
       <Modal visible={showCalendar} transparent animationType="fade" onRequestClose={closeOperationDatePicker}>
@@ -9735,7 +9554,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 disabled={isAuditActionPending || isCertifyingAudit}
                 accessibilityRole="button"
                 accessibilityLabel="Back"
-                style={{ position: 'absolute', left: SPACING.lg, width: 38, height: 38, borderRadius: RADIUS.sm, backgroundColor: '#F8FAF5', borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center', opacity: isAuditActionPending || isCertifyingAudit ? 0.45 : 1 }}
+                style={{ position: 'absolute', left: SPACING.lg, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', opacity: isAuditActionPending || isCertifyingAudit ? 0.45 : 1 }}
               >
                 <Ionicons name="arrow-back" size={22} color={COLORS.text} />
               </TouchableOpacity>

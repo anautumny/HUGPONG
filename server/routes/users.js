@@ -181,13 +181,16 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
       const current = existingUser.data();
       const actorId = String(req.session.user.employeeId || '').trim();
       if (current.status === 'ACTIVE' && current.approvedByUserId === actorId && canonicalRole(current.role) === role) {
+        if (actorRole === ROLES.FARM_MANAGER) {
+          await assertManagerUserScope(actorId, userId, current.affiliatedBlockFarmId);
+        }
         return res.json({ success: true, replayed: true, accountId: userId, data: publicUser(current, userId) });
       }
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
       const needsPhoneVerification = !current.phoneVerifiedAt;
       const verificationReason = needsPhoneVerification ? resolvePhoneVerificationReason(req.body) : null;
-      assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
+      assertBaseVersion(current.updatedAt, { ...mutationContext, requireVersion: true }, userId, publicUser(current, userId));
       let affiliatedBlockFarmId = current.affiliatedBlockFarmId || null;
       let managerFarmSnapshot = null;
       if (role === ROLES.MEMBER_FARMER) {
@@ -241,42 +244,66 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         approvedAt: now,
         updatedAt: now
       };
-      const batch = db.batch();
-      batch.update(userRef, {
-        status: approved.status,
-        affiliatedBlockFarmId: approved.affiliatedBlockFarmId,
-        approvedByUserId: approved.approvedByUserId,
-        approvedAt: approved.approvedAt,
-        phoneVerifiedAt: approved.phoneVerifiedAt,
-        phoneVerificationStatus: approved.phoneVerificationStatus,
-        phoneVerificationMethod: approved.phoneVerificationMethod,
-        phoneVerificationRequestedAt: approved.phoneVerificationRequestedAt,
-        phoneVerificationReviewRequestedByUser: approved.phoneVerificationReviewRequestedByUser,
-        phoneVerifiedByUserId: approved.phoneVerifiedByUserId,
-        phoneVerificationReasonCode: approved.phoneVerificationReasonCode,
-        phoneVerificationReason: approved.phoneVerificationReason,
-        authVersion: approved.authVersion,
-        disabledAt: approved.disabledAt,
-        updatedAt: approved.updatedAt
+      await db.runTransaction(async batch => {
+        const latestSnapshot = await batch.get(userRef);
+        if (!latestSnapshot.exists || latestSnapshot.data().status !== 'PENDING') {
+          throw Object.assign(new Error('Account changed before approval. Reload the member list.'), { status: 409 });
+        }
+        const latest = latestSnapshot.data();
+        assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, userId, publicUser(latest, userId));
+        let assignmentSnapshot = managerFarmSnapshot;
+        if (affiliatedBlockFarmId || managerFarmSnapshot) {
+          const farmId = affiliatedBlockFarmId || managerFarmSnapshot.id;
+          const liveFarm = await batch.get(db.collection(COLLECTIONS.BLOCK_FARMS).doc(farmId));
+          if (!liveFarm.exists || String(liveFarm.data().status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+            throw Object.assign(new Error('The selected Block Farm is no longer available.'), { status: 409 });
+          }
+          if (actorRole === ROLES.FARM_MANAGER && liveFarm.data().managerUserId !== actorId) {
+            throw Object.assign(new Error('The Block Farm is no longer assigned to this Farm Manager.'), { status: 403 });
+          }
+          if (managerFarmSnapshot) {
+            const assigned = String(liveFarm.data().managerUserId || '').trim();
+            if (assigned && assigned !== userId) throw Object.assign(new Error('The selected Block Farm already has a Farm Manager.'), { status: 409 });
+            assignmentSnapshot = liveFarm;
+          }
+        }
+        const accountUpdate = {
+          status: approved.status,
+          affiliatedBlockFarmId: approved.affiliatedBlockFarmId,
+          approvedByUserId: approved.approvedByUserId,
+          approvedAt: approved.approvedAt,
+          phoneVerifiedAt: approved.phoneVerifiedAt,
+          phoneVerificationStatus: approved.phoneVerificationStatus,
+          phoneVerificationMethod: approved.phoneVerificationMethod,
+          phoneVerificationRequestedAt: approved.phoneVerificationRequestedAt,
+          phoneVerificationReviewRequestedByUser: approved.phoneVerificationReviewRequestedByUser,
+          phoneVerifiedByUserId: approved.phoneVerifiedByUserId,
+          phoneVerificationReasonCode: approved.phoneVerificationReasonCode,
+          phoneVerificationReason: approved.phoneVerificationReason,
+          authVersion: approved.authVersion,
+          disabledAt: approved.disabledAt,
+          updatedAt: approved.updatedAt
+        };
+        if (latestSnapshot.updateTime) batch.update(userRef, accountUpdate, { lastUpdateTime: latestSnapshot.updateTime });
+        else batch.update(userRef, accountUpdate);
+        queueManagerFarmAssignment(
+          batch,
+          db,
+          assignmentSnapshot,
+          userId,
+          approved.approvedByUserId,
+          approved.updatedAt
+        );
+        queueAuditEvent(batch, db, {
+          eventType: 'USER_ACCOUNT_APPROVED',
+          actorUserId: approved.approvedByUserId,
+          entityType: 'USER',
+          entityId: userId,
+          details: `Approved ${role} account ${userId}.`,
+          createdAt: now
+        });
+        if (needsPhoneVerification) queuePhoneVerificationAudit(batch, db, userId, actorId, now);
       });
-      queueManagerFarmAssignment(
-        batch,
-        db,
-        managerFarmSnapshot,
-        userId,
-        approved.approvedByUserId,
-        approved.updatedAt
-      );
-      queueAuditEvent(batch, db, {
-        eventType: 'USER_ACCOUNT_APPROVED',
-        actorUserId: approved.approvedByUserId,
-        entityType: 'USER',
-        entityId: userId,
-        details: `Approved ${role} account ${userId}.`,
-        createdAt: now
-      });
-      if (needsPhoneVerification) queuePhoneVerificationAudit(batch, db, userId, actorId, now);
-      await batch.commit();
       const approvedUser = publicUser(approved, userId);
       const data = managerFarmSnapshot
         ? resolveDirectoryAssignments(
@@ -381,7 +408,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     const assignmentConflict = ['9', '10', 'aborted', 'failed-precondition'].includes(errorCode);
     const status = error.status || ((assignmentConflict || /already exists/i.test(error.message)) ? 409 : 400);
     const message = assignmentConflict
-      ? 'The selected Block Farm changed while the account was being created. Reload and try again.'
+      ? 'The account or Block Farm changed while the request was being saved. Reload and try again.'
       : error.message;
     return res.status(status).json({ success: false, error: message });
   }
@@ -391,68 +418,53 @@ router.post('/:userId/verify-phone', requireAuth, requireRole([ROLES.FARM_MANAGE
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const userId = requiredString(req.params.userId, 'userId', { max: 80 });
-    const targetRef = db.collection(COLLECTIONS.USERS).doc(userId);
-    const targetSnapshot = await targetRef.get();
-    if (!targetSnapshot.exists) return res.status(404).json({ success: false, error: 'User was not found.' });
-    const current = targetSnapshot.data();
-    if (current.phoneVerifiedAt) {
-      const currentStatus = String(current.status || '').toUpperCase();
-      return res.json({
-        success: true,
-        replayed: true,
-        accepted: currentStatus === 'ACTIVE',
-        pendingApproval: currentStatus === 'PENDING',
-        data: publicUser(current, userId)
-      });
-    }
-    const targetStatus = String(current.status || '').toUpperCase();
-    if (!['ACTIVE', 'PENDING'].includes(targetStatus)) {
-      return res.status(409).json({ success: false, error: 'Only active or pending accounts can receive phone verification.' });
-    }
-    if (targetStatus === 'ACTIVE'
-      && (String(current.phoneVerificationStatus || '').toUpperCase() !== 'PENDING_VERIFICATION'
-        || !current.phoneVerificationRequestedAt
-        || current.phoneVerificationReviewRequestedByUser !== true)) {
-      return res.status(409).json({
-        success: false,
-        error: 'This user has not requested authorized phone-verification review.'
-      });
-    }
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const actorId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
-    const verificationReason = resolvePhoneVerificationReason(req.body);
-    await assertPhoneVerificationAuthority(db, {
-      actorId,
-      actorRole,
-      targetUserId: userId,
-      targetRole: current.role,
-      requestedBlockFarmId: current.requestedBlockFarmId,
-      affiliatedBlockFarmId: current.affiliatedBlockFarmId
+    const targetRef = db.collection(COLLECTIONS.USERS).doc(userId);
+    const result = await db.runTransaction(async transaction => {
+      const targetSnapshot = await transaction.get(targetRef);
+      if (!targetSnapshot.exists) throw Object.assign(new Error('User was not found.'), { status: 404 });
+      const current = targetSnapshot.data();
+      await assertPhoneVerificationAuthority(db, {
+        actorId, actorRole, targetUserId: userId, targetRole: current.role,
+        requestedBlockFarmId: current.requestedBlockFarmId,
+        affiliatedBlockFarmId: current.affiliatedBlockFarmId, transaction
+      });
+      const targetStatus = String(current.status || '').toUpperCase();
+      if (current.phoneVerifiedAt) return {
+        success: true, replayed: true, accepted: targetStatus === 'ACTIVE',
+        pendingApproval: targetStatus === 'PENDING', data: publicUser(current, userId)
+      };
+      if (!['ACTIVE', 'PENDING'].includes(targetStatus)) {
+        throw Object.assign(new Error('Only active or pending accounts can receive phone verification.'), { status: 409 });
+      }
+      if (targetStatus === 'ACTIVE' && (String(current.phoneVerificationStatus || '').toUpperCase() !== 'PENDING_VERIFICATION'
+        || !current.phoneVerificationRequestedAt || current.phoneVerificationReviewRequestedByUser !== true)) {
+        throw Object.assign(new Error('This user has not requested authorized phone-verification review.'), { status: 409 });
+      }
+      assertBaseVersion(current.updatedAt, mutationContext, userId, publicUser(current, userId));
+      const verificationReason = resolvePhoneVerificationReason(req.body);
+      const verifiedAt = nowIso();
+      const update = {
+        phoneVerifiedAt: verifiedAt, phoneVerificationStatus: 'VERIFIED', phoneVerificationMethod: 'AUTHORIZED_REVIEW',
+        phoneVerificationRequestedAt: null, phoneVerificationReviewRequestedByUser: false,
+        phoneVerifiedByUserId: actorId, phoneVerificationReasonCode: verificationReason.code,
+        phoneVerificationReason: verificationReason.summary, updatedAt: verifiedAt
+      };
+      if (targetSnapshot.updateTime) transaction.update(targetRef, update, { lastUpdateTime: targetSnapshot.updateTime });
+      else transaction.update(targetRef, update);
+      queuePhoneVerificationAudit(transaction, db, userId, actorId, verifiedAt);
+      return {
+        success: true, accepted: targetStatus === 'ACTIVE', pendingApproval: targetStatus === 'PENDING',
+        data: publicUser({ ...current, ...update }, userId)
+      };
     });
-    const verifiedAt = nowIso();
-    const update = {
-      phoneVerifiedAt: verifiedAt,
-      phoneVerificationStatus: 'VERIFIED',
-      phoneVerificationMethod: 'AUTHORIZED_REVIEW',
-      phoneVerificationRequestedAt: null,
-      phoneVerificationReviewRequestedByUser: false,
-      phoneVerifiedByUserId: actorId,
-      phoneVerificationReasonCode: verificationReason.code,
-      phoneVerificationReason: verificationReason.summary,
-      updatedAt: verifiedAt
-    };
-    const batch = db.batch();
-    batch.update(targetRef, update);
-    queuePhoneVerificationAudit(batch, db, userId, actorId, verifiedAt);
-    await batch.commit();
-    return res.json({
-      success: true,
-      accepted: targetStatus === 'ACTIVE',
-      pendingApproval: targetStatus === 'PENDING',
-      data: publicUser({ ...current, ...update }, userId)
-    });
+    return res.json(result);
   } catch (error) {
-    return res.status(error.status || 400).json({ success: false, error: error.message });
+    const changed = ['9', '10', 'aborted', 'failed-precondition'].includes(String(error?.code ?? '').toLowerCase());
+    return res.status(error.status || (changed ? 409 : 400)).json({ success: false,
+      error: changed ? 'The account changed during verification. Reload and review the current phone number.' : error.message });
   }
 });
 
@@ -538,7 +550,7 @@ router.patch('/:userId', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA
       if (!liveSnapshot.exists) throw Object.assign(new Error('User was not found.'), { status: 404 });
       const live = liveSnapshot.data();
       assertAccountUpdateAllowed(actorRole, live.role, targetRole);
-      assertBaseVersion(live.updatedAt, mutationContext, targetSnapshot.id, publicUser(live, targetSnapshot.id));
+      assertBaseVersion(live.updatedAt, { ...mutationContext, requireVersion: true }, targetSnapshot.id, publicUser(live, targetSnapshot.id));
       if (live.updatedAt !== current.updatedAt) {
         throw Object.assign(new Error('Account was changed by another request. Reload and try again.'), { status: 409 });
       }

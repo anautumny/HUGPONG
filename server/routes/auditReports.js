@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { auditSnapshotBatch } = require('../domain/auditSnapshotBatch');
+const { auditReportLayout } = require('../domain/auditReportLayout');
 const { scanScopedDocumentIds } = require('../services/scopedQueryFallback');
 const { cleanText } = require('../services/diagnosticService');
 const router = express.Router();
@@ -18,7 +19,7 @@ const { auditMemberFollowUps } = require('../services/auditMemberFollowUpService
 const {
   AUDIT_STATUS, QR_SCHEMA_VERSION, canonicalAuditStatus, businessPeriod,
   rootAuditReportId, versionedAuditReportId, summarizeSnapshots, monthlyAuditReadiness,
-  buildFieldSnapshots, auditCropYearCycles, nextCropYearCycle, validateCanonicalAuditReport,
+  buildFieldSnapshots, auditCropYearCycles, validateCanonicalAuditReport,
   AUDIT_DELIVERY_METHOD, AUDIT_DELIVERY_STATUS,
   encodeQrPayload, decodeQrPayload, selectAuditCompilationBatch
 } = require('../domain/auditWorkflow');
@@ -69,7 +70,8 @@ function normalizedReport(document) {
     ...value,
     cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
     cropYearCycles,
-    continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
+    reportingCalendarYears: auditReportLayout(value).years,
+    continuationCropYearCycle: cropYearCycles[1] || null,
     status: canonicalAuditStatus(value.status) || value.status,
     periodKey,
     period: periodKey,
@@ -423,13 +425,17 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const { operationSnapshots, fieldSnapshots, sourceLogIds, remainingOperationCount } = auditSnapshotBatch(batch.operations, activeFields);
     const cropYearCycles = auditCropYearCycles({}, operationSnapshots, fieldSnapshots);
     if (!cropYearCycles.length) throw new Error('Eligible operation records are missing their Crop Year Cycle. Correct the source records before compiling this audit.');
+    if (cropYearCycles.some(year => Number(year.slice(0, 4)) > Number(period.slice(0, 4)))) {
+      throw new Error('An operation is assigned to a crop year that starts after this reporting month. Correct the source cycle before compiling.');
+    }
     const now = nowIso();
     const integrityHash = createAuditHash(reportId, farm.id, period, operationSnapshots);
     const report = {
       rootReportId: rootAuditReportId(farm.id, period), reportVersion: version, previousVersionId: latest?.id || null,
       blockFarmId: farm.id, blockFarmName: farm.name || farm.code || farm.id, periodKey: period,
       cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null, cropYearCycles,
-      continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
+      reportingCalendarYears: auditReportLayout({ periodKey: period, operationSnapshots }).years,
+      continuationCropYearCycle: cropYearCycles[1] || null,
       status: AUDIT_STATUS.COMPILED, reviewStatus: 'not_submitted', certificationStatus: 'not_certified',
       operationSnapshots, fieldSnapshots, sourceLogIds,
       remainingOperationCount,
@@ -446,14 +452,25 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     };
     validateCanonicalAuditReport({ id: reportId, ...report });
     try {
-      const writeBatch = db.batch();
-      writeBatch.create(db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId), report);
-      queueAuditEvent(writeBatch, db, {
+      await db.runTransaction(async transaction => {
+        const refs = sourceLogIds.map(id => db.collection(COLLECTIONS.OPERATION_LOGS).doc(id));
+        const sources = [];
+        for (const ref of refs) sources.push(await transaction.get(ref));
+        for (let index = 0; index < sources.length; index += 1) {
+          const source = sources[index];
+          const expected = batch.operations.find(doc => doc.id === source.id)?.data();
+          if (!source.exists || JSON.stringify(source.data()) !== JSON.stringify(expected)) {
+            throw Object.assign(new Error('Operation records changed during compilation. Refresh and compile again.'), { status: 409 });
+          }
+        }
+        transaction.create(db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId), report);
+        sources.forEach(source => transaction.update(source.ref, { auditLockReportId: reportId }));
+        queueAuditEvent(transaction, db, {
         eventType: 'AUDIT_REPORT_COMPILED', actorUserId: actorId,
         entityType: 'AUDIT_REPORT', entityId: reportId, blockFarmId: farm.id,
         details: `Compiled audit report ${reportId} from ${sourceLogIds.length} operation records.`, createdAt: now
+        });
       });
-      await writeBatch.commit();
     } catch (error) {
       if (!/already exists/i.test(error.message) && Number(error.code) !== 6) throw error;
       const replay = await db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId).get();
@@ -525,7 +542,7 @@ router.post('/:id/delivery-selection', requireAuth, requireRole([ROLES.FARM_MANA
     if (method !== AUDIT_DELIVERY_METHOD.QR) {
       throw new Error('Choose QR Transfer here. Cloud delivery is completed through Submit to SRA.');
     }
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
       const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.params.id || ''));
@@ -543,7 +560,7 @@ router.post('/:id/delivery-selection', requireAuth, requireRole([ROLES.FARM_MANA
       if (report.deliveryMethod === method && report.deliveryStatus === AUDIT_DELIVERY_STATUS.READY) {
         return { ...report, replayed: true };
       }
-      assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
+      assertBaseVersion(report.updatedAt, { ...mutationContext, requireVersion: true }, snapshot.id, report);
       const update = {
         deliveryMethod: method,
         deliveryStatus: AUDIT_DELIVERY_STATUS.READY,
@@ -567,6 +584,7 @@ router.post('/:id/delivery-selection', requireAuth, requireRole([ROLES.FARM_MANA
 
 router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const { actorId } = identity(req);
     const method = String(req.body.submissionMethod || 'cloud').trim().toLowerCase();
     if (method !== AUDIT_DELIVERY_METHOD.CLOUD) throw new Error('This endpoint accepts Cloud Submission only. QR Transfer is received through the SRA import workflow.');
@@ -581,6 +599,7 @@ router.post('/:id/submit', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       if ([AUDIT_STATUS.PENDING_REVIEW, AUDIT_STATUS.CERTIFIED].includes(report.status)) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.COMPILED) throw new Error('Only a compiled audit can be submitted to SRA.');
       validateCanonicalAuditReport(report);
+      assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
       const update = { status: AUDIT_STATUS.PENDING_REVIEW, reviewStatus: 'pending_review', certificationStatus: 'not_certified', submittedAt: now, submittedByUserId: actorId, submissionMethod: method, submissionMethods: Array.from(new Set([...(report.submissionMethods || []), method])), deliveryMethod: method, deliveryStatus: AUDIT_DELIVERY_STATUS.SUBMITTED, deliverySelectedAt: now, deliverySelectedByUserId: actorId, updatedAt: now };
       transaction.update(ref, update);
       queueAuditEvent(transaction, db, {
@@ -601,7 +620,7 @@ router.post('/:id/return', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (r
     const { actorId, actorName } = identity(req);
     const returnReason = optionalString(req.body.returnReason, { max: 2000 });
     if (!returnReason) throw new Error('A return reason is required.');
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
       const ref = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(String(req.params.id || ''));
@@ -610,9 +629,13 @@ router.post('/:id/return', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (r
       const report = normalizedReport(snapshot);
       if (report.status === AUDIT_STATUS.RETURNED && report.returnReason === returnReason) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.PENDING_REVIEW) throw new Error('Only an audit awaiting review can be returned.');
-      assertBaseVersion(report.updatedAt, mutationContext, snapshot.id, report);
+      assertBaseVersion(report.updatedAt, { ...mutationContext, requireVersion: true }, snapshot.id, report);
       const update = { status: AUDIT_STATUS.RETURNED, reviewStatus: 'returned', certificationStatus: 'not_certified', returnReason, returnedByUserId: actorId, returnedByName: actorName, returnedAt: now, updatedAt: now };
+      const sources = [];
+      for (const id of report.sourceLogIds || []) sources.push(await transaction.get(db.collection(COLLECTIONS.OPERATION_LOGS).doc(id)));
       transaction.update(ref, update);
+      sources.filter(source => source.exists && source.data().auditLockReportId === snapshot.id)
+        .forEach(source => transaction.update(source.ref, { auditLockReportId: null }));
       queueAuditEvent(transaction, db, { eventType: 'AUDIT_REPORT_RETURNED', actorUserId: actorId, entityType: 'AUDIT_REPORT', entityId: snapshot.id, blockFarmId: report.blockFarmId, details: returnReason, createdAt: now });
       return { ...report, ...update };
     });
@@ -627,7 +650,7 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const reportId = String(req.params.id || '').trim();
     const { actorId, actorName } = identity(req);
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const now = nowIso();
     const result = await db.runTransaction(async transaction => {
       const reportRef = db.collection(COLLECTIONS.AUDIT_REPORTS).doc(reportId);
@@ -636,7 +659,7 @@ router.post('/:id/certify', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (
       const report = normalizedReport(reportSnapshot);
       if (report.status === AUDIT_STATUS.CERTIFIED) return { ...report, replayed: true };
       if (report.status !== AUDIT_STATUS.PENDING_REVIEW) throw new Error('Only an audit awaiting SRA review can be certified.');
-      assertBaseVersion(report.updatedAt, mutationContext, reportId, report);
+      assertBaseVersion(report.updatedAt, { ...mutationContext, requireVersion: true }, reportId, report);
       const expectedHash = createAuditHash(reportId, report.blockFarmId, report.periodKey, report.operationSnapshots || []);
       if (expectedHash !== (report.integrityHash || report.qrHash)) throw new Error('Audit snapshot integrity validation failed. Certification was blocked.');
       const certificationNotes = optionalString(req.body.certificationNotes, { max: 2000 });

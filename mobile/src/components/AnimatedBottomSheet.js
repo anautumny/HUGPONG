@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
+  Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -26,10 +28,15 @@ export default function AnimatedBottomSheet({
   backdropColor = 'rgba(0, 0, 0, 0.5)',
   keyboardAvoiding = false,
   testID,
+  dismissible = false,
+  expandable = false,
 }) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const progress = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const [expanded, setExpanded] = useState(false);
+  const sheetHeight = useRef(400);
   const animationRef = useRef(null);
   const frameRef = useRef(null);
   const phaseRef = useRef('closed');
@@ -97,16 +104,33 @@ export default function AnimatedBottomSheet({
     if (visibleRef.current) onClose?.();
   }, [onClose]);
 
+  const gestures = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => dismissible
+      && Math.abs(gesture.dy) > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(-24, gesture.dy)),
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dy > Math.min(100, sheetHeight.current * 0.22) || (gesture.dy > 24 && gesture.vy > 0.7)) {
+        requestClose();
+      } else if (expandable && gesture.dy < -35) {
+        setExpanded(true);
+      }
+      Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+    },
+    onPanResponderTerminate: () => Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
+  }), [dismissible, dragY, expandable, requestClose]);
+
   useEffect(() => {
     visibleRef.current = Boolean(visible);
 
     if (visible) {
+      setExpanded(false);
+      dragY.setValue(0);
       if (phaseRef.current === 'closed' || phaseRef.current === 'closing') openSheet();
       return;
     }
 
     if (phaseRef.current !== 'closed' && phaseRef.current !== 'closing') closeSheet();
-  }, [closeSheet, openSheet, visible]);
+  }, [closeSheet, dragY, openSheet, visible]);
 
   useEffect(() => () => stopCurrentAnimation(), [stopCurrentAnimation]);
 
@@ -129,8 +153,10 @@ export default function AnimatedBottomSheet({
       onRequestClose={requestClose}
       testID={testID}
     >
-      <View style={styles.root} accessibilityViewIsModal>
-        <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]} />
+      <View style={styles.root} accessibilityViewIsModal onAccessibilityEscape={requestClose}>
+        <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]}>
+          {dismissible && <Pressable style={StyleSheet.absoluteFill} onPress={requestClose} accessible={false} />}
+        </Animated.View>
 
         <KeyboardAvoidingView
           pointerEvents="box-none"
@@ -143,15 +169,35 @@ export default function AnimatedBottomSheet({
           enabled={keyboardAvoiding}
         >
           <Animated.View
+            onLayout={event => { sheetHeight.current = event.nativeEvent.layout.height; }}
             style={[
               styles.sheet,
               sheetStyle,
+              expanded && { height: windowHeight - insets.top - insets.bottom - 24 },
               {
                 paddingBottom: Math.max(StyleSheet.flatten(sheetStyle)?.paddingBottom || 0, insets.bottom, 12),
-                transform: [{ translateY: sheetTranslateY }],
+                transform: [{ translateY: Animated.add(sheetTranslateY, dragY) }],
               },
             ]}
           >
+            {dismissible && (
+              <View
+                {...gestures.panHandlers}
+                style={styles.handleTouch}
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="Sheet controls"
+                accessibilityHint="Swipe down to dismiss. Swipe up to expand."
+                accessibilityActions={[
+                  { name: 'dismiss', label: 'Dismiss' },
+                  ...(expandable ? [{ name: 'increment', label: 'Expand' }, { name: 'decrement', label: 'Collapse' }] : []),
+                ]}
+                onAccessibilityAction={event => {
+                  if (event.nativeEvent.actionName === 'dismiss') requestClose();
+                  else setExpanded(event.nativeEvent.actionName === 'increment');
+                }}
+              ><View style={styles.handle} /></View>
+            )}
             {children}
           </Animated.View>
         </KeyboardAvoidingView>
@@ -161,6 +207,8 @@ export default function AnimatedBottomSheet({
 }
 
 const styles = StyleSheet.create({
+  handleTouch: { height: 32, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#CBD5D1' },
   root: {
     flex: 1,
     backgroundColor: 'transparent',

@@ -501,12 +501,12 @@ test('governance and support reads use server-scoped APIs instead of client coll
   assert.match(maintenanceService, /authenticatedRead\('\/api\/system-diagnostics'/);
   assert.match(telemetryService, /subscribeToAuthenticatedResource\('\/api\/terminal-diagnostics(?:\?[^']*)?'/);
   assert.match(usersService, /subscribeToAuthenticatedResource\('\/api\/users(?:\?[^']*)?'/);
-  assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /onSnapshot|collection\(db/);
+  assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /\bonSnapshot\b|collection\(db/);
   for (const endpoint of ['/api/block-farms', '/api/fields', '/api/crop-cycles', '/api/logs', '/api/prices', '/api/tickets', '/api/users', '/api/audit-reports', '/api/audit-events']) {
     if (endpoint === '/api/logs') assert.match(mobileStore, /fetchOperationPages\(authenticatedRequest/);
     else assert.match(mobileStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
   }
-  assert.doesNotMatch(mobileStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
+  assert.doesNotMatch(mobileStore, /firebase\/firestore|\bonSnapshot\b|collection\(db|doc\(db/);
 });
 
 test('governance API routes enforce role-scoped read boundaries', () => {

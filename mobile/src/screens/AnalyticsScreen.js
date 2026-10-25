@@ -113,6 +113,10 @@ export default function AnalyticsScreen({ navigation, route }) {
     }
   }, [route?.params?.blockFarmId]);
 
+  useEffect(() => {
+    if (isManager && !route?.params?.blockFarmId) setSelectedFarmId(defaultFarmId);
+  }, [defaultFarmId, isManager, route?.params?.blockFarmId]);
+
   // Scoped fields based on role
   const scopedFields = useMemo(() => {
     if (isMember) {
@@ -140,7 +144,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   // Available filter options derived strictly from recorded data
   const availableSeasons = useMemo(() => {
     const fieldIds = new Set(scopedFields.map(field => field.id));
-    return uniqueCropYears(allCropCycles.filter(cycle => fieldIds.has(cycle.fieldId)));
+    return uniqueCropYears(allCropCycles.filter(cycle => fieldIds.has(cycle.fieldId) && cycle.archivedReason !== 'CROP_YEAR_RESET'));
   }, [scopedFields, allCropCycles]);
 
   const currentSeason = useMemo(() => {
@@ -152,6 +156,9 @@ export default function AnalyticsScreen({ navigation, route }) {
       .sort()
       .reverse()[0] || '';
   }, [scopedFields, allCropCycles]);
+
+  const activeFilterCount = Number(selectedSeason !== (currentSeason || 'ALL'))
+    + Number(selectedFarmId !== defaultFarmId) + Number(selectedFieldId !== 'ALL') + Number(selectedPeriod !== 'ALL');
 
   useEffect(() => {
     if (!cycleFilterInitialized && allCropCycles.length > 0) {
@@ -320,11 +327,12 @@ export default function AnalyticsScreen({ navigation, route }) {
     <SafeAreaView style={s.safe} edges={['top']}>
       {/* 52dp Accessible Screen Header */}
       <ScreenHeader
-        title="Farm & Price Analytics"
-        subtitle="Canonical SRA & Cooperative Intelligence"
+        title="Analytics"
+        subtitle="Farm performance & prices"
         onBackPress={() => navigation.goBack()}
         rightAction={{
           icon: 'filter-outline',
+          label: activeFilterCount ? `Filters (${activeFilterCount})` : 'Filters',
           onPress: () => setShowScopeModal(true)
         }}
       />
@@ -355,7 +363,6 @@ export default function AnalyticsScreen({ navigation, route }) {
           farmName={activeFarmName}
           fieldName={activeFieldName}
           period={selectedPeriod}
-          onChangeScopePress={() => setShowScopeModal(true)}
           isMember={isMember}
         />
 
@@ -630,21 +637,20 @@ export default function AnalyticsScreen({ navigation, route }) {
         seasons={['ALL', ...availableSeasons]}
         currentSeason={currentSeason}
         farms={allFarms}
-        fields={scopeFields}
+        fields={scopedFields}
+        operations={scopedOps}
+        cropCycles={allCropCycles}
         periods={availablePeriods}
         selectedSeason={selectedSeason}
         selectedFarmId={selectedFarmId}
         selectedFieldId={selectedFieldId}
         selectedPeriod={selectedPeriod}
-        onSelectSeason={value => { setSelectedSeason(value); setSelectedPeriod('ALL'); }}
-        onSelectFarm={value => { setSelectedFarmId(value); setSelectedFieldId('ALL'); }}
-        onSelectField={setSelectedFieldId}
-        onSelectPeriod={setSelectedPeriod}
-        onReset={() => {
-          setSelectedSeason(currentSeason || 'ALL');
-          setSelectedFarmId(defaultFarmId);
-          setSelectedFieldId('ALL');
-          setSelectedPeriod('ALL');
+        defaultFarmId={defaultFarmId}
+        onApply={draft => {
+          setSelectedSeason(draft.season);
+          setSelectedFarmId(draft.farm);
+          setSelectedFieldId(draft.field);
+          setSelectedPeriod(draft.period);
         }}
         isMember={isMember}
         isManager={isManager}

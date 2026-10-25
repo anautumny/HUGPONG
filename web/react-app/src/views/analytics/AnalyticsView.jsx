@@ -104,19 +104,17 @@ export default function AnalyticsView() {
   }, [user]);
 
   // Derive available filter options dynamically from real recorded data
-  const availableSeasons = useMemo(() => uniqueCropYears(cropCycles), [cropCycles]);
+  const availableSeasons = useMemo(() => uniqueCropYears(cropCycles.filter(cycle => cycle.archivedReason !== 'CROP_YEAR_RESET')), [cropCycles]);
 
   const currentSeason = useMemo(() => {
-    const fieldIds = new Set(fields
-      .filter(field => selectedFarmId === 'ALL' || field.blockFarmId === selectedFarmId)
-      .map(field => field.id));
+    const fieldIds = new Set(fields.map(field => field.id));
     return cropCycles
       .filter(cycle => cycle.status === 'ACTIVE' && fieldIds.has(cycle.fieldId))
       .map(cycle => canonicalStoredCropYear(cycle.cropYear))
       .filter(Boolean)
       .sort()
       .reverse()[0] || '';
-  }, [cropCycles, fields, selectedFarmId]);
+  }, [cropCycles, fields]);
 
   useEffect(() => {
     if (!cycleFilterInitialized && !isFieldsLoading) {
@@ -307,7 +305,9 @@ export default function AnalyticsView() {
         blockFarms={blockFarms}
         selectedFarmId={selectedFarmId}
         onFarmChange={setSelectedFarmId}
-        fields={availableFields}
+        fields={fields}
+        operations={operations}
+        cropCycles={cropCycles}
         selectedFieldId={selectedFieldId}
         onFieldChange={setSelectedFieldId}
         periods={availablePeriods}

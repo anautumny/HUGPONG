@@ -380,6 +380,7 @@ export function toOperationLogDocument(value = {}, context = {}) {
     operationName: String(value.operationName || value.activity || '').trim(),
     category: String(value.category || '').trim(),
     plannedOperationId: String(value.plannedOperationId || '').trim() || null,
+    ...(value.reconciliation ? { reconciliation: value.reconciliation } : {}),
     plannedDate: String(value.plannedDate || '').trim() || null,
     estimatedCost: value.estimatedCost && typeof value.estimatedCost === 'object' ? {
       labor: Number(value.estimatedCost.labor || 0),

@@ -226,7 +226,7 @@ export default function AuditCenterView() {
 
     setIsCertifying(true);
     try {
-      const response = await certifyAuditReport(reportId, { certificationNotes: notes });
+      const response = await certifyAuditReport(reportId, { certificationNotes: notes, baseVersion: reports.find(report => (report.id || report.reportId) === reportId)?.updatedAt });
       if (response.success && response.data) {
         showToast('SRA Digital Seal issued for the audit report.', 'success');
         upsertReport(response.data);
@@ -258,7 +258,7 @@ export default function AuditCenterView() {
   const handleSubmitReport = async reportId => {
     setIsSubmitting(true);
     try {
-      const response = await submitAuditReport(reportId);
+      const response = await submitAuditReport(reportId, reports.find(report => (report.id || report.reportId) === reportId)?.updatedAt);
       upsertReport(response.data);
       showToast('Submitted to SRA. The audit is awaiting review.', 'success');
     } catch (error) {

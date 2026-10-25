@@ -87,17 +87,17 @@ export async function compileAuditReport({ blockFarmId, periodKey, operationLogI
 /**
  * SRA Admin: certify an audit report and issue its system audit seal
  */
-export async function certifyAuditReport(reportId, { certificationNotes = '' } = {}) {
+export async function certifyAuditReport(reportId, { certificationNotes = '', baseVersion = null } = {}) {
   const cleanId = String(reportId || '').trim();
   return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(cleanId)}/certify`, {
     method: 'POST',
-    body: { certificationNotes }
+    body: { certificationNotes }, baseVersion
   });
 }
 
-export async function submitAuditReport(reportId) {
+export async function submitAuditReport(reportId, baseVersion = null) {
   return authenticatedRequest(`/api/audit-reports/${encodeURIComponent(reportId)}/submit`, {
-    method: 'POST', body: { submissionMethod: 'CLOUD' }
+    method: 'POST', body: { submissionMethod: 'CLOUD' }, baseVersion
   });
 }
 

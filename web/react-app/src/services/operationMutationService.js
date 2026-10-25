@@ -21,10 +21,11 @@ export async function updateOperation(operationId, changes, amendment, baseVersi
   });
 }
 
-export async function archiveOperations(ids, takeoverGrant = null) {
+export async function archiveOperations(ids, takeoverGrant = null, baseVersion = null) {
   return authenticatedRequest('/api/logs/archive', {
     method: 'POST',
     body: { ids: Array.isArray(ids) ? ids : [ids] },
+    baseVersion,
     headers: takeoverHeaders(takeoverGrant)
   });
 }

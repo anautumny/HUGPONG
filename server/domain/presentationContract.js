@@ -59,7 +59,10 @@ function buildOperationPresentation(record = {}) {
 }
 
 function presentOperationRecord(record = {}) {
-  return { ...record, presentation: buildOperationPresentation(record) };
+  const status = String(record.status || 'ACTIVE');
+  const analyticsEligible = status === 'ACTIVE' || status === 'submitted'
+    || (status === 'ARCHIVED' && ['CYCLE_COMPLETED', 'CROP_YEAR_CORRECTED'].includes(record.archivedReason));
+  return { ...record, analyticsEligible, presentation: buildOperationPresentation(record) };
 }
 
 module.exports = {

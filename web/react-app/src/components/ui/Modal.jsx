@@ -14,10 +14,13 @@ export default function Modal({
   footer,
   preventEscapeClose = false,
   isLoading = false,
+  closeOnBackdrop = false,
   className = ''
 }) {
   const modalRef = useRef(null);
   const previousActiveElement = useRef(null);
+  const currentOptions = useRef({ onClose, preventEscapeClose, isLoading });
+  currentOptions.current = { onClose, preventEscapeClose, isLoading };
 
   // Size mapping
   const sizeClasses = {
@@ -50,9 +53,10 @@ export default function Modal({
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        if (!preventEscapeClose && !isLoading && onClose) {
+        const current = currentOptions.current;
+        if (!current.preventEscapeClose && !current.isLoading && current.onClose) {
           e.preventDefault();
-          onClose();
+          current.onClose();
         }
       }
 
@@ -94,13 +98,14 @@ export default function Modal({
         previousActiveElement.current.focus();
       }
     };
-  }, [isOpen, preventEscapeClose, isLoading, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // Dialogs close through their controls or Escape, never through the backdrop.
+  // Background dismissal is opt-in for reversible selection and filter dialogs.
   return createPortal(
     <div
+      onClick={event => { if (closeOnBackdrop && event.target === event.currentTarget && !isLoading) onClose?.(); }}
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity animate-in fade-in duration-150"
     >
       <div

@@ -237,14 +237,14 @@ test('large months compile in disjoint stable versions instead of rejecting all 
   const compile = loadAuditListHandler(db, 'post'), input = request({ blockFarmId: 'BF-1', periodKey: '2026-09' });
   const first = responseCapture(); await compile(input, first);
   assert.equal(first.statusCode, 201, first.payload.error);
-  assert.equal(first.payload.data.operationCount, 500);
-  assert.equal(first.payload.data.remainingOperationCount, 150);
+  assert.equal(first.payload.data.operationCount, 498);
+  assert.equal(first.payload.data.remainingOperationCount, 152);
   const replay = responseCapture(); await compile(input, replay);
   assert.equal(replay.payload.data.id, first.payload.data.id);
   db.records.get(`audit_reports/${first.payload.data.id}`).status = 'CERTIFIED';
   const second = responseCapture(); await compile(input, second);
   assert.equal(second.statusCode, 201, second.payload.error);
-  assert.equal(second.payload.data.operationCount, 150);
+  assert.equal(second.payload.data.operationCount, 152);
   assert.equal(second.payload.data.remainingOperationCount, 0);
   assert.equal(new Set([...first.payload.data.sourceLogIds, ...second.payload.data.sourceLogIds]).size, 650);
 });
@@ -444,12 +444,14 @@ test('QR delivery selection is persisted and both clients expose Cloud and repor
   const mobileSync = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'services', 'syncEngine.js'), 'utf8');
 
   assert.match(webService, /selectAuditDeliveryMethod/);
-  assert.match(webCompiler, /Send Through Cloud Instead/);
-  assert.match(webCompiler, /Copy Report ID/);
+  assert.match(webCompiler, /Send through Cloud instead/);
+  assert.match(webCompiler, /Copy ID/);
   assert.match(mobileSync, /audit_delivery_selection/);
   assert.match(mobileFieldOps, /View QR & Delivery Options/);
-  assert.match(mobileFieldOps, /Copy Report ID \(Online Lookup\)/);
-  assert.match(mobileFieldOps, /Send Through Cloud Instead/);
+  const mobileQrSheet = fs.readFileSync(path.join(repositoryRoot, 'mobile', 'src', 'components', 'AuditQrSheet.js'), 'utf8');
+  assert.match(mobileFieldOps, /<AuditQrSheet/);
+  assert.match(mobileQrSheet, /Copy ID/);
+  assert.match(mobileQrSheet, /Send through Cloud instead/);
   assert.doesNotMatch(mobileFieldOps, /checkmark-seal-outline/);
   assert.match(mobileFieldOps, /Field Summary/);
   assert.match(mobileFieldOps, /Operation Details/);

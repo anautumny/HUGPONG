@@ -4,9 +4,9 @@
 // Zero external internet requests, 100% offline-first.
 // ══════════════════════════════════════════════════════════════
 
-import React, { forwardRef, useEffect, useMemo } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { View } from 'react-native';
-import Svg, { Path, Rect } from 'react-native-svg';
+import Svg, { Path, Rect, Text as SvgText } from 'react-native-svg';
 import QRCode from 'qrcode';
 import { createMobileReference, reportMobileDiagnostic } from '../services/clientDiagnostics';
 import { AppText as Text } from './Typography';
@@ -26,8 +26,10 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
   color = '#000000',
   backgroundColor = '#FFFFFF',
   errorCorrectionLevel = 'M',
+  footerLines = [],
   style
 }, ref) {
+  const svgRef = useRef(null);
   const { pathData, moduleCount, diagnostic } = useMemo(() => {
     try {
       if (!value) return { pathData: '', moduleCount: 0 };
@@ -64,6 +66,18 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
     }
   }, [value, errorCorrectionLevel]);
 
+  const quietZone = 4;
+  const totalGrid = moduleCount + quietZone * 2;
+  const footerHeight = footerLines.length ? footerLines.length * 3 + 6 : 0;
+  const imageRatio = (totalGrid + footerHeight) / totalGrid;
+  useImperativeHandle(ref, () => ({
+    toDataURL(callback, options = {}) {
+      svgRef.current?.toDataURL(callback, footerHeight
+        ? { ...options, height: Math.round((options.width || size) * imageRatio) }
+        : options);
+    },
+  }), [footerHeight, imageRatio, size]);
+
   useEffect(() => {
     if (!diagnostic) return;
     reportMobileDiagnostic({
@@ -85,25 +99,24 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
   }
 
   // ISO/IEC 18004 recommends a four-module quiet zone.
-  const quietZone = 4;
-  const totalGrid = moduleCount + quietZone * 2;
 
   return (
-    <View style={[{ width: size, height: size, backgroundColor }, style]}>
+    <View style={[{ width: size, height: size * imageRatio, backgroundColor }, style]}>
       <Svg
-        ref={ref}
-        viewBox={`-${quietZone} -${quietZone} ${totalGrid} ${totalGrid}`}
+        ref={svgRef}
+        viewBox={`-${quietZone} -${quietZone} ${totalGrid} ${totalGrid + footerHeight}`}
         width={size}
-        height={size}
+        height={size * imageRatio}
       >
         <Rect
           x={-quietZone}
           y={-quietZone}
           width={totalGrid}
-          height={totalGrid}
+          height={totalGrid + footerHeight}
           fill={backgroundColor}
         />
         <Path d={pathData} fill={color} />
+        {footerLines.map((line, index) => <SvgText key={index} x={moduleCount / 2} y={moduleCount + quietZone + 4 + index * 3} textAnchor="middle" fontSize={1.8} fontFamily="sans-serif" fill={color}>{line}</SvgText>)}
       </Svg>
     </View>
   );

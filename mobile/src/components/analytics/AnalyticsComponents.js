@@ -6,6 +6,7 @@ import { Card, PrimaryButton, SecondaryButton, SearchableSelect } from '../ui';
 import { AppText as Text } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
 import { SearchableSelectContent } from '../ui/SearchableSelect';
+import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -13,71 +14,14 @@ export function AnalyticsScopeCard({
   farmName,
   fieldName,
   period,
-  onChangeScopePress,
   isMember
 }) {
   return (
-    <Card style={styles.scopeCardClean}>
-      <View style={styles.scopeHeaderClean}>
-        <View style={styles.scopeTitleWrapClean}>
-          <Ionicons name="funnel-outline" size={15} color={COLORS.primary} />
-          <Text style={styles.scopeHeaderTagClean}>ANALYTICS SCOPE</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.changeScopeBtnClean}
-          onPress={onChangeScopePress}
-          activeOpacity={0.75}
-        >
-          <Text style={styles.changeScopeTextClean}>Filter Scope</Text>
-          <Ionicons name="chevron-down" size={13} color={COLORS.primary} />
-        </TouchableOpacity>
-      </View>
-
-      <View
-        style={[styles.scopeChipsRowClean, { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }]}
-      >
-        {!isMember && farmName && (
-          <TouchableOpacity
-            style={styles.scopeChipClean}
-            onPress={onChangeScopePress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="leaf-outline" size={13} color={COLORS.primary} />
-            <Text style={styles.scopeChipValueClean}>{farmName}</Text>
-          </TouchableOpacity>
-        )}
-        {season && (
-          <TouchableOpacity
-            style={styles.scopeChipClean}
-            onPress={onChangeScopePress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="calendar-outline" size={13} color={COLORS.textSecondary} />
-            <Text style={styles.scopeChipValueClean}>{season === 'ALL' ? 'All Crop Year Cycles' : season}</Text>
-          </TouchableOpacity>
-        )}
-        {fieldName && (
-          <TouchableOpacity
-            style={styles.scopeChipClean}
-            onPress={onChangeScopePress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="grid-outline" size={13} color={COLORS.textSecondary} />
-            <Text style={styles.scopeChipValueClean}>{fieldName}</Text>
-          </TouchableOpacity>
-        )}
-        {period && (
-          <TouchableOpacity
-            style={styles.scopeChipClean}
-            onPress={onChangeScopePress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="time-outline" size={13} color={COLORS.textSecondary} />
-            <Text style={styles.scopeChipValueClean}>{period === 'ALL' ? 'All Periods' : period}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </Card>
+    <View style={{ paddingHorizontal: 2, paddingVertical: 4 }}>
+      <Text style={{ fontSize: 12, lineHeight: 19, color: COLORS.textSecondary }}>
+        {[season === 'ALL' ? 'All crop years' : season, !isMember && farmName, fieldName, period === 'ALL' ? 'All periods' : period].filter(Boolean).join(' · ')}
+      </Text>
+    </View>
   );
 }
 
@@ -90,25 +34,33 @@ export function AnalyticsScopeModal({
   farms = [],
   fields = [],
   periods = [],
+  operations = [],
+  cropCycles = [],
   selectedSeason,
   selectedFarmId,
   selectedFieldId,
   selectedPeriod,
-  onSelectSeason,
-  onSelectFarm,
-  onSelectField,
-  onSelectPeriod,
-  onReset,
+  onApply,
+  defaultFarmId = 'ALL',
   isMember,
   isManager
 }) {
   const [picker, setPicker] = useState(null);
+  const [draft, setDraft] = useState({ season: selectedSeason, farm: selectedFarmId, field: selectedFieldId, period: selectedPeriod });
   useEffect(() => {
-    if (!visible) setPicker(null);
+    if (visible) setDraft({ season: selectedSeason, farm: selectedFarmId, field: selectedFieldId, period: selectedPeriod });
+    setPicker(null);
   }, [visible]);
+  const draftFields = fields.filter(field => draft.farm === 'ALL' || field.blockFarmId === draft.farm);
+  const draftFieldIds = new Set(draftFields.map(field => field.id));
+  const draftPeriods = [...new Set(filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: draft.season })
+    .filter(op => draftFieldIds.has(op.fieldId) && (draft.field === 'ALL' || op.fieldId === draft.field))
+    .map(op => String(op.performedOn || op.isoDate || op.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
 
   return (
     <AnimatedBottomSheet
+      dismissible
+      expandable
       visible={visible}
       onClose={() => picker ? setPicker(null) : onClose()}
       keyboardAvoiding
@@ -126,12 +78,9 @@ export function AnalyticsScopeModal({
         <>
           <View style={styles.modalHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.modalTitle}>Filter Analytics Scope</Text>
-              <Text style={styles.modalSub}>Select Crop Year Cycle, farm, parcel, or period</Text>
+              <Text style={styles.modalTitle}>Filters</Text>
+              <Text style={styles.modalSub}>Choose the records to include</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.modalClose} accessibilityRole="button" accessibilityLabel="Close analytics filters">
-              <Ionicons name="close" size={22} color={COLORS.text} />
-            </TouchableOpacity>
           </View>
 
           <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ gap: 4, paddingVertical: 10, paddingHorizontal: SPACING.lg }} keyboardShouldPersistTaps="handled">
@@ -145,15 +94,15 @@ export function AnalyticsScopeModal({
                 sublabel: s === 'ALL' ? 'Aggregate all historical and active cycles' : (s === currentSeason ? 'Active season in progress' : 'Historical cycle records'),
                 icon: 'calendar-outline'
               }))}
-              selectedValue={selectedSeason}
-              onSelect={(opt) => onSelectSeason(opt.id)}
+              selectedValue={draft.season}
+              onSelect={(opt) => setDraft(value => ({ ...value, season: opt.id, period: 'ALL' }))}
               modalTitle="Select Crop Year Cycle"
               searchPlaceholder="Search crop year..."
               leftIcon="calendar"
             />
 
             {/* Farm Selector (if not member) */}
-            {!isMember && farms.length > 0 && (
+            {!isMember && !isManager && farms.length > 1 && (
               <SearchableSelect
                 onOpen={setPicker}
                 label="BLOCK FARM"
@@ -168,8 +117,8 @@ export function AnalyticsScopeModal({
                     icon: 'business-outline'
                   }))
                 ]}
-                selectedValue={selectedFarmId}
-                onSelect={(opt) => onSelectFarm(opt.id)}
+                selectedValue={draft.farm}
+                onSelect={(opt) => setDraft(value => ({ ...value, farm: opt.id, field: 'ALL', period: 'ALL' }))}
                 modalTitle="Select Block Farm"
                 searchPlaceholder="Search block farm..."
                 leftIcon="business"
@@ -181,16 +130,16 @@ export function AnalyticsScopeModal({
               onOpen={setPicker}
               label="PARCEL / PLOT"
               options={[
-                { id: 'ALL', label: `All Plots (${fields.length})`, sublabel: 'Aggregate analytics across all field plots', icon: 'grid-outline' },
-                ...fields.map(fld => ({
+                { id: 'ALL', label: `All Plots (${draftFields.length})`, icon: 'grid-outline' },
+                ...draftFields.map(fld => ({
                   id: fld.id,
                   label: fld.id,
                   sublabel: `${fld.ha || 0} Ha · Member: ${fld.memberName || fld.farmerName || 'Assigned Member'}`,
                   icon: 'leaf-outline'
                 }))
               ]}
-              selectedValue={selectedFieldId}
-              onSelect={(opt) => onSelectField(opt.id)}
+              selectedValue={draft.field}
+              onSelect={(opt) => setDraft(value => ({ ...value, field: opt.id, period: 'ALL' }))}
               modalTitle="Select Parcel / Plot"
               searchPlaceholder="Search plot ID or member..."
               leftIcon="leaf"
@@ -200,14 +149,14 @@ export function AnalyticsScopeModal({
               <SearchableSelect
                 onOpen={setPicker}
                 label="REPORTING PERIOD / MONTH"
-                options={['ALL', ...periods.filter(p => p !== 'ALL')].map(p => ({
+                options={['ALL', ...draftPeriods].map(p => ({
                   id: p,
                   label: p === 'ALL' ? 'All Months' : p,
                   sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
                   icon: 'time-outline'
                 }))}
-                selectedValue={selectedPeriod}
-                onSelect={(opt) => onSelectPeriod(opt.id)}
+                selectedValue={draft.period}
+                onSelect={(opt) => setDraft(value => ({ ...value, period: opt.id }))}
                 modalTitle="Select Reporting Period"
                 searchPlaceholder="Search period (e.g. 2026-03)..."
                 leftIcon="time"
@@ -217,12 +166,15 @@ export function AnalyticsScopeModal({
           <View style={styles.modalFooter}>
             <SecondaryButton
               title="Reset"
-              onPress={onReset}
+              onPress={() => setDraft({ season: currentSeason || 'ALL', farm: defaultFarmId, field: 'ALL', period: 'ALL' })}
               style={{ flex: 1 }}
             />
             <PrimaryButton
-              title="Apply Scope"
-              onPress={onClose}
+              title="Apply filters"
+              onPress={() => {
+                onApply({ ...draft, field: draftFields.some(field => field.id === draft.field) ? draft.field : 'ALL', period: draftPeriods.includes(draft.period) ? draft.period : 'ALL' });
+                onClose();
+              }}
               style={{ flex: 2 }}
             />
           </View>

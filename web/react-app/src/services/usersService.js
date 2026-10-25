@@ -82,18 +82,18 @@ export async function fetchUsers({ cursor = null, limit = 50 } = {}) {
 /**
  * Provision new account or approve pending registration
  */
-export async function approveOrProvisionUser(payload) {
+export async function approveOrProvisionUser(payload, baseVersion = null) {
   return authenticatedRequest('/api/users/approve', {
     method: 'POST',
-    body: payload
+    body: payload, baseVersion
   });
 }
 
 /** Verify an active account whose phone could not be verified by SMS. */
-export async function verifyUserPhone(userId, payload) {
+export async function verifyUserPhone(userId, payload, baseVersion = null) {
   return authenticatedRequest(`/api/users/${encodeURIComponent(userId)}/verify-phone`, {
     method: 'POST',
-    body: payload
+    body: payload, baseVersion
   });
 }
 

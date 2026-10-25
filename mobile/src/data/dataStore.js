@@ -328,9 +328,16 @@ export const approvePendingRegistration = async (contact, options = {}) => {
 
   if (!isPendingRegistration || !acceptUserNow) {
     try {
+      const verificationMutationId = createClientRecordId('MUT');
       const verified = await authenticatedRequest(`/api/users/${encodeURIComponent(empId)}/verify-phone`, {
         method: 'POST',
-        body: verificationPayload
+        body: {
+          ...verificationPayload,
+          _mutation: {
+            mutationId: verificationMutationId, idempotencyKey: verificationMutationId,
+            entityKey: `users/${empId}`, baseVersion: applicant.updatedAt || 'UNVERSIONED'
+          }
+        }
       });
       const publicAccount = fromUserDocument(empId, verified?.data || applicant);
       const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
@@ -365,7 +372,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
         role: targetRole,
         blockFarmId: assignedFarm.id,
         ...verificationPayload
-      }, { baseVersion: applicant.updatedAt || null });
+      }, { baseVersion: applicant.updatedAt || 'UNVERSIONED' });
       const approved = approvalOutcome.response;
       const publicAccount = fromUserDocument(empId, approved?.data || applicant);
       const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
@@ -405,7 +412,7 @@ export const approvePendingRegistration = async (contact, options = {}) => {
       role: 'MEMBER_FARMER',
       blockFarmId: assignedFarm.id,
       ...verificationPayload
-    }, { baseVersion: applicant.updatedAt || null });
+    }, { baseVersion: applicant.updatedAt || 'UNVERSIONED' });
     const approved = approvalOutcome.response;
     approvedAccountId = approved?.accountId || approved?.data?.id || empId;
     approvedData = approved?.data || applicant;
@@ -681,7 +688,7 @@ export const saveFieldPlot = async (fieldData, isNew = false) => {
   };
   try {
     const outcome = await commitExplicitMutation('field_upsert', fieldMutationPayload, {
-      baseVersion: currentF.updatedAt || null
+      baseVersion: currentF.updatedAt || 'UNVERSIONED'
     });
     if (outcome.response?.data?.cycle) {
       const authoritativeCycle = fromCycleDocument(outcome.response.data.cycle.id, outcome.response.data.cycle);
@@ -1468,7 +1475,7 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
   const previousField = { ...targetField };
   const localCycle = cropCycles.find(c => c.id === targetField.currentCycleId);
   const previousCycle = localCycle ? { ...localCycle } : null;
-  const baseVersion = localCycle?.updatedAt || null;
+  const baseVersion = localCycle?.updatedAt || 'UNVERSIONED';
   Object.assign(targetField, updates);
   if (Number(targetField.stageNumber) < 6) targetField.isCompleted = false;
   if (localCycle) {
@@ -1557,7 +1564,7 @@ export const requestFieldCropCycleRollover = async (fieldId, options = {}) => {
           mutationId,
           idempotencyKey: mutationId,
           entityKey: `fields/${cleanId}`,
-          baseVersion: targetField.updatedAt || null
+          baseVersion: targetField.updatedAt || 'UNVERSIONED'
         }
       }
     });
@@ -1600,9 +1607,16 @@ export const approveFieldCropCycleRollover = async (fieldId, options = {}) => {
   if (!getNetworkStatus()) return { success: false, message: 'Cycle approval requires an active server connection.' };
   if (!targetField?.currentCycleId) return { success: false, message: 'Field has no current Crop Year Cycle.' };
   try {
+    const mutationId = createClientRecordId('MUT');
     const response = await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cleanId)}/rollover/approve`, {
       method: 'POST',
-      body: { previousCycleId: targetField.currentCycleId }
+      body: {
+        previousCycleId: targetField.currentCycleId,
+        _mutation: {
+          mutationId, idempotencyKey: mutationId, entityKey: `fields/${cleanId}`,
+          baseVersion: targetField.updatedAt || 'UNVERSIONED'
+        }
+      }
     });
     if (!response?.data?.newCycleId) throw new Error('Cycle approval returned an incomplete response.');
     if (options.sync !== false) await performMobileSync('CYCLE_APPROVED');
@@ -1640,7 +1654,7 @@ export const archiveFieldPlot = async (fieldId) => {
   let queuedOffline = false;
   try {
     const outcome = await commitExplicitMutation('field_archive', { id: cleanId }, {
-      baseVersion: targetField.updatedAt || null
+      baseVersion: targetField.updatedAt || 'UNVERSIONED'
     });
     queuedOffline = outcome.queued;
     authoritativeField = outcome.response?.data;
@@ -1874,7 +1888,9 @@ export const releaseLocalDraftSubmission = async draftId => {
 };
 
 export const isLogLocked = (log) => {
-  return Boolean(log && log.status === 'ARCHIVED');
+  return Boolean(log && (log.status === 'ARCHIVED' || log.auditLockReportId || auditReports.some(report =>
+    String(report.status || '').toUpperCase() !== 'RETURNED' && (report.sourceLogIds || report.operationSnapshots || []).some(source =>
+      String(source?.operationLogId || source?.id || source) === String(log.id)))));
 };
 
 export const getLogAuditTrail = (logId) => {
@@ -1895,7 +1911,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
   if (isLogLocked(targetLog)) {
     return { 
       success: false, 
-      error: 'Security Lockout: This operation log is archived historical data and cannot be modified.'
+      error: 'This operation is archived or locked by an audit report and cannot be modified. Return an uncertified report before correcting its sources.'
     };
   }
 
@@ -2034,7 +2050,7 @@ export const updateOperationLogWithSecurity = async (logId, updates, editReason,
       changes: canonicalChanges,
       amendment: editRecord
     }, {
-      baseVersion: originalLog.updatedAt || null,
+      baseVersion: originalLog.updatedAt || 'UNVERSIONED',
       takeoverGrant: authorization?.takeoverGrant || null
     });
     if (outcome.response?.data) {
@@ -2074,7 +2090,7 @@ export const archivePastLogsForField = async (fieldId, takeoverGrant = null) => 
     const outcome = await commitExplicitMutation('operation_archive', {
       operationLogIds: toArchive.map(log => log.id)
     }, {
-      baseVersion: Object.fromEntries(toArchive.map(log => [log.id, log.updatedAt || null])),
+      baseVersion: Object.fromEntries(toArchive.map(log => [log.id, log.updatedAt || 'UNVERSIONED'])),
       takeoverGrant
     });
     archivedAt = outcome.response?.data?.archivedAt || outcome.response?.archivedAt || archivedAt;
@@ -2177,7 +2193,7 @@ export const updateFieldCustomStages = async (fieldId, stages) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const field = fields.find(f => f.id.toUpperCase() === cleanId);
   if (field) {
-    const baseVersion = field.updatedAt || null;
+    const baseVersion = field.updatedAt || 'UNVERSIONED';
     field.customStages = Array.isArray(stages) ? stages : [];
     field.updatedAt = new Date().toISOString();
     await saveItem(STORAGE_KEYS.FIELDS, fields);
@@ -2310,7 +2326,7 @@ export const saveFieldCustomOperations = async (fieldId, stageNumber, operations
   if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
     throw new Error('Farm plans can only be changed for your own assigned field.');
   }
-  const baseVersion = field.updatedAt || null;
+  const baseVersion = field.updatedAt || 'UNVERSIONED';
   if (!field.customOperations) field.customOperations = {};
   field.customOperations[stageNumber] = (operations || []).map(op => ({
     ...op,
@@ -2335,7 +2351,7 @@ export const saveFieldFullPlan = async (fieldId, fullPlanByStage) => {
   if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
     throw new Error('Farm plans can only be changed for your own assigned field.');
   }
-  const baseVersion = field.updatedAt || null;
+  const baseVersion = field.updatedAt || 'UNVERSIONED';
   field.customOperations = { ...(fullPlanByStage || {}) };
   field.updatedAt = new Date().toISOString();
   await saveItem(STORAGE_KEYS.FIELDS, fields);
@@ -2361,7 +2377,7 @@ export const saveFieldOperationSchedule = async (fieldId, operationSchedule) => 
   if (!getOperationCapabilities(CURRENT_SESSION, field).canPlan) {
     throw new Error('Farm schedules can only be changed for your own assigned field.');
   }
-  const baseVersion = field.updatedAt || null;
+  const baseVersion = field.updatedAt || 'UNVERSIONED';
   const previousSchedule = Array.isArray(field.operationSchedule)
     ? field.operationSchedule.map(entry => ({ ...entry }))
     : [];

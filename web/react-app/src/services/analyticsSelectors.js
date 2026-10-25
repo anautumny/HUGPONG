@@ -20,9 +20,10 @@ export function filterOperationsByCropYearCycle({ operations = [], cropCycles = 
 }
 
 const isAnalyticsOperation = operation => {
+  if (typeof operation?.analyticsEligible === 'boolean') return operation.analyticsEligible;
   const status = String(operation?.status || 'ACTIVE');
   return status === 'ACTIVE' || status === 'submitted'
-    || (status === 'ARCHIVED' && operation?.archivedReason === 'CYCLE_COMPLETED');
+    || (status === 'ARCHIVED' && ['CYCLE_COMPLETED', 'CROP_YEAR_CORRECTED'].includes(operation?.archivedReason));
 };
 
 /**

@@ -50,7 +50,7 @@ function actor(user) {
   };
 }
 
-async function readAuthorizedField(transaction, database, fieldId, user, action) {
+async function readAuthorizedField(transaction, database, fieldId, user, action, { readOnly = false } = {}) {
   const normalizedFieldId = String(fieldId || '').trim().toUpperCase();
   const identity = actor(user);
   if (![ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER].includes(identity.actorRole)) {
@@ -72,7 +72,7 @@ async function readAuthorizedField(transaction, database, fieldId, user, action)
   }
 
   const authorization = operationAuthorization(user, { id: fieldSnapshot.id, ...field }, { managedBlockFarm });
-  if (!authorization.canCreate) {
+  if (!(readOnly ? authorization.canView : authorization.canCreate)) {
     if (identity.actorRole === ROLES.MEMBER_FARMER) {
       throw serviceError(`Farm Members may ${action} only for their assigned field.`, 403);
     }
@@ -129,6 +129,14 @@ async function readCycleAuditCoverage(transaction, database, cycleId, blockFarmI
   return { submittedLogs, uncompiledLogs };
 }
 
+async function assertOperationNotReported(transaction, database, id, log) {
+  const reports = await transaction.get(database.collection(COLLECTIONS.AUDIT_REPORTS).where('blockFarmId', '==', log.blockFarmId));
+  const report = reports.docs.find(doc => coveredOperationIds([doc]).has(id));
+  if (report) throw serviceError('This operation is locked by an audit report. Return an uncertified report before correcting its source records. Certified records remain read-only.', 409, {
+    code: 'OPERATION_AUDIT_LOCKED', operationLogId: id, reportId: report.id, reportStatus: report.data().status
+  });
+}
+
 async function readActiveCurrentCycle(transaction, database, fieldAccess, cycleId) {
   const normalizedCycleId = String(cycleId || '').trim().toUpperCase();
   const cycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(normalizedCycleId);
@@ -172,10 +180,12 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       if (current.fieldId !== fieldId || current.cycleId !== cycleId || current.submittedByUserId !== identity.actorId) {
         throw serviceError('Operation log ID already belongs to another record.', 409);
       }
+      await readAuthorizedField(transaction, database, fieldId, user, 'view operation receipts', { readOnly: true });
       if (current.status === 'ARCHIVED') {
         throw serviceError('ARCHIVED operation logs cannot be recreated or reactivated.', 409, { id: logId, ...current });
       }
-      return { replayed: true, id: logId, record: current };
+      const cycle = await transaction.get(database.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId));
+      return { replayed: true, id: logId, record: current, cycleVersion: cycle.data()?.updatedAt || 'UNVERSIONED' };
     }
 
     const access = await readAuthorizedField(transaction, database, fieldId, user, 'record operations');
@@ -229,14 +239,42 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
     }, { submittedByUserId: access.actorId, now: timestamp });
     assertOperationFitsField(payload.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
 
+    // Read the cycle's operations before any writes. Updating the common cycle
+    // revision below serializes concurrent creates, including an initially
+    // empty query, across manager/member devices.
+    const cycleOperations = await transaction.get(database.collection(COLLECTIONS.OPERATION_LOGS).where('cycleId', '==', cycleId));
+    const possibleDuplicates = cycleOperations.docs.filter(snapshot => {
+      const saved = snapshot.data();
+      const eligible = saved.status === 'ACTIVE' || (saved.status === 'ARCHIVED' && ['CYCLE_COMPLETED', 'CROP_YEAR_CORRECTED'].includes(saved.archivedReason));
+      return eligible && saved.fieldId === fieldId && saved.submittedByUserId !== access.actorId
+        && saved.operationDefinitionId === payload.operationDefinitionId
+        && Number(saved.stageNumberAtRecord || saved.stageNumber) === payload.stageNumber
+        && String(saved.childOperationDefinitionId || '') === String(payload.childOperationDefinitionId || '')
+        && (payload.plannedOperationId && saved.plannedOperationId === payload.plannedOperationId || saved.performedOn === payload.performedOn);
+    });
+    if (possibleDuplicates.length) {
+      const canRecordSeparate = !payload.childOperationDefinitionId || payload.childOperationDefinitionId === 'CUSTOM';
+      const reviewed = input.reconciliation;
+      const versions = reviewed?.recordVersions;
+      const acknowledged = versions && typeof versions === 'object' && !Array.isArray(versions)
+        && possibleDuplicates.every(doc => versions[doc.id] === (doc.data().updatedAt || 'UNVERSIONED'));
+      if (!canRecordSeparate || !acknowledged || String(reviewed?.reason || '').trim().length < 3) {
+        throw serviceError('Another user already recorded this work. Your queued entry is preserved for review; compare the existing records before recording separate work.', 409, {
+          code: 'OPERATION_RECONCILIATION_REQUIRED', fieldId, cycleId, canRecordSeparate,
+          records: possibleDuplicates.map(doc => ({ id: doc.id, ...doc.data() }))
+        });
+      }
+      payload.reconciliation = {
+        recordVersions: Object.fromEntries(possibleDuplicates.map(doc => [doc.id, doc.data().updatedAt || 'UNVERSIONED'])),
+        reason: String(reviewed.reason).trim().slice(0, 500), reviewedByUserId: access.actorId, reviewedAt: timestamp
+      };
+    }
+
     if (payload.childOperationDefinitionId && payload.childOperationDefinitionId !== 'CUSTOM') {
       const canonicalComponentId = value => String(value || '')
         .trim()
         .toUpperCase()
         .replace(/^SI-SRA-(\d+)-(\d+)$/, 'SI-$1-$2');
-      const cycleOperations = await transaction.get(
-        database.collection(COLLECTIONS.OPERATION_LOGS).where('cycleId', '==', cycleId)
-      );
       const duplicateComponent = cycleOperations.docs.find(snapshot => {
         const operation = snapshot.data();
         return operation.status === 'ACTIVE'
@@ -249,10 +287,13 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
           replayed: true,
           id: duplicateComponent.id,
           record: duplicateComponent.data(),
+          cycleVersion: activeCycle.cycle.updatedAt || 'UNVERSIONED',
           replayReason: 'DUPLICATE_OPERATION_COMPONENT'
         };
       }
     }
+
+    transaction.update(activeCycle.cycleRef, { operationWriteRevision: Number(activeCycle.cycle.operationWriteRevision || 0) + 1 });
 
     if (variety && !existingCycleVariety) {
       transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
@@ -271,7 +312,10 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       details: `Recorded operation ${logId} for field ${fieldId}.`,
       createdAt: timestamp
     });
-    return { replayed: false, id: logId, record: payload };
+    return {
+      replayed: false, id: logId, record: payload,
+      cycleVersion: variety && !existingCycleVariety ? timestamp : activeCycle.cycle.updatedAt || 'UNVERSIONED'
+    };
   });
 }
 
@@ -298,6 +342,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     if (amendment.amendmentId && (existing.amendments || []).some(item => item.amendmentId === amendment.amendmentId)) {
       return { replayed: true, id: snapshot.id, record: existing };
     }
+    await assertOperationNotReported(transaction, database, snapshot.id, { ...existing, blockFarmId: access.field.blockFarmId });
     assertBaseVersion(existing.updatedAt, mutationContext, snapshot.id, { id: snapshot.id, ...existing });
 
     const requested = changes && typeof changes === 'object' ? changes : {};
@@ -350,7 +395,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       cycleId: existing.cycleId,
       blockFarmId: existing.blockFarmId || access.field.blockFarmId,
       cropYearCycle: existing.cropYearCycle || normalizeCropYear(activeCycle.cycle.cropYear),
-      stageNumberAtRecord: existing.stageNumberAtRecord == null ? activeCycle.cycle.currentStageNumber : existing.stageNumberAtRecord,
+      stageNumberAtRecord: fixedStageNumber,
       submittedByUserId: existing.submittedByUserId,
       submissionSource: existing.submissionSource,
       photoEvidence: existing.photoEvidence || null,
@@ -391,6 +436,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
     if (fixedStageNumber === 2 && variety && variety !== String(activeCycle.cycle.variety || '').trim()) {
       transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
     }
+    if (existing.reconciliation) payload.reconciliation = existing.reconciliation;
     transaction.set(ref, payload);
     const auditEventId = `OP-AMEND-${normalizedLogId}-${amendmentId}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 500);
     const auditEventRef = database.collection(COLLECTIONS.AUDIT_LOGS).doc(auditEventId);
@@ -438,6 +484,7 @@ async function archiveOperationRecords(database, logIds, user, timestamp = nowIs
         cycleById.set(log.cycleId, await readActiveCurrentCycle(transaction, database, access, log.cycleId));
       }
       if (log.status === 'ACTIVE') {
+        await assertOperationNotReported(transaction, database, snapshot.id, { ...log, blockFarmId: access.field.blockFarmId });
         assertBaseVersion(log.updatedAt, mutationContext, snapshot.id, { id: snapshot.id, ...log });
       }
     }
@@ -555,6 +602,9 @@ async function requestCycleRollover(database, fieldId, input, user, timestamp = 
     if (Number(cycle.currentStageNumber) !== CROP_STAGE_MAX || !cycle.completedAt) {
       throw serviceError('Complete the Harvest stage before requesting a new Crop Year Cycle.', 409);
     }
+    if (nextCropYearParts(cycle.cropYear).cropYearStart > cropYearParts(null, timestamp).cropYearStart) {
+      throw serviceError('The next annual Crop Year has not started. Your completed cycle remains available.', 409, { code: 'CROP_YEAR_NOT_STARTED' });
+    }
     if (cycle.closureRequest?.status === CYCLE_CLOSURE_STATUS.PENDING) {
       return { id: cycleSnapshot.id, closureRequest: cycle.closureRequest, replayed: true };
     }
@@ -641,7 +691,8 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       if (
         previousSnapshot.exists && previousSnapshot.data().fieldId === normalizedFieldId && previousSnapshot.data().status === 'ARCHIVED' &&
         currentSnapshot.exists && currentSnapshot.data().fieldId === normalizedFieldId && currentSnapshot.data().status === 'ACTIVE' &&
-        Number(currentSnapshot.data().sequenceNumber) === Number(previousSnapshot.data().sequenceNumber) + 1
+        (currentSnapshot.data().previousCycleId === previousCycleId ||
+          (!currentSnapshot.data().previousCycleId && Number(currentSnapshot.data().sequenceNumber) === Number(previousSnapshot.data().sequenceNumber) + 1))
       ) {
         const previousLogs = await transaction.get(
           database.collection(COLLECTIONS.OPERATION_LOGS).where('cycleId', '==', previousCycleId)
@@ -687,7 +738,8 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       throw serviceError('The field must have exactly one canonical ACTIVE Crop Year Cycle before rollover.', 409);
     }
 
-    const nextSequence = integer(oldCycle.sequenceNumber, 'sequenceNumber', { min: 1, max: 9998 }) + 1;
+    // Recovery may have retired an attempted successor. Never reuse its identity.
+    const nextSequence = integer(Math.max(Number(oldCycle.sequenceNumber), ...fieldCycles.docs.map(doc => Number(doc.data().sequenceNumber) || 0)), 'sequenceNumber', { min: 1, max: 9998 }) + 1;
     const newCycleId = createCycleId(normalizedFieldId, nextSequence);
     const newCycleRef = database.collection(COLLECTIONS.CROP_CYCLES).doc(newCycleId);
     const newCycleSnapshot = await transaction.get(newCycleRef);
@@ -733,7 +785,12 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       } : (oldCycle.closureRequest || null)
     };
     const nextCropYear = nextCropYearParts(oldCycle.cropYear);
-    const duplicateAnnualCycle = fieldCycles.docs.find(doc => normalizeCropYear(doc.data().cropYear) === nextCropYear.cropYear);
+    if (nextCropYear.cropYearStart > cropYearParts(null, timestamp).cropYearStart) {
+      throw serviceError(`The ${nextCropYear.cropYear} Crop Year has not started. The completed cycle remains available; start the next annual cycle when its year begins.`, 409, {
+        code: 'CROP_YEAR_NOT_STARTED', cropYearCycle: nextCropYear.cropYear
+      });
+    }
+    const duplicateAnnualCycle = fieldCycles.docs.find(doc => doc.data().archivedReason !== 'CROP_YEAR_RESET' && normalizeCropYear(doc.data().cropYear) === nextCropYear.cropYear);
     if (duplicateAnnualCycle) {
       throw serviceError('This field already has a Crop Year Cycle for the next annual range.', 409, {
         code: 'DUPLICATE_CROP_YEAR_CYCLE',
@@ -746,6 +803,7 @@ async function rolloverFieldCycle(database, fieldId, input, user, timestamp = no
       blockFarmId: field.blockFarmId,
       farmMemberId: field.memberUserId || null,
       sequenceNumber: nextSequence,
+      previousCycleId,
       cropType: requiredString(input.cropType || oldCycle.cropType, 'cropType', { max: 120 }),
       variety: '',
       cropYear: nextCropYear.cropYear,

@@ -163,7 +163,7 @@ export function createMutationContext(path, body, suppliedBaseVersion = null) {
     mutationId,
     idempotencyKey: mutationId,
     entityKey: String(path || '').replace(/^\/api\//, '').replace(/\?.*$/, ''),
-    baseVersion: suppliedBaseVersion
+    baseVersion: suppliedBaseVersion ?? 'UNVERSIONED'
   };
 }
 

@@ -38,6 +38,7 @@ import {
 } from '../../services/localOperationDrafts';
 import { amendmentEditor, amendmentSummary, formatAmendmentChanges, formatDate as formatAmendmentDate } from '../../domain/amendmentPresentation';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
+import ArchiveFilters from '../../components/operations/ArchiveFilters';
 import EditOperationModal from '../../components/operations/EditOperationModal';
 import AddOperationModal from '../../components/operations/AddOperationModal';
 import TakeOverAuthModal from '../../components/operations/TakeOverAuthModal';
@@ -196,7 +197,8 @@ export default function OperationsView() {
   const [completingStageFieldId, setCompletingStageFieldId] = useState(null);
   const [cycleDecisionFieldId, setCycleDecisionFieldId] = useState(null);
   const [selectedCycleClosureIds, setSelectedCycleClosureIds] = useState(() => new Set());
-  const [updateSuccess, setUpdateSuccess] = useState('');
+  const [updateSuccess, setUpdateSuccess] = useState(() => searchParams.get('notice') === 'stage-not-advanced'
+    ? 'The operation was saved, but its stage was not advanced. Refresh the field and complete the stage separately.' : '');
   const [localDrafts, setLocalDrafts] = useState([]);
   const [activeDraft, setActiveDraft] = useState(null);
 
@@ -567,10 +569,12 @@ export default function OperationsView() {
     }
   };
 
+  const isOperationLocked = operation => Boolean(operation?.auditLockReportId || (auditCoverageByOperationId.get(String(operation?.id))?.status && auditCoverageByOperationId.get(String(operation.id)).status !== 'RETURNED'));
+
   // Entry point: Edit Operation
   const handleEditOperationClick = (operation, field) => {
     setUpdateSuccess('');
-    if (operation.status === 'ARCHIVED') return;
+    if (operation.status === 'ARCHIVED' || isOperationLocked(operation)) return;
 
     // Auto-expand this field card
     setExpandedFields(prev => ({ ...prev, [field.id]: true }));
@@ -589,7 +593,7 @@ export default function OperationsView() {
 
   const handleArchiveOperationClick = (operation, field) => {
     setUpdateSuccess('');
-    if (operation.status === 'ARCHIVED') return;
+    if (operation.status === 'ARCHIVED' || isOperationLocked(operation)) return;
     if (getOperationCapabilities(user, field, takeoverSession).requiresTakeover) {
       setPendingAction({ type: 'ARCHIVE_OPERATION', operation, field });
       setAuthModalField(field);
@@ -685,7 +689,7 @@ export default function OperationsView() {
   }, [archiveState.records, validArchivePage]);
   const authorizedArchiveCycles = useMemo(() => {
     const fieldIds = new Set((fieldsData.fields || []).map(field => field.id));
-    return (fieldsData.cropCycles || []).filter(cycle => fieldIds.has(cycle.fieldId));
+    return (fieldsData.cropCycles || []).filter(cycle => fieldIds.has(cycle.fieldId) && cycle.archivedReason !== 'CROP_YEAR_RESET');
   }, [fieldsData.cropCycles, fieldsData.fields]);
   const pendingCycleClosures = useMemo(() => {
     const fieldById = new Map((fieldsData.fields || []).map(field => [field.id, field]));
@@ -730,7 +734,7 @@ export default function OperationsView() {
     setCycleDecisionFieldId(field.id);
     setUpdateSuccess('');
     try {
-      await approveCropYearCycleRollover(field.id, cycle.id);
+      await approveCropYearCycleRollover(field.id, cycle.id, field.updatedAt);
       setUpdateSuccess(`Approved ${field.id}. The next Crop Year Cycle is now active.`);
     } catch (error) {
       window.alert(error.message || 'Compile all outstanding operations before approving this request.');
@@ -750,7 +754,7 @@ export default function OperationsView() {
     const failed = [];
     for (const item of selected) {
       try {
-        await approveCropYearCycleRollover(item.field.id, item.cycle.id);
+        await approveCropYearCycleRollover(item.field.id, item.cycle.id, item.field.updatedAt);
         approved.push(item);
       } catch (error) {
         failed.push({ fieldId: item.field.id, message: error.message || 'Outstanding operations still need compilation.' });
@@ -786,7 +790,7 @@ export default function OperationsView() {
     if (!archiveTarget) return;
     setIsArchiving(true);
     try {
-      await archiveOperations([archiveTarget.id], takeoverGrant);
+      await archiveOperations([archiveTarget.id], takeoverGrant, { [archiveTarget.id]: archiveTarget.updatedAt || 'UNVERSIONED' });
       setIsArchiving(false);
       setArchiveTarget(null);
       setUpdateSuccess('Operation record archived successfully.');
@@ -924,7 +928,7 @@ export default function OperationsView() {
       align: 'right',
       width: '90px',
       render: (_, row) => (
-        canArchive && row.status !== 'ARCHIVED' ? (
+        canArchive && row.status !== 'ARCHIVED' && !isOperationLocked(row) ? (
           <button
             type="button"
             onClick={() => handleArchiveOperationClick(row, fieldsData.fields.find(field => field.id === row.fieldId))}
@@ -1426,7 +1430,7 @@ export default function OperationsView() {
 
                                   {/* Right: Actions */}
                                   <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
-                                    {capability.canEdit && (
+                                    {capability.canEdit && !isOperationLocked(operation) && (
                                       <Button
                                         variant="outline"
                                         size="sm"
@@ -1439,7 +1443,7 @@ export default function OperationsView() {
                                       </Button>
                                     )}
 
-                                    {canArchive && capability.canEdit && !isArchived && (
+                                    {canArchive && capability.canEdit && !isArchived && !isOperationLocked(operation) && (
                                       <button
                                         type="button"
                                         onClick={() => handleArchiveOperationClick(operation, field)}
@@ -1521,32 +1525,7 @@ export default function OperationsView() {
 
             {statusFilter === 'ARCHIVED' && (
               <div className="pt-3 border-t border-border/60">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <label className="min-w-0">
-                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Crop Year Cycle</span>
-                    <Select
-                      value={archiveFilters.cropYearCycle}
-                      onChange={(event) => updateArchiveFilter('cropYearCycle', event.target.value)}
-                      options={archiveCycleOptions}
-                    />
-                  </label>
-                  <label className="min-w-0">
-                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Field</span>
-                    <Select
-                      value={archiveFilters.fieldId}
-                      onChange={(event) => updateArchiveFilter('fieldId', event.target.value)}
-                      options={archiveFieldOptions}
-                    />
-                  </label>
-                  <label className="min-w-0">
-                    <span className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Operation</span>
-                    <Select
-                      value={archiveFilters.operationDefinitionId}
-                      onChange={(event) => updateArchiveFilter('operationDefinitionId', event.target.value)}
-                      options={archiveOperationOptions}
-                    />
-                  </label>
-                </div>
+                <ArchiveFilters filters={archiveFilters} onApply={setArchiveFilters} years={archiveCycleOptions} fields={archiveFieldOptions} operations={archiveOperationOptions} />
                 {invalidArchiveCycles.length > 0 && (
                   <p className="mt-2 text-xs font-semibold text-warning">
                     Data integrity notice: {invalidArchiveCycles.length} Crop Year Cycle record{invalidArchiveCycles.length === 1 ? '' : 's'} with an invalid stored year {invalidArchiveCycles.length === 1 ? 'is' : 'are'} excluded from this filter.
@@ -1668,7 +1647,7 @@ export default function OperationsView() {
             setAddOperationField(null);
             setActiveDraft(null);
           }
-          setUpdateSuccess(options.keepOpen ? 'Item submitted under its operation title.' : 'Operation recorded successfully and synchronized.');
+          setUpdateSuccess(options.stageAdvanceWarning || (options.keepOpen ? 'Item submitted under its operation title.' : 'Operation recorded successfully and synchronized.'));
         }}
       />
 

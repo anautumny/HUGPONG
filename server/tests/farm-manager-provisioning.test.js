@@ -148,6 +148,169 @@ function loadApproveHandler(database) {
   return router.stack.find(layer => layer.route?.path === '/approve' && layer.route.methods.post).route.stack.at(-1).handle;
 }
 
+function approvalRecheckFixture() {
+  const database = new MemoryDb({
+    users: { '04000077': {
+      displayName: 'Pending Member', role: 'MEMBER_FARMER', status: 'PENDING',
+      requestedBlockFarmId: 'BF-001', affiliatedBlockFarmId: 'BF-001',
+      phoneVerifiedAt: '2026-10-24T00:00:00.000Z', updatedAt: 'v1'
+    } },
+    block_farms: { 'BF-001': { status: 'ACTIVE', managerUserId: '03000001' } }
+  });
+  const request = {
+    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', _mutation: {
+      mutationId: 'MUT-APPROVAL-RECHECK', idempotencyKey: 'MUT-APPROVAL-RECHECK', entityKey: 'users/04000077', baseVersion: 'v1'
+    } },
+    session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } }, get: () => ''
+  };
+  return { database, request };
+}
+
+test('pending approval cannot reactivate an account disabled just before its atomic commit', async () => {
+  const { database, request } = approvalRecheckFixture();
+  const originalBatch = database.batch.bind(database);
+  let injected = false;
+  database.batch = () => {
+    const writer = originalBatch(), commit = writer.commit;
+    writer.commit = async () => {
+      if (!injected) {
+        injected = true;
+        const member = database.records.get('users').get('04000077');
+        database.records.get('users').set('04000077', { ...member, status: 'DISABLED', updatedAt: 'v2' });
+        database.versions.set('users/04000077', 2);
+      }
+      return commit();
+    };
+    return writer;
+  };
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 409);
+  assert.equal(database.records.get('users').get('04000077').status, 'DISABLED');
+  assert.equal(database.records.has('audit_logs'), false);
+});
+
+test('approval checks its expected user version inside the transaction', async () => {
+  const { database, request } = approvalRecheckFixture();
+  const transact = database.runTransaction.bind(database);
+  database.runTransaction = async work => {
+    database.records.get('users').get('04000077').updatedAt = 'v2';
+    return transact(work);
+  };
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 409);
+  assert.equal(database.records.get('users').get('04000077').status, 'PENDING');
+});
+
+test('approval revalidates manager assignment before committing the account change', async () => {
+  const { database, request } = approvalRecheckFixture();
+  const transact = database.runTransaction.bind(database);
+  database.runTransaction = async work => {
+    database.records.get('block_farms').get('BF-001').managerUserId = '03009999';
+    return transact(work);
+  };
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 403);
+  assert.equal(database.records.get('users').get('04000077').status, 'PENDING');
+});
+
+test('approval receipt retries retain idempotency and reject a manager who has lost account scope', async () => {
+  const { database, request } = approvalRecheckFixture();
+  const member = database.records.get('users').get('04000077');
+  Object.assign(member, { status: 'ACTIVE', approvedByUserId: '03000001' });
+  const handler = loadApproveHandler(database);
+  const allowed = responseCapture();
+  await handler(request, allowed);
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.payload.replayed, true);
+  database.records.get('block_farms').get('BF-001').managerUserId = '03009999';
+  const denied = responseCapture();
+  await handler(request, denied);
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.payload.data, undefined);
+});
+
+test('phone-verification receipts check current farm scope and target-role authority', async () => {
+  const { database, request } = approvalRecheckFixture();
+  request.params = { userId: '04000077' };
+  const handler = loadVerifyPhoneHandler(database);
+  const allowed = responseCapture();
+  await handler(request, allowed);
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.payload.replayed, true);
+  database.records.get('block_farms').get('BF-001').managerUserId = '03009999';
+  const reassigned = responseCapture();
+  await handler(request, reassigned);
+  assert.equal(reassigned.statusCode, 403);
+  assert.equal(reassigned.payload.data, undefined);
+  database.records.get('users').get('04000077').role = 'SRA_ADMIN';
+  const wrongRole = responseCapture();
+  await handler(request, wrongRole);
+  assert.equal(wrongRole.statusCode, 403);
+  assert.equal(wrongRole.payload.data, undefined);
+});
+
+test('phone verification requires the account version that the reviewer inspected', async () => {
+  const { database, request } = approvalRecheckFixture();
+  Object.assign(database.records.get('users').get('04000077'), { phoneVerifiedAt: null, updatedAt: 'v2' });
+  request.params = { userId: '04000077' };
+  request.body.verificationReasonCode = 'ID_AND_SIM_IN_PERSON';
+  const handler = loadVerifyPhoneHandler(database);
+  const stale = responseCapture();
+  await handler(request, stale);
+  assert.equal(stale.statusCode, 409);
+  assert.equal(database.records.get('users').get('04000077').phoneVerifiedAt, null);
+  delete request.body._mutation;
+  const absent = responseCapture();
+  await handler(request, absent);
+  assert.equal(absent.statusCode, 428);
+});
+
+test('a phone changed before verification commit is not marked as verified', async () => {
+  const { database, request } = approvalRecheckFixture();
+  Object.assign(database.records.get('users').get('04000077'), { phoneVerifiedAt: null, phone: '09171234567' });
+  request.params = { userId: '04000077' };
+  request.body.verificationReasonCode = 'ID_AND_SIM_IN_PERSON';
+  const originalBatch = database.batch.bind(database);
+  let injected = false;
+  database.batch = () => {
+    const writer = originalBatch(), commit = writer.commit;
+    writer.commit = async () => {
+      if (!injected) {
+        injected = true;
+        Object.assign(database.records.get('users').get('04000077'), { phone: '09179999999', updatedAt: 'v2' });
+        database.versions.set('users/04000077', 2);
+      }
+      return commit();
+    };
+    return writer;
+  };
+  const response = responseCapture();
+  await loadVerifyPhoneHandler(database)(request, response);
+  assert.equal(response.statusCode, 409);
+  assert.equal(database.records.get('users').get('04000077').phone, '09179999999');
+  assert.equal(database.records.get('users').get('04000077').phoneVerifiedAt, null);
+  assert.equal(database.records.has('audit_logs'), false);
+});
+
+test('phone verification rechecks the manager assignment inside its transaction', async () => {
+  const { database, request } = approvalRecheckFixture();
+  database.records.get('users').get('04000077').phoneVerifiedAt = null;
+  request.params = { userId: '04000077' };
+  request.body.verificationReasonCode = 'ID_AND_SIM_IN_PERSON';
+  const transact = database.runTransaction.bind(database);
+  database.runTransaction = async work => {
+    database.records.get('block_farms').get('BF-001').managerUserId = '03009999';
+    return transact(work);
+  };
+  const response = responseCapture();
+  await loadVerifyPhoneHandler(database)(request, response);
+  assert.equal(response.statusCode, 403);
+  assert.equal(database.records.get('users').get('04000077').phoneVerifiedAt, null);
+});
+
 function loadPatchHandler(database) {
   const firebasePath = require.resolve('../firebase-admin');
   const routePath = require.resolve('../routes/users');
@@ -270,7 +433,7 @@ test('assigned Farm Manager or district administrators can verify an unverified 
   const managerDatabase = new MemoryDb(seed());
   const managerApproved = responseCapture();
   await loadApproveHandler(managerDatabase)({
-    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', verificationReasonCode: 'ID_AND_SIM_IN_PERSON' },
+    body: { id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', verificationReasonCode: 'ID_AND_SIM_IN_PERSON', _mutation: { mutationId: 'MUT-APPROVAL-77', idempotencyKey: 'MUT-APPROVAL-77', entityKey: 'users/04000077', baseVersion: '2026-09-29T00:00:00.000Z' } },
     session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } },
     get: () => ''
   }, managerApproved);
@@ -282,7 +445,8 @@ test('assigned Farm Manager or district administrators can verify an unverified 
   await loadApproveHandler(sraDatabase)({
     body: {
       id: '04000077', role: 'MEMBER_FARMER', blockFarmId: 'BF-001',
-      verificationReasonCode: 'OFFICIAL_RECORD_MATCH'
+      verificationReasonCode: 'OFFICIAL_RECORD_MATCH',
+      _mutation: { mutationId: 'MUT-SRA-APPROVAL-77', idempotencyKey: 'MUT-SRA-APPROVAL-77', entityKey: 'users/04000077', baseVersion: '2026-09-29T00:00:00.000Z' }
     },
     session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } },
     get: () => ''
@@ -314,7 +478,9 @@ test('phone verification can leave a registration pending for explicit acceptanc
   });
   const verified = responseCapture();
   await loadVerifyPhoneHandler(database)({
-    body: { verificationReasonCode: 'ID_AND_SIM_IN_PERSON' },
+    body: { verificationReasonCode: 'ID_AND_SIM_IN_PERSON', _mutation: {
+      mutationId: 'MUT-VERIFY-88', idempotencyKey: 'MUT-VERIFY-88', entityKey: 'users/04000088', baseVersion: '2026-09-29T00:00:00.000Z'
+    } },
     params: { userId: '04000088' },
     session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } }
   }, verified);
@@ -326,7 +492,7 @@ test('phone verification can leave a registration pending for explicit acceptanc
 
   const approved = responseCapture();
   await loadApproveHandler(database)({
-    body: { id: '04000088', role: 'MEMBER_FARMER', blockFarmId: 'BF-001' },
+    body: { id: '04000088', role: 'MEMBER_FARMER', blockFarmId: 'BF-001', _mutation: { mutationId: 'MUT-APPROVAL-88', idempotencyKey: 'MUT-APPROVAL-88', entityKey: 'users/04000088', baseVersion: verified.payload.data.updatedAt } },
     session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } },
     get: () => ''
   }, approved);
@@ -352,7 +518,8 @@ test('editing a Farm Manager moves the canonical assignment to the selected Bloc
   await loadPatchHandler(database)({
     body: {
       firstName: 'Karl', middleName: '', lastName: 'Cuello', suffix: '',
-      phone: '09091765170', role: 'FARM_MANAGER', blockFarmId: 'BF-NEW'
+      phone: '09091765170', role: 'FARM_MANAGER', blockFarmId: 'BF-NEW',
+      _mutation: { mutationId: 'MUT-EDIT-MANAGER', idempotencyKey: 'MUT-EDIT-MANAGER', entityKey: 'users/03000055', baseVersion: '2026-09-01T00:00:00.000Z' }
     },
     params: { userId: '03000055' },
     session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } },
@@ -390,7 +557,8 @@ test('editing a Block Farm can replace its manager and moves the selected manage
   await loadBlockFarmPutHandler(database)({
     body: {
       name: 'Target Farm', location: 'Target Location', declaredAreaHa: 10,
-      managerUserId: '03000022'
+      managerUserId: '03000022',
+      _mutation: { mutationId: 'MUT-EDIT-FARM', idempotencyKey: 'MUT-EDIT-FARM', entityKey: 'block_farms/BF-TARGET', baseVersion: '2026-09-01T00:00:00.000Z' }
     },
     params: { id: 'BF-TARGET' },
     session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } },

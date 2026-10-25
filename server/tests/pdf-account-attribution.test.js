@@ -34,15 +34,16 @@ test('audit PDFs derive their Crop Year Cycle from authoritative report snapshot
   assert.equal(nextCropYearCycle(cropYears[0]), '2027-2028');
   assert.equal(nextCropYearCycle('2034-2035'), '2035-2036');
   assert.equal(nextCropYearCycle('invalid'), '');
-  assert.equal(canonicalAuditReport({ cropYearCycles: cropYears }).continuationCropYearCycle, '2027-2028');
+  assert.equal(canonicalAuditReport({ cropYearCycles: cropYears }).continuationCropYearCycle, null);
 
   const mobilePdf = read('../../mobile/src/services/auditPdfService.js');
   const webPdf = read('../../web/react-app/src/components/audit/PrintableAuditReport.jsx');
   for (const source of [mobilePdf, webPdf]) {
     assert.match(source, /auditCropYearCycles/);
-    assert.match(source, /nextCropYearCycle/);
-    assert.match(source, /formatCropYearDisplay\(continuationCropYear\)/);
-    assert.match(source, /Crop Year Cycle/);
+    assert.match(source, /auditReportLayout/);
+    assert.doesNotMatch(source, /nextCropYearCycle/);
+    assert.match(source, /Calendar year/);
+    assert.match(source, /CROP YEAR CYCLE|Crop Year Cycle/);
     assert.doesNotMatch(source, /Following Period/i);
     assert.doesNotMatch(source, /HUG-SRA-AUDIT/);
   }
@@ -50,7 +51,7 @@ test('audit PDFs derive their Crop Year Cycle from authoritative report snapshot
   assert.doesNotMatch(webPdf, /const continuationCY = currentCY;/);
 
   const serverRoute = read('../routes/auditReports.js');
-  assert.match(serverRoute, /continuationCropYearCycle:\s*nextCropYearCycle/);
+  assert.match(serverRoute, /continuationCropYearCycle:\s*cropYearCycles\[1\] \|\| null/);
 });
 
 test('audit PDF QR appears in the header with its code and no fabricated compliance copy', () => {

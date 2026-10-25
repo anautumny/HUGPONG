@@ -44,7 +44,8 @@ async function assertPhoneVerificationAuthority(database, {
   targetRole,
   requestedBlockFarmId = null,
   affiliatedBlockFarmId = null,
-  selectedBlockFarmId = null
+  selectedBlockFarmId = null,
+  transaction = null
 }) {
   const actor = canonicalRole(actorRole);
   const target = canonicalRole(targetRole);
@@ -81,7 +82,8 @@ async function assertPhoneVerificationAuthority(database, {
     throw verificationError('The assigned Farm Manager may verify only the Block Farm selected during registration.');
   }
   if (!database) throw verificationError('Account database is unavailable.', 503);
-  const farm = await database.collection(COLLECTIONS.BLOCK_FARMS).doc(authoritativeFarmId).get();
+  const farmRef = database.collection(COLLECTIONS.BLOCK_FARMS).doc(authoritativeFarmId);
+  const farm = await (transaction ? transaction.get(farmRef) : farmRef.get());
   if (!farm.exists || String(farm.data().managerUserId || '').trim() !== normalizedActorId) {
     throw verificationError('Only the Farm Manager assigned to the selected Block Farm may verify this member phone.');
   }

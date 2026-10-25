@@ -158,7 +158,7 @@ router.put('/:id', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res)
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Block farm not found.'), { status: 404 });
       const latest = latestSnapshot.data();
-      assertBaseVersion(latest.updatedAt, mutationContext, blockFarmId, { id: blockFarmId, ...latest });
+      assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, blockFarmId, { id: blockFarmId, ...latest });
       const farmFieldsSnapshot = await transaction.get(
         db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', blockFarmId)
       );

@@ -263,7 +263,7 @@ export default function AuditCompilationModal({
     setIsSubmitting(true);
     setCompileError(null);
     try {
-      const response = await submitAuditReport(reportId);
+      const response = await submitAuditReport(reportId, compiledResult.updatedAt);
       if (!response.success || !response.data) throw new Error(response.error || 'Cloud submission failed.');
       setCompiledResult(response.data);
       setDeliveryMessage('Submitted through Cloud. The report is now visible in the SRA Audit Inbox.');
@@ -432,9 +432,10 @@ export default function AuditCompilationModal({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={step === 1 ? 'Compile Monthly SRA Audit Dossier' : step === 2 ? 'Choose Report Delivery' : 'QR Audit Transfer'}
-      size="lg"
-      footer={footer}
+      title={step === 1 ? 'Compile Monthly SRA Audit Dossier' : step === 2 ? 'Choose Report Delivery' : 'Share audit QR'}
+      size={step === 3 ? 'sm' : 'lg'}
+      footer={step === 3 ? null : footer}
+      closeOnBackdrop={step === 3 && !isBusy}
       preventBackdropClose={isCompiling || isSubmitting || isPreparingQr}
       preventEscapeClose={isCompiling || isSubmitting || isPreparingQr}
       isLoading={isBusy}
@@ -679,63 +680,30 @@ export default function AuditCompilationModal({
           {deliveryMessage && <div className="w-full p-3 bg-primary-bg text-primary border border-primary/30 rounded-xl text-xs font-semibold">{deliveryMessage}</div>}
         </div>
       ) : (
-        <div className="flex flex-col items-center text-center gap-4 py-2">
-          <div>
-            <h4 className="text-base font-bold text-hug-text">
-              Audit Report QR
-            </h4>
-            <p className="text-xs text-hug-muted mt-1 max-w-md">
-              Scan this code once on the SRA device. The authoritative report will be securely retrieved from the server.
-            </p>
-          </div>
-          <div className="bg-bg p-4 rounded-2xl border border-border flex flex-col items-center gap-3 w-full max-w-sm">
-            <div className="w-full overflow-hidden rounded-2xl border border-[#BCD5C0] bg-[#F8FBF6] shadow-sm">
-              <div className="flex items-center gap-3 bg-[#173D24] px-4 py-3 text-left">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#9EE493] text-lg font-black text-[#173D24]">H</div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-lg font-black tracking-[0.18em] text-white">HUGPONG</p>
-                  <p className="text-[9px] font-extrabold tracking-[0.14em] text-[#BFE5B9]">OFFICIAL AUDIT TRANSFER</p>
-                </div>
-                <FileCheck2 className="h-6 w-6 text-[#9EE493]" aria-hidden="true" />
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 px-4 pt-3 text-left">
-                <div className="col-span-2">
-                  <p className="text-[8px] font-black tracking-wider text-hug-muted">FARM MANAGER</p>
-                  <p className="truncate text-xs font-extrabold text-hug-text">{compiledResult?.compiledByName || compiledResult?.compiledByUserId || 'Farm Manager'}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-[8px] font-black tracking-wider text-hug-muted">BLOCK FARM</p>
-                  <p className="truncate text-xs font-extrabold text-hug-text">{compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId || 'Not specified'}</p>
-                </div>
-                <div>
-                  <p className="text-[8px] font-black tracking-wider text-hug-muted">REPORTING MONTH</p>
-                  <p className="truncate text-[11px] font-bold text-hug-text">{compiledResult?.periodKey || selectedPeriod}</p>
-                </div>
-                <div>
-                  <p className="text-[8px] font-black tracking-wider text-hug-muted">CROP YEAR CYCLE</p>
-                  <p className="truncate text-[11px] font-bold text-hug-text">{compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Not specified'}</p>
-                </div>
-              </div>
-              <div className="mx-auto mt-3 w-fit rounded-2xl border border-[#DCE7DA] bg-white p-1">
-                <QRCodeView value={qrPayload} size={238} color="#000000" bgColor="#FFFFFF" className="border-0 p-0 shadow-none" />
-              </div>
-              <div className="px-4 pb-3 pt-2 text-center">
-                <strong className="inline-flex rounded-full bg-[#EAF5E7] px-3 py-1 text-[8px] font-black tracking-wider text-[#2F6B3B]">SECURE SERVER-VERIFIED REFERENCE</strong>
-                <p className="mt-1.5 break-all font-mono text-[9px] font-bold text-hug-muted">{compiledResult?.reportId || compiledResult?.id}</p>
-              </div>
+        <div className="mx-auto w-full max-w-sm space-y-3">
+          <p className="text-xs text-hug-muted">Show this QR to the SRA scanner.</p>
+          <div className="overflow-hidden rounded-xl border border-border bg-bg text-center">
+            <div className="bg-[#173D24] px-4 py-2 text-left text-xs font-extrabold tracking-widest text-white">HUGPONG</div>
+            <p className="px-4 pt-3 text-sm font-bold text-hug-text">{compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId}</p>
+            <p className="px-3 pt-1 text-xs text-hug-muted">{compiledResult?.periodKey || selectedPeriod} · {compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Crop year not recorded'}</p>
+            <div className="mx-auto my-3 w-fit overflow-hidden rounded-xl bg-white">
+              <QRCodeView value={qrPayload} size={238} color="#000000" bgColor="#FFFFFF" className="border-0 p-0 shadow-none" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
-              <Button variant="secondary" size="sm" icon={Download} onClick={downloadCurrentQr} isLoading={isSavingQr} loadingText="Saving QR image...">Save QR Image</Button>
-              <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference} disabled={isSavingQr}>Copy Report ID</Button>
-              {canonicalAuditStatus(compiledResult?.status) === AUDIT_STATUS.COMPILED && (
-                <Button className="sm:col-span-2" variant="primary" size="sm" icon={CloudUpload} onClick={handleCloudSubmission} isLoading={isSubmitting} loadingText="Sending through Cloud..." disabled={isPreparingQr || isSavingQr}>
-                  Send Through Cloud Instead
-                </Button>
-              )}
-            </div>
-            {qrActionMessage && <p className="text-[10px] text-success">{qrActionMessage}</p>}
-            {compileError && <p className="text-[10px] text-danger">{compileError}</p>}
+            <p className="px-3 pb-3 text-xs text-hug-muted">{compiledResult?.fieldCount || 0} plots · {compiledResult?.operationCount || 0} operations · ₱{Number(compiledResult?.totalCost || 0).toLocaleString('en-PH')}</p>
           </div>
+          <details className="text-xs text-hug-muted">
+            <summary className="min-h-10 cursor-pointer py-2 font-semibold text-primary">Report details</summary>
+            <p className="py-1">Farm manager: {compiledResult?.compiledByName || 'Not recorded'}</p>
+            <p className="break-all py-1 font-mono">{compiledResult?.reportId || compiledResult?.id}</p>
+            <p className="py-1">An internet connection is required to retrieve the report.</p>
+          </details>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="primary" size="sm" icon={Download} onClick={downloadCurrentQr} isLoading={isSavingQr} loadingText="Saving…">Save QR</Button>
+            <Button variant="secondary" size="sm" icon={Copy} onClick={copyReportReference} disabled={isSavingQr}>Copy ID</Button>
+          </div>
+          {canonicalAuditStatus(compiledResult?.status) === AUDIT_STATUS.COMPILED && <Button className="w-full" variant="ghost" size="sm" onClick={handleCloudSubmission} isLoading={isSubmitting} disabled={isPreparingQr || isSavingQr}>Send through Cloud instead</Button>}
+          {qrActionMessage && <p className="text-xs text-success">{qrActionMessage}</p>}
+          {compileError && <p role="alert" className="text-xs text-danger">{compileError}</p>}
         </div>
       )}
     </Modal>

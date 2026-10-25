@@ -715,7 +715,7 @@ test('Farm Manager records on their own assigned field without a takeover grant'
   db.collections.get(COLLECTIONS.FIELDS).get(FIELD_ID).memberUserId = manager.employeeId;
   const created = await createOperationRecord(db, {
     id: 'LOG-MANAGER-OWN-FIELD',
-    ...operation({ operationDefinitionId: 'SRA-02', stageNumber: 1 })
+    ...operation({ operationDefinitionId: 'SRA-02', stageNumber: 1, performedOn: '2026-09-17' })
   }, manager, NOW);
   assert.equal(created.record.submittedByUserId, manager.employeeId);
   assert.equal(created.record.submissionSource, 'FIELD_OWNER');
@@ -825,16 +825,37 @@ test('new Crop Year Cycle is the stored cycle successor instead of a client-supp
   assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).cropYear, '2026-2027');
 });
 
-test('rollover advances 2026-2027 to 2027-2028 even when both actions occur during 2026', async () => {
+test('rollover cannot start the 2027-2028 annual range during 2026', async () => {
   const db = database();
   db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).cropYear = '2026-2027';
 
-  const result = await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, NOW);
+  await assert.rejects(rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, NOW),
+    error => error.status === 409 && error.data?.code === 'CROP_YEAR_NOT_STARTED');
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).status, 'ACTIVE');
+  assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).currentCycleId, OLD_CYCLE_ID);
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, NEW_CYCLE_ID), undefined);
+});
 
+test('rollover can start the next annual range at the Philippine year boundary', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).cropYear = '2026-2027';
+  const result = await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, '2026-12-31T16:00:00.000Z');
   assert.equal(result.newCycle.cropYear, '2027-2028');
-  assert.equal(result.newCycle.cropYearStart, 2027);
-  assert.equal(result.newCycle.cropYearEnd, 2028);
-  assert.equal(db.get(COLLECTIONS.FIELDS, FIELD_ID).cropYear, '2027-2028');
+});
+
+test('a restored cycle can roll over after its retired successor without reusing the old identity', async () => {
+  const db = database();
+  db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID).cropYear = '2026-2027';
+  db.collections.get(COLLECTIONS.CROP_CYCLES).set(NEW_CYCLE_ID, {
+    fieldId: FIELD_ID, sequenceNumber: 2, cropYear: '2027-2028', status: 'ARCHIVED', archivedReason: 'CROP_YEAR_RESET',
+  });
+  const result = await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, '2027-01-01T00:00:00.000Z');
+  assert.equal(result.newCycle.sequenceNumber, 3);
+  assert.equal(result.newCycle.cropYear, '2027-2028');
+  assert.equal(result.newCycle.previousCycleId, OLD_CYCLE_ID);
+  const replay = await rolloverFieldCycle(db, FIELD_ID, rolloverInput, USER, '2027-01-01T00:00:01.000Z');
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.newCycleId, result.newCycleId);
 });
 
 test('Farm Member may advance only the canonical cycle for their own field without takeover', async () => {
@@ -1000,7 +1021,7 @@ test('web and mobile cache reconciliation defer to canonical server lifecycle st
 
   assert.match(webSource, /subscribeToAuthenticatedResource\(`\/api\/logs\$\{statusQuery\}`/);
   assert.match(webSource, /fromOperation\(item\.id, item\)/);
-  assert.doesNotMatch(webSource, /onSnapshot|collection\(db/);
+  assert.doesNotMatch(webSource, /\bonSnapshot\b|collection\(db/);
   assert.doesNotMatch(webSource, /refreshWebLifecycleStateFromApi/);
   assert.doesNotMatch(webSource, /canonicalLocalOnly|localOnly|pendingCreateOverlays/);
   assert.match(mobileSource, /pendingCreateOverlays/);
@@ -1008,5 +1029,5 @@ test('web and mobile cache reconciliation defer to canonical server lifecycle st
   assert.match(mobileSource, /authenticatedRequest\('\/api\/crop-cycles'\)/);
   assert.match(mobileSource, /authenticatedRequest\('\/api\/fields'\)/);
   assert.match(mobileSource, /fetchOperationPages\(authenticatedRequest/);
-  assert.doesNotMatch(mobileSource, /onSnapshot|collection\(db/);
+  assert.doesNotMatch(mobileSource, /\bonSnapshot\b|collection\(db/);
 });

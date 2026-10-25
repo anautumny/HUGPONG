@@ -307,6 +307,8 @@ export function getOutboxDiagnostics() {
     nextAttemptAt: item.nextAttemptAt || null,
     lastAttempt: item.lastAttempt || null,
     lastError: item.lastError || null,
+    conflict: item.conflict || null,
+    proposedChanges: item.type === 'operation_amendment' ? item.payload?.changes : null,
     dependsOnMutationId: item.dependsOnMutationId || null
   }));
 }
@@ -420,6 +422,38 @@ export async function removeOutboxItem(outboxId) {
   ));
   await persistOutboxQueue();
   notifySyncEngine();
+}
+
+export async function resolveOperationConflict(mutationId, { separate = false, reason = '' } = {}) {
+  return runOutboxSingleFlight(async () => {
+    const item = outboxQueue.find(queued => queued.mutationId === mutationId);
+    const reviewable = item && ['operation_log', 'takeover_log', 'operation_amendment', 'operation_archive'].includes(item.type)
+      && ['conflict', 'validation', 'rejected', 'authorization'].includes(item.status);
+    if (!activeOutboxOwnerId || !reviewable || (item.ownerUserId && item.ownerUserId !== activeOutboxOwnerId)
+      || (separate && item.conflict?.code !== 'OPERATION_RECONCILIATION_REQUIRED')) throw new Error('This operation conflict is no longer available. Refresh the queue.');
+    if (separate && String(reason).trim().length < 3) throw new Error('Explain why this is separate work.');
+    const nextQueue = separate ? outboxQueue.map(queued => queued !== item ? queued : {
+      ...item, status: 'queued', lastError: null, conflict: null, nextAttemptAt: null,
+      payload: { ...item.payload, reconciliation: {
+        recordVersions: Object.fromEntries(item.conflict.records.map(record => [record.id, record.updatedAt || 'UNVERSIONED'])),
+        reason: String(reason).trim().slice(0, 500)
+      } }
+    }) : outboxQueue.filter(queued => queued !== item).map(queued => queued.dependsOnMutationId !== mutationId ? queued : {
+      ...queued, status: 'conflict', lastError: 'The original queued copy was removed after review. Review this dependent change before submitting.', conflict: { code: 'REMOVED_OPERATION_DEPENDENCY' }
+    });
+    const owner = activeOutboxOwnerId;
+    const previousQueue = outboxQueue;
+    outboxQueue = nextQueue;
+    if (!(await persistOutboxQueue(nextQueue, owner))) {
+      if (activeOutboxOwnerId === owner) {
+        const previousIds = new Set(previousQueue.map(queued => queued.mutationId));
+        outboxQueue = [...previousQueue, ...outboxQueue.filter(queued => !previousIds.has(queued.mutationId))];
+        await persistOutboxQueue(outboxQueue, owner);
+      }
+      throw new Error('The reviewed queue could not be saved.');
+    }
+    notifySyncEngine();
+  }, { joinExisting: false });
 }
 
 /**
@@ -540,20 +574,23 @@ export async function processOutbox(remoteUploadHandler) {
       console.info(`[SYNC] Incomplete: ${result.remainingCount} item(s) remain`);
     }
     return result;
-  });
+  }, { joinExisting: false });
 }
 
 /**
  * Execute one mutation through the authoritative Express API. Direct online
- * callers omit mutation metadata; durable outbox replay includes it.
+ * callers with a version also send a transient precondition envelope. Durable
+ * outbox replay always keeps its original identity and version.
  */
 export async function executeMutationViaApi(item, { includeMutation = true } = {}) {
       const { type, payload } = item;
-      const mutation = includeMutation ? {
-        mutationId: item.mutationId,
-        idempotencyKey: item.idempotencyKey,
-        entityKey: item.entityKey,
-        baseVersion: item.baseVersion
+      const envelope = !item.mutationId && item.baseVersion != null
+        ? createMutationEnvelope(type, payload, { baseVersion: item.baseVersion }) : item;
+      const mutation = includeMutation || item.baseVersion != null ? {
+        mutationId: envelope.mutationId,
+        idempotencyKey: envelope.idempotencyKey,
+        entityKey: envelope.entityKey,
+        baseVersion: envelope.baseVersion
       } : null;
       const takeoverGrant = item.takeoverGrant || transientTakeoverGrants.get(item.mutationId) || null;
 

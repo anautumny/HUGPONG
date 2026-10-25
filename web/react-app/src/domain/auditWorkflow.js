@@ -1,4 +1,4 @@
-import { deflateRaw, inflateRaw } from 'pako';
+import { deflateRaw, Inflate } from 'pako';
 
 export const AUDIT_STATUS = Object.freeze({
   COMPILED: 'COMPILED',
@@ -152,15 +152,15 @@ export function nextCropYearCycle(value) {
 }
 
 export function auditCropYearCycles(report = {}, operationSnapshots = [], fieldSnapshots = []) {
-  const candidates = [
-    report.cropYearCycle,
-    report.cropYear,
+  // Immutable operation snapshots take priority over aggregate and field metadata.
+  const years = values => Array.from(new Set(values.map(canonicalCropYearCycle).filter(Boolean))).sort();
+  const operationYears = years(operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear]));
+  if (operationYears.length) return operationYears;
+  const fieldYears = years(fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]));
+  if (fieldYears.length) return fieldYears;
+  return years([report.cropYearCycle, report.cropYear,
     ...(Array.isArray(report.cropYearCycles) ? report.cropYearCycles : []),
-    ...(Array.isArray(report.cropYears) ? report.cropYears : []),
-    ...fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]),
-    ...operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
-  ];
-  return Array.from(new Set(candidates.map(canonicalCropYearCycle).filter(Boolean))).sort();
+    ...(Array.isArray(report.cropYears) ? report.cropYears : [])]);
 }
 
 export function canonicalAuditReport(report = {}) {
@@ -184,7 +184,7 @@ export function canonicalAuditReport(report = {}) {
     periodKey: report.periodKey || report.period,
     cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
     cropYearCycles,
-    continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
+    continuationCropYearCycle: cropYearCycles[1] || null,
     compiledByUserId: report.compiledByUserId,
     compiledByName: report.compiledByName || '',
     compiledAt: report.compiledAt,
@@ -285,13 +285,41 @@ function encodeQrPartData(value) {
   return btoa(binary);
 }
 
+const MAX_QR_BYTES = 1024 * 1024;
+const MAX_QR_INPUT = 2 * MAX_QR_BYTES;
+const MAX_QR_PARTS = 256;
+
+function parseQrInput(raw) {
+  if (typeof raw !== 'string') return raw;
+  if (raw.length > MAX_QR_INPUT) throw new Error('The audit QR package is too large.');
+  return JSON.parse(raw.trim());
+}
+
+function inflateBounded(bytes) {
+  const decoder = new Inflate({ raw: true, chunkSize: 16384 });
+  const chunks = [];
+  let length = 0;
+  decoder.onData = chunk => {
+    length += chunk.length;
+    if (length > MAX_QR_BYTES) throw new Error('The audit QR package is too large.');
+    chunks.push(chunk);
+  };
+  decoder.push(bytes, true);
+  if (decoder.err || !decoder.ended) throw new Error('Invalid compressed audit QR.');
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
+  return result;
+}
+
 function decodeQrPartData(value) {
+  if (value.length > MAX_QR_INPUT) throw new Error('The audit QR package is too large.');
   const binary = atob(value);
   return Uint8Array.from(binary, character => character.charCodeAt(0));
 }
 
 export function decodeAuditQrPayload(raw) {
-  const value = typeof raw === 'string' ? JSON.parse(raw.trim()) : raw;
+  const value = parseQrInput(raw);
   if (value?.type === 'HUGPONG_AUDIT' && Number(value.schemaVersion) === 1) return { ...value, legacyLookupOnly: true };
   if (!value || value.type !== AUDIT_QR_TYPE) throw new Error('This is not a supported HUGPONG audit QR package.');
   if (Number(value.schemaVersion) === 2) return validateCanonicalAuditReport(value.report);
@@ -304,7 +332,7 @@ export function decodeAuditQrPayload(raw) {
   if (Number(value.schemaVersion) !== 3 || value.encoding !== 'DEFLATE_RAW_BASE64_UTF8' || !value.data) throw new Error('This is not a supported HUGPONG audit QR package.');
   let report;
   try {
-    report = JSON.parse(new TextDecoder().decode(inflateRaw(decodeQrPartData(String(value.data)))));
+    report = JSON.parse(new TextDecoder().decode(inflateBounded(decodeQrPartData(String(value.data)))));
   } catch {
     throw new Error('The compressed audit QR package is malformed.');
   }
@@ -318,16 +346,18 @@ export function createAuditQrParts(report) {
 }
 
 export function decodeAuditQrPart(raw) {
-  const value = typeof raw === 'string' ? JSON.parse(raw.trim()) : raw;
+  const value = parseQrInput(raw);
   const partNumber = Number(value?.partNumber);
   const partCount = Number(value?.partCount);
   if (!value || value.type !== AUDIT_QR_PART_TYPE || Number(value.schemaVersion) !== 2) throw new Error('This is not a HUGPONG multipart audit transfer.');
-  if (!value.transferId || !Number.isInteger(partNumber) || !Number.isInteger(partCount) || partNumber < 1 || partNumber > partCount || !value.data) throw new Error('The QR transfer part is incomplete.');
+  if (!value.transferId || !Number.isInteger(partNumber) || !Number.isInteger(partCount) || partNumber < 1 || partNumber > partCount || partCount > MAX_QR_PARTS || String(value.transferId).length > 160 || !value.data || String(value.data).length > 8192 || !['RAW', 'BASE64_UTF8'].includes(value.encoding || 'RAW')) throw new Error('The QR transfer part is incomplete.');
   return { transferId: value.transferId, partNumber, partCount, encoding: value.encoding || 'RAW', data: String(value.data) };
 }
 
 export function assembleAuditQrParts(rawParts = []) {
+  if (!Array.isArray(rawParts) || rawParts.length > MAX_QR_PARTS) throw new Error('Too many audit QR parts.');
   const parts = rawParts.map(decodeAuditQrPart);
+  if (parts.reduce((sum, part) => sum + part.data.length, 0) > MAX_QR_INPUT) throw new Error('The audit QR package is too large.');
   if (!parts.length) throw new Error('No QR transfer parts were supplied.');
   const { transferId, partCount } = parts[0];
   if (parts.some(part => part.transferId !== transferId || part.partCount !== partCount)) throw new Error('QR transfer parts belong to different reports.');

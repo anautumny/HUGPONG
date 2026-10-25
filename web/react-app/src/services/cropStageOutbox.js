@@ -101,7 +101,7 @@ export async function updateCropStageOfflineFirst({ user, field, currentStageNum
     return authenticatedRequest(stagePath(cycleId), {
       method: 'PATCH',
       headers: { 'X-Hugpong-Takeover-Grant': takeoverGrant },
-      body: { currentStageNumber, isCompleted }
+      body: { currentStageNumber, isCompleted }, baseVersion: field?.cropCycle?.updatedAt
     });
   }
 

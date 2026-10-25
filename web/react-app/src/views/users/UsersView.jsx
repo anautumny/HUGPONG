@@ -114,8 +114,8 @@ export default function UsersView() {
         role: pendingUser.canonicalRole || 'MEMBER_FARMER',
         blockFarmId,
         ...verificationPayload
-      })
-      : await verifyUserPhone(pendingUser.id, verificationPayload);
+      }, pendingUser.updatedAt)
+      : await verifyUserPhone(pendingUser.id, verificationPayload, pendingUser.updatedAt);
     if (result.success && result.pendingApproval && result.data) {
       setPendingUsers(current => current.map(candidate => candidate.id === pendingUser.id
         ? { ...candidate, ...result.data, phoneVerified: Boolean(result.data.phoneVerifiedAt) }

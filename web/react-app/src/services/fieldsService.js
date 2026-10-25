@@ -81,34 +81,34 @@ export async function createField(payload, mutation) {
   return authenticatedRequest('/api/fields', { method: 'POST', body: { ...payload, _mutation: mutation } });
 }
 
-export async function updateField(fieldId, payload) {
-  return authenticatedRequest(`/api/fields/${encodeURIComponent(fieldId)}`, { method: 'PATCH', body: payload });
+export async function updateField(fieldId, payload, baseVersion) {
+  return authenticatedRequest(`/api/fields/${encodeURIComponent(fieldId)}`, { method: 'PATCH', body: payload, baseVersion });
 }
 
-export async function archiveField(fieldId) {
-  return authenticatedRequest(`/api/fields/${encodeURIComponent(fieldId)}/archive`, { method: 'POST' });
+export async function archiveField(fieldId, baseVersion) {
+  return authenticatedRequest(`/api/fields/${encodeURIComponent(fieldId)}/archive`, { method: 'POST', body: {}, baseVersion });
 }
 
-export async function startCropYearCycle(fieldId, payload = {}, takeoverGrant = null) {
+export async function startCropYearCycle(fieldId, payload = {}, takeoverGrant = null, baseVersion = null) {
   return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/start`, {
     method: 'POST',
     headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {},
-    body: payload
+    body: payload, baseVersion
   });
 }
 
-export async function rolloverCropYearCycle(fieldId, payload, takeoverGrant = null) {
+export async function rolloverCropYearCycle(fieldId, payload, takeoverGrant = null, baseVersion = null) {
   const { cropYear: _clientCropYear, ...serverOwnedPayload } = payload || {};
   return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover-request`, {
     method: 'POST',
-    body: serverOwnedPayload
+    body: serverOwnedPayload, baseVersion
   });
 }
 
-export async function approveCropYearCycleRollover(fieldId, previousCycleId) {
+export async function approveCropYearCycleRollover(fieldId, previousCycleId, baseVersion) {
   return authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(fieldId)}/rollover/approve`, {
     method: 'POST',
-    body: { previousCycleId }
+    body: { previousCycleId }, baseVersion
   });
 }
 

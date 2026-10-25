@@ -464,7 +464,8 @@ export default function AddOperationModal({
         } : null
       };
 
-      await operationSubmission.submit(payload, takeoverGrant);
+      const submissionResult = await operationSubmission.submit(payload, takeoverGrant);
+      let stageAdvanceWarning = '';
 
       // Advance crop cycle stage if checked
       if (advanceStage && !isSingleItemSubmission) {
@@ -473,9 +474,11 @@ export default function AddOperationModal({
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
             body: { currentStageNumber: nextStage },
+            baseVersion: submissionResult?.cycleVersion || field?.cropCycle?.updatedAt,
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
+          stageAdvanceWarning = 'The operation was saved, but its stage was not advanced. Refresh the field and complete the stage separately.';
           console.warn('[AddOperationModal] Crop Year Cycle stage advancement was not completed.');
         }
       }
@@ -484,7 +487,8 @@ export default function AddOperationModal({
       setSubmittingLineItemId(null);
       submissionLockRef.current = false;
       if (typeof onSuccess === 'function') {
-        onSuccess(payload, {
+        onSuccess(submissionResult?.data || payload, {
+          stageAdvanceWarning,
           keepOpen: isSingleItemSubmission,
           remainingDraftForm: isSingleItemSubmission && initialDraft?.id ? {
             selectedStageNumber,

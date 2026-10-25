@@ -248,7 +248,7 @@ export default function FarmFieldRegistryView() {
     if (!archiveTarget || !isFarmManager) return;
     setIsArchiving(true);
     try {
-      await archiveField(archiveTarget.id);
+      await archiveField(archiveTarget.id, archiveTarget.updatedAt);
       setIsArchiving(false);
       setArchiveTarget(null);
     } catch (err) {

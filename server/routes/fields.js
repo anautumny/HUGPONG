@@ -221,7 +221,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
     }
     const scope = await assertFieldScope(req.params.id, req.session.user, [ROLES.FARM_MANAGER]);
     const existing = scope.field;
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const blockFarmId = req.body.blockFarmId === undefined
       ? existing.blockFarmId
       : requiredString(req.body.blockFarmId, 'blockFarmId', { max: 80 }).toUpperCase();
@@ -263,7 +263,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
         && latest.areaHa === update.areaHa
         && !Object.prototype.hasOwnProperty.call(latest, 'soilType');
       if (alreadyApplied) return { replayed: true, record: withoutLegacySoilType(latest) };
-      assertBaseVersion(latest.updatedAt, mutationContext, scope.fieldId, { id: scope.fieldId, ...latest });
+      assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, scope.fieldId, { id: scope.fieldId, ...latest });
       transaction.update(scope.snapshot.ref, {
         ...update,
         ...(Object.prototype.hasOwnProperty.call(latest, 'soilType')
@@ -290,7 +290,7 @@ router.patch('/:id', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req,
 router.post('/:id/archive', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    const result = await archiveFieldWithOperations(db, req.params.id, req.session.user, undefined, readMutationContext(req));
+    const result = await archiveFieldWithOperations(db, req.params.id, req.session.user, undefined, readMutationContext(req, { requireVersion: true }));
     return res.json({ success: true, replayed: result.replayed, data: result.field, archivedLogCount: result.archivedLogCount });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
@@ -307,7 +307,7 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
       return res.status(403).json({ success: false, error: 'Farm plans can only be changed for your own assigned field.' });
     }
     const customOperations = normalizeCustomOperationsPlan(req.body.customOperations);
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const result = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
       if (!latestSnapshot.exists) throw Object.assign(new Error('Field not found.'), { status: 404 });
@@ -318,7 +318,7 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
       if (JSON.stringify(latest.customOperations || {}) === JSON.stringify(customOperations)) {
         return { replayed: true, updatedAt: latest.updatedAt };
       }
-      assertBaseVersion(latest.updatedAt, mutationContext, fieldId, { id: fieldId, ...latest });
+      assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, fieldId, { id: fieldId, ...latest });
       const updatedAt = nowIso();
       transaction.update(ref, { customOperations, updatedAt });
       queueAuditEvent(transaction, db, {
@@ -343,7 +343,7 @@ router.put('/:id/operation-schedule', requireAuth, requireRole([ROLES.FARM_MANAG
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const fieldId = String(req.params.id || '').trim().toUpperCase();
     const ref = db.collection(COLLECTIONS.FIELDS).doc(fieldId);
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const actorUserId = String(req.session.user.employeeId || req.session.user.userId || '').trim();
     const result = await db.runTransaction(async transaction => {
       const snapshot = await transaction.get(ref);
@@ -363,7 +363,7 @@ router.put('/:id/operation-schedule', requireAuth, requireRole([ROLES.FARM_MANAG
       if (JSON.stringify(field.operationSchedule || []) === JSON.stringify(operationSchedule)) {
         return { replayed: true, operationSchedule: field.operationSchedule || [], updatedAt: field.updatedAt };
       }
-      assertBaseVersion(field.updatedAt, mutationContext, fieldId, { id: fieldId, ...field });
+      assertBaseVersion(field.updatedAt, { ...mutationContext, requireVersion: true }, fieldId, { id: fieldId, ...field });
       transaction.update(ref, { operationSchedule, updatedAt });
       queueAuditEvent(transaction, db, {
         eventType: 'FIELD_SCHEDULE_UPDATED',
@@ -389,7 +389,7 @@ router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER]),
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ success: false, error: 'Field not found.' });
     await assertManagerScope(snapshot.data().blockFarmId, req.session.user);
-    const mutationContext = readMutationContext(req);
+    const mutationContext = readMutationContext(req, { requireVersion: true });
     const customStages = normalizeCustomStages(req.body.customStages);
     const result = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
@@ -398,7 +398,7 @@ router.put('/:id/custom-stages', requireAuth, requireRole([ROLES.FARM_MANAGER]),
       if (JSON.stringify(latest.customStages || []) === JSON.stringify(customStages)) {
         return { replayed: true, updatedAt: latest.updatedAt };
       }
-      assertBaseVersion(latest.updatedAt, mutationContext, fieldId, { id: fieldId, ...latest });
+      assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, fieldId, { id: fieldId, ...latest });
       const updatedAt = nowIso();
       transaction.update(ref, { customStages, updatedAt });
       queueAuditEvent(transaction, db, {

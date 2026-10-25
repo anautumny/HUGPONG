@@ -198,7 +198,7 @@ test('mobile submitted-operation Edit opens amendment authorization before leavi
   const authorizationStart = fieldOps.indexOf('const handleConfirmEditAuth = async');
   const authorizationEnd = fieldOps.indexOf('const editAuthorizationModal =', authorizationStart);
   const authorizationFlow = fieldOps.slice(authorizationStart, authorizationEnd);
-  const ledgerStart = fieldOps.indexOf('if (showHistoryModal)', fieldOps.indexOf('const editAuthorizationModal ='));
+  const ledgerStart = fieldOps.indexOf('\n  if (showHistoryModal)', fieldOps.indexOf('const editAuthorizationModal ='));
   const editorStart = fieldOps.indexOf('if (showLog)', ledgerStart);
   const ledgerScreen = fieldOps.slice(ledgerStart, editorStart);
   assert.match(ledgerScreen, /\{editAuthorizationModal\}/);
@@ -438,7 +438,7 @@ test('mobile canonical reads use role-scoped server APIs without direct Firestor
     if (endpoint === '/api/logs') assert.match(dataStore, /fetchOperationPages\(authenticatedRequest/);
     else assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
   }
-  assert.doesNotMatch(dataStore, /firebase\/firestore|onSnapshot|collection\(db|doc\(db/);
+  assert.doesNotMatch(dataStore, /firebase\/firestore|\bonSnapshot\b|collection\(db|doc\(db/);
 });
 
 test('Farm Member refresh never requests manager or SRA audit resources', () => {
@@ -471,13 +471,14 @@ test('Android QR scanner stays inside HUGPONG and supports camera and image inpu
   assert.match(liveQrScanner, /onBarcodeScanned=/);
   assert.match(liveQrScanner, /barcodeScannerSettings=\{\{ barcodeTypes: \['qr'\] \}\}/);
   assert.match(liveQrScanner, /enableTorch=\{torchEnabled\}/);
-  assert.match(liveQrScanner, /HUGPONG SECURE SCANNER/);
+  assert.match(liveQrScanner, /qr_scan_frame_hint/);
+  assert.match(liveQrScanner, /frameSize/);
   assert.match(liveQrScanner, /style=\{styles\.scanGuide\}/);
   assert.match(liveQrScanner, /onCameraReady=/);
   assert.match(liveQrScanner, /onMountError=/);
   assert.match(liveQrScanner, /style=\{styles\.cameraPreview\}/);
   assert.match(liveQrScanner, /Allow Camera/);
-  assert.match(liveQrScanner, /Upload QR Image/);
+  assert.match(liveQrScanner, /Upload QR/);
   assert.match(liveQrScanner, /launchImageLibraryAsync/);
   assert.match(liveQrScanner, /allowsEditing: true/);
   assert.match(liveQrScanner, /aspect: \[1, 1\]/);
@@ -489,12 +490,14 @@ test('Android QR scanner stays inside HUGPONG and supports camera and image inpu
 
 test('audit QR cards show HUGPONG identity and report context without covering the code', () => {
   const webAuditCompilation = read('web/react-app/src/components/audit/AuditCompilationModal.jsx');
-  assert.match(fieldOps, /OFFICIAL AUDIT TRANSFER/);
-  assert.match(fieldOps, /FARM MANAGER/);
-  assert.match(fieldOps, /BLOCK FARM/);
-  assert.match(fieldOps, /REPORTING MONTH/);
-  assert.match(fieldOps, /CROP YEAR CYCLE/);
-  assert.match(fieldOps, /size=\{Math\.min\(236, width - 124\)\}/);
+  const qrSheet = read('mobile/src/components/AuditQrSheet.js');
+  assert.match(fieldOps, /<AuditQrSheet/);
+  assert.match(qrSheet, /HUGPONG/);
+  assert.match(qrSheet, /data\?\.blockFarm/);
+  assert.match(qrSheet, /data\?\.month/);
+  assert.match(qrSheet, /data\?\.cropYearCycle/);
+  assert.match(qrSheet, /Report details/);
+  assert.match(qrSheet, /size=\{Math\.min\(256, width - 80\)\}/);
   assert.match(webAuditCompilation, /OFFICIAL AUDIT TRANSFER/);
   assert.match(webAuditCompilation, /SECURE SERVER-VERIFIED REFERENCE/);
   assert.match(webAuditCompilation, /margin: 4/);
@@ -530,7 +533,7 @@ test('SRA receives QR images and codes on Web with camera scanning on Mobile', (
 
 test('SRA mobile exposes one canonical monthly audit history interface', () => {
   assert.match(fieldOps, /const openSraAuditHistory = \(\) => \{[\s\S]*setShowAuditHistoryModal\(true\);[\s\S]*loadAuditHistory\(false\);[\s\S]*\};/);
-  assert.match(fieldOps, /accessibilityLabel="Monthly Audit History"/);
+  assert.match(fieldOps, /accessibilityLabel="Reports"/);
   assert.match(fieldOps, /onPress=\{openSraAuditHistory\}/);
   const lastScannedHeader = fieldOps.slice(fieldOps.indexOf('{\/\* Last Audit Summary Header \*\/}'), fieldOps.indexOf('const activeReport ='));
   assert.doesNotMatch(lastScannedHeader, /Audit History|setShowAuditHistoryModal/);
@@ -776,7 +779,7 @@ test('manual sync summaries remain honest when records remain', () => {
 test('server log creation remains idempotent by stable client operation ID', () => {
   const service = read('server/services/cropCycleOperations.js');
   assert.match(service, /existingSnapshot\.exists/);
-  assert.match(service, /return \{ replayed: true, id: logId, record: current \}/);
+  assert.match(service, /return \{ replayed: true, id: logId, record: current, cycleVersion:/);
   assert.match(service, /transaction\.create\(targetRef, payload\)/);
 });
 

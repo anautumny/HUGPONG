@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Image, StyleSheet, TouchableOpacity, Animated, Easing, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY } from '../theme';
 import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount, restartCloudSyncIfReady } from '../data/dataStore';
@@ -25,6 +25,8 @@ const LOGO = require('../../assets/icon-foreground.png');
  */
 function AppHeader({ right }) {
   const { t } = useTranslation();
+  const { width, fontScale } = useWindowDimensions();
+  const compact = width < 380 || fontScale > 1.2;
   const navigation = useNavigation();
   const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
@@ -220,6 +222,9 @@ function AppHeader({ right }) {
             onPress={isSraAdmin ? handleCheckConnection : handleSync}
             disabled={isSyncing}
             activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={isSyncing ? (syncStatusText || 'Syncing') : isFullySynced ? 'Online and synchronized' : `${isOnline ? 'Pending sync' : 'Offline'}, ${safeCount} pending operations`}
+            accessibilityHint="Open connection and sync details"
           >
             <Animated.View style={isSyncing ? { transform: [{ rotate: spin }] } : {}}>
               <Ionicons
@@ -228,7 +233,7 @@ function AppHeader({ right }) {
                 color={isSyncing ? '#1A6B9A' : (isFullySynced ? '#267326' : '#C97A00')}
               />
             </Animated.View>
-            <Text
+            {!compact && <Text
               style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}
             >
               {isSyncing
@@ -238,7 +243,7 @@ function AppHeader({ right }) {
                   : (!isOnline
                     ? (safeCount > 0 ? `${t('status_offline', 'Offline')} (${safeCount})` : t('status_offline', 'Offline'))
                     : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}
-            </Text>
+            </Text>}
           </TouchableOpacity>
         )}
 
@@ -312,6 +317,9 @@ const s = StyleSheet.create({
     width: 0,
   },
   syncPill: {
+    minHeight: 44,
+    minWidth: 44,
+    justifyContent: 'center',
     maxWidth: '100%',
     flexShrink: 1,
     minWidth: 0,

@@ -142,7 +142,7 @@ test('only rate-limit abuse and important security responses are aggregated for 
 test('server installs cheap protection before parsing and user budgets after authentication', () => {
   const server = fs.readFileSync(path.join(root, 'server', 'server.js'), 'utf8');
   const early = server.indexOf('app.use(createEarlyAbuseProtection())');
-  const parser = server.indexOf("app.use(express.json({ limit: '1mb' }))");
+  const parser = server.indexOf("app.use(express.json({ limit: '1mb', inflate: false }))");
   const apiBoundary = server.indexOf("app.use('/api', requireAuth, createAuthenticatedApiRateLimit()");
   assert.ok(early > 0 && early < parser);
   assert.ok(apiBoundary > parser);

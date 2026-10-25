@@ -137,15 +137,15 @@ function nextCropYearCycle(value) {
 }
 
 function auditCropYearCycles(report = {}, operationSnapshots = [], fieldSnapshots = []) {
-  const candidates = [
-    report.cropYearCycle,
-    report.cropYear,
+  // Immutable operation snapshots take priority over aggregate and field metadata.
+  const years = values => Array.from(new Set(values.map(canonicalCropYearCycle).filter(Boolean))).sort();
+  const operationYears = years(operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear]));
+  if (operationYears.length) return operationYears;
+  const fieldYears = years(fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]));
+  if (fieldYears.length) return fieldYears;
+  return years([report.cropYearCycle, report.cropYear,
     ...(Array.isArray(report.cropYearCycles) ? report.cropYearCycles : []),
-    ...(Array.isArray(report.cropYears) ? report.cropYears : []),
-    ...fieldSnapshots.flatMap(field => [field?.cropYearCycle, field?.cropYear]),
-    ...operationSnapshots.flatMap(operation => [operation?.cropYearCycle, operation?.cropYear])
-  ];
-  return Array.from(new Set(candidates.map(canonicalCropYearCycle).filter(Boolean))).sort();
+    ...(Array.isArray(report.cropYears) ? report.cropYears : [])]);
 }
 
 function canonicalAuditReport(report = {}) {
@@ -169,7 +169,7 @@ function canonicalAuditReport(report = {}) {
     periodKey: report.periodKey || report.period,
     cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
     cropYearCycles,
-    continuationCropYearCycle: nextCropYearCycle(cropYearCycles[cropYearCycles.length - 1]),
+    continuationCropYearCycle: cropYearCycles[1] || null,
     compiledByUserId: report.compiledByUserId,
     compiledByName: report.compiledByName || '',
     compiledAt: report.compiledAt,
@@ -314,6 +314,7 @@ function encodeQrPayload(report) {
 }
 
 function decodeQrPayload(rawPayload) {
+  if (typeof rawPayload === 'string' && rawPayload.length > 2 * 1024 * 1024) throw new Error('The audit QR package is too large.');
   let parsed = rawPayload;
   if (typeof rawPayload === 'string') {
     const text = rawPayload.trim();
@@ -359,18 +360,20 @@ function encodeQrParts(report) {
 }
 
 function decodeQrPart(rawPart) {
+  if (typeof rawPart === 'string' && rawPart.length > 16384) throw new Error('The QR transfer part is too large.');
   let parsed;
   try { parsed = typeof rawPart === 'string' ? JSON.parse(rawPart.trim()) : rawPart; } catch { throw new Error('The QR transfer part is malformed.'); }
   if (!parsed || parsed.type !== QR_PART_TYPE || Number(parsed.schemaVersion) !== 2) throw new Error('This is not a HUGPONG multipart audit transfer.');
   const partNumber = Number(parsed.partNumber);
   const partCount = Number(parsed.partCount);
-  if (!parsed.transferId || !Number.isInteger(partNumber) || !Number.isInteger(partCount) || partNumber < 1 || partNumber > partCount || !parsed.data) {
+  if (!parsed.transferId || String(parsed.transferId).length > 160 || !Number.isInteger(partNumber) || !Number.isInteger(partCount) || partCount > 256 || partNumber < 1 || partNumber > partCount || !parsed.data || String(parsed.data).length > 8192 || !['RAW', 'BASE64_UTF8'].includes(parsed.encoding || 'RAW')) {
     throw new Error('The QR transfer part is incomplete.');
   }
   return { transferId: parsed.transferId, partNumber, partCount, encoding: parsed.encoding || 'RAW', data: String(parsed.data) };
 }
 
 function assembleQrParts(rawParts = []) {
+  if (!Array.isArray(rawParts) || rawParts.length > 256) throw new Error('Too many audit QR parts.');
   const parts = rawParts.map(decodeQrPart);
   if (!parts.length) throw new Error('No QR transfer parts were supplied.');
   const transferId = parts[0].transferId;

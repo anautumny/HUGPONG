@@ -1,145 +1,55 @@
-import React from 'react';
-import { Filter, Calendar, MapPin, Clock, RotateCcw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Filter } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
+import Modal from '../ui/Modal';
 import { formatCropYear } from '../../utils/formatters';
+import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
+
+function FilterSelect({ label, ...props }) {
+  return <label className="block space-y-1.5"><span className="text-xs font-semibold text-hug-muted">{label}</span><Select {...props} aria-label={label} /></label>;
+}
 
 export default function AnalyticsFilters({
-  seasons = [],
-  currentSeason = '',
-  selectedSeason = 'ALL',
-  onSeasonChange,
-  blockFarms = [],
-  selectedFarmId = 'ALL',
-  onFarmChange,
-  fields = [],
-  selectedFieldId = 'ALL',
-  onFieldChange,
-  periods = [],
-  selectedPeriod = 'ALL',
-  onPeriodChange,
-  onResetFilters,
-  isFarmManager = false,
-  className = ''
+  seasons = [], currentSeason = '', selectedSeason = 'ALL', onSeasonChange,
+  blockFarms = [], selectedFarmId = 'ALL', onFarmChange,
+  fields = [], selectedFieldId = 'ALL', onFieldChange,
+  selectedPeriod = 'ALL', onPeriodChange,
+  operations = [], cropCycles = [], isMember = false, className = ''
 }) {
-  const seasonOptions = [
-    { value: 'ALL', label: 'All Crop Year Cycles' },
-    ...seasons.map(s => {
-      const formatted = formatCropYear(s);
-      const current = formatted === formatCropYear(currentSeason) ? ' (Current)' : '';
-      return { value: formatted, label: `Crop Year Cycle ${formatted.replace('-', '–')}${current}` };
-    })
-  ];
-
-  const farmOptions = [
-    { value: 'ALL', label: isFarmManager ? 'All Assigned Parcels' : 'All Block Farms' },
-    ...blockFarms.map(f => ({ value: f.id, label: f.name || f.id }))
-  ];
-
-  const periodOptions = [
-    { value: 'ALL', label: 'All Recorded Periods' },
-    ...periods.map(p => {
-      // p is 'YYYY-MM'
-      const [y, m] = p.split('-').map(Number);
-      const date = new Date(y, m - 1, 1);
-      const label = isNaN(date.getTime()) ? p : date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      return { value: p, label };
-    })
-  ];
-
-  const fieldOptions = [
-    { value: 'ALL', label: 'All Fields' },
-    ...fields.map(field => ({ value: field.id, label: field.id }))
-  ];
-
-  const hasActiveFilters = selectedSeason !== 'ALL' || selectedFarmId !== 'ALL' || selectedFieldId !== 'ALL' || selectedPeriod !== 'ALL';
-
-  return (
-    <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-4 sm:p-5 shadow-xs ${className}`}>
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        {/* Filter Title & Indicator */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light flex items-center justify-center shrink-0">
-            <Filter className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-hug-text flex items-center gap-2">
-              <span>Analytics Scope</span>
-              {hasActiveFilters && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-bg dark:bg-primary/20 text-primary dark:text-primary-light">
-                  Filtered
-                </span>
-              )}
-            </h3>
-            <p className="text-xs text-hug-muted">
-              Scope data across Crop Year Cycles, Block Farms, Fields, and reporting periods.
-            </p>
-          </div>
-        </div>
-
-        {/* Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full lg:w-auto min-w-0">
-          {/* Season Filter */}
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
-              Crop Year Cycle
-            </label>
-            <Select
-              value={selectedSeason}
-              onChange={(e) => onSeasonChange(e.target.value)}
-              options={seasonOptions}
-            />
-          </div>
-
-          {/* Farm Filter */}
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
-              {isFarmManager ? 'Block Farm / Area' : 'Block Farm Scope'}
-            </label>
-            <Select
-              value={selectedFarmId}
-              onChange={(e) => onFarmChange(e.target.value)}
-              options={farmOptions}
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">Field</label>
-            <Select
-              value={selectedFieldId}
-              onChange={(e) => onFieldChange(e.target.value)}
-              options={fieldOptions}
-            />
-          </div>
-
-          {/* Period Filter */}
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-hug-muted mb-1">
-              Reporting Period
-            </label>
-            <Select
-              value={selectedPeriod}
-              onChange={(e) => onPeriodChange(e.target.value)}
-              options={periodOptions}
-            />
-          </div>
-        </div>
-
-        {/* Reset Filter Action */}
-        {hasActiveFilters && (
-          <div className="flex items-end shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onResetFilters}
-              icon={RotateCcw}
-              className="text-xs text-hug-muted hover:text-hug-text"
-            >
-              Reset
-            </Button>
-          </div>
-        )}
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({});
+  const defaults = { season: currentSeason || 'ALL', farm: 'ALL', field: 'ALL', period: 'ALL' };
+  const selected = { season: selectedSeason, farm: selectedFarmId, field: selectedFieldId, period: selectedPeriod };
+  const count = Object.keys(defaults).filter(key => selected[key] !== defaults[key]).length;
+  const draftFields = fields.filter(field => draft.farm === 'ALL' || field.blockFarmId === draft.farm);
+  const fieldIds = new Set(draftFields.map(field => field.id));
+  const periods = [...new Set(filterOperationsByCropYearCycle({ operations, cropCycles, selectedSeason: draft.season })
+    .filter(op => fieldIds.has(op.fieldId) && (draft.field === 'ALL' || draft.field === op.fieldId))
+    .map(op => String(op.performedOn || op.isoDate || op.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const farmName = selectedFarmId === 'ALL' ? 'All farms' : blockFarms.find(farm => farm.id === selectedFarmId)?.name || selectedFarmId;
+  const summary = [selectedSeason === 'ALL' ? 'All crop years' : selectedSeason, !isMember && farmName, selectedFieldId === 'ALL' ? 'All plots' : selectedFieldId, selectedPeriod === 'ALL' ? 'All periods' : selectedPeriod].filter(Boolean).join(' · ');
+  const apply = () => {
+    onSeasonChange(draft.season); onFarmChange(draft.farm);
+    onFieldChange(draftFields.some(field => field.id === draft.field) ? draft.field : 'ALL');
+    onPeriodChange(periods.includes(draft.period) ? draft.period : 'ALL');
+    setOpen(false);
+  };
+  return <div className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
+    <p className="min-w-0 flex-1 text-xs leading-relaxed text-hug-muted">{summary}</p>
+    <Button variant="secondary" size="sm" icon={Filter} onClick={() => { setDraft(selected); setOpen(true); }}>Filters{count ? ` (${count})` : ''}</Button>
+    <Modal isOpen={open} onClose={() => setOpen(false)} title="Filters" subtitle="Choose the records to include" size="sm" closeOnBackdrop
+      footer={<><Button variant="ghost" onClick={() => setDraft(defaults)}>Reset</Button><Button variant="primary" onClick={apply}>Apply filters</Button></>}>
+      <div className="space-y-4">
+        <FilterSelect label="Crop year" value={draft.season || 'ALL'} onChange={event => setDraft(value => ({ ...value, season: event.target.value, period: 'ALL' }))}
+          options={[{ value: 'ALL', label: 'All crop years' }, ...seasons.filter(year => year !== 'ALL').map(year => ({ value: formatCropYear(year), label: `${formatCropYear(year)}${year === currentSeason ? ' (Current)' : ''}` }))]} />
+        {!isMember && blockFarms.length > 1 && <FilterSelect label="Block farm" value={draft.farm || 'ALL'} onChange={event => setDraft(value => ({ ...value, farm: event.target.value, field: 'ALL', period: 'ALL' }))}
+          options={[{ value: 'ALL', label: 'All farms' }, ...blockFarms.map(farm => ({ value: farm.id, label: farm.name || farm.id }))]} />}
+        <FilterSelect label="Plot" value={draft.field || 'ALL'} onChange={event => setDraft(value => ({ ...value, field: event.target.value, period: 'ALL' }))}
+          options={[{ value: 'ALL', label: 'All plots' }, ...draftFields.map(field => ({ value: field.id, label: field.id }))]} />
+        <FilterSelect label="Reporting period" value={draft.period || 'ALL'} onChange={event => setDraft(value => ({ ...value, period: event.target.value }))}
+          options={[{ value: 'ALL', label: 'All periods' }, ...periods.map(period => ({ value: period, label: period }))]} />
       </div>
-    </div>
-  );
+    </Modal>
+  </div>;
 }

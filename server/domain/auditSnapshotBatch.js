@@ -4,7 +4,8 @@ const { buildFieldSnapshots } = require('./auditWorkflow');
 const { buildOperationSnapshot } = require('../schema/firestoreSchema');
 
 // Leave room for report metadata and Firestore's per-field encoding overhead.
-const MAX_OPERATIONS = 500;
+// A compile transaction also writes its report and audit event.
+const MAX_OPERATIONS = 498;
 const SNAPSHOT_BYTE_BUDGET = 700 * 1024;
 function auditSnapshotBatch(documents, fields) {
   const sorted = [...documents].sort((a, b) => a.id.localeCompare(b.id));

@@ -4,14 +4,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe } from '../data/dataStore';
-import { getOutboxDiagnostics, getOutboxPressure } from '../services/syncEngine';
+import { getOutboxDiagnostics, getOutboxPressure, resolveOperationConflict } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
-import { AppText as Text } from '../components/Typography';
+import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 import Pagination, { usePagination } from '../components/ui/Pagination';
 
 const MEMBER_PAGE_SIZE = 10;
+
+function operationReviewSummary(value = {}, t) {
+  const cost = value.totalCost ?? value.baseCost;
+  return [value.operationName, value.performedOn,
+    cost != null && `PHP ${Number(cost).toLocaleString()}`,
+    value.areaHa != null && `${value.areaHa} ha`, value.variety,
+    value.peopleCount != null && `${value.peopleCount} ${t('queue_workers')}`,
+    value.lineItems && `${value.lineItems.length} ${t('queue_expenses')}`,
+    value.laborEntries && `${value.laborEntries.length} ${t('queue_crews')}`
+  ].filter(value => value !== false && value != null && value !== '').join(' · ');
+}
 
 function formatTime(value, t, language, fallback = t('sync_not_reported')) {
   if (!value) return fallback;
@@ -88,6 +99,18 @@ export default function SyncMonitorScreen({ navigation }) {
   const [error, setError] = React.useState('');
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [localRevision, setLocalRevision] = React.useState(0);
+  const [reviewReasons, setReviewReasons] = React.useState({});
+  const [reviewBusy, setReviewBusy] = React.useState(false);
+  const resolveQueuedConflict = async (item, separate) => {
+    if (reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      await resolveOperationConflict(item.mutationId, { separate, reason: reviewReasons[item.mutationId] || '' });
+      await performMobileSync('CONFLICT_REVIEW');
+      setLocalRevision(value => value + 1);
+    } catch (error) { Alert.alert(t('sync_needs_review'), error.message); }
+    finally { setReviewBusy(false); }
+  };
   const [memberPage, setMemberPage] = React.useState(1);
   const role = session?.role;
   const allowed = role === 'Farm Manager' || role === 'Farm Member';
@@ -241,6 +264,27 @@ export default function SyncMonitorScreen({ navigation }) {
                       <Text style={s.queueStatus}>{mutationStatusLabel(item.status, t)}</Text>
                     </View>
                     {item.lastError ? <Text style={s.queueError}>{item.lastError}</Text> : null}
+                    {item.conflict?.code === 'OPERATION_RECONCILIATION_REQUIRED' && <View style={{ gap: 8 }}>
+                      <Text style={s.note}>{t('queue_compare')}</Text>
+                      {item.conflict.records.map(record => <Text key={record.id} selectable style={s.queueMeta}>{record.id} · {record.performedOn} · PHP {Number(record.totalCost).toLocaleString()} · {record.submittedByUserId}</Text>)}
+                      <TouchableOpacity disabled={reviewBusy} style={s.syncButton} onPress={() => Alert.alert(t('queue_remove_title'), t('queue_remove_hint'), [
+                        { text: t('queue_cancel'), style: 'cancel' },
+                        { text: t('queue_remove'), onPress: () => resolveQueuedConflict(item, false) }
+                      ])}><Text style={s.syncButtonText}>{t('queue_remove')}</Text></TouchableOpacity>
+                      {item.conflict.canRecordSeparate !== false && <>
+                        <TextInput accessibilityLabel={t('queue_reason')} placeholder={t('queue_reason')} maxLength={500} value={reviewReasons[item.mutationId] || ''} onChangeText={value => setReviewReasons(current => ({ ...current, [item.mutationId]: value }))} style={{ minHeight: 48, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 10 }} />
+                        <TouchableOpacity disabled={reviewBusy || !getNetworkStatus() || (reviewReasons[item.mutationId] || '').trim().length < 3} style={s.syncButton} onPress={() => resolveQueuedConflict(item, true)}><Text style={s.syncButtonText}>{t('queue_separate')}</Text></TouchableOpacity>
+                      </>}
+                    </View>}
+                    {item.conflict?.code !== 'OPERATION_RECONCILIATION_REQUIRED' && ['operation_log', 'takeover_log', 'operation_amendment', 'operation_archive'].includes(item.type) && ['conflict', 'validation', 'rejected', 'authorization'].includes(item.status) && <View style={{ gap: 8 }}>
+                      <Text style={s.note}>{t('queue_rejected_hint')}</Text>
+                      {item.conflict?.current && <Text selectable style={s.queueMeta}>{t('queue_latest')}: {operationReviewSummary(item.conflict.current, t)}</Text>}
+                      {item.proposedChanges && <Text selectable style={s.queueMeta}>{t('queue_proposed')}: {operationReviewSummary(item.proposedChanges, t)}</Text>}
+                      <TouchableOpacity disabled={reviewBusy} style={s.syncButton} onPress={() => Alert.alert(t('queue_remove_title'), t('queue_remove_hint'), [
+                        { text: t('queue_cancel'), style: 'cancel' },
+                        { text: t('queue_remove_rejected'), onPress: () => resolveQueuedConflict(item, false) }
+                      ])}><Text style={s.syncButtonText}>{t('queue_remove_rejected')}</Text></TouchableOpacity>
+                    </View>}
                     <Text style={s.queueMeta}>{t('sync_attempted')} {Number(item.retryCount || 0)} {Number(item.retryCount || 0) === 1 ? t('sync_time_singular') : t('sync_time_plural')}</Text>
                   </View>
                 ))}

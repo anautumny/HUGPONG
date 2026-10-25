@@ -32,7 +32,7 @@ export function ScreenHeader({
             {title}
           </Text>
           {subtitle ? (
-            <Text style={styles.headerSubtitle}>
+            <Text style={styles.headerSubtitle} numberOfLines={2} accessibilityLabel={subtitle}>
               {subtitle}
             </Text>
           ) : null}
@@ -46,6 +46,8 @@ export function ScreenHeader({
           style={styles.rightActionBtn}
           onPress={rightAction.onPress}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={rightAction.accessibilityLabel || rightAction.label || 'Screen action'}
         >
           {rightAction.icon && (
             <Ionicons name={rightAction.icon} size={18} color={COLORS.primary} />
@@ -238,17 +240,14 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     flex: 1,
-    minWidth: 220
+    minWidth: 0
   },
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: RADIUS.sm,
-    backgroundColor: '#F8FAF5',
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    width: 44,
+    height: 44,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center'
   },
@@ -270,6 +269,7 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   rightActionBtn: {
+    minHeight: 44,
     maxWidth: '100%',
     flexShrink: 1,
     flexDirection: 'row',

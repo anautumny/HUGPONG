@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, AppState, Linking, Modal, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,7 +10,10 @@ import { FONT_FAMILY } from '../theme';
 
 export default function LiveQRScanner({ visible = false, onClose, onCodeDetected }) {
   const { t } = useTranslation();
-  const [permission, requestPermission] = useCameraPermissions();
+  const { width, height, fontScale } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const frameSize = Math.max(160, Math.min(width - 40, 340, height - insets.top - insets.bottom - 240 * Math.max(1, fontScale)));
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [cameraError, setCameraError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
   const [scanLocked, setScanLocked] = useState(false);
@@ -27,6 +30,14 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
   const sessionRef = useRef(0);
   const visibleRef = useRef(visible);
   const uploadBusyRef = useRef(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') getPermission().catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [visible, getPermission]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -168,12 +179,12 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerTitleWrap}>
-            <Text style={styles.brand}>HUGPONG</Text>
-            <Text style={styles.title}>{t('qr_scan_title', 'Scan QR')}</Text>
+            <Text style={styles.title}>{t('qr_scan_audit_heading', 'Scan audit QR')}</Text>
           </View>
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Toggle flashlight"
+            accessibilityState={{ disabled: !permission?.granted, selected: torchEnabled }}
             disabled={!permission?.granted}
             style={[styles.torchButton, torchEnabled && styles.torchButtonActive]}
             onPress={() => setTorchEnabled(current => !current)}
@@ -182,7 +193,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
           </TouchableOpacity>
         </View>
 
-        <View style={styles.content}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
           {permissionLoading ? (
             <>
               <ActivityIndicator size="large" color="#2F6B3B" />
@@ -196,17 +207,16 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
                 <TouchableOpacity style={styles.primaryButton} onPress={retryPermission}>
                   <Text style={styles.primaryButtonText}>{t('qr_allow_camera', 'Allow Camera')}</Text>
                 </TouchableOpacity>
-              ) : null}
+              ) : (
+                <TouchableOpacity accessibilityRole="button" style={styles.primaryButton} onPress={() => Linking.openSettings().catch(() => setCameraError(t('qr_permission_error', 'Camera permission is required. Enable it in device settings, or upload a QR image.')))}>
+                  <Text style={styles.primaryButtonText}>{t('qr_open_settings', 'Open Settings')}</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <>
-              <View style={styles.secureBadge}>
-                <Ionicons name="shield-checkmark" size={14} color="#9EE493" />
-                <Text style={styles.secureBadgeText}>HUGPONG SECURE SCANNER</Text>
-              </View>
-              <Text style={styles.heading}>{t('qr_scan_audit_heading', 'Scan Audit QR')}</Text>
-              <Text style={styles.help}>{t('qr_scan_help', 'Keep the complete QR square inside the frame. The report will be securely retrieved after one scan.')}</Text>
-              <View style={styles.cameraFrame}>
+              <Text style={styles.help}>{t('qr_scan_frame_hint', 'Place the QR inside the frame.')}</Text>
+              <View style={[styles.cameraFrame, { width: frameSize, height: frameSize }]}>
                 <CameraView
                   key={`hugpong-qr-camera-${cameraKey}`}
                   style={styles.cameraPreview}
@@ -245,7 +255,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
                   </View>
                 ) : null}
               </View>
-              <Text style={styles.autoScanText}>Scanning happens automatically</Text>
+              <Text style={styles.autoScanText}>{t('qr_scan_automatic', 'Scans automatically')}</Text>
               {cameraError ? (
                 <TouchableOpacity
                   style={styles.retryButton}
@@ -267,7 +277,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
               <Text style={[styles.statusText, cameraError && styles.errorText]}>{cameraError || scanMessage}</Text>
             </View>
           ) : null}
-        </View>
+        </ScrollView>
 
         <View style={styles.footer}>
           <TouchableOpacity
@@ -278,9 +288,8 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             {uploadBusy
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <Ionicons name="image-outline" size={20} color="#FFFFFF" />}
-            <Text style={styles.uploadButtonText}>{uploadBusy ? t('qr_reading_image', 'Reading Image...') : t('qr_upload_image', 'Upload QR Image')}</Text>
+            <Text style={styles.uploadButtonText}>{uploadBusy ? t('qr_reading_image', 'Reading image…') : t('qr_upload_short', 'Upload QR')}</Text>
           </TouchableOpacity>
-          <Text style={styles.uploadHint}>{t('qr_upload_hint', 'Crop the image so the QR square fills most of the frame.')}</Text>
         </View>
       </SafeAreaView>
     </Modal>
@@ -299,13 +308,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  closeButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  headerTitleWrap: { flex: 1, alignItems: 'center' },
+  closeButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerTitleWrap: { flex: 1, paddingHorizontal: 10 },
   brand: { color: '#9EE493', fontSize: 10, fontWeight: '900', letterSpacing: 2.2 },
   title: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginTop: 1 },
-  torchButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)' },
+  torchButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)' },
   torchButtonActive: { backgroundColor: '#2F6B3B', borderWidth: 1, borderColor: '#9EE493' },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  content: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 20 },
   secureBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(158,228,147,0.12)', borderWidth: 1, borderColor: 'rgba(158,228,147,0.28)' },
   secureBadgeText: { color: '#9EE493', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
   heading: { fontFamily: FONT_FAMILY.display, color: '#FFFFFF', fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 14 },
@@ -324,12 +333,9 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
   cameraFrame: {
-    width: '100%',
-    maxWidth: 310,
-    aspectRatio: 1,
-    marginTop: 20,
+    marginTop: 16,
     overflow: 'hidden',
-    borderRadius: 28,
+    borderRadius: 20,
     backgroundColor: '#050A07',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',

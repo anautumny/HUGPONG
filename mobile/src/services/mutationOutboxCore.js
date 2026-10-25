@@ -229,8 +229,12 @@ function isPendingMutation(item) {
 
 function createSingleFlightRunner() {
   let activePromise = null;
-  return async task => {
-    if (activePromise) return activePromise;
+  return async function run(task, { joinExisting = true } = {}) {
+    if (activePromise) {
+      if (joinExisting) return activePromise;
+      try { await activePromise; } catch { /* Run the distinct command after a failed drain too. */ }
+      return run(task, { joinExisting: false });
+    }
     activePromise = Promise.resolve().then(task);
     try {
       return await activePromise;

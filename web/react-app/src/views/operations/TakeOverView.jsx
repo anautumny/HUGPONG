@@ -385,7 +385,8 @@ export default function TakeOverView() {
         } : null
       };
 
-      await operationSubmission.submit(payload, takeoverGrant);
+      const submissionResult = await operationSubmission.submit(payload, takeoverGrant);
+      let stageAdvanceWarning = false;
 
       // Advance crop cycle stage if checked
       if (advanceStage && !isSingleItemSubmission) {
@@ -394,9 +395,11 @@ export default function TakeOverView() {
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
             body: { currentStageNumber: nextStage },
+            baseVersion: submissionResult?.cycleVersion || currentField?.cropCycle?.updatedAt,
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
         } catch (stageErr) {
+          stageAdvanceWarning = true;
           console.warn('[TakeOver] Crop Year Cycle stage advancement was not completed.');
         }
       }
@@ -410,7 +413,7 @@ export default function TakeOverView() {
         setWorkersCount('');
         setNewWorker({ workerCount: '', days: '1', rate: '' });
       }
-      if (!isSingleItemSubmission) navigate('/operations');
+      if (!isSingleItemSubmission) navigate(stageAdvanceWarning ? '/operations?notice=stage-not-advanced' : '/operations');
     } catch (err) {
       console.warn('[TakeOver] Submission failed; see the displayed reference ID.');
       setServerError(err.message || 'Unable to record Manager Takeover operation.');
@@ -463,6 +466,7 @@ export default function TakeOverView() {
           {
             label: 'Exit Manager Takeover',
             icon: ArrowLeft,
+            variant: 'ghost',
             onClick: handleExit
           }
         ]}

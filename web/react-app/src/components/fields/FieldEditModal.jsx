@@ -76,7 +76,7 @@ export default function FieldEditModal({
         areaHa: numHa
       };
 
-      await updateField(field.id, payload);
+      await updateField(field.id, payload, field.updatedAt);
       setIsSubmitting(false);
       if (onSuccess) onSuccess();
       onClose();

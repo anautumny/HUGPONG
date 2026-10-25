@@ -2,6 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOperationSubmission } from '../src/domain/operationSubmission.js';
 
+test('takeover conflicts survive restart and require an explicit separate-work review', async () => {
+  const records = new Map();
+  const storage = { getItem: key => records.get(key), setItem: (key, value) => records.set(key, value), removeItem: key => records.delete(key) };
+  const existing = { id: 'LOG-MANAGER', updatedAt: 'v1', totalCost: 100 };
+  const calls = [];
+  const send = async payload => {
+    calls.push(structuredClone(payload));
+    if (!payload.reconciliation) throw Object.assign(new Error('Review matching work'), { status: 409, data: { code: 'OPERATION_RECONCILIATION_REQUIRED', records: [existing] } });
+    return { success: true, data: payload };
+  };
+  let submission = createOperationSubmission(send, () => 'LOG-MEMBER', { storageKey: 'queue', storage });
+  await assert.rejects(submission.submit({ totalCost: 125 }), /Review/);
+  submission = createOperationSubmission(send, () => 'MUST-NOT-CHANGE-ID', { storageKey: 'queue', storage });
+  assert.equal(submission.conflict().records[0].id, existing.id);
+  await assert.rejects(submission.recordSeparate(''), /Explain/);
+  const response = await submission.recordSeparate('Second crew performed a separate pass');
+  assert.equal(response.data.id, 'LOG-MEMBER');
+  assert.deepEqual(calls[1].reconciliation.recordVersions, { 'LOG-MANAGER': 'v1' });
+  assert.equal(submission.pending(), null);
+  assert.equal(records.has('queue'), false);
+});
+
+test('accepting an existing server entry clears only a known rejected local copy', async () => {
+  const submission = createOperationSubmission(async () => {
+    throw Object.assign(new Error('Matching work exists'), { status: 409, data: { code: 'OPERATION_RECONCILIATION_REQUIRED', records: [{ id: 'LOG-SAVED' }] } });
+  }, () => 'LOG-LOCAL');
+  assert.throws(() => submission.acceptExisting(), /Review/);
+  await assert.rejects(submission.submit({ totalCost: 100 }));
+  submission.acceptExisting();
+  assert.equal(submission.pending(), null);
+});
+
 test('operation submissions share concurrent requests and retry a lost response with the same ID', async () => {
   const calls = [];
   let release, attempt = 0, ids = 0;
