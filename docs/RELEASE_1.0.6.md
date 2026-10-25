@@ -12,7 +12,7 @@ Operation/report locks, version preconditions, takeover collision review, scoped
 
 ## Web
 
-Filters are consolidated, modal focus is stable, matching-work conflicts remain reviewable, versioned writes use inspected records, and report columns use actual report/source years. The APK download remains on 1.0.5 until a verified 1.0.6 artifact is published.
+Filters are consolidated, modal focus is stable, matching-work conflicts remain reviewable, versioned writes use inspected records, and report columns use actual report/source years. The verified signed 1.0.6 APK is published and selected by the replacement download manifest. See [deployment evidence](DEPLOYMENT_1.0.6_2026-10-25.md).
 
 ## Mobile
 
