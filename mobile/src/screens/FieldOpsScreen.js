@@ -27,6 +27,7 @@ import RecoveryReviewQueue from '../components/RecoveryReviewQueue';
 import AnimatedBottomSheet from '../components/AnimatedBottomSheet';
 import AuditMemberReviewSheet from '../components/AuditMemberReviewSheet';
 import Pagination, { usePagination } from '../components/ui/Pagination';
+import { hapticFeedback } from '../utils/haptics';
 import {
   AUDIT_STATUS, AUDIT_QR_SCHEMA_VERSION, canonicalAuditStatus, createAuditQrPayload, createLegacyAuditQrPayload,
   decodeAuditQrPayload, decodeAuditQrPart, assembleAuditQrParts,
@@ -4875,6 +4876,15 @@ export default function FieldOpsScreen({ navigation, route }) {
     setArchiveFilters(previous => ({ ...previous, [key]: value }));
   };
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (archiveFilters.search !== archiveSearchDraft) {
+        setArchiveFilters(previous => ({ ...previous, search: archiveSearchDraft }));
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [archiveSearchDraft]);
+
   const clearArchiveView = () => {
     void writeArchiveClearViewPreference(archivePreferenceScope, true);
     archiveRequestIdRef.current += 1;
@@ -5156,28 +5166,72 @@ export default function FieldOpsScreen({ navigation, route }) {
 
         {/* Growth Stage Filter */}
         {!isDraft && !archiveMode && (
-          <SearchableSelect
-            label={t('stage_filter_label', 'Growth Stage Filter')}
-            options={[
-              { id: 'all', label: `${t('cat_all', 'All Stages')} (${baseList.length})`, sublabel: 'Show operations across all lifecycle stages', icon: 'layers-outline' },
-              { id: 'stage1', label: `${t('stage_word', 'Stage')} 1: ${t('stage_1_short', 'Land Prep')}`, sublabel: 'Land preparation and field layout', icon: 'trail-sign-outline' },
-              { id: 'stage2', label: `${t('stage_word', 'Stage')} 2: ${t('stage_2_short', 'Planting')}`, sublabel: 'Planting, furrows, and seedcane', icon: 'leaf-outline' },
-              { id: 'stage3', label: `${t('stage_word', 'Stage')} 3: ${t('stage_3_short', 'Basal Fert')}`, sublabel: 'Initial fertilization and soil nutrition', icon: 'water-outline' },
-              { id: 'stage4', label: `${t('stage_word', 'Stage')} 4: ${t('stage_4_short', 'Cultivation')}`, sublabel: 'Cultivation, off-barring, and hilling-up', icon: 'build-outline' },
-              { id: 'stage5', label: `${t('stage_word', 'Stage')} 5: ${t('stage_5_short', 'Maintenance')}`, sublabel: 'Weeding, pest control, and irrigation', icon: 'shield-checkmark-outline' },
-              { id: 'stage6', label: `${t('stage_word', 'Stage')} 6: ${t('stage_6_short', 'Harvesting')}`, sublabel: 'Cutting, loading, hauling, and milling', icon: 'cut-outline' },
-            ]}
-            selectedValue={logCategoryFilter}
-            onSelect={(opt) => {
-              setLogCategoryFilter(opt.id);
-              setLogCurrentPage(1);
-            }}
-            modalTitle="Filter by Growth Stage"
-            subtitle="Select a sugarcane lifecycle stage to filter records"
-            searchPlaceholder="Search stage name..."
-            leftIcon="layers"
-            style={{ marginBottom: 6 }}
-          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 6, paddingVertical: 4, paddingHorizontal: 2, marginBottom: 8 }}
+          >
+            {[
+              { id: 'all', label: t('cat_all', 'All Stages') },
+              { id: 'stage1', label: `1. ${t('stage_1_short', 'Land Prep')}` },
+              { id: 'stage2', label: `2. ${t('stage_2_short', 'Planting')}` },
+              { id: 'stage3', label: `3. ${t('stage_3_short', 'Basal Fert')}` },
+              { id: 'stage4', label: `4. ${t('stage_4_short', 'Cultivation')}` },
+              { id: 'stage5', label: `5. ${t('stage_5_short', 'Maintenance')}` },
+              { id: 'stage6', label: `6. ${t('stage_6_short', 'Harvest')}` },
+            ].map(chip => {
+              const isSelected = logCategoryFilter === chip.id;
+              return (
+                <TouchableOpacity
+                  key={chip.id}
+                  onPress={() => {
+                    hapticFeedback.light();
+                    setLogCategoryFilter(chip.id);
+                    setLogCurrentPage(1);
+                  }}
+                  activeOpacity={0.65}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  style={{
+                    flexDirection: 'row',
+                    paddingHorizontal: 15,
+                    paddingVertical: 8,
+                    minHeight: 38,
+                    borderRadius: RADIUS.full,
+                    backgroundColor: isSelected ? COLORS.primary : '#FFFFFF',
+                    borderWidth: 1.5,
+                    borderColor: isSelected ? COLORS.primary : '#D4E2D0',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: isSelected ? COLORS.primary : '#000000',
+                    shadowOffset: { width: 0, height: 1.5 },
+                    shadowOpacity: isSelected ? 0.35 : 0.09,
+                    shadowRadius: 2.5,
+                    elevation: isSelected ? 3.5 : 2.5,
+                  }}
+                >
+                  {isSelected ? (
+                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
+                      <Ionicons name="checkmark" size={11} color={COLORS.primary} />
+                    </View>
+                  ) : (
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#A3BFA0', marginRight: 6 }} />
+                  )}
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: isSelected ? '800' : '700',
+                      color: isSelected ? '#FFFFFF' : COLORS.text,
+                      includeFontPadding: false,
+                      textAlignVertical: 'center',
+                    }}
+                  >
+                    {chip.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         )}
 
         {/* Results summary when filtering */}
@@ -6125,6 +6179,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               {logTab === 'submitted' && (
                 <View style={{ marginHorizontal: SPACING.lg, marginBottom: 8 }}>
                   <SearchableSelect
+                    variant="capsule"
                     label="Ledger Plot Scope"
                     options={[
                       {
@@ -6214,9 +6269,19 @@ export default function FieldOpsScreen({ navigation, route }) {
                     onChangeText={setArchiveSearchDraft}
                     onSubmitEditing={() => updateArchiveFilter('search', archiveSearchDraft)}
                   />
-                  <TouchableOpacity onPress={() => updateArchiveFilter('search', archiveSearchDraft)} style={{ paddingHorizontal: 8, paddingVertical: 5, backgroundColor: COLORS.primary, borderRadius: RADIUS.xs }}>
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>Search</Text>
-                  </TouchableOpacity>
+                  {archiveSearchDraft.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setArchiveSearchDraft('');
+                        updateArchiveFilter('search', '');
+                      }}
+                      style={{ padding: 4 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear archive search"
+                    >
+                      <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -6225,7 +6290,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </Text>
                   <TouchableOpacity accessibilityRole="button" onPress={() => setShowArchiveFilters(true)} style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: 10, backgroundColor: COLORS.primaryBg, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Ionicons name="filter-outline" size={17} color={COLORS.primary} />
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>Filters{[archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length ? ' (' + [archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length + ')' : ''}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary, textAlignVertical: 'center', includeFontPadding: false }}>Filters{[archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length ? ' (' + [archiveFilters.cropYearCycle, archiveFilters.fieldId, archiveFilters.operationDefinitionId].filter(Boolean).length + ')' : ''}</Text>
                   </TouchableOpacity>
                 </View>
                 <ArchiveFilters visible={showArchiveFilters} onClose={() => setShowArchiveFilters(false)} filters={archiveFilters} onApply={setArchiveFilters} cropYears={archiveCropYears} fields={orderedArchiveFields} operations={SRA_OPERATIONS_CATALOGUE} />
@@ -6500,6 +6565,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 const isLocked = Boolean(storedVariety) && !logForm.id;
                 return (
                   <SearchableSelect
+                    variant="capsule"
                     label="Sugarcane Variety *"
                     options={SUGARCANE_VARIETIES.map(v => ({
                       id: v,
@@ -6508,7 +6574,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       icon: 'leaf-outline'
                     }))}
                     selectedValue={logForm.variety || ''}
-                    onSelect={(opt) => setLogForm(previous => ({ ...previous, variety: opt.id }))}
+                    onSelect={(opt) => setLogForm(previous => ({ ...previous, variety: opt?.id || opt }))}
                     placeholder="Select sugarcane variety..."
                     modalTitle="Select Sugarcane Variety"
                     subtitle="Select an approved SRA High-Yielding Sugarcane Variety"
@@ -6527,6 +6593,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               {/* Field Plot Selector (for new logs with multiple fields) */}
               {!logForm.id && (
                 <SearchableSelect
+                  variant="capsule"
                   label={t('log_field_plot', 'Field Plot')}
                   options={accessibleFields.map(field => ({
                     id: field.id,
@@ -6537,7 +6604,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     raw: field
                   }))}
                   selectedValue={logForm.fieldId}
-                  onSelect={(field) => setLogForm(p => ({ ...p, fieldId: field.id }))}
+                  onSelect={(field) => setLogForm(p => ({ ...p, fieldId: field?.id || field }))}
                   modalTitle="Select Field Plot"
                   searchPlaceholder="Search plot ID or area..."
                   leftIcon="leaf"
@@ -8338,7 +8405,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         }
       />
 
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
 
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* MEMBER VIEW */}
@@ -8401,6 +8468,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                 <>
                   {/* My Fields Selector */}
                   <SearchableSelect
+                    variant="capsule"
                     label={t('my_fields', 'My Sugarcane Plots')}
                     options={memberFieldList.filter(f => f && f.id).map(f => ({
                       id: f.id,
@@ -8827,6 +8895,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     </View>
                   ) : (
                     <SearchableSelect
+                      variant="capsule"
                       label={managerFieldFilter === 'my' ? t('my_fields', 'My Personal Field Plot') : t('block_farm_fields', 'Block Farm Field Plots')}
                       options={displayedFields.map(f => ({
                         id: f.id,
@@ -8996,6 +9065,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
               return (
                 <SearchableSelect
+                  variant="capsule"
                   label="District Block Farms Overview"
                   options={availableFarms}
                   selectedValue={selectedFarm}

@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { View, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, FlatList, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { AppText as Text, AppTextInput as TextInput } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
+import { hapticFeedback } from '../../utils/haptics';
 
 export function SearchableSelectContent({
   onClose,
@@ -66,12 +67,24 @@ export function SearchableSelectContent({
     </TouchableOpacity>
   );
 
+  const searchInputRef = React.useRef(null);
+
   return (
     <>
           {/* Modal Header */}
           <View style={styles.sheetHeader}>
-            {back && closeButton}
-            <View style={{ flex: 1, paddingRight: 10 }}>
+            {back ? (
+              <TouchableOpacity
+                onPress={onClose}
+                style={styles.closeBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={closeLabel || 'Back'}
+              >
+                <Ionicons name="arrow-back" size={22} color={COLORS.text} />
+              </TouchableOpacity>
+            ) : null}
+            <View style={{ flex: 1, paddingHorizontal: back ? 6 : 0, paddingRight: 8 }}>
               <Text style={styles.sheetTitle}>{title}</Text>
               {subtitle ? (
                 <Text style={styles.sheetSubtitle}>{subtitle}</Text>
@@ -81,13 +94,27 @@ export function SearchableSelectContent({
                 </Text>
               )}
             </View>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.circleCloseBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={20} color={COLORS.text} />
+            </TouchableOpacity>
           </View>
 
           {/* Search Bar for Quick Filtering */}
           {enableSearch && normalizedOptions.length > 3 && (
-            <View style={styles.searchBox}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => searchInputRef.current?.focus()}
+              style={styles.searchBox}
+            >
               <Ionicons name="search" size={19} color={COLORS.textMuted} />
               <TextInput
+                ref={searchInputRef}
                 style={styles.searchInput}
                 placeholder={searchPlaceholder}
                 placeholderTextColor={COLORS.textMuted}
@@ -101,7 +128,7 @@ export function SearchableSelectContent({
                   <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
                 </TouchableOpacity>
               )}
-            </View>
+            </TouchableOpacity>
           )}
 
           {/* Vertical Options Scroll List */}
@@ -231,6 +258,7 @@ export function SearchableSelect({
   disabled = false,
   helperText,
   onOpen,
+  variant,
 }) {
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -259,6 +287,120 @@ export function SearchableSelect({
     if (selectedItem == null || typeof selectedItem !== 'object') return null;
     return selectedItem.sublabel || selectedItem.subtitle || (selectedItem.ha ? `${selectedItem.ha} Ha` : null);
   }, [selectedItem]);
+
+  if (variant === 'capsule') {
+    const isLargeList = options.length > 5;
+    const selectedId = String(selectedValue ?? '');
+
+    // For lists > 5, show top 3 options + selected option (if outside top 3) + search capsule
+    let capsulesToRender = options;
+    if (isLargeList) {
+      const topOptions = options.slice(0, 3);
+      const isSelectedInTop = topOptions.some(opt => String(opt.id ?? opt.value ?? opt.key ?? opt) === selectedId);
+      const activeOption = !isSelectedInTop
+        ? options.find(opt => String(opt.id ?? opt.value ?? opt.key ?? opt) === selectedId)
+        : null;
+      capsulesToRender = activeOption ? [...topOptions, activeOption] : topOptions;
+    }
+
+    return (
+      <View style={[styles.container, style]}>
+        {Boolean(label) && (
+          <View style={styles.capsuleSectionHeader}>
+            {leftIcon && (
+              <Ionicons
+                name={leftIcon.endsWith('-outline') ? leftIcon : `${leftIcon}-outline`}
+                size={14}
+                color={COLORS.primary}
+                style={{ marginRight: 6 }}
+              />
+            )}
+            <Text style={styles.fieldLabel}>{label}</Text>
+          </View>
+        )}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.capsuleScroll}
+        >
+          {capsulesToRender.map((opt) => {
+            const optId = String(opt.id ?? opt.value ?? opt.key ?? opt);
+            const isSelected = selectedId === optId;
+            const optLabel = opt.label || opt.name || opt.title || String(optId);
+            return (
+              <TouchableOpacity
+                key={optId}
+                style={[
+                  styles.capsulePill,
+                  isSelected && styles.capsulePillActive,
+                  disabled && styles.capsulePillDisabled
+                ]}
+                onPress={() => {
+                  hapticFeedback.light();
+                  onSelect(opt.raw ?? opt);
+                }}
+                disabled={disabled}
+                activeOpacity={0.65}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+              >
+                {isSelected ? (
+                  <View style={styles.capsuleCheckBadge}>
+                    <Ionicons name="checkmark" size={12} color={COLORS.primary} />
+                  </View>
+                ) : (
+                  <View style={styles.capsuleUnselectedDot} />
+                )}
+                <Text
+                  style={[
+                    styles.capsulePillText,
+                    isSelected && styles.capsulePillTextActive
+                  ]}
+                >
+                  {optLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          {isLargeList && (
+            <TouchableOpacity
+              style={[styles.capsulePillMore, disabled && styles.capsulePillDisabled]}
+              onPress={() => {
+                hapticFeedback.light();
+                if (onOpen) {
+                  onOpen({ options, selectedValue, onSelect, title: modalTitle || label || 'Select Option', subtitle, searchPlaceholder });
+                } else {
+                  setModalVisible(true);
+                }
+              }}
+              disabled={disabled}
+              activeOpacity={0.65}
+              accessibilityRole="button"
+              accessibilityLabel={`Search all ${options.length} options`}
+            >
+              <Ionicons name="search-outline" size={13} color={COLORS.primary} style={{ marginRight: 5 }} />
+              <Text style={styles.capsulePillMoreText}>
+                {`Search all ${options.length}...`}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+        {helperText && <Text style={styles.helperText}>{helperText}</Text>}
+        {!onOpen && (
+          <SearchableSelectModal
+            visible={modalVisible}
+            onClose={() => setModalVisible(false)}
+            options={options}
+            selectedValue={selectedValue}
+            onSelect={onSelect}
+            title={modalTitle || label}
+            subtitle={subtitle}
+            searchPlaceholder={searchPlaceholder}
+          />
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, style]}>
@@ -439,11 +581,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   closeBtn: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  circleCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   searchBox: {
     flexDirection: 'row',
@@ -561,5 +712,106 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textMuted,
     fontWeight: '500',
+  },
+
+  // Capsule Variant
+  capsuleSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  capsuleScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  capsulePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    minHeight: 40,
+    borderRadius: RADIUS.full,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D4E2D0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2.5,
+    elevation: 2.5,
+  },
+  capsulePillActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3.5,
+    elevation: 3.5,
+  },
+  capsuleUnselectedDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#A3BFA0',
+    marginRight: 7,
+  },
+  capsuleCheckBadge: {
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  capsulePillText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  capsulePillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  capsulePillMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    minHeight: 40,
+    borderRadius: RADIUS.full,
+    backgroundColor: '#F5F9F3',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  capsulePillMoreText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  capsulePillDisabled: {
+    opacity: 0.55,
+  },
+  sheetContainer: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1.5,
+    borderTopColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 24,
   },
 });

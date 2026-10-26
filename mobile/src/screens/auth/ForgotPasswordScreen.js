@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Keyboard, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
@@ -16,9 +16,37 @@ import { passwordPolicyError } from '../../domain/passwordPolicy';
 import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
 import { getRecoveryPushToken } from '../../services/recoveryNotificationService';
 import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
+import OtpCodeInput from '../../components/OtpCodeInput';
 
 export default function ForgotPasswordScreen({ navigation, route }) {
   const { t } = useTranslation();
+
+  const scrollViewRef = useRef(null);
+  const newPwRef = useRef(null);
+  const confirmPwRef = useRef(null);
+  const [keyboardActive, setKeyboardActive] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardActive(true);
+        setKeyboardHeight(e.endCoordinates?.height || 260);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardActive(false);
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Step 1: Identifier Entry; Step 2: SMS OTP Verification; Step 3: Set New Password; Step 4: Success
   const [step, setStep] = useState(1);
@@ -259,8 +287,22 @@ export default function ForgotPasswordScreen({ navigation, route }) {
         <View style={{ width: 36 }} />
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={[
+            s.scroll,
+            { paddingBottom: keyboardActive ? Math.max(keyboardHeight + 20, 180) : 40 }
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
+        >
 
           {/* STEP 1: Enter User ID or Mobile */}
           {step === 1 && (
@@ -343,22 +385,18 @@ export default function ForgotPasswordScreen({ navigation, route }) {
 
               <View style={s.card}>
                 <Text style={s.label}>{t('recovery_code_label')}</Text>
-                <View style={s.inputWrap}>
-                  <Ionicons name="keypad-outline" size={18} color={COLORS.textMuted} />
-                  <TextInput
-                    style={[s.input, { letterSpacing: 4, fontSize: 18, fontWeight: '700' }]}
-                    value={otpCode}
-                    onChangeText={setOtpCode}
-                    placeholder="123456"
-                    placeholderTextColor={COLORS.textMuted}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
-                </View>
+                <OtpCodeInput
+                  value={otpCode}
+                  onChangeText={setOtpCode}
+                  onComplete={handleVerifyOtp}
+                  disabled={loading}
+                  autoFocus
+                  accessibilityLabel={t('recovery_code_label')}
+                />
                 <TouchableOpacity
                   onPress={handleSendOtp}
                   disabled={loading || resendSeconds > 0}
-                  style={{ alignSelf: 'flex-end', marginTop: 4, opacity: loading || resendSeconds > 0 ? 0.55 : 1 }}
+                  style={{ alignSelf: 'flex-end', marginTop: 10, opacity: loading || resendSeconds > 0 ? 0.55 : 1 }}
                 >
                   <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>
                     {resendSeconds > 0
@@ -428,12 +466,20 @@ export default function ForgotPasswordScreen({ navigation, route }) {
                   <View style={s.inputWrap}>
                     <Ionicons name="lock-closed-outline" size={18} color={COLORS.textMuted} />
                     <TextInput
+                      ref={newPwRef}
                       style={[s.input, { flex: 1 }]}
                       value={newPassword}
                       onChangeText={setNewPassword}
                       secureTextEntry={!showPassword}
                       placeholder="••••••••"
                       placeholderTextColor={COLORS.textMuted}
+                      returnKeyType="next"
+                      onSubmitEditing={() => confirmPwRef.current?.focus()}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          scrollViewRef.current?.scrollTo({ y: 120, animated: true });
+                        }, 150);
+                      }}
                     />
                     <TouchableOpacity onPress={() => setShowPassword(p => !p)}>
                       <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.textMuted} />
@@ -446,12 +492,19 @@ export default function ForgotPasswordScreen({ navigation, route }) {
                   <View style={s.inputWrap}>
                     <Ionicons name="checkmark-done-outline" size={18} color={COLORS.textMuted} />
                     <TextInput
+                      ref={confirmPwRef}
                       style={[s.input, { flex: 1 }]}
                       value={confirmPassword}
                       onChangeText={setConfirmPassword}
                       secureTextEntry={!showPassword}
                       placeholder="••••••••"
                       placeholderTextColor={COLORS.textMuted}
+                      returnKeyType="done"
+                      onFocus={() => {
+                        setTimeout(() => {
+                          scrollViewRef.current?.scrollToEnd({ animated: true });
+                        }, 150);
+                      }}
                     />
                   </View>
                 </View>

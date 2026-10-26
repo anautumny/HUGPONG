@@ -7,6 +7,7 @@ import { AppText as Text } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
 import { SearchableSelectContent } from '../ui/SearchableSelect';
 import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
+import { hapticFeedback } from '../../utils/haptics';
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -14,13 +15,73 @@ export function AnalyticsScopeCard({
   farmName,
   fieldName,
   period,
-  isMember
+  isMember,
+  onPress,
+  activeFilterCount = 0
 }) {
+  const chips = [
+    { label: season === 'ALL' ? 'All crop years' : season, icon: 'calendar-outline' },
+    !isMember && farmName ? { label: farmName, icon: 'business-outline' } : null,
+    { label: fieldName || 'All plots', icon: 'leaf-outline' },
+    period && period !== 'ALL' ? { label: period, icon: 'time-outline' } : null
+  ].filter(Boolean);
+
+  const hasActiveFilters = Boolean(activeFilterCount);
+
   return (
-    <View style={{ paddingHorizontal: 2, paddingVertical: 4 }}>
-      <Text style={{ fontSize: 12, lineHeight: 19, color: COLORS.textSecondary }}>
-        {[season === 'ALL' ? 'All crop years' : season, !isMember && farmName, fieldName, period === 'ALL' ? 'All periods' : period].filter(Boolean).join(' · ')}
-      </Text>
+    <View style={styles.scopeCapsuleBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scopeCapsuleScroll}
+      >
+        <TouchableOpacity
+          activeOpacity={0.65}
+          onPress={() => {
+            hapticFeedback.light();
+            onPress();
+          }}
+          style={[
+            styles.scopeCapsule,
+            styles.scopeActionCapsule,
+            hasActiveFilters && styles.scopeActionCapsuleActive
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Filter analytics scope"
+        >
+          <Ionicons
+            name="options-outline"
+            size={13}
+            color={hasActiveFilters ? '#FFFFFF' : COLORS.primary}
+          />
+          <Text
+            style={[
+              styles.scopeActionCapsuleText,
+              hasActiveFilters && styles.scopeActionCapsuleTextActive
+            ]}
+          >
+            {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : 'Filters'}
+          </Text>
+        </TouchableOpacity>
+
+        {chips.map((chip, index) => (
+          <TouchableOpacity
+            key={index}
+            activeOpacity={0.65}
+            onPress={() => {
+              hapticFeedback.light();
+              onPress();
+            }}
+            style={styles.scopeCapsule}
+            accessibilityRole="button"
+            accessibilityLabel={`Filter: ${chip.label}`}
+          >
+            <Ionicons name={chip.icon} size={12} color={COLORS.primary} />
+            <Text style={styles.scopeCapsuleText}>{chip.label}</Text>
+            <Ionicons name="chevron-down" size={10} color={COLORS.textMuted} style={{ marginLeft: 1 }} />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
 }
@@ -83,14 +144,15 @@ export function AnalyticsScopeModal({
             </View>
           </View>
 
-          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ gap: 4, paddingVertical: 10, paddingHorizontal: SPACING.lg }} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ gap: 14, paddingVertical: 12, paddingHorizontal: SPACING.lg }} keyboardShouldPersistTaps="handled">
             {/* Season Selector */}
             <SearchableSelect
+              variant="capsule"
               onOpen={setPicker}
               label="CROP YEAR CYCLE"
               options={seasons.map(s => ({
                 id: s,
-                label: s === 'ALL' ? 'All Crop Year Cycles' : `${s}${s === currentSeason ? ' (Current)' : ''}`,
+                label: s === 'ALL' ? 'All Crop Years' : `${s}${s === currentSeason ? ' (Current)' : ''}`,
                 sublabel: s === 'ALL' ? 'Aggregate all historical and active cycles' : (s === currentSeason ? 'Active season in progress' : 'Historical cycle records'),
                 icon: 'calendar-outline'
               }))}
@@ -104,6 +166,7 @@ export function AnalyticsScopeModal({
             {/* Farm Selector (if not member) */}
             {!isMember && !isManager && farms.length > 1 && (
               <SearchableSelect
+                variant="capsule"
                 onOpen={setPicker}
                 label="BLOCK FARM"
                 options={[
@@ -127,6 +190,7 @@ export function AnalyticsScopeModal({
 
             {/* Field / Plot Selector */}
             <SearchableSelect
+              variant="capsule"
               onOpen={setPicker}
               label="PARCEL / PLOT"
               options={[
@@ -146,21 +210,22 @@ export function AnalyticsScopeModal({
             />
 
             {/* Period Selector */}
-              <SearchableSelect
-                onOpen={setPicker}
-                label="REPORTING PERIOD / MONTH"
-                options={['ALL', ...draftPeriods].map(p => ({
-                  id: p,
-                  label: p === 'ALL' ? 'All Months' : p,
-                  sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
-                  icon: 'time-outline'
-                }))}
-                selectedValue={draft.period}
-                onSelect={(opt) => setDraft(value => ({ ...value, period: opt.id }))}
-                modalTitle="Select Reporting Period"
-                searchPlaceholder="Search period (e.g. 2026-03)..."
-                leftIcon="time"
-              />
+            <SearchableSelect
+              variant="capsule"
+              onOpen={setPicker}
+              label="REPORTING PERIOD / MONTH"
+              options={['ALL', ...draftPeriods].map(p => ({
+                id: p,
+                label: p === 'ALL' ? 'All Months' : p,
+                sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
+                icon: 'time-outline'
+              }))}
+              selectedValue={draft.period}
+              onSelect={(opt) => setDraft(value => ({ ...value, period: opt.id }))}
+              modalTitle="Select Reporting Period"
+              searchPlaceholder="Search period (e.g. 2026-03)..."
+              leftIcon="time"
+            />
           </ScrollView>
 
           <View style={styles.modalFooter}>
@@ -539,7 +604,7 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 10,
     marginTop: 8,
     paddingHorizontal: SPACING.lg,
@@ -843,5 +908,157 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     textAlign: 'center'
-  }
+  },
+
+  // Scope Filter Capsules
+  scopeCapsuleBar: {
+    marginVertical: 4,
+  },
+  scopeCapsuleScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 2,
+  },
+  scopeCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D4E2D0',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    minHeight: 38,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2.5,
+    elevation: 2.5,
+  },
+  scopeActionCapsule: {
+    backgroundColor: '#EAF6E7',
+    borderColor: '#BFDEB6',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2.5,
+    elevation: 2.5,
+  },
+  scopeActionCapsuleActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3.5,
+    elevation: 3.5,
+  },
+  scopeActionCapsuleText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  scopeActionCapsuleTextActive: {
+    color: '#FFFFFF',
+  },
+  scopeCapsuleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+
+  // Scope Filter Bar (Backwards-compatibility)
+  scopeBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAF5',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginVertical: 4,
+    gap: 8,
+  },
+  scopeChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    flex: 1,
+  },
+  scopeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D7ECD0',
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  scopeChipText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  scopeEditIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#EAF6E7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Analytics Filter Bottom Modal
+  modalSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1.5,
+    borderTopColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+    letterSpacing: -0.3,
+  },
+  modalSub: {
+    fontSize: 12.5,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    backgroundColor: '#FFFFFF',
+  },
 });

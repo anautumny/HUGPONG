@@ -10,7 +10,7 @@ let activeSync = null;
 let notificationModule = null;
 let notificationHandlerReady = false;
 
-const isExpoGo = Constants.appOwnership === 'expo';
+const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
 function getNotificationModule() {
   // Importing expo-notifications itself initializes Android push-token support,

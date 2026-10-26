@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { AppState, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, LogBox, Pressable, StyleSheet, View } from 'react-native';
+
+LogBox.ignoreAllLogs();
 import { useFonts } from 'expo-font';
 import * as ExpoSplashScreen from 'expo-splash-screen';
 import { Inter_300Light } from '@expo-google-fonts/inter/300Light';

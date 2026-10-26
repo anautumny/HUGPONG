@@ -275,9 +275,10 @@ export default function PlannerScreen({ navigation, route }) {
           <View style={s.editorCard}>
             <Text style={s.inputLabel}>{t('planner_planned_activity')}</Text>
             <SearchableSelect
+              variant="capsule"
               options={operationChoices}
               selectedValue={form.operationChoiceId}
-              onSelect={choice => setForm(current => ({ ...current, operationChoiceId: choice.id, customName: choice.id === 'CUSTOM' ? current.customName : '' }))}
+              onSelect={choice => setForm(current => ({ ...current, operationChoiceId: choice?.id || choice, customName: (choice?.id || choice) === 'CUSTOM' ? current.customName : '' }))}
               placeholder={t('planner_select_operation_placeholder')}
               modalTitle={t('planner_select_operation')}
               searchPlaceholder={t('planner_search_operations')}
@@ -329,10 +330,11 @@ export default function PlannerScreen({ navigation, route }) {
       )}
       {fields.length === 0 ? <EmptyState t={t} /> : <>
         <SearchableSelect
+          variant="capsule"
           label={t('field_plot', 'Active Sugarcane Field Plot')}
           options={fieldOptions}
           selectedValue={selectedFieldId}
-          onSelect={(opt) => setSelectedFieldId(opt.id)}
+          onSelect={(opt) => setSelectedFieldId(opt?.id || opt)}
           modalTitle={t('select_field_plot', 'Select Sugarcane Field Plot')}
           searchPlaceholder={t('search_fields', 'Search by plot ID or size...')}
           leftIcon="leaf"

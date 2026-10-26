@@ -1486,26 +1486,21 @@ export default function OperationsView() {
                 />
               </div>
               {statusFilter === 'ARCHIVED' ? (
-                <form
-                  className="relative flex-1 min-w-0"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    updateArchiveFilter('search', archiveSearchDraft);
-                  }}
-                >
+                <div className="relative flex-1 min-w-0">
                   <Search className="w-4 h-4 text-hug-muted absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="search"
                     value={archiveSearchDraft}
-                    onChange={(event) => setArchiveSearchDraft(event.target.value)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setArchiveSearchDraft(value);
+                      updateArchiveFilter('search', value);
+                    }}
                     placeholder="Exact operation record ID"
                     aria-label="Search archived operations by exact record ID"
-                    className="w-full text-xs font-medium pl-9 pr-24 py-2 border border-border rounded-xl bg-surface-subtle text-hug-text placeholder:text-hug-muted outline-none focus:border-primary"
+                    className="w-full text-xs font-medium pl-9 pr-3 py-2 border border-border rounded-xl bg-surface-subtle text-hug-text placeholder:text-hug-muted outline-none focus:border-primary"
                   />
-                  <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1 rounded-lg bg-primary text-white text-xs font-bold">
-                    Search
-                  </button>
-                </form>
+                </div>
               ) : (
                 <div className="relative flex-1 min-w-0">
                   <Search className="w-4 h-4 text-hug-muted absolute left-3 top-1/2 -translate-y-1/2" />

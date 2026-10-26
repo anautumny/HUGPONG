@@ -87,8 +87,8 @@ export default function CropYearCompilationScreen({ onClose }) {
       {!online && <Text style={s.error}>Connect to the internet to compile or retrieve Crop Year reports.</Text>}
       {!!error && <View accessibilityRole="alert" style={s.card}><Text style={s.error}>{error}</Text>{button('Retry', () => setReload(value => value + 1), saving || !online)}</View>}
       <View pointerEvents={disabled ? 'none' : 'auto'} style={disabled ? { opacity: 0.65 } : undefined}>
-        <SearchableSelect label="Crop Year Cycle" options={(options?.cropYearCycles || []).map(year => ({ id: year, label: year }))} selectedValue={cropYearCycle} onSelect={item => setYear(item.id)} modalTitle="Select Crop Year" searchPlaceholder="Search crop year..." />
-        <SearchableSelect label="Block Farm" options={[{ id: 'ALL', label: 'All Block Farms' }, ...(options?.blockFarms || []).map(farm => ({ id: farm.id, label: farm.name }))]} selectedValue={blockFarmId || 'ALL'} onSelect={item => setFarm(item.id === 'ALL' ? '' : item.id)} modalTitle="Select Block Farm" searchPlaceholder="Search Block Farm..." />
+        <SearchableSelect variant="capsule" label="Crop Year Cycle" options={(options?.cropYearCycles || []).map(year => ({ id: year, label: year }))} selectedValue={cropYearCycle} onSelect={item => setYear(item?.id || item)} modalTitle="Select Crop Year" searchPlaceholder="Search crop year..." />
+        <SearchableSelect variant="capsule" label="Block Farm" options={[{ id: 'ALL', label: 'All Block Farms' }, ...(options?.blockFarms || []).map(farm => ({ id: farm.id, label: farm.name }))]} selectedValue={blockFarmId || 'ALL'} onSelect={item => setFarm((item?.id || item) === 'ALL' ? '' : (item?.id || item))} modalTitle="Select Block Farm" searchPlaceholder="Search Block Farm..." />
       </View>
       {loading && <ActivityIndicator color={COLORS.primary} accessibilityLabel="Loading certified reports" />}
       {!loading && options && !cropYearCycle && <Text style={s.copy}>No certified monthly reports with Crop Year data are available yet.</Text>}

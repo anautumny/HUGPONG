@@ -42,6 +42,7 @@ import { canonicalStoredCropYear, uniqueCropYears } from '../utils/dataHelpers';
 import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
 import Pagination, { usePagination } from '../components/ui/Pagination';
 import PriceHistorySheet from '../components/PriceHistorySheet';
+import { hapticFeedback } from '../utils/haptics';
 
 export default function AnalyticsScreen({ navigation, route }) {
   const { t } = useTranslation();
@@ -330,16 +331,13 @@ export default function AnalyticsScreen({ navigation, route }) {
         title="Analytics"
         subtitle="Farm performance & prices"
         onBackPress={() => navigation.goBack()}
-        rightAction={{
-          icon: 'filter-outline',
-          label: activeFilterCount ? `Filters (${activeFilterCount})` : 'Filters',
-          onPress: () => setShowScopeModal(true)
-        }}
       />
 
       <ScrollView
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
       >
         {isSRA && !isOnline && (
           <View style={s.offlineSnapshotBanner}>
@@ -364,6 +362,8 @@ export default function AnalyticsScreen({ navigation, route }) {
           fieldName={activeFieldName}
           period={selectedPeriod}
           isMember={isMember}
+          onPress={() => setShowScopeModal(true)}
+          activeFilterCount={activeFilterCount}
         />
 
         {/* ── 2. 4 Segmented Navigation Tabs ── */}
@@ -379,7 +379,10 @@ export default function AnalyticsScreen({ navigation, route }) {
               <TouchableOpacity
                 key={tabItem.key}
                 style={[s.segmentedTabBtn, isActive && s.segmentedTabBtnActive]}
-                onPress={() => setActiveTab(tabItem.key)}
+                onPress={() => {
+                  hapticFeedback.light();
+                  setActiveTab(tabItem.key);
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons

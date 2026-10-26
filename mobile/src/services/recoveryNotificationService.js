@@ -9,7 +9,7 @@ let notificationModule = null;
 let notificationHandlerReady = false;
 let applicationPermissionRequest = null;
 
-const isExpoGo = Constants.appOwnership === 'expo';
+const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
 function getNotificationModule() {
   if (isExpoGo) return null;

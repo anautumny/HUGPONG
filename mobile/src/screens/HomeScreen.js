@@ -42,6 +42,20 @@ const { width } = Dimensions.get('window');
 const BAR_COLORS = ['#B8D4A0', '#8FBF6A', '#6BA045', '#4A7C2F', '#2D5016'];
 const MAX_PRICE = 3000;
 const MIN_PRICE = 1000;
+const CHART_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const formatChartMonth = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+  const parts = str.split('-');
+  if (parts.length >= 2) {
+    const monthNum = parseInt(parts[1], 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      return CHART_MONTHS[monthNum - 1];
+    }
+  }
+  return str;
+};
 
 const generateDynamicNotifications = (session, customDrafts, customLogs, readIds = new Set(), dismissedIds = new Set()) => {
   const notifs = [];
@@ -666,7 +680,7 @@ export default function HomeScreen({ navigation }) {
                   <View style={s.chartXAxisRow}>
                     {priceAnalytics.months.map((month, mi) => (
                       <View key={mi} style={s.chartXAxisCol}>
-                        <Text style={s.xLabel}>{month}</Text>
+                        <Text style={s.xLabel} numberOfLines={1}>{formatChartMonth(month)}</Text>
                       </View>
                     ))}
                   </View>
@@ -1078,6 +1092,7 @@ const s = StyleSheet.create({
   bar: { flex: 1, borderRadius: 3 },
   chartXAxisRow: { flexDirection: 'row', gap: 4, marginTop: 6, height: 18 },
   chartXAxisCol: { flex: 1, alignItems: 'center' },
+  xLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textAlign: 'center' },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -127,6 +127,7 @@ export default function AuditHistoryModal({
             <>
           {/* Monthly Selector */}
           <SearchableSelect
+            variant="capsule"
             label={t('select_report_month', 'SELECT REPORT MONTH')}
             options={uniquePeriodAudits.map((audit, idx) => {
               const auditKey = audit.reportId || audit.id || `audit-${idx}`;
@@ -143,7 +144,7 @@ export default function AuditHistoryModal({
               };
             })}
             selectedValue={selectedAuditId}
-            onSelect={(item) => setSelectedAuditId(item.raw?.id || item.raw?.reportId || item.id)}
+            onSelect={(item) => setSelectedAuditId(item.raw?.id || item.raw?.reportId || item?.id || item)}
             modalTitle="Select Audit Month"
             searchPlaceholder="Search audit month or status..."
             leftIcon="calendar"

@@ -5,6 +5,7 @@ import { COLORS, SHADOW, RADIUS } from '../theme';
 import { getCurrentSession, subscribe, getPendingSyncCount } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import { safeAlert } from '../utils/dialogs';
+import { hapticFeedback } from '../utils/haptics';
 import { AppText as Text } from './Typography';
 
 const TAB_CONFIG = {
@@ -89,6 +90,7 @@ export default function CustomBottomTabBar({
         const hasPendingSync = route.name === 'Field Ops' && pendingCount > 0;
 
         const onPress = () => {
+          hapticFeedback.light();
           if (isTabDisabled) {
             safeAlert(
               'Offline Mode Active',
@@ -266,6 +268,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: COLORS.textInverse,
     lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   offlineChip: {
     position: 'absolute',
@@ -289,5 +293,6 @@ const styles = StyleSheet.create({
     minHeight: 28,
     width: '100%',
     flexShrink: 1,
+    includeFontPadding: false,
   },
 });

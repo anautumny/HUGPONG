@@ -78,6 +78,7 @@ function harness() {
       if (name.endsWith('/i18n')) return { useTranslation: () => ({ t: (_key, fallback) => fallback }) };
       if (name.endsWith('/pagination')) return load('utils/pagination.js');
       if (name.endsWith('/notificationIdentity')) return load('domain/notificationIdentity.js');
+      if (name.endsWith('/haptics')) return { hapticFeedback: { light: () => {}, success: () => {}, warning: () => {}, error: () => {} } };
       throw new Error(`Unexpected dependency ${name}`);
     };
     new Function('require', 'module', 'exports', compiled)(requireMock, module, module.exports);

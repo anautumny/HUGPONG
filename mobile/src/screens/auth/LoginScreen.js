@@ -73,6 +73,8 @@ export default function LoginScreen({ navigation, route }) {
   const spinAnim = useRef(new Animated.Value(0)).current;
   const loopAnimRef = useRef(null);
   const phoneVerificationAttemptRef = useRef('');
+  const contactInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
 
   const startSpinAnimation = () => {
     spinAnim.setValue(0);
@@ -479,7 +481,7 @@ export default function LoginScreen({ navigation, route }) {
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView style={s.scrollWrap} contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={s.scrollWrap} contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
 
           <View style={s.contentContainer}>
             {/* Header */}
@@ -529,10 +531,10 @@ export default function LoginScreen({ navigation, route }) {
             {/* Lockout or Auth Error Banner */}
             {authError ? (
               <View style={[s.errorBanner, lockoutSeconds > 0 && s.lockoutBanner]}>
-                <Ionicons 
-                  name={lockoutSeconds > 0 ? "shield-outline" : "alert-circle-outline"} 
-                  size={18} 
-                  color={lockoutSeconds > 0 ? "#B45309" : "#DC2626"} 
+                <Ionicons
+                  name={lockoutSeconds > 0 ? "shield-outline" : "alert-circle-outline"}
+                  size={18}
+                  color={lockoutSeconds > 0 ? "#B45309" : "#DC2626"}
                 />
                 <Text style={[s.errorBannerText, lockoutSeconds > 0 && s.lockoutBannerText]}>
                   {lockoutSeconds > 0 ? t('auth_lockout_wait') : authError}
@@ -546,23 +548,28 @@ export default function LoginScreen({ navigation, route }) {
                 <Text style={s.label}>{t('auth_identifier_label', 'User ID or Mobile Number')}</Text>
                 <Text style={s.subLabel}>{t('auth_lost_sim_user_id')}</Text>
               </View>
-              <View style={[
-                s.inputWrap, 
-                focusedField === 'contactNumber' && s.inputFocused,
-                errors.contactNumber && s.inputError
-              ]}>
-                <Ionicons 
-                  name="person-circle-outline" 
-                  size={19} 
-                  color={focusedField === 'contactNumber' ? COLORS.primary : COLORS.textMuted} 
-                  style={s.inputIcon} 
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => contactInputRef.current?.focus()}
+                style={[
+                  s.inputWrap,
+                  focusedField === 'contactNumber' && s.inputFocused,
+                  errors.contactNumber && s.inputError
+                ]}
+              >
+                <Ionicons
+                  name="person-circle-outline"
+                  size={19}
+                  color={focusedField === 'contactNumber' ? COLORS.primary : COLORS.textMuted}
+                  style={s.inputIcon}
                 />
                 <TextInput
+                  ref={contactInputRef}
                   style={s.input}
                   value={contactNumber}
-                  onChangeText={v => { 
-                    setContactNumber(v); 
-                    setErrors(p => ({ ...p, contactNumber: null })); 
+                  onChangeText={v => {
+                    setContactNumber(v);
+                    setErrors(p => ({ ...p, contactNumber: null }));
                     setAuthError('');
                   }}
                   onFocus={() => setFocusedField('contactNumber')}
@@ -574,31 +581,38 @@ export default function LoginScreen({ navigation, route }) {
                   editable={lockoutSeconds === 0}
                   autoComplete="username"
                   autoCapitalize="none"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInputRef.current?.focus()}
                 />
-              </View>
+              </TouchableOpacity>
               {errors.contactNumber && <Text style={s.errorText}>{errors.contactNumber}</Text>}
             </View>
 
             {/* Password */}
             <View style={s.fieldGroup}>
               <Text style={s.label}>{t('auth_password', 'Password')}</Text>
-              <View style={[
-                s.inputWrap, 
-                focusedField === 'password' && s.inputFocused,
-                errors.password && s.inputError
-              ]}>
-                <Ionicons 
-                  name="lock-closed-outline" 
-                  size={19} 
-                  color={focusedField === 'password' ? COLORS.primary : COLORS.textMuted} 
-                  style={s.inputIcon} 
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => passwordInputRef.current?.focus()}
+                style={[
+                  s.inputWrap,
+                  focusedField === 'password' && s.inputFocused,
+                  errors.password && s.inputError
+                ]}
+              >
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={19}
+                  color={focusedField === 'password' ? COLORS.primary : COLORS.textMuted}
+                  style={s.inputIcon}
                 />
                 <TextInput
+                  ref={passwordInputRef}
                   style={s.input}
                   value={password}
-                  onChangeText={v => { 
-                    setPassword(v); 
-                    setErrors(p => ({ ...p, password: null })); 
+                  onChangeText={v => {
+                    setPassword(v);
+                    setErrors(p => ({ ...p, password: null }));
                     setAuthError('');
                   }}
                   onFocus={() => setFocusedField('password')}
@@ -608,22 +622,24 @@ export default function LoginScreen({ navigation, route }) {
                   secureTextEntry={!showPw}
                   editable={lockoutSeconds === 0}
                   autoComplete="password"
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogin}
                 />
-                <TouchableOpacity 
-                  onPress={() => setShowPw(p => !p)} 
-                  style={s.eyeBtn} 
+                <TouchableOpacity
+                  onPress={() => setShowPw(p => !p)}
+                  style={s.eyeBtn}
                   activeOpacity={0.7}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   accessibilityRole="button"
                   accessibilityLabel={showPw ? t('a11y_hide_password', 'Hide password') : t('a11y_show_password', 'Show password')}
                 >
-                  <Ionicons 
-                    name={showPw ? 'eye-off-outline' : 'eye-outline'} 
-                    size={19} 
-                    color={focusedField === 'password' ? COLORS.primary : COLORS.textMuted} 
+                  <Ionicons
+                    name={showPw ? 'eye-off-outline' : 'eye-outline'}
+                    size={19}
+                    color={focusedField === 'password' ? COLORS.primary : COLORS.textMuted}
                   />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
               {errors.password && <Text style={s.errorText}>{errors.password}</Text>}
             </View>
 
@@ -633,13 +649,13 @@ export default function LoginScreen({ navigation, route }) {
             </TouchableOpacity>
 
             {/* Sign In Button */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
-                s.btn, 
+                s.btn,
                 (loading || lockoutSeconds > 0) && s.btnDisabled,
                 lockoutSeconds > 0 && { backgroundColor: '#9CA3AF' }
-              ]} 
-              onPress={handleLogin} 
+              ]}
+              onPress={handleLogin}
               disabled={loading || lockoutSeconds > 0}
               activeOpacity={0.8}
             >
@@ -935,13 +951,13 @@ const s = StyleSheet.create({
   },
   safe: { flex: 1, backgroundColor: COLORS.background },
   scrollWrap: { flex: 1 },
-  scroll: { 
-    flexGrow: 1, 
-    paddingHorizontal: SPACING.lg, 
-    paddingTop: SPACING.md, 
-    paddingBottom: SPACING.xl, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   contentContainer: {
     width: '100%',
@@ -949,41 +965,41 @@ const s = StyleSheet.create({
     gap: SPACING.lg,
     paddingVertical: SPACING.xs,
   },
-  header: { 
-    alignItems: 'center', 
-    gap: 6, 
-    width: '100%', 
+  header: {
+    alignItems: 'center',
+    gap: 6,
+    width: '100%',
   },
-  logoImg: { 
-    width: 128, 
-    height: 128, 
-    marginBottom: 8 
+  logoImg: {
+    width: 128,
+    height: 128,
+    marginBottom: 8
   },
-  title: { 
+  title: {
     fontFamily: FONT_FAMILY.display,
-    fontSize: 26, 
-    fontWeight: '800', 
-    color: COLORS.text, 
-    letterSpacing: -0.4, 
-    textAlign: 'center' 
+    fontSize: 26,
+    fontWeight: '800',
+    color: COLORS.text,
+    letterSpacing: -0.4,
+    textAlign: 'center'
   },
-  sub: { 
-    fontSize: 13.5, 
-    color: COLORS.textMuted, 
-    textAlign: 'center', 
-    lineHeight: 18 
+  sub: {
+    fontSize: 13.5,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 18
   },
-  card: { 
-    backgroundColor: '#FFFFFF', 
-    borderRadius: RADIUS['2xl'] || 24, 
-    padding: SPACING.xl, 
-    gap: SPACING.md, 
-    borderWidth: 1, 
-    borderColor: COLORS.border, 
-    width: '100%', 
-    ...SHADOW.card 
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS['2xl'] || 24,
+    padding: SPACING.xl,
+    gap: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    width: '100%',
+    ...SHADOW.card
   },
-  
+
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1050,90 +1066,90 @@ const s = StyleSheet.create({
   },
 
   fieldGroup: { gap: 5 },
-  fieldLabelRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'baseline', 
+  fieldLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
     flexWrap: 'wrap',
     gap: 6,
-    marginBottom: 4 
+    marginBottom: 4
   },
-  label: { 
-    fontSize: 11.5, 
-    fontWeight: '700', 
-    color: COLORS.textSecondary, 
-    textTransform: 'uppercase', 
+  label: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
     letterSpacing: 0.5,
     flexShrink: 1,
   },
-  subLabel: { 
-    fontSize: 11, 
-    color: COLORS.primary, 
-    fontWeight: '600', 
-    textAlign: 'right' 
+  subLabel: {
+    fontSize: 11,
+    color: COLORS.primary,
+    fontWeight: '600',
+    textAlign: 'right'
   },
-  inputWrap: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: COLORS.background, 
-    borderRadius: RADIUS.md, 
-    borderWidth: 1.5, 
-    borderColor: COLORS.border, 
-    paddingHorizontal: 13, 
-    paddingVertical: 11, 
-    gap: 10 
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    gap: 10
   },
-  inputFocused: { 
-    borderColor: COLORS.primary, 
-    backgroundColor: '#FFFFFF' 
+  inputFocused: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#FFFFFF'
   },
   inputError: { borderColor: '#D9534F' },
   inputIcon: { flexShrink: 0 },
-  input: { 
-    flex: 1, 
-    fontSize: 15, 
-    color: COLORS.text, 
-    fontWeight: '500', 
-    paddingVertical: 0 
+  input: {
+    flex: 1,
+    fontSize: 15,
+    color: COLORS.text,
+    fontWeight: '500',
+    paddingVertical: 0
   },
-  eyeBtn: { 
-    padding: 4, 
-    alignItems: 'center', 
-    justifyContent: 'center' 
+  eyeBtn: {
+    padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  errorText: { 
-    fontSize: 11.5, 
-    color: '#D9534F', 
-    marginTop: 3, 
-    fontWeight: '500' 
+  errorText: {
+    fontSize: 11.5,
+    color: '#D9534F',
+    marginTop: 3,
+    fontWeight: '500'
   },
-  forgotWrap: { 
-    alignSelf: 'flex-end', 
-    marginTop: -2, 
-    paddingVertical: 4 
+  forgotWrap: {
+    alignSelf: 'flex-end',
+    marginTop: -2,
+    paddingVertical: 4
   },
-  forgotText: { 
-    fontSize: 12.5, 
-    color: COLORS.primary, 
-    fontWeight: '700' 
+  forgotText: {
+    fontSize: 12.5,
+    color: COLORS.primary,
+    fontWeight: '700'
   },
-  btn: { 
-    backgroundColor: COLORS.primary, 
-    borderRadius: RADIUS.lg, 
-    paddingVertical: 15, 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    gap: 8, 
-    marginTop: 4, 
-    ...SHADOW.sm 
+  btn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    ...SHADOW.sm
   },
   btnDisabled: { opacity: 0.65 },
-  btnText: { 
-    fontSize: 15.5, 
-    fontWeight: '800', 
-    color: '#fff', 
-    letterSpacing: 0.2 
+  btnText: {
+    fontSize: 15.5,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.2
   },
 
   securityNotice: {
@@ -1158,34 +1174,34 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginTop: 2,
   },
-  registerRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    width: '100%', 
+  registerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
   },
-  registerText: { 
-    fontSize: 13.5, 
-    color: COLORS.textMuted 
+  registerText: {
+    fontSize: 13.5,
+    color: COLORS.textMuted
   },
-  registerLink: { 
-    fontSize: 13.5, 
-    fontWeight: '800', 
-    color: COLORS.primary 
+  registerLink: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: COLORS.primary
   },
-  legalNoticeRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    gap: 6, 
-    paddingHorizontal: 16, 
-    width: '100%', 
+  legalNoticeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    width: '100%',
   },
-  legalNoticeText: { 
-    fontSize: 11, 
-    color: COLORS.textMuted, 
-    textAlign: 'center', 
-    lineHeight: 15 
+  legalNoticeText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 15
   },
 
   // First Login Modal Styles

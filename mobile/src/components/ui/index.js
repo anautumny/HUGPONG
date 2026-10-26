@@ -43,17 +43,27 @@ export function ScreenHeader({
         rightAction
       ) : rightAction ? (
         <TouchableOpacity
-          style={styles.rightActionBtn}
+          style={[
+            styles.rightActionBtn,
+            rightAction.active && styles.rightActionBtnActive,
+            rightAction.style
+          ]}
           onPress={rightAction.onPress}
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel={rightAction.accessibilityLabel || rightAction.label || 'Screen action'}
         >
           {rightAction.icon && (
-            <Ionicons name={rightAction.icon} size={18} color={COLORS.primary} />
+            <Ionicons
+              name={rightAction.icon}
+              size={18}
+              color={rightAction.active ? '#FFFFFF' : COLORS.primary}
+            />
           )}
           {rightAction.label ? (
-            <Text style={styles.rightActionLabel}>{rightAction.label}</Text>
+            <Text style={[styles.rightActionLabel, rightAction.active && styles.rightActionLabelActive]}>
+              {rightAction.label}
+            </Text>
           ) : null}
         </TouchableOpacity>
       ) : null}
@@ -226,9 +236,8 @@ const styles = StyleSheet.create({
   // Header
   headerContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
     gap: 8,
     paddingHorizontal: SPACING.lg,
     paddingVertical: 10,
@@ -269,25 +278,32 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   rightActionBtn: {
-    minHeight: 44,
-    maxWidth: '100%',
-    flexShrink: 1,
+    minHeight: 38,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-    backgroundColor: '#F4FAF0',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#EAF6E7',
     borderWidth: 1,
-    borderColor: '#D7ECD0',
-    paddingHorizontal: 10,
+    borderColor: '#BFE7B6',
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: RADIUS.md
   },
+  rightActionBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary
+  },
   rightActionLabel: {
-    flexShrink: 1,
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '800',
-    color: COLORS.primary
+    color: COLORS.primary,
+    textAlignVertical: 'center',
+    includeFontPadding: false
+  },
+  rightActionLabelActive: {
+    color: '#FFFFFF'
   },
 
   // Card
@@ -315,7 +331,6 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     paddingHorizontal: 16,
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 46,
@@ -325,6 +340,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
     textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
     color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '800',
@@ -340,7 +357,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 46
@@ -349,6 +365,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
     textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
     color: COLORS.text,
     fontSize: 13.5,
     fontWeight: '700'
@@ -389,3 +407,4 @@ const styles = StyleSheet.create({
 });
 
 export { SearchableSelect, SearchableSelectModal } from './SearchableSelect';
+export { SkeletonItem, AnalyticsOverviewSkeleton } from './Skeleton';

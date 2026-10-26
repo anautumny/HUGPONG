@@ -1,6 +1,6 @@
 import VerificationMethodChoices from '../../components/VerificationMethodChoices';
-import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, Modal, Share, ActivityIndicator, Keyboard, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
@@ -58,14 +58,26 @@ const f = StyleSheet.create({
   error: { fontSize: 11, color: '#D9534F' },
 });
 
-function InputBox({ icon, error, ...props }) {
+const InputBox = React.forwardRef(function InputBox({ icon, error, style, ...props }, ref) {
+  const innerRef = useRef(null);
+  const targetRef = ref || innerRef;
+
   return (
-    <View style={[inp.wrap, error && inp.err]}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={() => targetRef.current?.focus()}
+      style={[inp.wrap, error && inp.err, style]}
+    >
       {icon && <Ionicons name={icon} size={17} color={COLORS.textMuted} />}
-      <TextInput style={inp.input} placeholderTextColor={COLORS.textMuted} {...props} />
-    </View>
+      <TextInput
+        ref={targetRef}
+        style={inp.input}
+        placeholderTextColor={COLORS.textMuted}
+        {...props}
+      />
+    </TouchableOpacity>
   );
-}
+});
 const inp = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.background, borderRadius: RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 13 },
   err: { borderColor: '#D9534F' },
@@ -92,7 +104,7 @@ export default function RegisterScreen({ navigation }) {
     blockFarm: '',
     blockFarmId: '',
     contactNumber: '',
-    password: '', 
+    password: '',
     confirmPassword: '',
   });
   const [showPw, setShowPw] = useState(false);
@@ -116,6 +128,62 @@ export default function RegisterScreen({ navigation }) {
   const [farmsError, setFarmsError] = useState('');
   const verificationAttemptRef = React.useRef('');
   const phoneRequestLockRef = React.useRef(false);
+
+  // Form input refs and keyboard visibility tracking
+  const scrollViewRef = useRef(null);
+  const phoneInputRef = useRef(null);
+  const firstNameRef = useRef(null);
+  const middleNameRef = useRef(null);
+  const lastNameRef = useRef(null);
+  const suffixRef = useRef(null);
+  const passwordRef = useRef(null);
+  const confirmPasswordRef = useRef(null);
+  const [keyboardActive, setKeyboardActive] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardActive(true);
+        setKeyboardHeight(e.endCoordinates?.height || 260);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardActive(false);
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Cancel SMS verification / authorized review and immediately focus phone input
+  const cancelVerification = useCallback(() => {
+    setCodeSent(false);
+    setPhoneVerificationRequested(false);
+    setPhoneVerificationRequestToken('');
+    setVerificationCode('');
+    verificationAttemptRef.current = '';
+    setErrors(p => ({ ...p, verificationCode: null, contactNumber: null }));
+    setTimeout(() => {
+      phoneInputRef.current?.focus();
+    }, 150);
+  }, []);
+
+  // Auto-focus phone input and show keyboard whenever verification is cancelled or Step 3 is entered
+  useEffect(() => {
+    if (step === 3 && !codeSent && !phoneVerificationRequested && !codeVerified) {
+      const timer = setTimeout(() => {
+        phoneInputRef.current?.focus();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [step, codeSent, phoneVerificationRequested, codeVerified]);
 
   const loadRegistrationBlockFarms = React.useCallback(async () => {
     setFarmsLoading(true);
@@ -170,8 +238,8 @@ export default function RegisterScreen({ navigation }) {
   const stepTitles = [
     { title: t('reg_step_personal', 'Personal Info'), sub: t('reg_step_personal_sub', 'Enter your official Farm Member identity') },
     { title: t('reg_step_farm', 'Block Farm'), sub: t('reg_step_farm_sub', 'Select it if known, or continue unassigned') },
-    { 
-      title: t('reg_step_contact', 'Contact Number'), 
+    {
+      title: codeSent && !codeVerified ? t('reg_step_verify_title', 'Verify Mobile Number') : t('reg_step_contact', 'Contact Number'),
       sub: phoneVerificationRequested
         ? t('reg_phone_verification_pending_sub', 'Your phone will be checked by an authorized reviewer')
         : (codeSent && !codeVerified ? t('reg_step_verify_sub', 'Enter the 6-digit SMS verification code') : t('reg_contact_sub'))
@@ -364,10 +432,12 @@ export default function RegisterScreen({ navigation }) {
   };
 
   const back = () => {
-    if (step === 3 && codeSent && !codeVerified && !phoneVerificationRequested) {
-      setCodeSent(false);
-      setVerificationCode('');
-      verificationAttemptRef.current = '';
+    if (step === 3 && codeSent && !codeVerified) {
+      cancelVerification();
+      return;
+    }
+    if (step === 3 && phoneVerificationRequested) {
+      cancelVerification();
       return;
     }
     if (step > 1) {
@@ -391,18 +461,32 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }}>
-        {/* Top Nav */}
-        <View style={s.topNav}>
-          <TouchableOpacity style={s.backBtn} onPress={back}>
-            <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={s.navTitle}>{t('reg_nav_title', 'Farm Member Registration')}</Text>
-          
-          <View style={{ width: 36 }} />
-        </View>
+      {/* Top Nav */}
+      <View style={s.topNav}>
+        <TouchableOpacity style={s.backBtn} onPress={back} accessibilityRole="button" accessibilityLabel="Back">
+          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={s.navTitle}>{t('reg_nav_title', 'Farm Member Registration')}</Text>
 
-        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <View style={{ width: 36 }} />
+      </View>
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={[
+            s.scroll,
+            { paddingBottom: keyboardActive ? Math.max(keyboardHeight + 20, 200) : 48 }
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
+        >
           <ProgressBar step={step} totalSteps={totalSteps} t={t} />
 
           <View style={s.stepHeader}>
@@ -414,16 +498,59 @@ export default function RegisterScreen({ navigation }) {
             {/* STEP 1: PERSONAL INFO */}
             {step === 1 && <>
               <Field label={t('reg_first_name', 'First Name *')} error={errors.firstName}>
-                <InputBox value={form.firstName} onChangeText={v => set('firstName', v)} placeholder="e.g. Juan" error={errors.firstName} autoCapitalize="words" />
+                <InputBox
+                  ref={firstNameRef}
+                  value={form.firstName}
+                  onChangeText={v => set('firstName', v)}
+                  placeholder="e.g. Juan"
+                  error={errors.firstName}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  onSubmitEditing={() => middleNameRef.current?.focus()}
+                />
               </Field>
               <Field label={t('reg_middle_name', 'Middle Name (Optional)')}>
-                <InputBox value={form.middleInitial} onChangeText={v => set('middleInitial', v)} placeholder="e.g. Mendoza or M" autoCapitalize="words" />
+                <InputBox
+                  ref={middleNameRef}
+                  value={form.middleInitial}
+                  onChangeText={v => set('middleInitial', v)}
+                  placeholder="e.g. Mendoza or M"
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
+                />
               </Field>
               <Field label={t('reg_last_name', 'Last Name *')} error={errors.lastName}>
-                <InputBox value={form.lastName} onChangeText={v => set('lastName', v)} placeholder="e.g. Dela Cruz" error={errors.lastName} autoCapitalize="words" />
+                <InputBox
+                  ref={lastNameRef}
+                  value={form.lastName}
+                  onChangeText={v => set('lastName', v)}
+                  placeholder="e.g. Dela Cruz"
+                  error={errors.lastName}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  onSubmitEditing={() => suffixRef.current?.focus()}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollTo({ y: 140, animated: true });
+                    }, 150);
+                  }}
+                />
               </Field>
               <Field label={t('reg_suffix', 'Suffix (Optional)')}>
-                <InputBox value={form.suffix} onChangeText={v => set('suffix', v)} placeholder="e.g. Jr. or III" autoCapitalize="characters" />
+                <InputBox
+                  ref={suffixRef}
+                  value={form.suffix}
+                  onChangeText={v => set('suffix', v)}
+                  placeholder="e.g. Jr. or III"
+                  autoCapitalize="characters"
+                  returnKeyType="done"
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }, 150);
+                  }}
+                />
               </Field>
             </>}
 
@@ -465,7 +592,7 @@ export default function RegisterScreen({ navigation }) {
                     </View>
                   ) : null}
                   {!farmsLoading && !farmsError && availableBlockFarms.map(farm => (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       key={farm.id}
                       style={[rc.chip, form.blockFarmId === farm.id && rc.selected, { paddingVertical: 14 }]}
                       onPress={() => {
@@ -506,11 +633,10 @@ export default function RegisterScreen({ navigation }) {
                     <Text style={s.phoneVerificationText}>{t('reg_phone_verification_pending_help', 'Your selected Farm Manager can verify you. Without a selected Block Farm, an SRA Admin or Super Admin must review your number.')}</Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => {
-                      setPhoneVerificationRequested(false);
-                      setPhoneVerificationRequestToken('');
-                    }}
+                    onPress={cancelVerification}
                     style={{ padding: 4 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('reg_btn_change', 'Change')}
                   >
                     <Text style={{ color: COLORS.primary, fontSize: 12, fontWeight: '700' }}>{t('reg_btn_change', 'Change')}</Text>
                   </TouchableOpacity>
@@ -518,9 +644,10 @@ export default function RegisterScreen({ navigation }) {
               ) : !codeSent ? (
                 <>
                   <Field label={t('reg_mobile_label', 'Mobile Number *')} error={errors.contactNumber}>
-                    <InputBox 
-                      icon="call-outline" 
-                      value={form.contactNumber} 
+                    <InputBox
+                      ref={phoneInputRef}
+                      icon="call-outline"
+                      value={form.contactNumber}
                       onChangeText={v => {
                         set('contactNumber', v);
                         setPhoneVerificationRequestToken('');
@@ -531,10 +658,11 @@ export default function RegisterScreen({ navigation }) {
                         verificationAttemptRef.current = '';
                         setErrors(p => ({ ...p, contactNumber: null }));
                       }}
-                      placeholder="09XX XXX XXXX" 
-                      keyboardType="phone-pad" 
-                      maxLength={11} 
-                      error={errors.contactNumber} 
+                      placeholder="09XX XXX XXXX"
+                      keyboardType="phone-pad"
+                      maxLength={11}
+                      error={errors.contactNumber}
+                      returnKeyType="done"
                     />
                   </Field>
                   <View style={[s.infoNoticeBox, { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}>
@@ -555,14 +683,11 @@ export default function RegisterScreen({ navigation }) {
                       <Text style={s.otpSentLabel}>{t('reg_code_sent_to', 'SMS Code Sent to:')}</Text>
                       <Text style={s.otpSentPhone}>+63 {form.contactNumber.slice(1)}</Text>
                     </View>
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setCodeSent(false);
-                        setVerificationCode('');
-                        verificationAttemptRef.current = '';
-                        setErrors(p => ({ ...p, verificationCode: null }));
-                      }}
+                    <TouchableOpacity
+                      onPress={cancelVerification}
                       style={s.editPhoneBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('reg_btn_change', 'Change')}
                     >
                       <Ionicons name="create-outline" size={13} color={COLORS.primary} />
                       <Text style={s.editPhoneBtnText}>{t('reg_btn_change', 'Change')}</Text>
@@ -591,7 +716,7 @@ export default function RegisterScreen({ navigation }) {
 
                   <View style={s.resendRow}>
                     <Text style={s.resendText}>{t('reg_resend_prompt', "Didn't receive the SMS?")}</Text>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       disabled={countdown > 0 || loading}
                       onPress={handleSendCode}
                       style={{ paddingVertical: 4 }}
@@ -627,9 +752,11 @@ export default function RegisterScreen({ navigation }) {
                     <Text style={s.verifiedTitle}>{t('reg_verified_msg', 'Mobile Number Verified')}</Text>
                     <Text style={s.verifiedPhone}>+63 {form.contactNumber.slice(1)}</Text>
                   </View>
-                  <TouchableOpacity 
-                    onPress={() => { setCodeVerified(false); setCodeSent(false); }}
+                  <TouchableOpacity
+                    onPress={() => { setCodeVerified(false); cancelVerification(); }}
                     style={{ padding: 4 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('reg_btn_change', 'Change')}
                   >
                     <Text style={{ color: COLORS.primary, fontSize: 12, fontWeight: '700' }}>{t('reg_btn_change', 'Change')}</Text>
                   </TouchableOpacity>
@@ -644,20 +771,32 @@ export default function RegisterScreen({ navigation }) {
               return (
                 <>
                   <Field label={t('reg_password_label', 'Password *')} error={errors.password}>
-                    <View style={[inp.wrap, errors.password && inp.err]}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => passwordRef.current?.focus()}
+                      style={[inp.wrap, errors.password && inp.err]}
+                    >
                       <Ionicons name="lock-closed-outline" size={17} color={COLORS.textMuted} />
-                      <TextInput 
-                        style={[inp.input, { flex: 1 }]} 
-                        value={form.password} 
-                        onChangeText={v => set('password', v)} 
-                        placeholder={t('first_password_placeholder')} 
-                        placeholderTextColor={COLORS.textMuted} 
-                        secureTextEntry={!showPw} 
+                      <TextInput
+                        ref={passwordRef}
+                        style={[inp.input, { flex: 1 }]}
+                        value={form.password}
+                        onChangeText={v => set('password', v)}
+                        placeholder={t('first_password_placeholder')}
+                        placeholderTextColor={COLORS.textMuted}
+                        secureTextEntry={!showPw}
+                        returnKeyType="next"
+                        onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                        onFocus={() => {
+                          setTimeout(() => {
+                            scrollViewRef.current?.scrollTo({ y: 120, animated: true });
+                          }, 150);
+                        }}
                       />
                       <TouchableOpacity onPress={() => setShowPw(p => !p)}>
                         <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
                       </TouchableOpacity>
-                    </View>
+                    </TouchableOpacity>
                   </Field>
 
                   {/* Password Strength Indicator */}
@@ -679,25 +818,25 @@ export default function RegisterScreen({ navigation }) {
                   <View style={s.pwRulesBox}>
                     <Text style={s.pwRulesTitle}>{t('reg_security_requirements')}</Text>
                     <View style={s.pwRuleItem}>
-                      <Ionicons 
-                        name={str.hasMin ? 'checkmark-circle' : 'ellipse-outline'} 
-                        size={15} 
-                        color={str.hasMin ? COLORS.success : COLORS.textMuted} 
+                      <Ionicons
+                        name={str.hasMin ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={15}
+                        color={str.hasMin ? COLORS.success : COLORS.textMuted}
                       />
                       <Text style={[s.pwRuleText, str.hasMin && s.pwRuleTextMet]}>{t('reg_rule_length')}</Text>
                     </View>
                     <View style={s.pwRuleItem}>
-                      <Ionicons 
+                      <Ionicons
                         name={str.hasLetter && str.hasUpper && str.hasNum ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={15} 
+                        size={15}
                         color={str.hasLetter && str.hasUpper && str.hasNum ? COLORS.success : COLORS.textMuted}
                       />
                       <Text style={[s.pwRuleText, str.hasLetter && str.hasUpper && str.hasNum && s.pwRuleTextMet]}>Uppercase, lowercase, and a number</Text>
                     </View>
                     <View style={s.pwRuleItem}>
-                      <Ionicons 
+                      <Ionicons
                         name={str.isUnpredictable ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={15} 
+                        size={15}
                         color={str.isUnpredictable ? COLORS.success : COLORS.textMuted}
                       />
                       <Text style={[s.pwRuleText, str.isUnpredictable && s.pwRuleTextMet]}>Not a common or default password</Text>
@@ -705,15 +844,26 @@ export default function RegisterScreen({ navigation }) {
                   </View>
 
                   <Field label={t('reg_confirm_password', 'Confirm Password *')} error={errors.confirmPassword}>
-                    <View style={[inp.wrap, errors.confirmPassword && inp.err, passwordsMatch && { borderColor: COLORS.success }]}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => confirmPasswordRef.current?.focus()}
+                      style={[inp.wrap, errors.confirmPassword && inp.err, passwordsMatch && { borderColor: COLORS.success }]}
+                    >
                       <Ionicons name="lock-closed-outline" size={17} color={passwordsMatch ? COLORS.success : COLORS.textMuted} />
-                      <TextInput 
-                        style={[inp.input, { flex: 1 }]} 
-                        value={form.confirmPassword} 
-                        onChangeText={v => set('confirmPassword', v)} 
-                        placeholder={t('first_confirm_placeholder')} 
-                        placeholderTextColor={COLORS.textMuted} 
-                        secureTextEntry={!showCPw} 
+                      <TextInput
+                        ref={confirmPasswordRef}
+                        style={[inp.input, { flex: 1 }]}
+                        value={form.confirmPassword}
+                        onChangeText={v => set('confirmPassword', v)}
+                        placeholder={t('first_confirm_placeholder')}
+                        placeholderTextColor={COLORS.textMuted}
+                        secureTextEntry={!showCPw}
+                        returnKeyType="done"
+                        onFocus={() => {
+                          setTimeout(() => {
+                            scrollViewRef.current?.scrollToEnd({ animated: true });
+                          }, 150);
+                        }}
                       />
                       {passwordsMatch ? (
                         <Ionicons name="checkmark-circle" size={18} color={COLORS.success} style={{ marginRight: 4 }} />
@@ -721,7 +871,7 @@ export default function RegisterScreen({ navigation }) {
                       <TouchableOpacity onPress={() => setShowCPw(p => !p)}>
                         <Ionicons name={showCPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
                       </TouchableOpacity>
-                    </View>
+                    </TouchableOpacity>
                   </Field>
 
                   {/* DPA (RA 10173) Consent Checkbox */}

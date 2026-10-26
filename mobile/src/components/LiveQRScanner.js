@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTranslation } from '../services/i18n';
 import { AppText as Text } from './Typography';
 import { FONT_FAMILY } from '../theme';
+import { hapticFeedback } from '../utils/haptics';
 
 export default function LiveQRScanner({ visible = false, onClose, onCodeDetected }) {
   const { t } = useTranslation();
@@ -95,9 +96,11 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
     scanLockedRef.current = true;
     setScanLocked(true);
     setScanMessage(t('qr_validating', 'Validating audit report...'));
+    hapticFeedback.success();
     try {
       const outcome = await onCodeDetected?.(normalizedData, { source });
       if (outcome?.continueScanning && isCurrent()) {
+        hapticFeedback.error();
         setScanMessage(outcome.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
         scanRearmTimerRef.current = setTimeout(() => {
           if (!isCurrent()) return;
@@ -107,6 +110,7 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
       }
     } catch (error) {
       if (!isCurrent()) return;
+      hapticFeedback.error();
       setScanMessage(error.message || t('qr_invalid', 'This QR code is not a valid HUGPONG audit report.'));
       scanRearmTimerRef.current = setTimeout(() => {
         if (!isCurrent()) return;
@@ -284,11 +288,20 @@ export default function LiveQRScanner({ visible = false, onClose, onCodeDetected
             disabled={uploadBusy || scanLocked}
             style={[styles.uploadButton, (uploadBusy || scanLocked) && styles.disabledButton]}
             onPress={uploadQrImage}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={uploadBusy ? t('qr_reading_image', 'Reading image…') : t('qr_upload_short', 'Upload QR')}
           >
-            {uploadBusy
-              ? <ActivityIndicator size="small" color="#FFFFFF" />
-              : <Ionicons name="image-outline" size={20} color="#FFFFFF" />}
-            <Text style={styles.uploadButtonText}>{uploadBusy ? t('qr_reading_image', 'Reading image…') : t('qr_upload_short', 'Upload QR')}</Text>
+            <View style={styles.uploadButtonSide}>
+              {uploadBusy
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                : <Ionicons name="image-outline" size={20} color="#FFFFFF" />}
+            </View>
+            <Text style={styles.uploadButtonText}>
+              {uploadBusy ? t('qr_reading_image', 'Reading image…') : t('qr_upload_short', 'Upload QR')}
+            </Text>
+            {/* Symmetrical placeholder balancing the icon on the left to keep the text dead-center */}
+            <View style={styles.uploadButtonSide} />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -309,9 +322,9 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   closeButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitleWrap: { flex: 1, paddingHorizontal: 10 },
-  brand: { color: '#9EE493', fontSize: 10, fontWeight: '900', letterSpacing: 2.2 },
-  title: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginTop: 1 },
+  headerTitleWrap: { flex: 1, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  brand: { color: '#9EE493', fontSize: 10, fontWeight: '900', letterSpacing: 2.2, textAlign: 'center' },
+  title: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', textAlign: 'center', marginTop: 1 },
   torchButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)' },
   torchButtonActive: { backgroundColor: '#2F6B3B', borderWidth: 1, borderColor: '#9EE493' },
   content: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 20 },
@@ -326,7 +339,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#2F6B3B',
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
@@ -360,21 +372,32 @@ const styles = StyleSheet.create({
   errorCard: { backgroundColor: 'rgba(185,52,52,0.16)', borderColor: 'rgba(255,140,140,0.35)' },
   statusText: { color: '#B9F0B1', fontSize: 12, lineHeight: 18, fontWeight: '700', textAlign: 'center' },
   errorText: { color: '#FFD0D0' },
-  footer: { paddingHorizontal: 20, paddingBottom: 20, alignItems: 'center' },
+  footer: { paddingHorizontal: 20, paddingBottom: 24, width: '100%', alignItems: 'center' },
   uploadButton: {
     width: '100%',
-    minHeight: 50,
-    borderRadius: 12,
+    minHeight: 52,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.28)',
     backgroundColor: 'rgba(255,255,255,0.08)',
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  uploadButtonSide: {
+    width: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
-  uploadButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
+  uploadButtonText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
   uploadHint: { color: 'rgba(255,255,255,0.5)', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 8 },
   disabledButton: { opacity: 0.6 },
 });

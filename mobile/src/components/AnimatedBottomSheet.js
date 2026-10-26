@@ -12,9 +12,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { hapticFeedback } from '../utils/haptics';
 
-const OPEN_DURATION_MS = 250;
-const CLOSE_DURATION_MS = 230;
+const OPEN_DURATION_MS = 290;
+const CLOSE_DURATION_MS = 220;
 
 /**
  * A controlled bottom sheet whose backdrop and sheet animate independently.
@@ -25,7 +26,7 @@ export default function AnimatedBottomSheet({
   onClose,
   children,
   sheetStyle,
-  backdropColor = 'rgba(0, 0, 0, 0.5)',
+  backdropColor = 'rgba(0, 0, 0, 0.55)',
   keyboardAvoiding = false,
   testID,
   dismissible = false,
@@ -105,19 +106,43 @@ export default function AnimatedBottomSheet({
   }, [onClose]);
 
   const gestures = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => dismissible,
+    onStartShouldSetPanResponderCapture: () => false,
     onMoveShouldSetPanResponder: (_, gesture) => dismissible
-      && Math.abs(gesture.dy) > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-    onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(-24, gesture.dy)),
+      && gesture.dy > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onMoveShouldSetPanResponderCapture: (_, gesture) => dismissible
+      && gesture.dy > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.1,
+    onPanResponderGrant: () => {
+      dragY.stopAnimation();
+    },
+    onPanResponderMove: (_, gesture) => {
+      const clampedY = gesture.dy > 0 ? gesture.dy : Math.max(-18, gesture.dy * 0.2);
+      dragY.setValue(clampedY);
+    },
     onPanResponderRelease: (_, gesture) => {
-      if (gesture.dy > Math.min(100, sheetHeight.current * 0.22) || (gesture.dy > 24 && gesture.vy > 0.7)) {
+      const shouldDismiss = gesture.dy > 35 || (gesture.dy > 12 && gesture.vy > 0.2);
+      if (shouldDismiss) {
+        try { hapticFeedback.light(); } catch {}
         requestClose();
       } else if (expandable && gesture.dy < -35) {
         setExpanded(true);
       }
-      Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
+      Animated.spring(dragY, {
+        toValue: 0,
+        damping: 24,
+        mass: 0.8,
+        stiffness: 220,
+        useNativeDriver: true,
+      }).start();
     },
-    onPanResponderTerminate: () => Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
-  }), [dismissible, dragY, expandable, requestClose]);
+    onPanResponderTerminate: () => Animated.spring(dragY, {
+      toValue: 0,
+      damping: 24,
+      mass: 0.8,
+      stiffness: 220,
+      useNativeDriver: true,
+    }).start(),
+  }), [dismissible, dragY, expandable, requestClose, windowHeight]);
 
   useEffect(() => {
     visibleRef.current = Boolean(visible);
@@ -136,9 +161,14 @@ export default function AnimatedBottomSheet({
 
   if (phase === 'closed') return null;
 
+  const sheetTravelDistance = sheetHeight.current > 50
+    ? sheetHeight.current + 40
+    : 480;
+
   const sheetTranslateY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [Math.max(windowHeight, 800), 0],
+    outputRange: [sheetTravelDistance, 0],
+    extrapolate: 'clamp',
   });
 
   return (
@@ -165,7 +195,7 @@ export default function AnimatedBottomSheet({
             paddingLeft: insets.left,
             paddingRight: insets.right,
           }]}
-          behavior={keyboardAvoiding ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}
+          behavior={keyboardAvoiding ? (Platform.OS === 'ios' ? 'padding' : undefined) : undefined}
           enabled={keyboardAvoiding}
         >
           <Animated.View
@@ -184,6 +214,7 @@ export default function AnimatedBottomSheet({
               <View
                 {...gestures.panHandlers}
                 style={styles.handleTouch}
+                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
                 accessible
                 accessibilityRole="adjustable"
                 accessibilityLabel="Sheet controls"
@@ -207,8 +238,21 @@ export default function AnimatedBottomSheet({
 }
 
 const styles = StyleSheet.create({
-  handleTouch: { height: 32, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#CBD5D1' },
+  handleTouch: {
+    width: '100%',
+    paddingTop: 12,
+    paddingBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    backgroundColor: 'transparent',
+  },
+  handle: {
+    width: 48,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#94A3B8',
+  },
   root: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -225,6 +269,15 @@ const styles = StyleSheet.create({
     maxHeight: '100%',
     flexShrink: 1,
     backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1.5,
+    borderTopColor: '#E2E8F0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 24,
     overflow: 'hidden',
   },
 });
