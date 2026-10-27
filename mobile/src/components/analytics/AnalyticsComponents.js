@@ -1,3 +1,4 @@
+import { formatPhaseMonth } from '../../services/i18n';
 import React, { useEffect, useState } from 'react';
 import { View, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +9,29 @@ import AnimatedBottomSheet from '../AnimatedBottomSheet';
 import { SearchableSelectContent } from '../ui/SearchableSelect';
 import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
 import { hapticFeedback } from '../../utils/haptics';
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+function formatMonthLabel(val) {
+  if (!val || val === 'ALL') return 'All Months';
+  const str = String(val).trim();
+  const match = str.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (match) {
+    const monthIndex = parseInt(match[2], 10) - 1;
+    return `${MONTH_NAMES[monthIndex]} ${match[1]}`;
+  }
+  if (typeof formatPhaseMonth === 'function') {
+    try {
+      return formatPhaseMonth(val);
+    } catch {
+      // fallback
+    }
+  }
+  return val;
+}
 
 // ── 1. Analytics Scope Summary Card ──────────────────────────────
 export function AnalyticsScopeCard({
@@ -23,7 +47,7 @@ export function AnalyticsScopeCard({
     { label: season === 'ALL' ? 'All crop years' : season, icon: 'calendar-outline' },
     !isMember && farmName ? { label: farmName, icon: 'business-outline' } : null,
     { label: fieldName || 'All plots', icon: 'leaf-outline' },
-    period && period !== 'ALL' ? { label: period, icon: 'time-outline' } : null
+    period && period !== 'ALL' ? { label: formatMonthLabel(period), icon: 'time-outline' } : null
   ].filter(Boolean);
 
   const hasActiveFilters = Boolean(activeFilterCount);
@@ -125,7 +149,7 @@ export function AnalyticsScopeModal({
       visible={visible}
       onClose={() => picker ? setPicker(null) : onClose()}
       keyboardAvoiding
-      backdropColor="rgba(0, 0, 0, 0.45)"
+      backdropColor="rgba(0, 0, 0, 0.48)"
       sheetStyle={styles.modalSheet}
     >
       {picker ? (
@@ -192,7 +216,7 @@ export function AnalyticsScopeModal({
             <SearchableSelect
               variant="capsule"
               onOpen={setPicker}
-              label="PARCEL / PLOT"
+              label="FIELD PLOT"
               options={[
                 { id: 'ALL', label: `All Plots (${draftFields.length})`, icon: 'grid-outline' },
                 ...draftFields.map(fld => ({
@@ -204,7 +228,7 @@ export function AnalyticsScopeModal({
               ]}
               selectedValue={draft.field}
               onSelect={(opt) => setDraft(value => ({ ...value, field: opt.id, period: 'ALL' }))}
-              modalTitle="Select Parcel / Plot"
+              modalTitle="Select Field Plot"
               searchPlaceholder="Search plot ID or member..."
               leftIcon="leaf"
             />
@@ -216,7 +240,7 @@ export function AnalyticsScopeModal({
               label="REPORTING PERIOD / MONTH"
               options={['ALL', ...draftPeriods].map(p => ({
                 id: p,
-                label: p === 'ALL' ? 'All Months' : p,
+                label: p === 'ALL' ? 'All Months' : formatMonthLabel(p),
                 sublabel: p === 'ALL' ? 'Aggregate all recorded months in cycle' : 'Monthly reporting activity window',
                 icon: 'time-outline'
               }))}
@@ -260,6 +284,16 @@ export function PrimaryMetric({ title, value, subtitle }) {
   );
 }
 
+// Canonical 6-stage agronomic colors matching Web design system
+const STAGE_COLORS = {
+  1: '#9A5B32', // Stage 1: Pre-Planting & Land Preparation (earth brown)
+  2: '#15803D', // Stage 2: Planting & Crop Establishment (emerald green)
+  3: '#D97706', // Stage 3: Basal Nutrition & Early Care (harvest amber/gold)
+  4: '#0D9488', // Stage 4: Cultivation & Weed Management (cultivation teal)
+  5: '#2563EB', // Stage 5: Crop Maintenance & Final Hilling-Up (royal blue)
+  6: '#EA580C', // Stage 6: Harvesting & Hauling (harvest orange)
+};
+
 // ── 4. 6-Stage Sugarcane Progression List ─────────────────────────
 export function StageDistributionList({
   stages = [],
@@ -268,43 +302,63 @@ export function StageDistributionList({
   onViewStageDetails
 }) {
   return (
-    <View style={{ gap: 10 }}>
+    <View style={{ gap: 12 }}>
       {stages.map((st, idx) => {
+        const stageNum = Number(st.stageNumber || idx + 1);
+        const stageColor = STAGE_COLORS[stageNum] || COLORS.primary;
         const plotsCount = st.plotsCount ?? st.plotCount ?? 0;
         const areaHa = Number(st.areaHa ?? st.acreageHa ?? 0);
         const pct = st.percentOfArea ?? st.percentOfTotal ?? 0;
         const barWidth = Math.min(100, Math.max(0, pct));
+        const hasParcels = plotsCount > 0 || areaHa > 0;
+
         return (
           <View key={st.stageNumber || idx} style={styles.stageItemWrap}>
             {/* Row 1: Stage badge + Name */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-              <View style={[styles.stageBadge, { backgroundColor: COLORS.primary }]}>
-                <Text style={styles.stageBadgeNum}>{st.stageNumber}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <View style={[
+                styles.stageBadge,
+                {
+                  backgroundColor: hasParcels ? stageColor : '#F1F5F9',
+                  borderWidth: hasParcels ? 0 : 1.5,
+                  borderColor: '#E2E8F0'
+                }
+              ]}>
+                <Text style={[styles.stageBadgeNum, { color: hasParcels ? '#FFFFFF' : '#64748B' }]}>
+                  {st.stageNumber}
+                </Text>
               </View>
-              <Text style={[styles.stageNameText, { flex: 1 }]}>
+              <Text style={[
+                styles.stageNameText,
+                { flex: 1, color: hasParcels ? COLORS.text : '#475569', fontWeight: hasParcels ? '800' : '700' }
+              ]}>
                 {st.name}
               </Text>
             </View>
 
             {/* Row 2: Metrics */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 30, marginBottom: 5 }}>
-              <Text style={styles.stageMetricText}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 36, marginBottom: 6 }}>
+              <Text style={[styles.stageMetricText, { color: hasParcels ? COLORS.textSecondary : '#94A3B8' }]}>
                 {plotsCount} {plotsCount === 1 ? 'plot' : 'plots'} · {areaHa.toFixed(2)} Ha
               </Text>
-              <Text style={[styles.stageMetricText, { fontWeight: '700', color: COLORS.text }]}>
-                {pct}%
-              </Text>
+              {hasParcels ? (
+                <View style={styles.pctBadgeActive}>
+                  <Text style={styles.pctTextActive}>{pct}%</Text>
+                </View>
+              ) : (
+                <Text style={styles.pctTextMuted}>0%</Text>
+              )}
             </View>
 
             {/* Progress bar */}
-            <View style={[styles.stageProgressTrack, { marginLeft: 30 }]}>
+            <View style={[styles.stageProgressTrack, { marginLeft: 36 }]}>
               <View
                 style={[
                   styles.stageProgressFill,
                   {
                     width: `${barWidth}%`,
-                    backgroundColor: COLORS.primary,
-                    minWidth: barWidth > 0 ? 4 : 0,
+                    backgroundColor: stageColor,
+                    minWidth: barWidth > 0 ? 6 : 0,
                   }
                 ]}
               />
@@ -323,38 +377,44 @@ export function CostBreakdownList({
   topCategory
 }) {
   return (
-    <View style={{ gap: 10, marginTop: 8 }}>
-      {categories.map((cat, idx) => (
-        <View key={cat.key || idx} style={styles.costCatItem}>
-          <View style={styles.costCatRow}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
-              <View style={[styles.catDot, { backgroundColor: cat.color || COLORS.primary }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.catLabel}>{cat.label}</Text>
-                <Text style={styles.catSub}>{cat.opsCount ?? cat.operationsCount ?? 0} operations logged</Text>
+    <View style={{ gap: 12, marginTop: 10 }}>
+      {categories.map((cat, idx) => {
+        const pct = cat.percentOfTotal || 0;
+        const hasCost = cat.totalCost > 0;
+        return (
+          <View key={cat.key || idx} style={styles.costCatItem}>
+            <View style={styles.costCatRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={[styles.catDot, { backgroundColor: cat.color || COLORS.primary }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.catLabel}>{cat.label}</Text>
+                  <Text style={styles.catSub}>{cat.opsCount ?? cat.operationsCount ?? 0} operations logged</Text>
+                </View>
+              </View>
+
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.catAmount}>₱{cat.totalCost.toLocaleString()}</Text>
+                <Text style={[styles.catPercent, hasCost && styles.catPercentActive]}>
+                  {pct}% of total
+                </Text>
               </View>
             </View>
 
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.catAmount}>₱{cat.totalCost.toLocaleString()}</Text>
-              <Text style={styles.catPercent}>{cat.percentOfTotal}% of total</Text>
+            {/* Progress bar */}
+            <View style={styles.catProgressTrack}>
+              <View
+                style={[
+                  styles.catProgressFill,
+                  {
+                    width: `${Math.min(100, Math.max(pct > 0 ? 5 : 0, pct))}%`,
+                    backgroundColor: cat.color || COLORS.primary
+                  }
+                ]}
+              />
             </View>
           </View>
-
-          {/* Progress bar */}
-          <View style={styles.catProgressTrack}>
-            <View
-              style={[
-                styles.catProgressFill,
-                {
-                  width: `${Math.min(100, Math.max(0, cat.percentOfTotal || 0))}%`,
-                  backgroundColor: cat.color || COLORS.primary
-                }
-              ]}
-            />
-          </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -364,33 +424,48 @@ export function ActivityFrequencyList({ ranking = [] }) {
   if (!ranking || ranking.length === 0) {
     return (
       <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-        <Text style={{ fontSize: 12, color: COLORS.textMuted }}>No operations recorded yet</Text>
+        <Text style={{ fontSize: 12.5, color: COLORS.textMuted, fontWeight: '500' }}>No operations recorded yet</Text>
       </View>
     );
   }
 
+  const totalExec = ranking.reduce((acc, curr) => acc + (curr.count ?? curr.executionCount ?? 0), 0);
+
   return (
-    <View style={{ gap: 8, marginTop: 8 }}>
+    <View style={{ gap: 10, marginTop: 4 }}>
       {ranking.slice(0, 8).map((act, idx) => {
         const actName = act.name ?? act.activity ?? 'Field Operation';
         const execCount = act.count ?? act.executionCount ?? 0;
         const avgCost = act.avgCost ?? act.averageCost ?? 0;
         const totalCost = act.totalCost ?? 0;
-        const pctShare = act.percentageOfTotal ?? 0;
+        const pctShare = act.percentageOfTotal ?? (totalExec > 0 ? Math.round((execCount / totalExec) * 100) : 0);
+
         return (
-          <View key={actName + idx} style={styles.freqRow}>
-            <View style={styles.freqRankBadge}>
-              <Text style={styles.freqRankText}>#{idx + 1}</Text>
+          <View key={actName + idx} style={styles.freqCard}>
+            <View style={styles.freqCardTopRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
+                <View style={styles.freqRankBadge}>
+                  <Text style={styles.freqRankText}>{idx + 1}</Text>
+                </View>
+                <Text style={styles.freqTitle} numberOfLines={1}>
+                  {actName}
+                </Text>
+              </View>
+
+              <View style={styles.freqSharePill}>
+                <Text style={styles.freqShareText}>
+                  {execCount} {execCount === 1 ? 'pass' : 'passes'}{pctShare > 0 ? ` · ${pctShare}%` : ''}
+                </Text>
+              </View>
             </View>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.freqTitle}>{actName}</Text>
-              <Text style={styles.freqSub}>
-                {execCount} {execCount === 1 ? 'pass' : 'passes'} · Avg ₱{Number(avgCost).toLocaleString()}
+
+            <View style={styles.freqCardBottomRow}>
+              <Text style={styles.freqCostLabel}>
+                Total: <Text style={styles.freqCostVal}>₱{Number(totalCost).toLocaleString()}</Text>
               </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.freqCost}>₱{Number(totalCost).toLocaleString()}</Text>
-              <Text style={styles.freqShare}>{pctShare}% share</Text>
+              <Text style={styles.freqCostLabel}>
+                Avg: <Text style={styles.freqAvgVal}>₱{Number(avgCost).toLocaleString()}</Text> / op
+              </Text>
             </View>
           </View>
         );
@@ -436,7 +511,7 @@ const styles = StyleSheet.create({
     gap: 6
   },
   scopeHeaderTag: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '800',
     color: COLORS.primary,
     letterSpacing: 0.5,
@@ -482,7 +557,7 @@ const styles = StyleSheet.create({
     minWidth: 0
   },
   scopeHeaderTagClean: {
-    fontSize: 11.5,
+    fontSize: 14,
     fontWeight: '800',
     color: COLORS.primary,
     letterSpacing: 0.6,
@@ -570,7 +645,7 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   filterSectionTitle: {
-    fontSize: 10.5,
+    fontSize: 12.5,
     fontWeight: '800',
     color: COLORS.primary,
     letterSpacing: 0.5,
@@ -615,36 +690,38 @@ const styles = StyleSheet.create({
 
   // Primary Metric
   primaryMetricCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md + 2,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: '#FEF5E7',
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    borderWidth: 1.2,
+    borderColor: '#FCE2B6',
     ...SHADOW.card,
     gap: 4
   },
   primaryMetricTag: {
-    fontSize: 11,
+    fontSize: 12.5,
     fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.5,
+    color: '#92400E',
+    letterSpacing: 0.6,
     textTransform: 'uppercase'
   },
   primaryMetricVal: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
-    color: COLORS.primary,
+    color: '#78350F',
     letterSpacing: -0.5
   },
   primaryMetricSub: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#92400E',
     marginTop: 2
   },
 
   // Stages
   stageItemWrap: {
-    gap: 5
+    gap: 6,
+    paddingVertical: 3
   },
   stageItemTop: {
     flexDirection: 'row',
@@ -652,41 +729,60 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   stageBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center'
   },
   stageBadgeNum: {
-    fontSize: 10.5,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
     color: '#fff'
   },
   stageNameText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: COLORS.text
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.text,
+    lineHeight: 20
   },
   stageMetricText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
+    color: COLORS.textSecondary
+  },
+  pctBadgeActive: {
+    backgroundColor: '#FDF1DC',
+    borderWidth: 1,
+    borderColor: '#FCE2B6',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: RADIUS.full
+  },
+  pctTextActive: {
+    fontSize: 12.5,
+    fontWeight: '900',
+    color: '#B45309'
+  },
+  pctTextMuted: {
+    fontSize: 12,
+    fontWeight: '700',
     color: COLORS.textMuted
   },
   stageProgressTrack: {
-    height: 6,
-    backgroundColor: '#EEF2E6',
-    borderRadius: 3,
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: RADIUS.full,
     overflow: 'hidden'
   },
   stageProgressFill: {
     height: '100%',
-    borderRadius: 3
+    borderRadius: RADIUS.full
   },
 
   // Cost Categories
   costCatItem: {
-    gap: 5
+    gap: 6
   },
   costCatRow: {
     flexDirection: 'row',
@@ -696,86 +792,123 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   catDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5
+    width: 12,
+    height: 12,
+    borderRadius: 6
   },
   catLabel: {
     flexShrink: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.text
-  },
-  catSub: {
-    fontSize: 10.5,
-    color: COLORS.textMuted,
-    marginTop: 1
-  },
-  catAmount: {
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.text
   },
+  catSub: {
+    fontSize: 12.5,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+    fontWeight: '500'
+  },
+  catAmount: {
+    fontSize: 16.5,
+    fontWeight: '900',
+    color: COLORS.text
+  },
   catPercent: {
-    fontSize: 10.5,
+    fontSize: 12,
     color: COLORS.textMuted,
     fontWeight: '600'
   },
+  catPercentActive: {
+    color: '#B45309',
+    fontWeight: '800'
+  },
   catProgressTrack: {
-    height: 5,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 2.5,
+    height: 7,
+    backgroundColor: '#F1F5F9',
+    borderRadius: RADIUS.full,
     overflow: 'hidden'
   },
   catProgressFill: {
     height: '100%',
-    borderRadius: 2.5
+    borderRadius: RADIUS.full
   },
 
-  // Activity Frequency
-  freqRow: {
+  // Activity Frequency Cards (Synchronized with Web)
+  freqCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.2,
+    borderColor: '#FCE2B6',
+    borderRadius: RADIUS.lg,
+    padding: 13,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  freqCardTopRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5'
+    marginBottom: 10,
   },
   freqRankBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#EEF2E6',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FDECCF',
+    borderWidth: 1,
+    borderColor: '#FCD69D',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8
   },
   freqRankText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.primary
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#92400E',
   },
   freqTitle: {
-    flexShrink: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.text
-  },
-  freqSub: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 1
-  },
-  freqCost: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 14,
     fontWeight: '800',
-    color: COLORS.text
+    color: COLORS.text,
   },
-  freqShare: {
-    fontSize: 10.5,
+  freqSharePill: {
+    backgroundColor: '#FDF1DC',
+    borderWidth: 1,
+    borderColor: '#FCE2B6',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: RADIUS.full,
+  },
+  freqShareText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#78350F',
+  },
+  freqCardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F5',
+    paddingTop: 8,
+  },
+  freqCostLabel: {
+    fontSize: 12,
     color: COLORS.textMuted,
-    fontWeight: '600'
+    fontWeight: '500',
+  },
+  freqCostVal: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: COLORS.text,
+  },
+  freqAvgVal: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#92400E',
   },
 
   // Price Card
@@ -796,7 +929,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start'
   },
   priceCircularTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.text,
     marginTop: 2
@@ -821,7 +954,7 @@ const styles = StyleSheet.create({
     color: '#fff'
   },
   priceBoxLabel: {
-    fontSize: 9.5,
+    fontSize: 11.5,
     fontWeight: '800',
     color: COLORS.textMuted,
     letterSpacing: 0.3,
@@ -860,7 +993,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   analyticsMolLabel: {
-    fontSize: 9.5,
+    fontSize: 11.5,
     fontWeight: '800',
     color: COLORS.textMuted,
     letterSpacing: 0.3,
@@ -900,7 +1033,7 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   emptyTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.text
   },

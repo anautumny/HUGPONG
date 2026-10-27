@@ -19,12 +19,14 @@ export default function ResolveTicketModal({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   useEffect(() => {
     if (isOpen && ticket) {
       setStatus(ticket.status || 'IN_PROGRESS');
       setResolutionNotes('');
       setFormError(null);
+      setFieldErrors({});
       setIsSubmitting(false);
     }
   }, [isOpen, ticket]);
@@ -36,8 +38,9 @@ export default function ResolveTicketModal({
     e.preventDefault();
     if (!ticket) return;
     setFormError(null);
+    setFieldErrors({});
     if (status === 'RESOLVED' && !resolutionNotes.trim()) {
-      setFormError('A public resolution response is required before resolving the ticket.');
+      setFieldErrors({ resolutionNotes: 'A public resolution response is required before resolving the ticket.' });
       return;
     }
     setIsSubmitting(true);
@@ -128,14 +131,15 @@ export default function ResolveTicketModal({
         <FormField
           id="tck-resolution-notes"
           label="Public Response"
-          helperText="This append-only response will be visible to the requester"
+          error={fieldErrors.resolutionNotes}
+          helperText={fieldErrors.resolutionNotes ? undefined : "This append-only response will be visible to the requester"}
         >
           <Textarea
             id="tck-resolution-notes"
             rows={4}
             placeholder="Write a response to the requester..."
             value={resolutionNotes}
-            onChange={(e) => setResolutionNotes(e.target.value)}
+            onChange={(e) => { setResolutionNotes(e.target.value); if (fieldErrors.resolutionNotes) setFieldErrors(prev => ({ ...prev, resolutionNotes: null })); }}
             disabled={isSubmitting}
           />
         </FormField>

@@ -29,6 +29,13 @@ function harness() {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     Fragment: 'Fragment',
+    createContext(defaultValue) {
+      const context = { _currentValue: defaultValue, Provider: ({ value, children }) => { context._currentValue = value; return children; } };
+      return context;
+    },
+    useContext(context) {
+      return context?._currentValue;
+    },
     useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
@@ -75,10 +82,30 @@ function harness() {
       if (name in defaults) return defaults[name];
       if (name.endsWith('/theme')) return { COLORS: { primary: '#2D5016', border: '#DDD' }, SPACING: { lg: 16, md: 12, sm: 8 }, RADIUS: {}, SHADOW: {} };
       if (name.endsWith('/Typography')) return { AppText: 'Text', AppTextInput: 'TextInput' };
-      if (name.endsWith('/i18n')) return { useTranslation: () => ({ t: (_key, fallback) => fallback }) };
+      if (name.endsWith('/i18n')) return {
+        useTranslation: () => ({ t: (_key, fallback) => fallback }),
+        formatPhaseMonth: (s) => {
+          const m = String(s || '').match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+          if (!m) return s;
+          const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          return `${months[parseInt(m[2], 10) - 1]} ${m[1]}`;
+        },
+        formatPeriodDisplay: (s) => s
+      };
       if (name.endsWith('/pagination')) return load('utils/pagination.js');
       if (name.endsWith('/notificationIdentity')) return load('domain/notificationIdentity.js');
       if (name.endsWith('/haptics')) return { hapticFeedback: { light: () => {}, success: () => {}, warning: () => {}, error: () => {} } };
+      if (name.endsWith('/BlurTargetContext')) return { useBlurTarget: () => ({ requestBlur: () => {}, releaseBlur: () => {} }), BlurTargetProvider: ({ children }) => children };
+      if (name.endsWith('/ExpandedSheetContext')) return { useExpandedSheet: () => ({ expanded: false, isExpanded: false, setExpanded: () => {} }), ExpandedSheetContext: { Provider: ({ children }) => children } };
+      if (name.endsWith('/AnimatedBottomSheet')) return { default: 'Sheet', useExpandedSheet: () => ({ expanded: false, isExpanded: false }), ExpandedSheetContext: { Provider: ({ children }) => children } };
+      if (name.endsWith('/formatters')) return {
+        formatPeriodDisplay: (s) => {
+          const m = String(s || '').match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+          if (!m) return s || '—';
+          const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          return `${months[parseInt(m[2], 10) - 1]} ${m[1]}`;
+        }
+      };
       throw new Error(`Unexpected dependency ${name}`);
     };
     new Function('require', 'module', 'exports', compiled)(requireMock, module, module.exports);
@@ -437,7 +464,24 @@ test('selection searches IDs and descriptions, preserves raw values, and resets 
   assert.equal(list.props.data.length, 4);
   list.props.renderItem({ item: list.props.data[0] }).props.onPress();
   assert.equal(selection, 0, 'numeric zero stays a valid option');
-  assert.equal(list.props.style.flexShrink, 1, 'long lists shrink within the sheet');
+  assert.equal(flatten(list.props.style).flexShrink, 1, 'long lists shrink within the sheet');
+});
+
+test('searchable select paginates long lists and supports nested scrolling', () => {
+  const runtime = harness();
+  const { SearchableSelectContent } = runtime.load('components/ui/SearchableSelect.js', { '../AnimatedBottomSheet': 'Sheet' });
+  const options = Array.from({ length: 7 }, (_, i) => ({ id: `FLD-${i + 1}`, label: `Plot ${i + 1}` }));
+  let tree = runtime.render(SearchableSelectContent, { options, resetKey: true, onSelect: () => {}, onClose: () => {} });
+  let list = find(tree, node => node.type === 'FlatList');
+  assert.equal(list.props.nestedScrollEnabled, true, 'nested scrolling enabled for sheet compatibility');
+  assert.equal(list.props.data.length, 5, 'page size limits long lists to 5 items on page 1');
+  assert.ok(list.props.ListFooterComponent, 'pagination footer rendered for long lists');
+
+  let expandedTree = runtime.render(SearchableSelectContent, { options, resetKey: true, onSelect: () => {}, onClose: () => {}, isExpanded: true });
+  let expandedList = find(expandedTree, node => node.type === 'FlatList');
+  assert.equal(expandedList.props.data.length, 7, 'page size expands to 10 when expanded, displaying all 7 items');
+  assert.equal(expandedList.props.ListFooterComponent, null, 'no pagination footer needed when all items fit on expanded page');
+  assert.equal(flatten(expandedList.props.style).maxHeight, undefined, 'maxHeight constraint removed when expanded');
 });
 
 test('analytics filters reuse their sheet and apply drafts only after explicit Apply', () => {

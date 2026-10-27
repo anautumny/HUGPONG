@@ -181,7 +181,7 @@ export default function LandingView() {
                 Descriptive Farm Analytics
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Summarize acreage, crop stages, operations, production costs, price trends, and audit status.
+                Summarize hectares, crop stages, operations, production costs, price trends, and audit status.
               </p>
             </div>
           </div>

@@ -13,7 +13,7 @@ export default function AuditMemberReviewSheet({ data: incomingData, onClose, on
   const data = incomingData || lastReview;
   const page = usePagination(data?.memberFollowUps || [], { resetKey: data && `${data.blockFarmId}:${data.periodKey}` });
   return (
-    <AnimatedBottomSheet visible={Boolean(incomingData)} onClose={onClose} sheetStyle={styles.sheet}>
+    <AnimatedBottomSheet visible={Boolean(incomingData)} onClose={onClose} dismissible sheetStyle={styles.sheet}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Review Members Before Compiling</Text>
@@ -31,6 +31,7 @@ export default function AuditMemberReviewSheet({ data: incomingData, onClose, on
         ListHeaderComponent={<View style={{ gap: 6 }}>
           <Text style={styles.note}>Call members to check whether they had no monthly work or still need to synchronize. Account inactivity is shown separately. You can compile the available operations.</Text>
           {data?.activityAvailable === false && <Text style={styles.note}>Account activity is unavailable. Monthly operation records were checked.</Text>}
+          <Pagination {...page} label="members to review" position="top" />
         </View>}
         ListEmptyComponent={<Text style={styles.note}>No members need follow-up for this month.</Text>}
         renderItem={({ item: member }) => {
@@ -58,7 +59,6 @@ export default function AuditMemberReviewSheet({ data: incomingData, onClose, on
             </View>
           );
         }}
-        ListFooterComponent={<Pagination {...page} label="members to review" />}
       />
       <View style={styles.footer}>
         {!data?.canCompile && <Text style={styles.note}>No eligible operations are available. You can contact members, but an empty report cannot be compiled.</Text>}

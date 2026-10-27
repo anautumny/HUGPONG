@@ -39,6 +39,7 @@ export default function PublishPriceModal({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState(null);
 
   // Calendar picker state
@@ -68,6 +69,7 @@ export default function PublishPriceModal({
       setSugarStatus('REPORTED');
       setMolassesStatus('REPORTED');
       setFormError(null);
+      setFieldErrors({});
       setSuccessMessage(null);
       setIsSubmitting(false);
       setShowCalendar(false);
@@ -78,6 +80,7 @@ export default function PublishPriceModal({
   const handleDateSelect = (selectedIso) => {
     setEffectiveDate(selectedIso);
     setWeekLabel(calculateSRAWeekLabel(selectedIso));
+    setFieldErrors(p => ({ ...p, effectiveDate: null, weekLabel: null }));
     setShowCalendar(false);
   };
 
@@ -90,40 +93,40 @@ export default function PublishPriceModal({
     setFormError(null);
     setSuccessMessage(null);
 
-    // Strict validation matching web PublishPriceModal.jsx
+    // Strict field-level validation matching web PublishPriceModal.jsx
+    const newFieldErrors = {};
     if (!effectiveDate) {
-      setFormError('Effective Date is required.');
-      return;
-    }
-    const parsedDate = new Date(`${effectiveDate}T00:00:00.000Z`);
-    const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)
-      && !Number.isNaN(parsedDate.getTime())
-      && parsedDate.toISOString().slice(0, 10) === effectiveDate;
-
-    if (!canonicalDate) {
-      setFormError('Effective Date must be a valid date in YYYY-MM-DD format.');
-      return;
+      newFieldErrors.effectiveDate = 'Effective Date is required.';
+    } else {
+      const parsedDate = new Date(`${effectiveDate}T00:00:00.000Z`);
+      const canonicalDate = /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)
+        && !Number.isNaN(parsedDate.getTime())
+        && parsedDate.toISOString().slice(0, 10) === effectiveDate;
+      if (!canonicalDate) {
+        newFieldErrors.effectiveDate = 'Effective Date must be a valid date in YYYY-MM-DD format.';
+      }
     }
     if (!weekLabel.trim()) {
-      setFormError('SRA Week Label is required.');
-      return;
+      newFieldErrors.weekLabel = 'Reporting Period is required.';
     }
     if (sugarStatus === 'REPORTED' && (!Number.isFinite(curSugarNum) || curSugarNum <= 0)) {
-      setFormError('Raw Sugar price must be a valid positive number.');
-      return;
+      newFieldErrors.sugarPrice = 'Raw Sugar price must be a valid positive number.';
     }
     if (molassesStatus === 'REPORTED' && (!Number.isFinite(curMolassesNum) || curMolassesNum <= 0)) {
-      setFormError('Molasses price must be a valid positive number.');
-      return;
+      newFieldErrors.molassesPrice = 'Molasses price must be a valid positive number.';
     }
     if (!circularNumber.trim()) {
-      setFormError('Circular or reference number is required.');
-      return;
+      newFieldErrors.circularNumber = 'Circular or reference number is required.';
     }
     if (!source.trim()) {
-      setFormError('A verifiable source description is required.');
+      newFieldErrors.source = 'A verifiable source description is required.';
+    }
+
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
       return;
     }
+    setFieldErrors({});
 
     setIsSubmitting(true);
 
@@ -154,15 +157,20 @@ export default function PublishPriceModal({
     }
   };
 
-  if (!visible) return null;
-
-  const mainContent = (
-    <SafeAreaView style={s.modalScreen} edges={['top']}>
-      <KeyboardAvoidingView
-        style={s.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={s.modalCard}>
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      statusBarTranslucent={false}
+      onRequestClose={isSubmitting ? undefined : onClose}
+    >
+      <SafeAreaView style={s.modalScreen} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
+          style={s.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={s.modalCard}>
         {/* Standard Header matching My Sync Status */}
         <View style={s.modalHeader}>
           <TouchableOpacity
@@ -217,10 +225,10 @@ export default function PublishPriceModal({
                 {/* Effective Date with Calendar Picker Button */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    Effective Date <Text style={{ color: COLORS.danger }}>*</Text>
+                    Effective Date <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                   </Text>
                   <TouchableOpacity
-                    style={s.datePickerBtn}
+                    style={[s.datePickerBtn, fieldErrors.effectiveDate && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}
                     onPress={() => {
                       if (!isSubmitting) setShowCalendar(true);
                     }}
@@ -230,23 +238,40 @@ export default function PublishPriceModal({
                     <Text style={s.datePickerText}>{effectiveDate}</Text>
                     <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
                   </TouchableOpacity>
-                  <Text style={s.helperText}>Date circular takes millsite effect</Text>
+                  {fieldErrors.effectiveDate ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                      <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.effectiveDate}</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.helperText}>Date circular takes millsite effect</Text>
+                  )}
                 </View>
 
                 {/* Reporting Period */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    Reporting Period <Text style={{ color: COLORS.danger }}>*</Text>
+                    Reporting Period <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                   </Text>
                   <TextInput
-                    style={s.input}
+                    style={[s.input, fieldErrors.weekLabel && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}
                     value={weekLabel}
-                    onChangeText={setWeekLabel}
+                    onChangeText={(v) => {
+                      setWeekLabel(v);
+                      if (fieldErrors.weekLabel) setFieldErrors(p => ({ ...p, weekLabel: null }));
+                    }}
                     editable={!isSubmitting}
                     placeholder="e.g. Week 3, September 2026"
                     placeholderTextColor={COLORS.textDisabled}
                   />
-                  <Text style={s.helperText}>Reporting period shown on the source document</Text>
+                  {fieldErrors.weekLabel ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                      <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.weekLabel}</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.helperText}>Reporting period shown on the source document</Text>
+                  )}
                 </View>
               </View>
 
@@ -256,14 +281,17 @@ export default function PublishPriceModal({
                 {/* Raw Sugar Price */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    Raw Sugar Price <Text style={{ color: COLORS.danger }}>*</Text>
+                    Raw Sugar Price <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                   </Text>
-                  <View style={s.inputWithAffixes}>
+                  <View style={[s.inputWithAffixes, fieldErrors.sugarPrice && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                     <Text style={s.prefixText}>₱</Text>
                     <TextInput
                       style={s.affixInput}
                       value={sugarPrice}
-                      onChangeText={setSugarPrice}
+                      onChangeText={(v) => {
+                        setSugarPrice(v);
+                        if (fieldErrors.sugarPrice) setFieldErrors(p => ({ ...p, sugarPrice: null }));
+                      }}
                       editable={!isSubmitting && sugarStatus === 'REPORTED'}
                       keyboardType="numeric"
                       placeholder="e.g. 2950"
@@ -271,20 +299,30 @@ export default function PublishPriceModal({
                     />
                     <Text style={s.suffixText}>/ Lkg</Text>
                   </View>
-                  <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
+                  {fieldErrors.sugarPrice ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                      <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.sugarPrice}</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
+                  )}
                 </View>
 
                 {/* Molasses Price */}
                 <View style={{ flex: 1 }}>
                   <Text style={s.fieldLabel}>
-                    Molasses Price <Text style={{ color: COLORS.danger }}>*</Text>
+                    Molasses Price <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                   </Text>
-                  <View style={s.inputWithAffixes}>
+                  <View style={[s.inputWithAffixes, fieldErrors.molassesPrice && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                     <Text style={s.prefixText}>₱</Text>
                     <TextInput
                       style={s.affixInput}
                       value={molassesPrice}
-                      onChangeText={setMolassesPrice}
+                      onChangeText={(v) => {
+                        setMolassesPrice(v);
+                        if (fieldErrors.molassesPrice) setFieldErrors(p => ({ ...p, molassesPrice: null }));
+                      }}
                       editable={!isSubmitting && molassesStatus === 'REPORTED'}
                       keyboardType="numeric"
                       placeholder="e.g. 11500"
@@ -292,43 +330,70 @@ export default function PublishPriceModal({
                     />
                     <Text style={s.suffixText}>/ MT</Text>
                   </View>
-                  <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
+                  {fieldErrors.molassesPrice ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                      <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.molassesPrice}</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.helperText}>Only reported weeks have a price. The server calculates comparisons.</Text>
+                  )}
                 </View>
               </View>
 
               {/* Circular / Reference No. */}
               <View style={{ marginTop: 10 }}>
                 <Text style={s.fieldLabel}>
-                  Circular / Reference No. <Text style={{ color: COLORS.danger }}>*</Text>
+                  Circular / Reference No. <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                 </Text>
-                <View style={s.inputWithIcon}>
+                <View style={[s.inputWithIcon, fieldErrors.circularNumber && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                   <Ionicons name="document-text-outline" size={17} color={COLORS.textMuted} style={{ marginRight: 8 }} />
                   <TextInput
                     style={{ flex: 1, fontSize: 13, color: COLORS.text, paddingVertical: 10 }}
                     value={circularNumber}
-                    onChangeText={setCircularNumber}
+                    onChangeText={(v) => {
+                      setCircularNumber(v);
+                      if (fieldErrors.circularNumber) setFieldErrors(p => ({ ...p, circularNumber: null }));
+                    }}
                     editable={!isSubmitting}
                     placeholder="e.g. SRA-MD-2026-039"
                     placeholderTextColor={COLORS.textDisabled}
                   />
                 </View>
-                <Text style={s.helperText}>Reference code from the source document</Text>
+                {fieldErrors.circularNumber ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.circularNumber}</Text>
+                  </View>
+                ) : (
+                  <Text style={s.helperText}>Reference code from the source document</Text>
+                )}
               </View>
 
               {/* Issuing Authority / Source */}
               <View style={{ marginTop: 10 }}>
                 <Text style={s.fieldLabel}>
-                  Issuing Authority / Source <Text style={{ color: COLORS.danger }}>*</Text>
+                  Issuing Authority / Source <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
                 </Text>
                 <TextInput
-                  style={s.input}
+                  style={[s.input, fieldErrors.source && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}
                   value={source}
-                  onChangeText={setSource}
+                  onChangeText={(v) => {
+                    setSource(v);
+                    if (fieldErrors.source) setFieldErrors(p => ({ ...p, source: null }));
+                  }}
                   editable={!isSubmitting}
                   placeholder="e.g. issuing agency, circular, or millsite bulletin"
                   placeholderTextColor={COLORS.textDisabled}
                 />
-                <Text style={s.helperText}>Originating agency or millsite market monitoring division</Text>
+                {fieldErrors.source ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{fieldErrors.source}</Text>
+                  </View>
+                ) : (
+                  <Text style={s.helperText}>Originating agency or millsite market monitoring division</Text>
+                )}
               </View>
             </ScrollView>
 
@@ -361,11 +426,6 @@ export default function PublishPriceModal({
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
-  );
-
-  return (
-    <>
-      {mainContent}
 
       {/* ── Interactive Calendar Date Picker Modal ── */}
       <Modal visible={showCalendar} transparent animationType="fade" onRequestClose={() => setShowCalendar(false)}>
@@ -470,7 +530,7 @@ export default function PublishPriceModal({
           </View>
         </View>
       </Modal>
-    </>
+    </Modal>
   );
 }
 

@@ -217,6 +217,7 @@ export default function HomeScreen({ navigation }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingNet, setIsCheckingNet] = useState(false);
   const [syncTimeStr, setSyncTimeStr] = useState('Just now');
+  const homeScrollRef = useRef(null);
 
   // Keep notification state per account and reconcile it with the API. A late
   // response from a signed-out account cannot replace the current projection.
@@ -417,29 +418,6 @@ export default function HomeScreen({ navigation }) {
 
   const isFieldRole = session?.role === 'Farm Member' || session?.role === 'Farm Manager';
 
-  // ── In-App Sub-Screen: Publish Price Reference ──
-  if (showPriceModal) {
-    return (
-      <PublishPriceModal
-        visible={true}
-        onClose={() => setShowPriceModal(false)}
-        latestPrice={{
-          sugarPricePerLkg: livePrice || currentPrice?.value,
-          molassesPricePerMetricTon: liveMol || currentMarketObservation?.value
-        }}
-        onPublished={(newPost) => {
-          setShowPriceModal(false);
-          setPriceData({
-            livePrice: newPost.sugarPricePerLkg,
-            liveMol: newPost.molassesPricePerMetricTon,
-            liveWeek: newPost.weekLabel,
-            liveDate: newPost.effectiveDate,
-            liveChange: newPost.sugarPriceChange || (newPost.sugarPricePerLkg - (livePrice || currentPrice?.value || newPost.sugarPricePerLkg))
-          });
-        }}
-      />
-    );
-  }
 
   // ── In-App Sub-Screen: System Notifications ──
   if (showNotifs) {
@@ -547,7 +525,9 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <AppHeader right={
+      <AppHeader
+        onPressBrand={() => homeScrollRef.current?.scrollTo?.({ y: 0, animated: true })}
+        right={
         <TouchableOpacity style={s.notifBtn} onPress={openNotifs}>
           <Ionicons name="notifications-outline" size={22} color={COLORS.text} />
           {unreadCount > 0 && <View style={s.badge}><Text style={s.badgeText}>{unreadCount}</Text></View>}
@@ -592,7 +572,7 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={homeScrollRef} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {/* ── 1. Published price card ── */}
             <PriceReferenceCard priceRecord={getSortedPrices()[0]} canPost={session?.role === 'SRA Admin' && isOnline} onPostPricePress={handleOpenPriceModal} />
 
@@ -821,8 +801,25 @@ export default function HomeScreen({ navigation }) {
         )}
         </ScrollView>
       )}
-
-
+      {/* ── SRA Admin Publish Price Reference Modal ── */}
+      <PublishPriceModal
+        visible={showPriceModal}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={{
+          sugarPricePerLkg: livePrice || currentPrice?.value,
+          molassesPricePerMetricTon: liveMol || currentMarketObservation?.value
+        }}
+        onPublished={(newPost) => {
+          setShowPriceModal(false);
+          setPriceData({
+            livePrice: newPost.sugarPricePerLkg,
+            liveMol: newPost.molassesPricePerMetricTon,
+            liveWeek: newPost.weekLabel,
+            liveDate: newPost.effectiveDate,
+            liveChange: newPost.sugarPriceChange || (newPost.sugarPricePerLkg - (livePrice || currentPrice?.value || newPost.sugarPricePerLkg))
+          });
+        }}
+      />
     </SafeAreaView>
   );
 }

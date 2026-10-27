@@ -222,6 +222,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
             price={currentPrice}
             previousPrice={previousPrice}
             isLoading={isLoading}
+            className="h-full flex-1"
           />
         </div>
 

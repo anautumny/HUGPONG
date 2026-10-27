@@ -272,7 +272,7 @@ export default function Sidebar({
     <aside
       id="sidebar"
       className={`${
-        collapsed ? 'w-16' : 'w-64'
+        collapsed ? 'w-16' : 'w-72'
       } bg-surface border-r border-border flex-shrink-0 flex flex-col h-full overflow-visible transition-all duration-200 z-30 select-none relative`}
       aria-label="Main Navigation"
     >
@@ -303,7 +303,13 @@ export default function Sidebar({
           collapsed ? 'justify-center px-0' : 'justify-between px-4 sm:px-5'
         }`}
       >
-        <div className={`flex items-center gap-3 ${collapsed ? 'justify-center w-full' : 'min-w-0'}`}>
+        <NavLink
+          to="/dashboard"
+          onClick={handleNavClick}
+          className={`flex items-center gap-3 ${collapsed ? 'justify-center w-full' : 'min-w-0'} hover:opacity-90 transition-opacity`}
+          title="Go to Dashboard"
+          aria-label="Go to Dashboard"
+        >
           <div
             className="brand-logo-box w-10 h-10 rounded-xl bg-white border border-border/80 p-1 flex items-center justify-center flex-shrink-0 shadow-xs"
             title="HUGPONG Official Emblem"
@@ -320,7 +326,7 @@ export default function Sidebar({
               </span>
             </div>
           )}
-        </div>
+        </NavLink>
 
         {/* Mobile close button (only displayed in mobile drawer mode) */}
         {isMobileDrawer && (

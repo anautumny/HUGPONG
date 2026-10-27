@@ -220,13 +220,13 @@ export default function AnalyticsView() {
       '',
       '--- DOMAIN 1: CROP & FIELD PROGRESS ---',
       `Total Registered Plots: ${cropProgressData.totalPlots}`,
-      `Total Tracked Acreage: ${cropProgressData.totalAcreageHa.toFixed(2)} ha`,
-      'Stage,Plots Count,Acreage (Ha),Area Share (%)',
+      `Total Tracked Hectares: ${cropProgressData.totalAcreageHa.toFixed(2)} ha`,
+      'Stage,Plots Count,Hectares (Ha),Area Share (%)',
       ...cropProgressData.stagesDistribution.map(s => `"${s.shortName}",${s.plotsCount},${s.areaHa.toFixed(2)},${s.percentOfArea}%`),
       '',
       '--- DOMAIN 2: PRODUCTION COST ---',
       `Total Recorded Expenditure: PHP ${productionCostData.totalExpenditure}`,
-      `Tracked Operational Acreage: ${productionCostData.totalAuditedHa.toFixed(2)} ha`,
+      `Tracked Operational Hectares: ${productionCostData.totalAuditedHa.toFixed(2)} ha`,
       `Average Cost per Hectare: PHP ${productionCostData.averageCostPerHa}`,
       'Entity,Total Cost (PHP),Area (Ha),Cost per Ha (PHP),Ops Count',
       ...productionCostData.breakdownByEntity.map(e => `"${e.name}",${e.totalCost},${e.areaHa.toFixed(2)},${e.costPerHa},${e.opsCount}`),
@@ -269,7 +269,7 @@ export default function AnalyticsView() {
             Operational & Market Analytics
           </h1>
           <p className="text-xs sm:text-sm text-hug-muted mt-1 max-w-2xl">
-            Descriptive insights derived from recorded sugarcane parcel lifecycles, field operations, and source-referenced market prices.
+            Descriptive insights derived from recorded sugarcane plot lifecycles, field operations, and source-referenced market prices.
           </p>
         </div>
 

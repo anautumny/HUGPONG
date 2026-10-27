@@ -94,7 +94,7 @@ export default function FieldEnrollmentModal({
       size="md"
       title="Enroll New Field Plot"
       subtitle="Register an individual sugarcane field and assign its field owner."
-      badge="Field Parcel Allocation"
+      badge="Field Plot Allocation"
       icon={Layers}
       preventBackdropClose={isSubmitting}
       preventEscapeClose={isSubmitting}

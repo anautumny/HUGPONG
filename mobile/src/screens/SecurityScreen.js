@@ -27,7 +27,9 @@ export default function SecurityScreen({ navigation }) {
   const [showCurrentPw, setShowCurrentPw] = useState(false);
   const [showNewPw, setShowNewPw] = useState(false);
   const [loadingPw, setLoadingPw] = useState(false);
-  const [passwordSessionAction, setPasswordSessionAction] = useState('KEEP_CURRENT');
+  const [passwordSessionAction, setPasswordSessionAction] = useState('KEEP_CURRENT');
+  const [pwErrors, setPwErrors] = useState({});
+  const [phoneErrors, setPhoneErrors] = useState({});
 
   // Change Mobile Number State
   const [showChangePhone, setShowChangePhone] = useState(false);
@@ -119,6 +121,7 @@ export default function SecurityScreen({ navigation }) {
     setPendingPhone('');
     setPhoneOtp('');
     setPhoneResendSeconds(0);
+    setPhoneErrors({});
   };
 
   const handlePhoneVerificationRequest = async () => {
@@ -158,16 +161,17 @@ export default function SecurityScreen({ navigation }) {
 
   const handlePhoneVerificationConfirm = async () => {
     if (!/^\d{6}$/.test(phoneOtp.trim())) {
-      Alert.alert('Verification Code Required', 'Enter the 6-digit code sent to your new mobile number.');
+      setPhoneErrors({ phoneOtp: 'Enter the 6-digit verification code.' });
       return;
     }
+    setPhoneErrors({});
 
     setLoadingPhone(true);
     const res = await confirmUserMobileNumberChange(pendingPhone, phoneOtp);
     setLoadingPhone(false);
 
     if (!res.success) {
-      Alert.alert('Verification Failed', res.error || 'The new mobile number could not be verified.');
+      setPhoneErrors({ phoneOtp: res.error || 'The code could not be verified.' });
       return;
     }
 
@@ -259,12 +263,15 @@ export default function SecurityScreen({ navigation }) {
 
                   <View style={s.fieldGroup}>
                     <Text style={s.fieldLabel}>New Mobile Number <Text style={s.req}>*</Text></Text>
-                    <View style={s.inputWrap}>
+                    <View style={[s.inputWrap, phoneErrors.newPhone && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                       <Ionicons name="phone-portrait-outline" size={17} color={COLORS.textMuted} />
                       <TextInput
                         style={s.textInput}
                         value={newPhone}
-                        onChangeText={setNewPhone}
+                        onChangeText={(v) => {
+                          setNewPhone(v);
+                          if (phoneErrors.newPhone) setPhoneErrors(p => ({ ...p, newPhone: null }));
+                        }}
                         placeholder="e.g. 0918 987 6543"
                         placeholderTextColor={COLORS.textMuted}
                         keyboardType="phone-pad"
@@ -272,16 +279,25 @@ export default function SecurityScreen({ navigation }) {
                         editable={!loadingPhone}
                       />
                     </View>
+                    {phoneErrors.newPhone && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                        <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{phoneErrors.newPhone}</Text>
+                      </View>
+                    )}
                   </View>
 
                   <View style={s.fieldGroup}>
                     <Text style={s.fieldLabel}>Confirm Current Password <Text style={s.req}>*</Text></Text>
-                    <View style={s.inputWrap}>
+                    <View style={[s.inputWrap, phoneErrors.phoneVerifyPw && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                       <Ionicons name="lock-closed-outline" size={17} color={COLORS.textMuted} />
                       <TextInput
                         style={[s.textInput, { flex: 1 }]}
                         value={phoneVerifyPw}
-                        onChangeText={setPhoneVerifyPw}
+                        onChangeText={(v) => {
+                          setPhoneVerifyPw(v);
+                          if (phoneErrors.phoneVerifyPw) setPhoneErrors(p => ({ ...p, phoneVerifyPw: null }));
+                        }}
                         secureTextEntry={!showPhoneVerifyPw}
                         placeholder="Enter password to authorize"
                         placeholderTextColor={COLORS.textMuted}
@@ -291,6 +307,12 @@ export default function SecurityScreen({ navigation }) {
                         <Ionicons name={showPhoneVerifyPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
                       </TouchableOpacity>
                     </View>
+                    {phoneErrors.phoneVerifyPw && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                        <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{phoneErrors.phoneVerifyPw}</Text>
+                      </View>
+                    )}
                   </View>
 
                   <TouchableOpacity
@@ -316,12 +338,15 @@ export default function SecurityScreen({ navigation }) {
 
                   <View style={s.fieldGroup}>
                     <Text style={s.fieldLabel}>Verification Code <Text style={s.req}>*</Text></Text>
-                    <View style={s.inputWrap}>
+                    <View style={[s.inputWrap, phoneErrors.phoneOtp && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                       <Ionicons name="keypad-outline" size={18} color={COLORS.primary} />
                       <TextInput
                         style={[s.textInput, s.phoneOtpInput]}
                         value={phoneOtp}
-                        onChangeText={value => setPhoneOtp(value.replace(/\D/g, '').slice(0, 6))}
+                        onChangeText={value => {
+                          setPhoneOtp(value.replace(/\D/g, '').slice(0, 6));
+                          if (phoneErrors.phoneOtp) setPhoneErrors(p => ({ ...p, phoneOtp: null }));
+                        }}
                         placeholder="000000"
                         placeholderTextColor={COLORS.textMuted}
                         keyboardType="number-pad"
@@ -330,6 +355,12 @@ export default function SecurityScreen({ navigation }) {
                         autoFocus
                       />
                     </View>
+                    {phoneErrors.phoneOtp && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                        <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{phoneErrors.phoneOtp}</Text>
+                      </View>
+                    )}
                   </View>
 
                   <TouchableOpacity
@@ -390,12 +421,15 @@ export default function SecurityScreen({ navigation }) {
             <View style={s.formWrap}>
               <View style={s.fieldGroup}>
                 <Text style={s.fieldLabel}>{t('sec_curr_pw', 'Current Password')} <Text style={s.req}>*</Text></Text>
-                <View style={s.inputWrap}>
+                <View style={[s.inputWrap, pwErrors.currentPw && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                   <Ionicons name="key-outline" size={17} color={COLORS.textMuted} />
                   <TextInput
                     style={[s.textInput, { flex: 1 }]}
                     value={currentPw}
-                    onChangeText={setCurrentPw}
+                    onChangeText={(v) => {
+                      setCurrentPw(v);
+                      if (pwErrors.currentPw) setPwErrors(p => ({ ...p, currentPw: null }));
+                    }}
                     secureTextEntry={!showCurrentPw}
                     placeholder="••••••••"
                     placeholderTextColor={COLORS.textMuted}
@@ -404,16 +438,25 @@ export default function SecurityScreen({ navigation }) {
                     <Ionicons name={showCurrentPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
+                {pwErrors.currentPw && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{pwErrors.currentPw}</Text>
+                  </View>
+                )}
               </View>
 
               <View style={s.fieldGroup}>
                 <Text style={s.fieldLabel}>{t('sec_new_pw', 'New Password')} <Text style={s.req}>*</Text></Text>
-                <View style={s.inputWrap}>
+                <View style={[s.inputWrap, pwErrors.newPw && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                   <Ionicons name="lock-closed-outline" size={17} color={COLORS.textMuted} />
                   <TextInput
                     style={[s.textInput, { flex: 1 }]}
                     value={newPw}
-                    onChangeText={setNewPw}
+                    onChangeText={(v) => {
+                      setNewPw(v);
+                      if (pwErrors.newPw) setPwErrors(p => ({ ...p, newPw: null }));
+                    }}
                     secureTextEntry={!showNewPw}
                     placeholder="••••••••"
                     placeholderTextColor={COLORS.textMuted}
@@ -422,6 +465,12 @@ export default function SecurityScreen({ navigation }) {
                     <Ionicons name={showNewPw ? 'eye-off-outline' : 'eye-outline'} size={17} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
+                {pwErrors.newPw && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{pwErrors.newPw}</Text>
+                  </View>
+                )}
               </View>
 
               {newPw.length > 0 && (
@@ -451,17 +500,26 @@ export default function SecurityScreen({ navigation }) {
 
               <View style={s.fieldGroup}>
                 <Text style={s.fieldLabel}>{t('sec_confirm_pw', 'Confirm New Password')} <Text style={s.req}>*</Text></Text>
-                <View style={s.inputWrap}>
+                <View style={[s.inputWrap, pwErrors.confirmPw && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}>
                   <Ionicons name="checkmark-done-outline" size={17} color={COLORS.textMuted} />
                   <TextInput
                     style={[s.textInput, { flex: 1 }]}
                     value={confirmPw}
-                    onChangeText={setConfirmPw}
+                    onChangeText={(v) => {
+                      setConfirmPw(v);
+                      if (pwErrors.confirmPw) setPwErrors(p => ({ ...p, confirmPw: null }));
+                    }}
                     secureTextEntry={!showNewPw}
                     placeholder="••••••••"
                     placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
+                {pwErrors.confirmPw && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{pwErrors.confirmPw}</Text>
+                  </View>
+                )}
               </View>
 
               <View style={s.fieldGroup}>
@@ -596,7 +654,7 @@ const s = StyleSheet.create({
   phoneSecondaryText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
   fieldGroup: { gap: 6 },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
-  req: { color: COLORS.danger },
+  req: { color: COLORS.required, fontWeight: 'normal' },
   inputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.background, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 10 },
   textInput: { flex: 1, fontSize: 14, color: COLORS.text },
   

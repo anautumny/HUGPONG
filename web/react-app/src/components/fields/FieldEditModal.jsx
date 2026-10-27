@@ -93,7 +93,7 @@ export default function FieldEditModal({
       onClose={onClose}
       size="md"
       title={`Edit Field ${field.id}`}
-      subtitle="Modify registered acreage or field owner assignment."
+      subtitle="Modify registered hectares or field owner assignment."
       badge="Plot Configuration"
       icon={Edit3}
       preventBackdropClose={isSubmitting}

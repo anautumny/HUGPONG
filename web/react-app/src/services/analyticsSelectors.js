@@ -241,12 +241,12 @@ export function selectOperationalCostBreakdown({
   const fieldMap = new Map(fields.map(f => [f.id, f]));
 
   const categoryDefinitions = [
-    { key: 'prep', label: 'Land Preparation', color: '#2D5016' },
-    { key: 'plant', label: 'Planting & Seedcane', color: '#3E7345' },
-    { key: 'fert', label: 'Fertilization & Lime', color: '#5B8C5A' },
-    { key: 'weed', label: 'Cultivation & Weeding', color: '#4B5563' },
-    { key: 'maint', label: 'Crop Maintenance', color: '#6B7280' },
-    { key: 'harvest', label: 'Harvesting & Hauling', color: '#9CA3AF' }
+    { key: 'prep', label: 'Land Preparation', color: '#9A5B32' },
+    { key: 'plant', label: 'Planting & Seedcane', color: '#15803D' },
+    { key: 'fert', label: 'Fertilization & Lime', color: '#D97706' },
+    { key: 'weed', label: 'Cultivation & Weeding', color: '#0D9488' },
+    { key: 'maint', label: 'Crop Maintenance', color: '#2563EB' },
+    { key: 'harvest', label: 'Harvesting & Hauling', color: '#EA580C' }
   ];
 
   const catMap = new Map(categoryDefinitions.map(c => [c.key, { ...c, totalCost: 0, opsCount: 0, percentOfTotal: 0 }]));

@@ -313,7 +313,7 @@ export default function FarmFieldRegistryView() {
         {
           label: 'Enrolled Plots',
           value: managerScopedFields.length,
-          subtext: 'Active member parcels',
+          subtext: 'Active member plots',
           icon: Layers
         },
         {
@@ -347,7 +347,7 @@ export default function FarmFieldRegistryView() {
         {
           label: 'Enrolled Farm Member Fields',
           value: totalDistrictPlots,
-          subtext: 'Registered parcel records',
+          subtext: 'Registered plot records',
           icon: Layers
         },
         {
@@ -374,13 +374,13 @@ export default function FarmFieldRegistryView() {
       {
         label: 'Registered Landholding',
         value: formatHectares(totalDeclared),
-        subtext: 'Certified agricultural acreage',
+        subtext: 'Certified agricultural hectares',
         icon: MapPin
       },
       {
         label: 'Registered Field Plots',
         value: fieldsState.fields.length,
-        subtext: 'Enrolled parcel directory',
+        subtext: 'Enrolled plot directory',
         icon: Layers
       },
       {
@@ -637,13 +637,13 @@ export default function FarmFieldRegistryView() {
   ];
 
   const pageSubtitle = isFarmManager
-    ? 'Manage and review member field parcels within your assigned block farm.'
+    ? 'Manage and review member field plots within your assigned block farm.'
     : isSraAdmin
       ? 'Manage and review district cooperative block farms and declared landholdings.'
-      : 'System-wide inspection of cooperative block farms and member field parcels.';
+      : 'System-wide inspection of cooperative block farms and member field plots.';
 
   const pageBadge = isFarmManager
-    ? 'Cooperative Parcels'
+    ? 'Cooperative Plots'
     : isSraAdmin
       ? 'District Registry'
       : 'Governance Oversight';
@@ -806,7 +806,7 @@ export default function FarmFieldRegistryView() {
             emptySubtext={
               isFarmManager
                 ? 'Click "Add Field" to enroll Farm Members and field details.'
-                : 'Enrolled parcels will display here once registered by farm managers.'
+                : 'Enrolled plots will display here once registered by farm managers.'
             }
             currentPage={fieldCurrentPage}
             totalPages={totalFieldPages}
@@ -1004,7 +1004,7 @@ export default function FarmFieldRegistryView() {
         isLoading={isArchiving}
         loadingText="Archiving Field..."
         title={`Archive field plot ${archiveTarget?.id}?`}
-        message="This field parcel will be archived. All associated active Crop Year Cycles and historical operation records will remain preserved in compliance audit ledgers."
+        message="This field plot will be archived. All associated active Crop Year Cycles and historical operation records will remain preserved in compliance audit ledgers."
         confirmText="Archive Plot"
         cancelText="Cancel"
         type="danger"

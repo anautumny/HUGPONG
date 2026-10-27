@@ -90,3 +90,27 @@ export function uniqueCropYears(records = [], selector = record => record?.cropY
   });
   return Array.from(years).sort((left, right) => Number(right.slice(0, 4)) - Number(left.slice(0, 4)));
 }
+
+export function formatPeriodDisplay(val, fallback = '—') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  // Match YYYY-MM, YYYY/MM, YYYY-M, or dates like YYYY-MM-DD
+  let match = str.match(/^(\d{4})[-/_](0?[1-9]|1[0-2])(?:\D.*)?$/);
+  if (match) {
+    const year = match[1];
+    const monthIndex = parseInt(match[2], 10) - 1;
+    return `${MONTH_NAMES[monthIndex]} ${year}`;
+  }
+  // Match MM-YYYY, MM/YYYY
+  match = str.match(/^(0?[1-9]|1[0-2])[-/_](\d{4})(?:\D.*)?$/);
+  if (match) {
+    const monthIndex = parseInt(match[1], 10) - 1;
+    const year = match[2];
+    return `${MONTH_NAMES[monthIndex]} ${year}`;
+  }
+  return str;
+}

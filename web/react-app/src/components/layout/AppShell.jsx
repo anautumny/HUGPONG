@@ -191,7 +191,7 @@ export default function AppShell() {
           />
 
           {/* Sliding Drawer Container */}
-          <div className="relative z-10 h-full w-64 max-w-[80vw] shadow-2xl flex flex-col bg-white dark:bg-surface">
+          <div className="relative z-10 h-full w-72 max-w-[80vw] shadow-2xl flex flex-col bg-white dark:bg-surface">
             <Sidebar
               isCollapsed={false}
               isMobileDrawer={true}

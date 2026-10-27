@@ -461,7 +461,7 @@ export default function TakeOverView() {
         category="Supervisory Intervention"
         badge="Manager Override"
         title="Manager Takeover Mode"
-        subtitle="Record supervisory operations and stage completions for member parcels in the authoritative SRA audit ledger."
+        subtitle="Record supervisory operations and stage completions for member plots in the authoritative SRA audit ledger."
         actions={[
           {
             label: 'Exit Manager Takeover',
@@ -484,7 +484,7 @@ export default function TakeOverView() {
                 {isAuthorized ? 'Manager Takeover Active' : 'Manager Takeover Authorization Required'}
               </span>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white dark:bg-surface border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300">
-                {currentField?.id || 'No Parcel Selected'}
+                {currentField?.id || 'No Plot Selected'}
               </span>
             </div>
             <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5 font-medium">
@@ -579,7 +579,7 @@ export default function TakeOverView() {
             </span>
           </div>
           <p className="text-xs text-hug-muted">
-            Select a stage below to log operations for this parcel:
+            Select a stage below to log operations for this plot:
           </p>
 
           <div className="space-y-2">

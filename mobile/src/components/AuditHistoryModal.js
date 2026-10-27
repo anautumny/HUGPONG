@@ -131,7 +131,8 @@ export default function AuditHistoryModal({
             label={t('select_report_month', 'SELECT REPORT MONTH')}
             options={uniquePeriodAudits.map((audit, idx) => {
               const auditKey = audit.reportId || audit.id || `audit-${idx}`;
-              const monthLabel = formatPhaseMonth ? formatPhaseMonth(audit.month) : (audit.month || audit.period || 'Report');
+              const periodRaw = audit.month || audit.periodKey || audit.reportPeriod || audit.period;
+              const monthLabel = formatPhaseMonth ? formatPhaseMonth(periodRaw) : (periodRaw || 'Report');
               const status = audit.status || (audit.certifiedAt ? 'CERTIFIED' : 'AWAITING_REVIEW');
               return {
                 id: audit.id || audit.reportId || auditKey,
@@ -155,7 +156,7 @@ export default function AuditHistoryModal({
             <View style={s.summaryTop}>
               <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={s.monthTitle}>
-                  {formatPhaseMonth ? formatPhaseMonth(activeAudit.month) : (activeAudit.month || activeAudit.period || 'Monthly')} {t('audit_report_suffix', 'Audit Report')}
+                  {formatPhaseMonth ? formatPhaseMonth(activeAudit.month || activeAudit.periodKey || activeAudit.reportPeriod || activeAudit.period) : (activeAudit.month || activeAudit.periodKey || activeAudit.reportPeriod || activeAudit.period || 'Monthly')} {t('audit_report_suffix', 'Audit Report')}
                 </Text>
                 <Text style={s.reportFarm}>{displayFarm}</Text>
               </View>

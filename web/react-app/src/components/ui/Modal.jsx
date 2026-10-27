@@ -106,7 +106,7 @@ export default function Modal({
   return createPortal(
     <div
       onClick={event => { if (closeOnBackdrop && event.target === event.currentTarget && !isLoading) onClose?.(); }}
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 transition-opacity animate-in fade-in duration-150"
     >
       <div
         ref={modalRef}

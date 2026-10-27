@@ -115,7 +115,7 @@ export default function FirstLoginPasswordModal({
           {/* New Password Input */}
           <div className="flex flex-col gap-1">
             <label htmlFor="new-password-input" className="text-xs font-semibold text-hug-text2">
-              New Password <span className="text-danger">*</span>
+              New Password <span className="text-rose-600/70 dark:text-rose-400/70 ml-0.5 text-xs font-normal select-none" aria-hidden="true">*</span>
             </label>
             <div className="relative">
               <input
@@ -144,7 +144,7 @@ export default function FirstLoginPasswordModal({
           {/* Confirm Password Input */}
           <div className="flex flex-col gap-1">
             <label htmlFor="confirm-password-input" className="text-xs font-semibold text-hug-text2">
-              Confirm New Password <span className="text-danger">*</span>
+              Confirm New Password <span className="text-rose-600/70 dark:text-rose-400/70 ml-0.5 text-xs font-normal select-none" aria-hidden="true">*</span>
             </label>
             <div className="relative">
               <input

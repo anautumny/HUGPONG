@@ -26,6 +26,7 @@ export default function PublishPriceModal({
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState(null);
 
   // Initialize or reset form values when opening
@@ -40,6 +41,7 @@ export default function PublishPriceModal({
       setSugarStatus('REPORTED');
       setMolassesStatus('REPORTED');
       setFormError(null);
+      setFieldErrors({});
       setSuccessMessage(null);
       setIsSubmitting(false);
     }
@@ -68,28 +70,30 @@ export default function PublishPriceModal({
     setSuccessMessage(null);
 
     // Validation
+    setFieldErrors({});
+    const newFieldErrors = {};
+
     if (!effectiveDate) {
-      setFormError('Effective Date is required.');
-      return;
+      newFieldErrors.effectiveDate = 'Effective Date is required.';
     }
     if (!weekLabel.trim()) {
-      setFormError('SRA Week Label is required.');
-      return;
+      newFieldErrors.weekLabel = 'Reporting Period is required.';
     }
     if (sugarStatus === 'REPORTED' && (!Number.isFinite(curSugarNum) || curSugarNum <= 0)) {
-      setFormError('Raw Sugar price must be a valid positive number.');
-      return;
+      newFieldErrors.sugarPrice = 'Raw Sugar price must be a valid positive number.';
     }
     if (molassesStatus === 'REPORTED' && (!Number.isFinite(curMolassesNum) || curMolassesNum <= 0)) {
-      setFormError('Molasses price must be a valid positive number.');
-      return;
+      newFieldErrors.molassesPrice = 'Molasses price must be a valid positive number.';
     }
     if (!circularNumber.trim()) {
-      setFormError('Circular or reference number is required.');
-      return;
+      newFieldErrors.circularNumber = 'Circular or reference number is required.';
     }
     if (!source.trim()) {
-      setFormError('A verifiable source description is required.');
+      newFieldErrors.source = 'A verifiable source description is required.';
+    }
+
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
       return;
     }
 
@@ -179,7 +183,8 @@ export default function PublishPriceModal({
             id="price-effective-date"
             label="Effective Date"
             required
-            helperText="Date circular takes millsite effect"
+            error={fieldErrors.effectiveDate}
+            helperText={fieldErrors.effectiveDate ? undefined : "Date circular takes millsite effect"}
           >
             <Input
               type="date"
@@ -195,14 +200,15 @@ export default function PublishPriceModal({
             id="price-week-label"
             label="Reporting Period"
             required
-            helperText="Reporting period shown on the source document"
+            error={fieldErrors.weekLabel}
+            helperText={fieldErrors.weekLabel ? undefined : "Reporting period shown on the source document"}
           >
             <Input
               type="text"
               id="price-week-label"
               placeholder="e.g. Week 3, September 2026"
               value={weekLabel}
-              onChange={(e) => setWeekLabel(e.target.value)}
+              onChange={(e) => { setWeekLabel(e.target.value); if (fieldErrors.weekLabel) setFieldErrors(prev => ({ ...prev, weekLabel: null })); }}
               disabled={isSubmitting}
               required
             />
@@ -218,7 +224,8 @@ export default function PublishPriceModal({
             id="price-sugar"
             label="Raw Sugar Price"
             required
-            helperText="Only reported weeks have a price. Comparisons are calculated by the server."
+            error={fieldErrors.sugarPrice}
+            helperText={fieldErrors.sugarPrice ? undefined : "Only reported weeks have a price. Comparisons are calculated by the server."}
           >
             <Input
               type="number"
@@ -227,7 +234,7 @@ export default function PublishPriceModal({
               prefix="₱"
               suffix="/ Lkg"
               value={sugarPrice}
-              onChange={(e) => setSugarPrice(e.target.value)}
+              onChange={(e) => { setSugarPrice(e.target.value); if (fieldErrors.sugarPrice) setFieldErrors(prev => ({ ...prev, sugarPrice: null })); }}
               disabled={isSubmitting || sugarStatus !== 'REPORTED'}
               min="1"
               step="0.01"
@@ -239,7 +246,8 @@ export default function PublishPriceModal({
             id="price-molasses"
             label="Molasses Price"
             required
-            helperText="Only reported weeks have a price. Comparisons are calculated by the server."
+            error={fieldErrors.molassesPrice}
+            helperText={fieldErrors.molassesPrice ? undefined : "Only reported weeks have a price. Comparisons are calculated by the server."}
           >
             <Input
               type="number"
@@ -248,7 +256,7 @@ export default function PublishPriceModal({
               prefix="₱"
               suffix="/ MT"
               value={molassesPrice}
-              onChange={(e) => setMolassesPrice(e.target.value)}
+              onChange={(e) => { setMolassesPrice(e.target.value); if (fieldErrors.molassesPrice) setFieldErrors(prev => ({ ...prev, molassesPrice: null })); }}
               disabled={isSubmitting || molassesStatus !== 'REPORTED'}
               min="1"
               step="0.01"
@@ -262,7 +270,8 @@ export default function PublishPriceModal({
           id="price-circular-number"
           label="Circular / Reference No."
           required
-          helperText="Reference code from the source document"
+          error={fieldErrors.circularNumber}
+          helperText={fieldErrors.circularNumber ? undefined : "Reference code from the source document"}
         >
           <Input
             type="text"
@@ -270,7 +279,7 @@ export default function PublishPriceModal({
             placeholder="e.g. SRA-MD-2026-039"
             icon={FileText}
             value={circularNumber}
-            onChange={(e) => setCircularNumber(e.target.value)}
+            onChange={(e) => { setCircularNumber(e.target.value); if (fieldErrors.circularNumber) setFieldErrors(prev => ({ ...prev, circularNumber: null })); }}
             disabled={isSubmitting}
             required
           />
@@ -280,14 +289,15 @@ export default function PublishPriceModal({
           id="price-source"
           label="Issuing Authority / Source"
           required
-          helperText="Originating agency or millsite market monitoring division"
+          error={fieldErrors.source}
+          helperText={fieldErrors.source ? undefined : "Originating agency or millsite market monitoring division"}
         >
           <Input
             type="text"
             id="price-source"
             placeholder="e.g. issuing agency, circular, or millsite bulletin"
             value={source}
-            onChange={(e) => setSource(e.target.value)}
+            onChange={(e) => { setSource(e.target.value); if (fieldErrors.source) setFieldErrors(prev => ({ ...prev, source: null })); }}
             disabled={isSubmitting}
             required
           />

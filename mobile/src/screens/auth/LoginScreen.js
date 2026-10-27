@@ -54,7 +54,8 @@ export default function LoginScreen({ navigation, route }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
-  const [firstLoginError, setFirstLoginError] = useState('');
+  const [firstLoginError, setFirstLoginError] = useState('');
+  const [firstLoginFieldErrors, setFirstLoginFieldErrors] = useState({});
   const [firstLoginSaving, setFirstLoginSaving] = useState(false);
   const [showPhoneVerificationModal, setShowPhoneVerificationModal] = useState(false);
   const [phoneVerificationCode, setPhoneVerificationCode] = useState('');

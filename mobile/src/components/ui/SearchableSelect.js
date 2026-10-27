@@ -4,7 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../../theme';
 import { AppText as Text, AppTextInput as TextInput } from '../Typography';
 import AnimatedBottomSheet from '../AnimatedBottomSheet';
+import { useExpandedSheet } from '../../context/ExpandedSheetContext';
 import { hapticFeedback } from '../../utils/haptics';
+import { paginate } from '../../utils/pagination';
 
 export function SearchableSelectContent({
   onClose,
@@ -19,11 +21,37 @@ export function SearchableSelectContent({
   closeLabel = 'Close selection',
   back = false,
   resetKey,
+  pageSize = 5,
+  expandedPageSize = 10,
+  isExpanded: isExpandedProp,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const sheetContext = typeof useExpandedSheet === 'function' ? useExpandedSheet() : null;
+  const isSheetExpanded = Boolean(isExpandedProp ?? sheetContext?.expanded ?? sheetContext?.isExpanded);
+  const effectivePageSize = isSheetExpanded ? (expandedPageSize || 10) : (pageSize || 5);
+
   React.useEffect(() => {
     setSearchQuery('');
+    setPage(1);
   }, [resetKey]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  const prevPageSizeRef = React.useRef(effectivePageSize);
+  React.useEffect(() => {
+    if (prevPageSizeRef.current !== effectivePageSize) {
+      const prevSize = prevPageSizeRef.current;
+      prevPageSizeRef.current = effectivePageSize;
+      setPage(currentPage => {
+        const firstVisibleIndex = (currentPage - 1) * prevSize;
+        const newPage = Math.floor(firstVisibleIndex / effectivePageSize) + 1;
+        return Math.max(1, newPage);
+      });
+    }
+  }, [effectivePageSize]);
 
   // Normalize options to a uniform structure
   const normalizedOptions = useMemo(() => {
@@ -54,6 +82,16 @@ export function SearchableSelectContent({
       opt.id.toLowerCase().includes(q)
     );
   }, [normalizedOptions, searchQuery]);
+
+  const paged = useMemo(() => {
+    return paginate(filteredOptions, page, effectivePageSize);
+  }, [filteredOptions, page, effectivePageSize]);
+
+  React.useEffect(() => {
+    if (paged.totalPages >= 1 && page > paged.totalPages) {
+      setPage(paged.totalPages);
+    }
+  }, [paged.totalPages, page]);
 
   const closeButton = (
     <TouchableOpacity
@@ -94,15 +132,35 @@ export function SearchableSelectContent({
                 </Text>
               )}
             </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={styles.circleCloseBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <Ionicons name="close" size={20} color={COLORS.text} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {typeof sheetContext?.setExpanded === 'function' && (
+                <TouchableOpacity
+                  onPress={() => {
+                    try { hapticFeedback.light(); } catch {}
+                    sheetContext.setExpanded(prev => !prev);
+                  }}
+                  style={styles.circleCloseBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={isSheetExpanded ? 'Collapse list' : 'Expand list'}
+                >
+                  <Ionicons
+                    name={isSheetExpanded ? 'contract-outline' : 'expand-outline'}
+                    size={17}
+                    color={COLORS.text}
+                  />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={onClose}
+                style={styles.circleCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={20} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Search Bar for Quick Filtering */}
@@ -133,19 +191,60 @@ export function SearchableSelectContent({
 
           {/* Vertical Options Scroll List */}
           <FlatList
-            style={styles.optionsList}
-            contentContainerStyle={styles.optionsListContent}
-            data={filteredOptions}
+            style={[styles.optionsList, isSheetExpanded && styles.optionsListExpanded]}
+            contentContainerStyle={[styles.optionsListContent, isSheetExpanded && styles.optionsListContentExpanded]}
+            data={paged.items}
             keyExtractor={item => item.id}
             extraData={selectedValue}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            nestedScrollEnabled
             showsVerticalScrollIndicator
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <Ionicons name="search-outline" size={36} color={COLORS.textMuted} />
                 <Text style={styles.emptyText}>{emptyMessage}</Text>
               </View>
+            }
+            ListFooterComponent={
+              paged.totalPages > 1 ? (
+                <View style={[styles.paginationContainer, isSheetExpanded && styles.paginationContainerExpanded]}>
+                  <Text style={styles.paginationSummary} accessibilityLiveRegion="polite">
+                    {paged.start}–{paged.end} / {paged.total} items
+                  </Text>
+                  <View style={styles.paginationControls}>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Previous page of items"
+                      accessibilityState={{ disabled: paged.page <= 1 }}
+                      disabled={paged.page <= 1}
+                      onPress={() => {
+                        try { hapticFeedback.light(); } catch {}
+                        setPage(p => Math.max(1, p - 1));
+                      }}
+                      style={[styles.paginationBtn, paged.page <= 1 && styles.paginationBtnDisabled]}
+                    >
+                      <Ionicons name="chevron-back" size={16} color={paged.page <= 1 ? '#94A3B8' : COLORS.primary} />
+                      <Text style={[styles.paginationBtnText, paged.page <= 1 && styles.paginationBtnTextDisabled]}>Previous</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.paginationPageText}>{paged.page} / {paged.totalPages}</Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Next page of items"
+                      accessibilityState={{ disabled: paged.page >= paged.totalPages }}
+                      disabled={paged.page >= paged.totalPages}
+                      onPress={() => {
+                        try { hapticFeedback.light(); } catch {}
+                        setPage(p => Math.min(paged.totalPages, p + 1));
+                      }}
+                      style={[styles.paginationBtn, paged.page >= paged.totalPages && styles.paginationBtnDisabled]}
+                    >
+                      <Text style={[styles.paginationBtnText, paged.page >= paged.totalPages && styles.paginationBtnTextDisabled]}>Next</Text>
+                      <Ionicons name="chevron-forward" size={16} color={paged.page >= paged.totalPages ? '#94A3B8' : COLORS.primary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null
             }
             renderItem={({ item }) => {
                 const isSelected = String(selectedValue ?? '') === item.id;
@@ -234,7 +333,7 @@ export function SearchableSelectModal({ visible, onClose, ...props }) {
       visible={visible}
       onClose={onClose}
       keyboardAvoiding
-      backdropColor="rgba(15, 23, 42, 0.5)"
+      backdropColor="rgba(0, 0, 0, 0.65)"
       sheetStyle={styles.sheetContainer}
     >
       <SearchableSelectContent {...props} resetKey={visible} onClose={onClose} />
@@ -376,11 +475,11 @@ export function SearchableSelect({
               disabled={disabled}
               activeOpacity={0.65}
               accessibilityRole="button"
-              accessibilityLabel={`Search all ${options.length} options`}
+              accessibilityLabel={`More options (${options.length})`}
             >
-              <Ionicons name="search-outline" size={13} color={COLORS.primary} style={{ marginRight: 5 }} />
+              <Ionicons name="ellipsis-horizontal-circle-outline" size={15} color={COLORS.primary} style={{ marginRight: 5 }} />
               <Text style={styles.capsulePillMoreText}>
-                {`Search all ${options.length}...`}
+                {`More (${options.length})`}
               </Text>
             </TouchableOpacity>
           )}
@@ -622,10 +721,20 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minHeight: 0,
   },
+  optionsListExpanded: {
+    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+  },
   optionsListContent: {
     paddingHorizontal: SPACING.lg,
     paddingVertical: 8,
     gap: 8,
+    paddingBottom: 20,
+  },
+  optionsListContentExpanded: {
+    flexGrow: 1,
+    paddingBottom: 28,
   },
   optionRow: {
     flexDirection: 'row',
@@ -712,6 +821,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textMuted,
     fontWeight: '500',
+  },
+
+  // Pagination
+  paginationContainer: {
+    gap: 8,
+    paddingTop: 12,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  paginationContainerExpanded: {
+    marginTop: 'auto',
+    paddingBottom: 10,
+  },
+  paginationSummary: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  paginationBtn: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.2,
+    borderColor: COLORS.primaryBorder,
+    backgroundColor: '#F8FAF5',
+  },
+  paginationBtnDisabled: {
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    opacity: 0.5,
+  },
+  paginationBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  paginationBtnTextDisabled: {
+    color: '#94A3B8',
+  },
+  paginationPageText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: COLORS.text,
+    minWidth: 44,
+    textAlign: 'center',
   },
 
   // Capsule Variant

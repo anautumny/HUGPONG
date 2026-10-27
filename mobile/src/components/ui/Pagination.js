@@ -6,24 +6,36 @@ import { AppText as Text } from '../Typography';
 import { paginate } from '../../utils/pagination';
 import { useTranslation } from '../../services/i18n';
 
-export function usePagination(items, { pageSize = 10, resetKey } = {}) {
-  const [state, setState] = useState({ page: 1, key: resetKey });
+export function usePagination(items, { pageSize = 10, expandedPageSize, isExpanded: isExpandedProp, resetKey } = {}) {
+  let sheetContext = null;
+  try {
+    const { useExpandedSheet } = require('../../context/ExpandedSheetContext');
+    sheetContext = typeof useExpandedSheet === 'function' ? useExpandedSheet() : null;
+  } catch {}
+  const isExpanded = Boolean(isExpandedProp ?? sheetContext?.expanded ?? sheetContext?.isExpanded);
+  const effectivePageSize = isExpanded ? (expandedPageSize || Math.max(pageSize * 2, 15)) : pageSize;
+  const [state, setState] = useState({ page: 1, key: resetKey, size: effectivePageSize });
   const changed = !Object.is(state.key, resetKey);
-  const result = paginate(items, changed ? 1 : state.page, pageSize);
+  const sizeChanged = state.size !== effectivePageSize;
+  const requestedPage = changed
+    ? 1
+    : (sizeChanged ? (Math.floor(((state.page - 1) * (state.size || effectivePageSize)) / effectivePageSize) + 1) : state.page);
+  const result = paginate(items, requestedPage, effectivePageSize);
   // Clamp state as records disappear, so later additions do not jump back to an
   // obsolete page. Reset synchronously when the user changes the list's filter.
-  if (changed || state.page !== result.page) {
-    setState({ page: result.page, key: resetKey });
+  if (changed || sizeChanged || state.page !== result.page) {
+    setState({ page: result.page, key: resetKey, size: effectivePageSize });
   }
-  const setPage = page => setState({ page, key: resetKey });
-  return { ...result, setPage };
+  const setPage = page => setState({ page, key: resetKey, size: effectivePageSize });
+  return { ...result, setPage, isExpanded };
 }
 
-export default function Pagination({ page, totalPages, start, end, total, setPage, label = 'records' }) {
+export default function Pagination({ page, totalPages, start, end, total, setPage, label = 'records', position = 'bottom', style }) {
   const { t } = useTranslation();
   if (total === 0) return null;
+  const isTop = position === 'top';
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isTop && styles.containerTop, style]}>
       <Text style={styles.summary} accessibilityLiveRegion="polite">{start}–{end} / {total} {label}</Text>
       <View style={styles.controls}>
         <TouchableOpacity
@@ -56,6 +68,7 @@ export default function Pagination({ page, totalPages, start, end, total, setPag
 
 const styles = StyleSheet.create({
   container: { gap: 8, paddingTop: 12, marginTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
+  containerTop: { paddingTop: 0, marginTop: 0, paddingBottom: 10, marginBottom: 8, borderTopWidth: 0, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   summary: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
   controls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8 },
   button: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface },

@@ -22,6 +22,7 @@ export default function CreateTicketModal({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const submitLock = useRef(false);
 
   const categoryOptions = TICKET_CATEGORIES.map(c => ({ value: c, label: c }));
@@ -34,13 +35,18 @@ export default function CreateTicketModal({
     e.preventDefault();
     if (submitLock.current) return;
     setFormError(null);
+    setFieldErrors({});
 
+    const newFieldErrors = {};
     if (!title.trim()) {
-      setFormError('Subject is required.');
-      return;
+      newFieldErrors.title = 'Subject is required.';
     }
     if (!details.trim()) {
-      setFormError('Description is required.');
+      newFieldErrors.details = 'Description is required.';
+    }
+
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
       return;
     }
 
@@ -62,6 +68,7 @@ export default function CreateTicketModal({
         setTitle('');
         setDetails('');
         setFieldId('');
+        setFieldErrors({});
         onClose();
       } else {
         setFormError(res.error || 'Failed to submit ticket.');
@@ -120,14 +127,15 @@ export default function CreateTicketModal({
           id="tck-title"
           label="Subject"
           required
-          helperText="Brief summary of the issue or assistance required"
+          error={fieldErrors.title}
+          helperText={fieldErrors.title ? undefined : "Brief summary of the issue or assistance required"}
         >
           <Input
             type="text"
             id="tck-title"
             placeholder="e.g. Submitted operation is still pending"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => { setTitle(e.target.value); if (fieldErrors.title) setFieldErrors(prev => ({ ...prev, title: null })); }}
             disabled={isSubmitting}
             required
           />
@@ -153,7 +161,7 @@ export default function CreateTicketModal({
         {fields.length > 0 && (
           <FormField
             id="tck-field"
-            label="Associated Parcel (Optional)"
+            label="Associated Plot (Optional)"
             helperText="Link issue directly to a registered sugarcane plot"
           >
             <Select
@@ -169,7 +177,8 @@ export default function CreateTicketModal({
         <FormField
           id="tck-details"
           label="Description"
-          helperText="Describe what happened and what help you need"
+          error={fieldErrors.details}
+          helperText={fieldErrors.details ? undefined : "Describe what happened and what help you need"}
           required
         >
           <Textarea
@@ -177,7 +186,7 @@ export default function CreateTicketModal({
             rows={4}
             placeholder="Describe the issue in detail..."
             value={details}
-            onChange={(e) => setDetails(e.target.value)}
+            onChange={(e) => { setDetails(e.target.value); if (fieldErrors.details) setFieldErrors(prev => ({ ...prev, details: null })); }}
             disabled={isSubmitting}
             required
           />

@@ -1537,7 +1537,8 @@ export default function FieldOpsScreen({ navigation, route }) {
     const nextCropYear = nextCropYearCycle(currentCycle?.cropYear || selectedField?.cropYear);
     if (nextCropYear) setCycleTypeForm(previous => ({ ...previous, cropYear: nextCropYear }));
   }, [selectedField?.currentCycleId, selectedField?.cropYear]);
-  const [showManagerAssignModal, setShowManagerAssignModal] = useState(false);
+  const [showManagerAssignModal, setShowManagerAssignModal] = useState(false);
+  const [managerAssignError, setManagerAssignError] = useState('');
   const [showOwnerDropdown, setShowOwnerDropdown] = useState(false);
   const [managerAssignForm, setManagerAssignForm] = useState({
     userId: '',
@@ -4705,7 +4706,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             </View>
 
             <View style={{ gap: 6 }}>
-              <Text style={s.formLabel}>Reason for Amendment <Text style={{ color: '#D9534F' }}>*</Text></Text>
+              <Text style={s.formLabel}>Reason for Amendment <Text style={{ color: COLORS.required }}>*</Text></Text>
               <TextInput
                 multiline
                 placeholder="State the reason (e.g. Receipt adjustment, headcount recount...)"
@@ -5254,6 +5255,32 @@ export default function FieldOpsScreen({ navigation, route }) {
           </View>
         )}
 
+        {/* Simple Page-by-Page Pagination Controls (Prev / Page X of Y / Next) */}
+        {!archiveMode && filtered.length > 0 && totalPages > 1 && (
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
+            <TouchableOpacity
+              disabled={currentPageClamped <= 1}
+              onPress={() => setLogCurrentPage(p => Math.max(1, p - 1))}
+              style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' }, currentPageClamped <= 1 && { opacity: 0.4 }]}
+            >
+              <Ionicons name="chevron-back" size={14} color={COLORS.text} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>Prev</Text>
+            </TouchableOpacity>
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textSecondary }}>
+              Page {currentPageClamped} of {totalPages}
+            </Text>
+
+            <TouchableOpacity
+              disabled={currentPageClamped >= totalPages}
+              onPress={() => setLogCurrentPage(p => Math.min(totalPages, p + 1))}
+              style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' }, currentPageClamped >= totalPages && { opacity: 0.4 }]}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.text }}>Next</Text>
+              <Ionicons name="chevron-forward" size={14} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+        )}
         {/* Compact Expandable Item Rows using memoized component */}
         {displayItems.map((log, logIdx) => {
           const isExpanded = expandedLogId === log.id;
@@ -6083,7 +6110,7 @@ export default function FieldOpsScreen({ navigation, route }) {
             <View style={{
               flexDirection: 'row',
               backgroundColor: '#EEF2E6',
-              borderRadius: RADIUS.md,
+              borderRadius: RADIUS.full,
               padding: 3,
               marginHorizontal: SPACING.lg,
               marginBottom: 8,
@@ -6091,8 +6118,8 @@ export default function FieldOpsScreen({ navigation, route }) {
             }}>
               <TouchableOpacity
                 style={[
-                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
-                  logTab === 'submitted' && { backgroundColor: '#fff', ...SHADOW.card }
+                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.full },
+                  logTab === 'submitted' && { backgroundColor: '#fff', borderRadius: RADIUS.full, ...SHADOW.card }
                 ]}
                 onPress={() => setLogTab('submitted')}
                 activeOpacity={0.7}
@@ -6103,8 +6130,8 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
-                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
-                  logTab === 'drafts' && { backgroundColor: '#fff', ...SHADOW.card }
+                  { flex: 1, paddingVertical: 8.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.full },
+                  logTab === 'drafts' && { backgroundColor: '#fff', borderRadius: RADIUS.full, ...SHADOW.card }
                 ]}
                 onPress={() => setLogTab('drafts')}
                 activeOpacity={0.7}
@@ -7150,6 +7177,32 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             return (
               <>
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: '#fff' }}>
+                    <TouchableOpacity
+                      disabled={curPage === 1}
+                      onPress={() => setFieldsModalPage(p => Math.max(1, p - 1))}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 12, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: curPage === 1 ? COLORS.border : COLORS.primary, backgroundColor: curPage === 1 ? '#F8F9FA' : COLORS.primaryBg, opacity: curPage === 1 ? 0.6 : 1 }}
+                    >
+                      <Ionicons name="chevron-back" size={14} color={curPage === 1 ? COLORS.textMuted : COLORS.primary} />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: curPage === 1 ? COLORS.textMuted : COLORS.primary }}>Prev</Text>
+                    </TouchableOpacity>
+
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textSecondary }}>
+                      Page {curPage} of {totalPages} ({filtered.length} Fields)
+                    </Text>
+
+                    <TouchableOpacity
+                      disabled={curPage === totalPages}
+                      onPress={() => setFieldsModalPage(p => Math.min(totalPages, p + 1))}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 12, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: curPage === totalPages ? COLORS.border : COLORS.primary, backgroundColor: curPage === totalPages ? '#F8F9FA' : COLORS.primaryBg, opacity: curPage === totalPages ? 0.6 : 1 }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: curPage === totalPages ? COLORS.textMuted : COLORS.primary }}>Next</Text>
+                      <Ionicons name="chevron-forward" size={14} color={curPage === totalPages ? COLORS.textMuted : COLORS.primary} />
+                    </TouchableOpacity>
+                  </View>
+                )}
                 <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 10, paddingBottom: 16 }}>
                   {filtered.length === 0 && (
                     <Text style={s.emptyText}>No fields match your search.</Text>
@@ -7347,7 +7400,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScreenHeader
           title={managerAssignForm.isEditing ? 'Edit Field Plot & Ownership' : 'Enroll New Field Plot'}
-          subtitle={managerAssignForm.isEditing ? 'Modify parcel specifications and assigned member' : 'Register an individual sugarcane field and assign its field owner'}
+          subtitle={managerAssignForm.isEditing ? 'Modify plot specifications and assigned member' : 'Register an individual sugarcane field and assign its field owner'}
           onBackPress={() => {
             setShowOwnerDropdown(false);
             setShowManagerAssignModal(false);
@@ -7373,7 +7426,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   </Text>
                 </View>
                 <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                  {managerAssignForm.isEditing ? 'Permanent parcel identifier.' : 'Generated by the server after enrollment.'}
+                  {managerAssignForm.isEditing ? 'Permanent plot identifier.' : 'Generated by the server after enrollment.'}
                 </Text>
               </View>
 
@@ -7381,7 +7434,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               <View style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
-                    Parent Block Farm <Text style={{ color: '#DC2626' }}>*</Text>
+                    Parent Block Farm <Text style={{ color: COLORS.required }}>*</Text>
                   </Text>
                     <View style={{ backgroundColor: COLORS.primaryBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: RADIUS.xs }}>
                       <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.primary }}>Assigned Cluster</Text>
@@ -7641,7 +7694,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
               <View style={{ gap: 4 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>
-                  Plot Area <Text style={{ color: '#DC2626' }}>*</Text>
+                  Plot Area <Text style={{ color: COLORS.required }}>*</Text>
                 </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', borderWidth: 1.2, borderColor: '#D1D5DB', borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, minHeight: 46 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
@@ -8855,9 +8908,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                       </View>
                     ) : (
                       /* Sleek Segmented Pill Switcher matching Planner UI */
-                      <View style={{ flexDirection: 'row', backgroundColor: '#EEF2E6', borderRadius: RADIUS.md, padding: 3, minHeight: 40, alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', backgroundColor: '#EEF2E6', borderRadius: RADIUS.full, padding: 3, minHeight: 40, alignItems: 'center' }}>
                         <TouchableOpacity
-                          style={[{ flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' }, managerFieldFilter === 'my' && { backgroundColor: '#fff', ...SHADOW.card }]}
+                          style={[{ flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: RADIUS.full, alignItems: 'center', justifyContent: 'center' }, managerFieldFilter === 'my' && { backgroundColor: '#fff', borderRadius: RADIUS.full, ...SHADOW.card }]}
                           onPress={() => {
                             setManagerFieldFilter('my');
                             setSelectedField(myFieldList[0] || null);
@@ -8868,7 +8921,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          style={[{ flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' }, managerFieldFilter === 'all' && { backgroundColor: '#fff', ...SHADOW.card }]}
+                          style={[{ flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: RADIUS.full, alignItems: 'center', justifyContent: 'center' }, managerFieldFilter === 'all' && { backgroundColor: '#fff', borderRadius: RADIUS.full, ...SHADOW.card }]}
                           onPress={() => {
                             setManagerFieldFilter('all');
                             if (accessibleFields.length > 0 && !accessibleFields.some(f => f.id === safeField.id)) {
@@ -9219,7 +9272,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </TouchableOpacity>
             ))}
 
-            <Pagination {...pendingAuditPage} label="reports awaiting review" />
+
 
             {/* Scanner Card */}
             <TouchableOpacity style={[s.scannerCard, { marginBottom: SPACING.xl }]} onPress={() => setShowAuditReceiveOptions(true)}>
@@ -9329,7 +9382,8 @@ export default function FieldOpsScreen({ navigation, route }) {
       <AnimatedBottomSheet
         visible={showIncompleteAuditFields}
         onClose={() => setShowIncompleteAuditFields(false)}
-        backdropColor="rgba(0, 0, 0, 0.52)"
+        dismissible
+        backdropColor="rgba(0, 0, 0, 0.65)"
         sheetStyle={{ maxHeight: '86%' }}
       >
           <SafeAreaView edges={[]} style={{ flexShrink: 1, backgroundColor: COLORS.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
@@ -9971,7 +10025,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
             {/* Manager Password Input */}
             <View style={{ gap: 6 }}>
-              <Text style={s.formLabel}>Farm Manager Password <Text style={{ color: '#D9534F' }}>*</Text></Text>
+              <Text style={s.formLabel}>Farm Manager Password <Text style={{ color: COLORS.required }}>*</Text></Text>
               <View style={{ position: 'relative', justifyContent: 'center' }}>
                 <TextInput
                   secureTextEntry={!showTakeOverPassword}

@@ -257,6 +257,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <View>
                 <Text style={s.sectionTitle}>{t('sync_changes_waiting')}</Text>
                 <Text style={s.sectionSub}>{t('sync_changes_waiting_sub')}</Text>
+                <Pagination {...outboxPage} label="pending changes" position="top" />
                 {outboxPage.items.map((item, index) => (
                   <View key={item.mutationId || `${item.type}-${index}`} style={s.queueCard}>
                     <View style={s.queueHeading}>
@@ -288,7 +289,7 @@ export default function SyncMonitorScreen({ navigation }) {
                     <Text style={s.queueMeta}>{t('sync_attempted')} {Number(item.retryCount || 0)} {Number(item.retryCount || 0) === 1 ? t('sync_time_singular') : t('sync_time_plural')}</Text>
                   </View>
                 ))}
-                <Pagination {...outboxPage} label="pending changes" />
+
               </View>
             ) : null}
 
@@ -296,22 +297,8 @@ export default function SyncMonitorScreen({ navigation }) {
               <View>
                 <Text style={s.sectionTitle}>{t('sync_member_activity')}</Text>
                 <Text style={s.sectionSub}>{t('sync_member_activity_sub')}</Text>
-                {members.length === 0 ? <Text style={s.emptyText}>{t('sync_no_members')}</Text> : pagedMembers.map(member => (
-                  <View key={member.userId} style={s.memberCard}>
-                    <View style={s.cardHeading}>
-                      <Text style={s.memberName}>{member.displayName}</Text>
-                      <View style={[s.badge, member.activity?.attentionStatus === 'CRITICAL' ? s.dangerBadge : member.activity?.attentionStatus === 'NEEDS_ATTENTION' ? s.warnBadge : member.activity?.attentionStatus === 'WITHIN_WINDOW' ? s.goodBadge : s.neutralBadge]}>
-                        <Text style={s.badgeText}>{activityStatusLabel(member.activity, t)}</Text>
-                      </View>
-                    </View>
-                    <StatusRow label={t('sync_last_active')} value={formatActivity(member.activity?.lastActiveAt, t, language)} />
-                    <StatusRow label={t('sync_activity_status')} value={activityStatusLabel(member.activity, t)} />
-                    <StatusRow label={t('sync_last_successful')} value={formatTime(member.sync?.lastSuccessfulSyncAt, t, language)} />
-                    <StatusRow label={t('sync_last_reported')} value={formatTime(member.sync?.lastReportedAt, t, language)} />
-                  </View>
-                ))}
                 {members.length > 0 ? (
-                  <View style={s.pagination}>
+                  <View style={[s.pagination, { marginTop: 4, marginBottom: 12, paddingTop: 0, paddingBottom: 10, borderTopWidth: 0, borderBottomWidth: 1 }]}>
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel={t('btn_prev')}
@@ -335,6 +322,21 @@ export default function SyncMonitorScreen({ navigation }) {
                     </TouchableOpacity>
                   </View>
                 ) : null}
+                {members.length === 0 ? <Text style={s.emptyText}>{t('sync_no_members')}</Text> : pagedMembers.map(member => (
+                  <View key={member.userId} style={s.memberCard}>
+                    <View style={s.cardHeading}>
+                      <Text style={s.memberName}>{member.displayName}</Text>
+                      <View style={[s.badge, member.activity?.attentionStatus === 'CRITICAL' ? s.dangerBadge : member.activity?.attentionStatus === 'NEEDS_ATTENTION' ? s.warnBadge : member.activity?.attentionStatus === 'WITHIN_WINDOW' ? s.goodBadge : s.neutralBadge]}>
+                        <Text style={s.badgeText}>{activityStatusLabel(member.activity, t)}</Text>
+                      </View>
+                    </View>
+                    <StatusRow label={t('sync_last_active')} value={formatActivity(member.activity?.lastActiveAt, t, language)} />
+                    <StatusRow label={t('sync_activity_status')} value={activityStatusLabel(member.activity, t)} />
+                    <StatusRow label={t('sync_last_successful')} value={formatTime(member.sync?.lastSuccessfulSyncAt, t, language)} />
+                    <StatusRow label={t('sync_last_reported')} value={formatTime(member.sync?.lastReportedAt, t, language)} />
+                  </View>
+                ))}
+                
               </View>
             ) : null}
           </>

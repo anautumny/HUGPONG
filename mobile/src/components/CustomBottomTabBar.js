@@ -83,8 +83,8 @@ export default function CustomBottomTabBar({
         };
 
         const isTabDisabled = !isOnline && (route.name === 'Home' || route.name === 'Profile');
-        const rawLabel = (cfg.translationKey && t(cfg.translationKey)) || cfg.fallbackLabel || route.name;
-        const label = typeof rawLabel === 'string' ? rawLabel : cfg.fallbackLabel;
+        // Bottom menu labels remain strictly in English regardless of language selection (English, Tagalog, Hiligaynon)
+        const label = cfg.fallbackLabel || route.name;
         const iconName = isFocused && !isTabDisabled ? cfg.activeIcon : cfg.inactiveIcon;
 
         const hasPendingSync = route.name === 'Field Ops' && pendingCount > 0;
@@ -231,15 +231,15 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   activeIndicatorLine: {
-    width: 24,
+    width: 20,
     height: 3,
     borderRadius: 1.5,
     marginBottom: 4,
   },
   iconWrapper: {
-    width: 52,
-    height: 30,
-    borderRadius: 15,
+    width: 64,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
@@ -247,11 +247,12 @@ const styles = StyleSheet.create({
   },
   iconWrapperActive: {
     backgroundColor: '#E4EED8',
+    borderRadius: 16,
   },
   syncBadge: {
     position: 'absolute',
-    top: -3,
-    right: -4,
+    top: -4,
+    right: 8,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -273,8 +274,8 @@ const styles = StyleSheet.create({
   },
   offlineChip: {
     position: 'absolute',
-    top: -2,
-    right: -4,
+    top: -3,
+    right: 9,
     width: 15,
     height: 15,
     borderRadius: 7.5,
@@ -286,7 +287,7 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 11,
-    lineHeight: 13,
+    lineHeight: 14,
     letterSpacing: -0.2,
     marginTop: 2,
     textAlign: 'center',

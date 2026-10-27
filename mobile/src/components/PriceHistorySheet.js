@@ -50,7 +50,7 @@ export default function PriceHistorySheet({ visible, onClose, ownerId }) {
   }, [visible, ownerId]);
 
   return (
-    <AnimatedBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
+    <AnimatedBottomSheet visible={visible} onClose={onClose} dismissible sheetStyle={styles.sheet}>
       <View style={styles.header}>
         <Text style={styles.title}>Published price history</Text>
         <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close price history" style={styles.close}>
@@ -58,6 +58,7 @@ export default function PriceHistorySheet({ visible, onClose, ownerId }) {
         </TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
+        <Pagination {...page} label="price records" position="top" />
         {page.items.map(row => (
           <View key={row.id} style={styles.record}>
             <Text style={styles.date}>{row.weekLabel || row.effectiveDate}</Text>
@@ -69,7 +70,6 @@ export default function PriceHistorySheet({ visible, onClose, ownerId }) {
         {!records.length && !loading && !error && <Text style={styles.muted}>No published price records.</Text>}
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         {loading && <Text style={styles.muted}>Loading price history…</Text>}
-        <Pagination {...page} label="price records" />
         {(cursor || (!records.length && error)) && (
           <TouchableOpacity style={styles.button} accessibilityRole="button" disabled={loading} onPress={() => load(cursor)}>
             <Text style={styles.buttonText}>{loading ? 'Loading…' : cursor ? 'Load older price records' : 'Retry'}</Text>

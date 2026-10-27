@@ -21,7 +21,14 @@ export default function FormField({
               className="text-xs sm:text-sm font-semibold text-hug-text2 select-none"
             >
               {label}
-              {required && <span className="text-danger ml-1 font-bold">*</span>}
+              {required && (
+                <span
+                  className="text-rose-600/70 dark:text-rose-400/70 ml-0.5 text-xs font-normal select-none"
+                  aria-hidden="true"
+                >
+                  *
+                </span>
+              )}
             </label>
           )}
 
@@ -33,7 +40,9 @@ export default function FormField({
         </div>
       )}
 
-      {children}
+      {React.isValidElement(children) && error && !children.props.error
+        ? React.cloneElement(children, { error: children.props.error || error })
+        : children}
 
       {error ? (
         <p

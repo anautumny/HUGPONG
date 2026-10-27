@@ -95,6 +95,7 @@ export const COLORS = {
   successLight:   '#EAF4EB',              // Backward-compatible alias
   danger:         '#C53030',              // Web light-mode --danger
   dangerBg:       '#FEE2E2',              // Web light-mode --danger-bg
+  required:       '#C55A5A',              // Softened/muted red for required asterisks
   warning:        '#B45309',              // Web light-mode --warning
   warningBg:      '#FEF3C7',              // Web light-mode --warning-bg
   info:           '#2B6CB0',              // Web light-mode --info

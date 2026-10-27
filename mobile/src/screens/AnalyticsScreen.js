@@ -16,7 +16,7 @@ import {
   publishSraPrice,
   calculateSRAWeekLabel
 } from '../data/dataStore';
-import { useTranslation } from '../services/i18n';
+import { useTranslation, formatPhaseMonth } from '../services/i18n';
 import {
   selectCropFieldProgress,
   selectProductionCost,
@@ -310,19 +310,6 @@ export default function AnalyticsScreen({ navigation, route }) {
     Alert.alert('Published', 'The source-referenced price record was published to all devices.');
   };
 
-  // Price publishing is a content-heavy form, so keep it inside the current
-  // tab as a normal page. The analytics state remains mounted and returns
-  // exactly as the user left it.
-  if (showPriceModal) {
-    return (
-      <PublishPriceModal
-        visible={true}
-        onClose={() => setShowPriceModal(false)}
-        latestPrice={pricesList[0]}
-        onPublished={() => setPricesList(getSortedPrices())}
-      />
-    );
-  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -405,27 +392,25 @@ export default function AnalyticsScreen({ navigation, route }) {
           <View style={{ gap: SPACING.md }}>
             {/* Primary KPI Card */}
             <Card style={s.overviewKpiCard}>
-              <Text style={s.sectionHeaderTag}>FINANCIAL & ACREAGE SUMMARY</Text>
+              <Text style={s.sectionHeaderTag}>FINANCIAL & HECTARES SUMMARY</Text>
               <View style={s.kpiRow}>
-                <View style={s.kpiBox}>
-                  <Text style={s.kpiLabel}>TOTAL RECORDED EXPENDITURE</Text>
-                  <Text style={s.kpiMainNumber}>
+                <View style={[s.kpiBox, s.kpiBoxExpenditure]}>
+                  <Text style={[s.kpiLabel, { color: '#92400E' }]}>TOTAL LOGGED EXPENDITURE</Text>
+                  <Text style={[s.kpiMainNumber, { color: '#78350F' }]}>
                     ₱{productionCost.totalExpenditure.toLocaleString()}
                   </Text>
-                  <Text style={s.kpiSub}>
+                  <Text style={[s.kpiSub, { color: '#92400E' }]}>
                     Across {productionCost.operationsCount} logged operations
                   </Text>
                 </View>
 
-                <View style={s.kpiDivider} />
-
-                <View style={s.kpiBox}>
-                  <Text style={s.kpiLabel}>AVERAGE COST / HA</Text>
-                  <Text style={[s.kpiMainNumber, { color: COLORS.text }]}>
+                <View style={[s.kpiBox, s.kpiBoxAverage]}>
+                  <Text style={[s.kpiLabel, { color: COLORS.primary }]}>AVERAGE COST / HA</Text>
+                  <Text style={[s.kpiMainNumber, { color: COLORS.primaryDark }]}>
                     ₱{productionCost.averageCostPerHa.toLocaleString()}
                   </Text>
-                  <Text style={s.kpiSub}>
-                    {cropProgress.totalAcreageHa.toFixed(2)} Ha active area
+                  <Text style={[s.kpiSub, { color: COLORS.textSecondary }]}>
+                    {cropProgress.totalAcreageHa.toFixed(2)} ha active area
                   </Text>
                 </View>
               </View>
@@ -494,7 +479,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         {activeTab === 'costs' && (
           <View style={{ gap: SPACING.md }}>
             <PrimaryMetric
-              title="TOTAL OPERATIONAL EXPENDITURE"
+              title="TOTAL LOGGED EXPENDITURE"
               value={`₱${costBreakdown.grandTotalCost.toLocaleString()}`}
               subtitle={`Average ₱${productionCost.averageCostPerHa.toLocaleString()} per hectare across ${cropProgress.totalAcreageHa.toFixed(2)} Ha`}
             />
@@ -516,8 +501,9 @@ export default function AnalyticsScreen({ navigation, route }) {
             {productionCost.breakdownByEntity.length > 0 && (
               <Card style={s.contentCard}>
                 <Text style={s.sectionHeaderTag}>
-                  {isManager || isMember ? 'EXPENDITURE BY PLOT PARCEL' : 'EXPENDITURE BY BLOCK FARM'}
+                  {isManager || isMember ? 'EXPENDITURE BY FIELD PLOT' : 'EXPENDITURE BY BLOCK FARM'}
                 </Text>
+                <Pagination {...entityPage} label={isManager || isMember ? 'plots' : 'farms'} position="top" />
                 <View style={{ gap: 8, marginTop: 8 }}>
                   {entityPage.items.map((item) => (
                     <View key={item.id} style={s.entityRow}>
@@ -534,7 +520,6 @@ export default function AnalyticsScreen({ navigation, route }) {
                     </View>
                   ))}
                 </View>
-                <Pagination {...entityPage} label={isManager || isMember ? 'plots' : 'farms'} />
               </Card>
             )}
           </View>
@@ -549,7 +534,7 @@ export default function AnalyticsScreen({ navigation, route }) {
             <Card style={s.contentCard}>
               <Text style={s.sectionHeaderTag}>6-STAGE CROP GROWTH DISTRIBUTION</Text>
               <Text style={s.cardDescText}>
-                Active parcel progress across the six-stage sugarcane lifecycle (Month 0 to Month 12).
+                Active plot progress across the six-stage sugarcane lifecycle (Month 0 to Month 12).
               </Text>
               <StageDistributionList
                 stages={cropProgress.stagesDistribution}
@@ -585,7 +570,7 @@ export default function AnalyticsScreen({ navigation, route }) {
 
             {/* Timeframe selector (Weekly vs Monthly) */}
             <View style={s.timeframeRow}>
-              <Text style={s.sectionHeaderTag}>PRICE HISTORY</Text>
+              <Text style={[s.sectionHeaderTag, { marginBottom: 0 }]}>PRICE HISTORY</Text>
               <View style={s.timeframeChipsWrap}>
                 {['weekly', 'monthly'].map(tf => (
                   <TouchableOpacity
@@ -610,10 +595,11 @@ export default function AnalyticsScreen({ navigation, route }) {
                 />
               ) : (
                 <View style={{ gap: 8 }}>
+                  <Pagination {...pricePage} label={priceTimeframe === 'monthly' ? 'months' : 'weeks'} position="top" />
                   {pricePage.items.map((pt) => (
                     <View key={pt.date || pt.periodLabel} style={s.priceHistoryRow}>
                       <View>
-                        <Text style={s.pricePeriodTitle}>{pt.periodLabel}</Text>
+                        <Text style={s.pricePeriodTitle}>{formatPhaseMonth(pt.periodLabel || pt.date)}</Text>
                         {priceTimeframe === 'monthly' && <Text style={s.pricePeriodDate}>Reported weeks: Sugar {pt.sugarReportedWeeks}/{pt.totalWeeks}, Molasses {pt.molassesReportedWeeks}/{pt.totalWeeks}</Text>}
                       </View>
                       <View style={{ gap: 6 }}>
@@ -622,7 +608,6 @@ export default function AnalyticsScreen({ navigation, route }) {
                       </View>
                     </View>
                   ))}
-                  <Pagination {...pricePage} label={priceTimeframe === 'monthly' ? 'months' : 'weeks'} />
                 </View>
               )}
               <SecondaryButton title="Browse all published price records" onPress={() => setShowFullPriceHistory(true)} />
@@ -660,6 +645,12 @@ export default function AnalyticsScreen({ navigation, route }) {
       />
 
       {/* ── Publish Price Reference Modal (web parity) ── */}
+      <PublishPriceModal
+        visible={showPriceModal}
+        onClose={() => setShowPriceModal(false)}
+        latestPrice={pricesList[0]}
+        onPublished={() => setPricesList(getSortedPrices())}
+      />
     </SafeAreaView>
   );
 }
@@ -698,7 +689,7 @@ const s = StyleSheet.create({
   segmentedTabBar: {
     flexDirection: 'row',
     backgroundColor: COLORS.surfaceSubtle,
-    borderRadius: RADIUS.md,
+    borderRadius: RADIUS.full,
     padding: 3,
     gap: 3
   },
@@ -711,26 +702,30 @@ const s = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 2,
     minHeight: 38,
-    borderRadius: RADIUS.sm
+    borderRadius: RADIUS.full
   },
   segmentedTabBtnActive: {
     backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.full,
     ...SHADOW.card
   },
   segmentedTabText: {
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: COLORS.textMuted
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    textAlign: 'center'
   },
   segmentedTabTextActive: {
     color: COLORS.primaryDark,
-    fontWeight: '900'
+    fontWeight: '800'
   },
   overviewKpiCard: {
     padding: SPACING.md
   },
   sectionHeaderTag: {
-    fontSize: 11,
+    fontSize: 14,
+    lineHeight: 19,
     fontWeight: '800',
     color: COLORS.primary,
     textTransform: 'uppercase',
@@ -739,75 +734,80 @@ const s = StyleSheet.create({
   },
   kpiRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border
+    alignItems: 'stretch',
+    gap: 10
   },
   kpiBox: {
-    flex: 1
+    flex: 1,
+    padding: 14,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.2
   },
-  kpiDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: COLORS.border,
-    marginHorizontal: 12
+  kpiBoxExpenditure: {
+    backgroundColor: '#FEF5E7',
+    borderColor: '#FCE2B6'
+  },
+  kpiBoxAverage: {
+    backgroundColor: '#F4FAF0',
+    borderColor: '#D7ECD0'
   },
   kpiLabel: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.4
+    letterSpacing: 0.5
   },
   kpiMainNumber: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '900',
-    color: COLORS.primaryDark,
-    marginTop: 2
+    marginTop: 4
   },
   kpiSub: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4
   },
   parcelAcreageRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 12,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: COLORS.borderLight
   },
   parcelAcreageText: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
     color: COLORS.text
   },
   parcelAcreageSub: {
-    fontSize: 12.5,
-    fontWeight: '800',
+    fontSize: 13.5,
+    fontWeight: '900',
     color: COLORS.primary
   },
   driverCard: {
-    padding: SPACING.md
+    padding: SPACING.md,
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: RADIUS.lg
   },
   driverDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4
+    width: 10,
+    height: 10,
+    borderRadius: 5
   },
   driverTitle: {
-    fontSize: 13,
-    color: COLORS.textSecondary
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#92400E'
   },
   driverSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 4,
-    marginLeft: 16
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#B45309',
+    marginTop: 2,
+    marginLeft: 18
   },
   stagePreviewCard: {
     padding: SPACING.md
@@ -815,57 +815,62 @@ const s = StyleSheet.create({
   stagePreviewHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    alignItems: 'center',
+    marginBottom: 4
   },
   viewDetailsLink: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     color: COLORS.primary
   },
   stagePreviewTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
     marginBottom: 8
   },
   contentCard: {
     padding: SPACING.md
   },
   cardDescText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
+    fontSize: 13,
+    color: COLORS.textSecondary,
     marginBottom: 12,
-    lineHeight: 17
+    lineHeight: 18
   },
   entityRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderLight
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8FAF5',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#E2EBDC',
+    marginBottom: 6
   },
   entityName: {
-    fontSize: 13.5,
-    fontWeight: '700',
+    fontSize: 14.5,
+    fontWeight: '800',
     color: COLORS.text
   },
   entitySub: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     color: COLORS.textMuted,
-    marginTop: 1
+    marginTop: 2
   },
   entityCost: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.primaryDark
+    fontSize: 16.5,
+    fontWeight: '900',
+    color: '#92400E'
   },
   entityPerHa: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 1
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textSecondary
   },
   timeframeRow: {
     flexDirection: 'row',

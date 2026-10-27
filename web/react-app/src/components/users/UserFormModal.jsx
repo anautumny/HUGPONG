@@ -45,6 +45,7 @@ export default function UserFormModal({
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   // Available roles for creation with platform scope indicators
   const roleOptions = [
@@ -101,6 +102,7 @@ export default function UserFormModal({
         setVerificationReasonDetails('');
       }
       setFormError(null);
+      setFieldErrors({});
       setIsSubmitting(false);
     }
   }, [isOpen, initialUser, currentUser, blockFarms, isFarmManager]);
@@ -108,6 +110,7 @@ export default function UserFormModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError(null);
+    setFieldErrors({});
 
     const cleanFirstName = firstName.trim();
     const cleanMiddleName = middleName.trim();
@@ -115,31 +118,37 @@ export default function UserFormModal({
     const cleanSuffix = suffix.trim();
     const cleanPhone = phone.replace(/\D/g, '');
 
-    if (!cleanFirstName || !cleanLastName) {
-      setFormError('First name and last name are required.');
-      return;
+    const newFieldErrors = {};
+    if (!cleanFirstName) {
+      newFieldErrors.firstName = 'First name is required.';
     }
-    if (!/^09\d{9}$/.test(cleanPhone)) {
-      setFormError('A valid 11-digit mobile number starting with 09 is required.');
-      return;
+    if (!cleanLastName) {
+      newFieldErrors.lastName = 'Last name is required.';
+    }
+    if (!cleanPhone) {
+      newFieldErrors.phone = 'Philippine mobile number is required.';
+    } else if (!/^09\d{9}$/.test(cleanPhone)) {
+      newFieldErrors.phone = 'A valid 11-digit mobile number starting with 09 is required.';
     }
     if ((selectedRole === 'FARM_MANAGER' || isFarmManager) && !blockFarmId) {
-      setFormError('Select a Block Farm before creating this account.');
-      return;
+      newFieldErrors.blockFarmId = 'Select a Block Farm before creating this account.';
     }
 
     if (!isEditing) {
       const policyError = passwordPolicyError(password);
       if (policyError) {
-        setFormError(`Initial temporary password: ${policyError}`);
-        return;
+        newFieldErrors.password = `Initial temporary password: ${policyError}`;
       }
       if (phoneVerificationMode === 'VERIFIED'
         && isOtherPhoneVerificationReason(verificationReasonCode)
         && verificationReasonDetails.trim().length < 10) {
-        setFormError('Add a reviewer comment of at least 10 characters when using another verification method.');
-        return;
+        newFieldErrors.verificationReasonDetails = 'Add a reviewer comment of at least 10 characters.';
       }
+    }
+
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
+      return;
     }
 
     setIsSubmitting(true);
@@ -237,13 +246,13 @@ export default function UserFormModal({
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FormField id="user-form-first-name" label="First Name" required>
+          <FormField id="user-form-first-name" label="First Name" required error={fieldErrors.firstName}>
             <Input
               type="text"
               id="user-form-first-name"
               placeholder="e.g. Juan"
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
+              onChange={(e) => { setFirstName(e.target.value); if (fieldErrors.firstName) setFieldErrors(prev => ({ ...prev, firstName: null })); }}
               disabled={isSubmitting}
               required
             />
@@ -258,13 +267,13 @@ export default function UserFormModal({
               disabled={isSubmitting}
             />
           </FormField>
-          <FormField id="user-form-last-name" label="Last Name" required>
+          <FormField id="user-form-last-name" label="Last Name" required error={fieldErrors.lastName}>
             <Input
               type="text"
               id="user-form-last-name"
               placeholder="e.g. Dela Cruz"
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+              onChange={(e) => { setLastName(e.target.value); if (fieldErrors.lastName) setFieldErrors(prev => ({ ...prev, lastName: null })); }}
               disabled={isSubmitting}
               required
             />
@@ -293,7 +302,8 @@ export default function UserFormModal({
             id="user-form-phone"
             label="Philippine Mobile Number"
             required
-            helperText="11-digit mobile number used for login and account-owner verification"
+            error={fieldErrors.phone}
+            helperText={fieldErrors.phone ? undefined : "11-digit mobile number used for login and account-owner verification"}
           >
             <Input
               type="tel"
@@ -301,7 +311,7 @@ export default function UserFormModal({
               placeholder="0917XXXXXXX"
               icon={Phone}
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => { setPhone(e.target.value); if (fieldErrors.phone) setFieldErrors(prev => ({ ...prev, phone: null })); }}
               disabled={isSubmitting}
               required
             />
@@ -341,7 +351,8 @@ export default function UserFormModal({
                   id="user-form-verification-details"
                   label={`Reviewer Comment ${isOtherPhoneVerificationReason(verificationReasonCode) ? '' : '(Optional)'}`}
                   required={isOtherPhoneVerificationReason(verificationReasonCode)}
-                  helperText="Add a short note about how you confirmed this number."
+                  error={fieldErrors.verificationReasonDetails}
+                  helperText={fieldErrors.verificationReasonDetails ? undefined : "Add a short note about how you confirmed this number."}
                 >
                   <textarea
                     id="user-form-verification-details"
@@ -403,6 +414,7 @@ export default function UserFormModal({
               id="user-form-farm"
               label="Assigned Block Farm"
               required={selectedRole === 'FARM_MANAGER' || isFarmManager}
+              error={fieldErrors.blockFarmId}
               helperText={selectedRole === 'MEMBER_FARMER' && !isFarmManager
                 ? 'Optional. An SRA Admin can assign an unassigned member later.'
                 : 'Affiliated cooperative sugarcane cluster'}
@@ -410,7 +422,7 @@ export default function UserFormModal({
               <Select
                 id="user-form-farm"
                 value={blockFarmId}
-                onChange={(e) => setBlockFarmId(e.target.value)}
+                onChange={(e) => { setBlockFarmId(e.target.value); if (fieldErrors.blockFarmId) setFieldErrors(prev => ({ ...prev, blockFarmId: null })); }}
                 options={farmOptions}
                 disabled={isSubmitting || isFarmManager}
               />
@@ -424,13 +436,14 @@ export default function UserFormModal({
             id="user-form-password"
             label="Temporary Initial Password"
             required
+            error={fieldErrors.password}
             helperText={`${PASSWORD_POLICY_HINT} On first login, the user verifies the registered phone and then replaces this password.`}
           >
             <PasswordInput
               id="user-form-password"
               placeholder="••••••••"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: null })); }}
               disabled={isSubmitting}
               required
             />

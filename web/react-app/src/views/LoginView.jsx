@@ -9,6 +9,7 @@ import AccountRecoveryModal from '../components/auth/AccountRecoveryModal';
 import FirstLoginVerifyModal from '../components/auth/FirstLoginVerifyModal';
 import FirstLoginPasswordModal from '../components/auth/FirstLoginPasswordModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import sugarcaneBg from '../assets/sugarcane-bg.jpg';
 
 const LOGIN_LOCKOUT_STORAGE_KEY = 'hugpong_login_lockout_until';
 
@@ -36,6 +37,7 @@ export default function LoginView() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [lockoutUntil, setLockoutUntil] = useState(storedLoginLockoutUntil);
   const [lockoutRemaining, setLockoutRemaining] = useState(() => Math.max(0, Math.ceil((storedLoginLockoutUntil() - Date.now()) / 1000)));
   const connectionUnavailable = !networkOnline || apiReachable === false;
@@ -91,13 +93,16 @@ export default function LoginView() {
       return;
     }
 
+    setFieldErrors({});
+    const newFieldErrors = {};
     if (!identifier.trim()) {
-      setErrorMessage('User ID or mobile number is required.');
-      return;
+      newFieldErrors.identifier = 'User ID or mobile number is required.';
     }
-
     if (!password) {
-      setErrorMessage('Password is required.');
+      newFieldErrors.password = 'Password is required.';
+    }
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
       return;
     }
 
@@ -204,11 +209,20 @@ export default function LoginView() {
   };
 
   return (
-    <div className="min-h-screen relative flex flex-col justify-between overflow-x-hidden bg-bg text-hug-text selection:bg-primary selection:text-white transition-colors duration-200">
-      {/* Subtle Ambient Lighting & Dot Texture Backdrops */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-80 bg-gradient-to-b from-primary/10 via-primary/3 to-transparent blur-3xl pointer-events-none -z-10" />
+    <div className="min-h-screen relative flex flex-col justify-between overflow-x-hidden bg-bg text-hug-text selection:bg-primary selection:text-white transition-colors duration-200 isolate">
+      {/* Sugarcane Farm Photographic Backdrop with Controlled Opacity */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center bg-no-repeat opacity-35 dark:opacity-35 transition-opacity duration-700"
+        style={{
+          backgroundImage: `url(${sugarcaneBg})`,
+        }}
+        aria-hidden="true"
+      />
+      {/* Ambient Lighting & Soft Vignette Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-0 bg-gradient-to-b from-bg/40 via-bg/15 to-bg/60 dark:from-bg/60 dark:via-bg/30 dark:to-bg/75" aria-hidden="true" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-80 bg-gradient-to-b from-primary/15 via-primary/5 to-transparent blur-3xl pointer-events-none z-0" />
       <div 
-        className="absolute inset-0 bg-[radial-gradient(var(--color-primary,#2d5016)_1px,transparent_1px)] opacity-[0.035] dark:opacity-[0.06] [background-size:24px_24px] pointer-events-none -z-10" 
+        className="absolute inset-0 bg-[radial-gradient(var(--color-primary,#2d5016)_1px,transparent_1px)] opacity-[0.035] dark:opacity-[0.06] [background-size:24px_24px] pointer-events-none z-0" 
         aria-hidden="true" 
       />
 
@@ -335,14 +349,27 @@ export default function LoginView() {
                 id="contact-input"
                 type="text"
                 value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                onChange={(e) => {
+                  setIdentifier(e.target.value);
+                  if (fieldErrors.identifier) setFieldErrors(prev => ({ ...prev, identifier: null }));
+                }}
                 placeholder="e.g. 03000001 or 09170000003"
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-border bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all font-medium placeholder:text-hug-muted/70"
+                className={`w-full pl-10 pr-3.5 py-2.5 rounded-xl border ${
+                  fieldErrors.identifier
+                    ? 'border-danger focus:border-danger focus:ring-1 focus:ring-danger'
+                    : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
+                } bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none transition-all font-medium placeholder:text-hug-muted/70`}
                 autoComplete="username"
                 disabled={isSubmitting || lockoutRemaining > 0}
                 required
               />
             </div>
+            {fieldErrors.identifier && (
+              <p className="text-xs font-semibold text-danger flex items-center gap-1.5 mt-1.5" role="alert">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{fieldErrors.identifier}</span>
+              </p>
+            )}
           </div>
 
           {/* Password Input */}
@@ -367,9 +394,16 @@ export default function LoginView() {
                 id="password-input"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: null }));
+                }}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-border bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all font-medium placeholder:text-hug-muted/70"
+                className={`w-full pl-10 pr-10 py-2.5 rounded-xl border ${
+                  fieldErrors.password
+                    ? 'border-danger focus:border-danger focus:ring-1 focus:ring-danger'
+                    : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
+                } bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none transition-all font-medium placeholder:text-hug-muted/70`}
                 autoComplete="current-password"
                 disabled={isSubmitting || lockoutRemaining > 0}
                 required
@@ -383,6 +417,12 @@ export default function LoginView() {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            {fieldErrors.password && (
+              <p className="text-xs font-semibold text-danger flex items-center gap-1.5 mt-1.5" role="alert">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{fieldErrors.password}</span>
+              </p>
+            )}
           </div>
 
           {/* RA 10173 Consent Checkbox */}

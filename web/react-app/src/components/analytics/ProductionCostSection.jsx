@@ -41,66 +41,66 @@ export default function ProductionCostSection({
       {/* Section Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-4">
         <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-hug-muted block">
+          <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 block mb-1">
             Financial Exposure
           </span>
-          <h2 className="text-lg sm:text-xl font-black text-hug-text mt-0.5">
+          <h2 className="text-xl sm:text-2xl font-black text-hug-text">
             Production Cost & Unit Investment
           </h2>
-          <p className="text-xs text-hug-muted mt-0.5">
-            Actual logged expenditures across {isFarmManager ? 'member parcels' : 'Block Farms'} and real cost per hectare.
+          <p className="text-xs sm:text-sm text-hug-muted mt-0.5">
+            Actual logged expenditures across {isFarmManager ? 'member plots' : 'Block Farms'} and real cost per hectare.
           </p>
         </div>
 
-        <div className="text-xs text-hug-muted flex items-center gap-1.5 self-start sm:self-auto bg-bg px-3 py-1.5 rounded-xl border border-border">
-          <Info className="w-3.5 h-3.5 text-primary dark:text-primary-light shrink-0" />
+        <div className="text-xs sm:text-sm text-hug-muted flex items-center gap-1.5 self-start sm:self-auto bg-surface-subtle px-3.5 py-1.5 rounded-xl border border-border">
+          <Info className="w-4 h-4 text-primary dark:text-primary-light shrink-0" />
           <span>Strictly recorded operational expenses</span>
         </div>
       </div>
 
       {/* KPI Trio */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-5">
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
-          <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
+        <div className="bg-amber-500/10 dark:bg-amber-500/15 rounded-2xl p-5 border border-amber-500/30 shadow-xs">
+          <span className="text-xs uppercase font-bold text-amber-800 dark:text-amber-300 tracking-wider block mb-1">
             Total Logged Expenditure
           </span>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl sm:text-3xl font-black text-primary dark:text-primary-light">
+            <span className="text-2xl sm:text-3xl font-black text-amber-900 dark:text-amber-200">
               ₱{totalExpenditure.toLocaleString()}
             </span>
           </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
+          <span className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-1.5 block font-medium">
             Across {operationsCount} active field operations
           </span>
         </div>
 
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
-          <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
-            Tracked Operational Acreage
+        <div className="bg-surface rounded-2xl p-5 border border-border shadow-xs">
+          <span className="text-xs uppercase font-bold text-hug-muted tracking-wider block mb-1">
+            Tracked Operational Hectares
           </span>
-          <div className="flex items-baseline gap-1">
+          <div className="flex items-baseline gap-1.5">
             <span className="text-2xl sm:text-3xl font-black text-hug-text">
               {totalAuditedHa.toFixed(2)}
             </span>
-            <span className="text-xs text-hug-muted font-bold">hectares</span>
+            <span className="text-sm text-hug-muted font-bold">hectares</span>
           </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
-            Acreage with recorded farm activities
+          <span className="text-xs text-hug-muted mt-1.5 block font-medium">
+            Hectares with recorded farm activities
           </span>
         </div>
 
-        <div className="bg-bg/60 dark:bg-gray-800/40 rounded-xl p-4 border border-border">
-          <span className="text-[10px] uppercase font-bold text-hug-muted tracking-wider block mb-1">
+        <div className="bg-primary-bg/25 dark:bg-primary/10 rounded-2xl p-5 border border-primary/20 shadow-xs">
+          <span className="text-xs uppercase font-bold text-primary dark:text-primary-light tracking-wider block mb-1">
             Average Cost per Hectare
           </span>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl sm:text-3xl font-black text-hug-text">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-2xl sm:text-3xl font-black text-primary dark:text-primary-light">
               ₱{averageCostPerHa.toLocaleString()}
             </span>
-            <span className="text-xs text-hug-muted font-bold">/ ha</span>
+            <span className="text-sm text-primary/80 dark:text-primary-light/80 font-bold">/ ha</span>
           </div>
-          <span className="text-[11px] text-hug-muted mt-1 block">
-            {totalAuditedHa > 0 ? 'Weighted across active acreage' : 'No active acreage recorded'}
+          <span className="text-xs text-hug-muted mt-1.5 block font-medium">
+            {totalAuditedHa > 0 ? 'Weighted across active hectares' : 'No active hectares recorded'}
           </span>
         </div>
       </div>
@@ -128,35 +128,35 @@ export default function ProductionCostSection({
             return (
               <div
                 key={entity.id}
-                className="p-3.5 rounded-xl border border-border bg-bg/30 hover:bg-bg/60 transition-colors"
+                className="p-4 rounded-2xl border border-border bg-surface hover:border-amber-500/40 shadow-xs transition-all"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-hug-text">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-sm sm:text-base font-black text-hug-text">
                       {entity.name}
                     </span>
-                    <span className="text-[10px] font-mono text-hug-muted px-1.5 py-0.5 rounded bg-bg dark:bg-gray-800 border border-border">
+                    <span className="text-xs font-bold text-hug-muted px-2.5 py-0.5 rounded-lg bg-surface-subtle border border-border">
                       {entity.opsCount} ops
                     </span>
                   </div>
 
-                  <div className="flex items-baseline gap-3 text-xs">
+                  <div className="flex items-baseline gap-3 text-xs sm:text-sm">
                     <div className="text-right">
-                      <span className="font-black text-primary dark:text-primary-light">
+                      <span className="font-black text-amber-900 dark:text-amber-200 text-sm sm:text-base">
                         ₱{entity.totalCost.toLocaleString()}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1 font-medium">total</span>
+                      <span className="text-xs text-amber-700 dark:text-amber-400 ml-1 font-bold uppercase tracking-wider">total</span>
                     </div>
 
                     <div className="text-right border-l border-border pl-3">
-                      <span className="font-bold text-hug-text">
+                      <span className="font-black text-hug-text">
                         ₱{entity.costPerHa.toLocaleString()}
                       </span>
-                      <span className="text-[10px] text-hug-muted ml-1">/ ha</span>
+                      <span className="text-xs text-hug-muted ml-1 font-medium">/ ha</span>
                     </div>
 
                     <div className="text-right border-l border-border pl-3">
-                      <span className="font-semibold text-hug-muted">
+                      <span className="font-bold text-hug-muted">
                         {entity.areaHa > 0 ? `${entity.areaHa.toFixed(2)} ha` : '—'}
                       </span>
                     </div>
@@ -164,9 +164,9 @@ export default function ProductionCostSection({
                 </div>
 
                 {/* Comparative Horizontal Bar Meter */}
-                <div className="w-full bg-gray-200 dark:bg-gray-700/60 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-border/60 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
                   <div
-                    className="bg-primary dark:bg-primary-light h-full rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-emerald-600 via-primary to-amber-500 h-full rounded-full transition-all duration-300 shadow-2xs"
                     style={{ width: `${widthPercent}%` }}
                   />
                 </div>

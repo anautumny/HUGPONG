@@ -7,6 +7,7 @@ import { AppText as Text } from './Typography';
 import { SearchableSelect, ScreenHeader } from './ui';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { fetchCropYearOptions, previewCropYear, fetchCropYearCompilations, compileCropYear, exportCropYearCompilation } from '../services/cropYearCompilationService';
+import { formatPeriodDisplay } from '../services/i18n';
 
 const money = value => `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -105,9 +106,9 @@ export default function CropYearCompilationScreen({ onClose }) {
         {button('Refresh certified reports', () => setReload(value => value + 1))}
         {current && button('Export / Share PDF', share)}
         {!report.operationCount && <Text style={s.copy}>No certified monthly operations match this selection.</Text>}
-        {!!report.monthlySummaries.length && <View style={s.card}><Text style={s.title}>Included monthly totals</Text>{report.monthlySummaries.map(month => <View key={month.periodKey} style={s.row}><Text style={s.copy}>{month.periodKey} · {month.operationCount} operations · {month.blockFarmCount} farms</Text><Text style={s.value}>{money(month.totalCost)}</Text></View>)}</View>}
+        {!!report.monthlySummaries.length && <View style={s.card}><Text style={s.title}>Included monthly totals</Text>{report.monthlySummaries.map(month => <View key={month.periodKey} style={s.row}><Text style={s.copy}>{formatPeriodDisplay(month.periodKey)} · {month.operationCount} operations · {month.blockFarmCount} farms</Text><Text style={s.value}>{money(month.totalCost)}</Text></View>)}</View>}
         {!!report.farmSummaries.length && <View style={s.card}><Text style={s.title}>Block Farm totals</Text>{report.farmSummaries.map(farm => <View key={farm.blockFarmId} style={s.row}><Text style={s.copy}>{farm.blockFarmName} · {farm.fieldCount} fields · {farm.hectaresAudited} ha</Text><Text style={s.value}>{money(farm.totalCost)}</Text></View>)}</View>}
-        {current && <View style={s.card}><Text style={s.title}>Certified source reports ({current.sourceReportCount})</Text>{current.sourceReports.map(source => <View key={source.reportId} style={s.row}><Text style={s.copy}>{source.reportId}</Text><Text style={s.note}>{source.periodKey} · Certified by {source.certifiedByUserId}</Text></View>)}</View>}
+        {current && <View style={s.card}><Text style={s.title}>Certified source reports ({current.sourceReportCount})</Text>{current.sourceReports.map(source => <View key={source.reportId} style={s.row}><Text style={s.copy}>{source.reportId}</Text><Text style={s.note}>{formatPeriodDisplay(source.periodKey)} · Certified by {source.certifiedByUserId}</Text></View>)}</View>}
       </>}
       {!!history.length && <View style={s.card}><Text style={s.title}>Saved compilations</Text><Text style={s.note}>Saving the same certified sources reopens the existing compilation. Later certifications create a new snapshot.</Text>{history.map(item => <TouchableOpacity key={item.id} onPress={() => setCurrent(item)} disabled={disabled} style={[s.row, current?.id === item.id && { backgroundColor: COLORS.primaryBg }]}><Text style={s.value}>{item.cropYearCycle} · {money(item.totalCost)}</Text><Text style={s.note}>{item.sourceReportCount} reports · {new Date(item.compiledAt).toLocaleString()}</Text></TouchableOpacity>)}{cursor && button('Load more compilations', more)}</View>}
       <Ionicons name="shield-checkmark-outline" color={COLORS.primary} size={22} style={{ alignSelf: 'center' }} />

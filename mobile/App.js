@@ -22,6 +22,7 @@ import { createNavigationContainerRef, NavigationContainer } from '@react-naviga
 import { StatusBar } from 'expo-status-bar';
 import RootNavigator from './src/navigation/RootNavigator';
 import { LanguageProvider } from './src/services/i18n';
+import { BlurTargetProvider } from './src/context/BlurTargetContext';
 import { checkConnectivity, startNetworkMonitor, stopNetworkMonitor } from './src/services/networkService';
 import { fields, getCurrentSession, performMobileSync, subscribe } from './src/data/dataStore';
 import { reportMobileActivity } from './src/services/telemetryService';
@@ -169,7 +170,9 @@ function HugpongApp() {
         }}
       >
         <StatusBar style="auto" />
-        <RootNavigator />
+        <BlurTargetProvider>
+          <RootNavigator />
+        </BlurTargetProvider>
       </NavigationContainer>
     </LanguageProvider>
   );

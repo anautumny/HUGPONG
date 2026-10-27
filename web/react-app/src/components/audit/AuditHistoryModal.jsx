@@ -6,6 +6,7 @@ import Input from '../ui/Input';
 import Badge from '../ui/Badge';
 import { PaginationFooter } from '../ui/Table';
 import { canonicalAuditStatus, auditStatusLabel, AUDIT_STATUS } from '../../domain/auditWorkflow';
+import { formatPeriodDisplay } from '../../utils/formatters';
 
 const PAGE_SIZE = 10;
 
@@ -171,7 +172,7 @@ export default function AuditHistoryModal({
                       : 'bg-bg dark:bg-surface-subtle text-hug-muted hover:text-hug-text border border-border'
                   }`}
                 >
-                  {p}
+                  {formatPeriodDisplay(p)}
                 </button>
               ))}
             </div>
@@ -259,8 +260,8 @@ export default function AuditHistoryModal({
 
                   return (
                     <tr key={report.id || report.reportId} className="hover:bg-bg/40">
-                      <td className="px-3.5 py-2.5 font-bold font-mono whitespace-nowrap">
-                        {report.periodKey || report.period || report.month}
+                      <td className="px-3.5 py-2.5 font-bold whitespace-nowrap">
+                        {formatPeriodDisplay(report.periodKey || report.period || report.month)}
                       </td>
                       <td className="px-3.5 py-2.5 font-semibold whitespace-nowrap">
                         {getFarmName(report.blockFarmId)}

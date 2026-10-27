@@ -23,7 +23,7 @@ const LOGO = require('../../assets/icon-foreground.png');
  * Features a dynamic sync indicator button on the right that turns green when online and fully synced,
  * and yellow when offline or when pending unsynced records exist.
  */
-function AppHeader({ right }) {
+function AppHeader({ right, onPressBrand }) {
   const { t } = useTranslation();
   const { width, fontScale } = useWindowDimensions();
   const compact = width < 380 || fontScale > 1.2;
@@ -203,14 +203,47 @@ function AppHeader({ right }) {
   const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
   const isFullySynced = isOnline && safeCount === 0;
 
+  const handleGoHome = () => {
+    if (typeof onPressBrand === 'function') {
+      onPressBrand();
+      return;
+    }
+    if (!isOnline && session?.role !== 'SRA Admin') {
+      safeAlert(
+        'Offline Mode Active',
+        'Home requires an active internet connection to synchronize with the cloud. Operation remains fully functional offline.'
+      );
+      return;
+    }
+    try {
+      navigation.navigate('MainTabs', {
+        screen: 'Home',
+        params: { screen: 'HomeMain' }
+      });
+    } catch (_) {
+      try {
+        navigation.navigate('Home', { screen: 'HomeMain' });
+      } catch (__) {
+        navigation.navigate('Home');
+      }
+    }
+  };
+
   return (
     <View style={s.header}>
-      <View style={s.brand}>
+      <TouchableOpacity
+        style={s.brand}
+        onPress={handleGoHome}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Go to Home"
+        accessibilityHint="Navigates to the home screen"
+      >
         <View style={s.logoFrame}>
           <Image source={LOGO} style={s.logoImg} resizeMode="contain" accessibilityIgnoresInvertColors />
         </View>
         <Text style={s.logoText} numberOfLines={1}>HUGPONG</Text>
-      </View>
+      </TouchableOpacity>
       <View style={s.rightActions}>
         {(isFieldRole || isSraAdmin) && (
           <TouchableOpacity

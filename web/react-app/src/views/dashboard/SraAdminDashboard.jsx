@@ -146,6 +146,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
             price={currentPrice}
             previousPrice={previousPrice}
             isLoading={isLoading}
+            className="h-full flex-1"
           />
         </div>
 

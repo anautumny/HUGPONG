@@ -13,9 +13,23 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { hapticFeedback } from '../utils/haptics';
+import { useBlurTarget } from '../context/BlurTargetContext';
+import { ExpandedSheetContext, useExpandedSheet } from '../context/ExpandedSheetContext';
 
-const OPEN_DURATION_MS = 290;
-const CLOSE_DURATION_MS = 220;
+export { ExpandedSheetContext, useExpandedSheet };
+
+const OPEN_DURATION_MS = 340;
+const CLOSE_DURATION_MS = 240;
+const OPEN_EASING = typeof Easing.bezier === 'function' ? Easing.bezier(0.16, 1, 0.3, 1) : Easing.out(Easing.cubic);
+const CLOSE_EASING = typeof Easing.bezier === 'function' ? Easing.bezier(0.3, 0, 0.8, 0.15) : Easing.in(Easing.cubic);
+
+let BlurViewComponent = null;
+try {
+  const blurModule = require('expo-blur');
+  BlurViewComponent = blurModule.BlurView || null;
+} catch {
+  BlurViewComponent = null;
+}
 
 /**
  * A controlled bottom sheet whose backdrop and sheet animate independently.
@@ -26,18 +40,35 @@ export default function AnimatedBottomSheet({
   onClose,
   children,
   sheetStyle,
-  backdropColor = 'rgba(0, 0, 0, 0.55)',
+  backdropColor = 'rgba(0, 0, 0, 0.65)',
   keyboardAvoiding = false,
   testID,
   dismissible = false,
   expandable = false,
+  blurTarget,
 }) {
-  const { height: windowHeight } = useWindowDimensions();
+  const blurContext = useBlurTarget();
+  const requestBlur = blurContext?.requestBlur;
+  const releaseBlur = blurContext?.releaseBlur;
+
+  useEffect(() => {
+    if (visible) {
+      requestBlur?.();
+      return () => {
+        releaseBlur?.();
+      };
+    }
+  }, [visible, requestBlur, releaseBlur]);
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const progress = useRef(new Animated.Value(0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
   const [expanded, setExpanded] = useState(false);
-  const sheetHeight = useRef(400);
+  const expandedRef = useRef(false);
+  expandedRef.current = expanded;
+  const initialEstimate = Math.round((windowHeight || 800) * 0.72);
+  const sheetHeight = useRef(initialEstimate);
+  const [measuredHeight, setMeasuredHeight] = useState(initialEstimate);
   const animationRef = useRef(null);
   const frameRef = useRef(null);
   const phaseRef = useRef('closed');
@@ -68,7 +99,7 @@ export default function AnimatedBottomSheet({
       animationRef.current = Animated.timing(progress, {
         toValue: 1,
         duration: OPEN_DURATION_MS,
-        easing: Easing.out(Easing.cubic),
+        easing: OPEN_EASING,
         useNativeDriver: true,
         isInteraction: true,
       });
@@ -88,7 +119,7 @@ export default function AnimatedBottomSheet({
     animationRef.current = Animated.timing(progress, {
       toValue: 0,
       duration: CLOSE_DURATION_MS,
-      easing: Easing.in(Easing.cubic),
+      easing: CLOSE_EASING,
       useNativeDriver: true,
       isInteraction: true,
     });
@@ -108,30 +139,65 @@ export default function AnimatedBottomSheet({
   const gestures = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => dismissible,
     onStartShouldSetPanResponderCapture: () => false,
-    onMoveShouldSetPanResponder: (_, gesture) => dismissible
-      && gesture.dy > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-    onMoveShouldSetPanResponderCapture: (_, gesture) => dismissible
-      && gesture.dy > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.1,
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      if (!dismissible) return false;
+      const isVertical = Math.abs(gesture.dy) > Math.abs(gesture.dx);
+      if (!isVertical) return false;
+      if (gesture.dy > 4) return true;
+      if (expandable && gesture.dy < -4) return true;
+      return false;
+    },
+    onMoveShouldSetPanResponderCapture: (_, gesture) => {
+      if (!dismissible) return false;
+      const isVertical = Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.1;
+      if (!isVertical) return false;
+      if (gesture.dy > 6) return true;
+      if (expandable && gesture.dy < -6) return true;
+      return false;
+    },
     onPanResponderGrant: () => {
       dragY.stopAnimation();
     },
     onPanResponderMove: (_, gesture) => {
-      const clampedY = gesture.dy > 0 ? gesture.dy : Math.max(-18, gesture.dy * 0.2);
+      const isCurrentlyExpanded = expandedRef.current;
+      const clampedY = gesture.dy > 0
+        ? gesture.dy
+        : (expandable && !isCurrentlyExpanded ? Math.max(-50, gesture.dy * 0.4) : Math.max(-18, gesture.dy * 0.2));
       dragY.setValue(clampedY);
     },
     onPanResponderRelease: (_, gesture) => {
-      const shouldDismiss = gesture.dy > 35 || (gesture.dy > 12 && gesture.vy > 0.2);
-      if (shouldDismiss) {
+      const isCurrentlyExpanded = expandedRef.current;
+      if (isCurrentlyExpanded) {
+        // If sheet is expanded, swiping down collapses it back unless it is a strong drag
+        const shouldDismiss = gesture.dy > 160 || (gesture.dy > 60 && gesture.vy > 0.8);
+        if (shouldDismiss) {
+          try { hapticFeedback.light(); } catch {}
+          requestClose();
+        } else if (gesture.dy > 30) {
+          try { hapticFeedback.light(); } catch {}
+          setExpanded(false);
+        }
+      } else {
+        const shouldDismiss = gesture.dy > 35 || (gesture.dy > 12 && gesture.vy > 0.2);
+        if (shouldDismiss) {
+          try { hapticFeedback.light(); } catch {}
+          requestClose();
+        } else if (expandable && (gesture.dy < -30 || (gesture.dy < -10 && gesture.vy < -0.2))) {
+          try { hapticFeedback.light(); } catch {}
+          setExpanded(true);
+        }
+      }
+      // Tap on handle toggles expand / collapse when expandable
+      if (expandable && Math.abs(gesture.dy) < 6 && Math.abs(gesture.dx) < 6) {
         try { hapticFeedback.light(); } catch {}
-        requestClose();
-      } else if (expandable && gesture.dy < -35) {
-        setExpanded(true);
+        setExpanded(prev => !prev);
       }
       Animated.spring(dragY, {
         toValue: 0,
         damping: 24,
         mass: 0.8,
         stiffness: 220,
+        overshootClamping: false,
         useNativeDriver: true,
       }).start();
     },
@@ -140,9 +206,10 @@ export default function AnimatedBottomSheet({
       damping: 24,
       mass: 0.8,
       stiffness: 220,
+      overshootClamping: false,
       useNativeDriver: true,
     }).start(),
-  }), [dismissible, dragY, expandable, requestClose, windowHeight]);
+  }), [dismissible, dragY, expandable, requestClose]);
 
   useEffect(() => {
     visibleRef.current = Boolean(visible);
@@ -162,8 +229,8 @@ export default function AnimatedBottomSheet({
   if (phase === 'closed') return null;
 
   const sheetTravelDistance = sheetHeight.current > 50
-    ? sheetHeight.current + 40
-    : 480;
+    ? sheetHeight.current + (insets?.bottom || 0) + 48
+    : Math.max(windowHeight || 800, 600);
 
   const sheetTranslateY = progress.interpolate({
     inputRange: [0, 1],
@@ -184,8 +251,15 @@ export default function AnimatedBottomSheet({
       testID={testID}
     >
       <View style={styles.root} accessibilityViewIsModal onAccessibilityEscape={requestClose}>
-        <Animated.View style={[styles.backdrop, { backgroundColor: backdropColor, opacity: progress }]}>
-          {dismissible && <Pressable style={StyleSheet.absoluteFill} onPress={requestClose} accessible={false} />}
+        <Animated.View style={[styles.backdrop, { opacity: progress }]}>
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: backdropColor }]} />
+          {dismissible && (
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={requestClose}
+              accessible={false}
+            />
+          )}
         </Animated.View>
 
         <KeyboardAvoidingView
@@ -199,11 +273,19 @@ export default function AnimatedBottomSheet({
           enabled={keyboardAvoiding}
         >
           <Animated.View
-            onLayout={event => { sheetHeight.current = event.nativeEvent.layout.height; }}
+            renderToHardwareTextureAndroid={phase !== 'open'}
+            onLayout={event => {
+              const h = event.nativeEvent.layout.height;
+              sheetHeight.current = h;
+              if (h > 0 && Math.abs(h - measuredHeight) > 1) setMeasuredHeight(h);
+            }}
             style={[
               styles.sheet,
               sheetStyle,
-              expanded && { height: windowHeight - insets.top - insets.bottom - 24 },
+              expanded && {
+                height: windowHeight - insets.top - insets.bottom - 24,
+                maxHeight: windowHeight - insets.top - 12,
+              },
               {
                 paddingBottom: Math.max(StyleSheet.flatten(sheetStyle)?.paddingBottom || 0, insets.bottom, 12),
                 transform: [{ translateY: Animated.add(sheetTranslateY, dragY) }],
@@ -218,7 +300,7 @@ export default function AnimatedBottomSheet({
                 accessible
                 accessibilityRole="adjustable"
                 accessibilityLabel="Sheet controls"
-                accessibilityHint="Swipe down to dismiss. Swipe up to expand."
+                accessibilityHint="Swipe down to dismiss. Swipe up or tap handle to expand."
                 accessibilityActions={[
                   { name: 'dismiss', label: 'Dismiss' },
                   ...(expandable ? [{ name: 'increment', label: 'Expand' }, { name: 'decrement', label: 'Collapse' }] : []),
@@ -229,8 +311,29 @@ export default function AnimatedBottomSheet({
                 }}
               ><View style={styles.handle} /></View>
             )}
-            {children}
+            <ExpandedSheetContext.Provider value={{ expanded, isExpanded: expanded, setExpanded }}>
+              {children}
+            </ExpandedSheetContext.Provider>
           </Animated.View>
+          {dismissible && (
+            <Pressable
+              collapsable={false}
+              style={[
+                styles.topBackdropPressable,
+                {
+                  top: -(insets.top + 12),
+                  left: -insets.left,
+                  right: -insets.right,
+                  bottom: measuredHeight,
+                },
+              ]}
+              onPress={() => {
+                try { hapticFeedback.light(); } catch {}
+                requestClose();
+              }}
+              accessible={false}
+            />
+          )}
         </KeyboardAvoidingView>
       </View>
     </Modal>
@@ -264,20 +367,30 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
   },
+  topBackdropPressable: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 400,
+    backgroundColor: 'transparent',
+    zIndex: 1,
+  },
   sheet: {
     width: '100%',
-    maxHeight: '100%',
-    flexShrink: 1,
+    maxHeight: '92%',
+    minHeight: 180,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1.5,
     borderTopColor: '#E2E8F0',
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 24,
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 20,
+    zIndex: 20,
     overflow: 'hidden',
   },
 });

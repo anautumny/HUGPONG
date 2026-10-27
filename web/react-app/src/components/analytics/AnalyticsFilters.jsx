@@ -3,7 +3,7 @@ import { Filter } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
-import { formatCropYear } from '../../utils/formatters';
+import { formatCropYear, formatPeriodDisplay } from '../../utils/formatters';
 import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
 
 function FilterSelect({ label, ...props }) {
@@ -28,7 +28,7 @@ export default function AnalyticsFilters({
     .filter(op => fieldIds.has(op.fieldId) && (draft.field === 'ALL' || draft.field === op.fieldId))
     .map(op => String(op.performedOn || op.isoDate || op.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
   const farmName = selectedFarmId === 'ALL' ? 'All farms' : blockFarms.find(farm => farm.id === selectedFarmId)?.name || selectedFarmId;
-  const summary = [selectedSeason === 'ALL' ? 'All crop years' : selectedSeason, !isMember && farmName, selectedFieldId === 'ALL' ? 'All plots' : selectedFieldId, selectedPeriod === 'ALL' ? 'All periods' : selectedPeriod].filter(Boolean).join(' · ');
+  const summary = [selectedSeason === 'ALL' ? 'All crop years' : selectedSeason, !isMember && farmName, selectedFieldId === 'ALL' ? 'All plots' : selectedFieldId, selectedPeriod === 'ALL' ? 'All periods' : formatPeriodDisplay(selectedPeriod)].filter(Boolean).join(' · ');
   const apply = () => {
     onSeasonChange(draft.season); onFarmChange(draft.farm);
     onFieldChange(draftFields.some(field => field.id === draft.field) ? draft.field : 'ALL');
@@ -48,7 +48,7 @@ export default function AnalyticsFilters({
         <FilterSelect label="Plot" value={draft.field || 'ALL'} onChange={event => setDraft(value => ({ ...value, field: event.target.value, period: 'ALL' }))}
           options={[{ value: 'ALL', label: 'All plots' }, ...draftFields.map(field => ({ value: field.id, label: field.id }))]} />
         <FilterSelect label="Reporting period" value={draft.period || 'ALL'} onChange={event => setDraft(value => ({ ...value, period: event.target.value }))}
-          options={[{ value: 'ALL', label: 'All periods' }, ...periods.map(period => ({ value: period, label: period }))]} />
+          options={[{ value: 'ALL', label: 'All periods' }, ...periods.map(period => ({ value: period, label: formatPeriodDisplay(period) }))]} />
       </div>
     </Modal>
   </div>;

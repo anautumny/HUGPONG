@@ -108,11 +108,11 @@ export default function TicketsView() {
         </div>
       )}
 
-      <div className="inline-flex rounded-xl border border-border bg-bg p-1 gap-1">
-        <button type="button" onClick={() => setView('active')} className={`px-4 py-2 rounded-lg text-xs font-bold ${view === 'active' ? 'bg-white text-primary shadow-sm' : 'text-hug-muted'}`}>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/80 pb-2.5">
+        <button type="button" onClick={() => setView('active')} className={`px-4.5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${view === 'active' ? 'bg-primary text-white shadow-xs' : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'}`}>
           {isSuperAdmin ? 'Inbox' : 'Active'}{!isSuperAdmin && activeCounts.pending > 0 ? ` (${activeCounts.pending} queued)` : ''}
         </button>
-        <button type="button" onClick={() => setView('history')} className={`px-4 py-2 rounded-lg text-xs font-bold ${view === 'history' ? 'bg-white text-primary shadow-sm' : 'text-hug-muted'}`}>
+        <button type="button" onClick={() => setView('history')} className={`px-4.5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${view === 'history' ? 'bg-primary text-white shadow-xs' : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'}`}>
           Ticket History
         </button>
       </div>

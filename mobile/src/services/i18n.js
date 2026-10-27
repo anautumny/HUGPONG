@@ -5160,6 +5160,25 @@ export const formatSyncTime = (timeStr, lang) => formatRelativeTime(timeStr, lan
 export const formatPhaseMonth = (monthStr, currentLang = 'en') => {
   if (!monthStr) return '';
   const s = String(monthStr).trim();
+  const MONTHS_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const MONTHS_TL = ['Enero', 'Pebrero', 'Marso', 'Abril', 'Mayo', 'Hunyo', 'Hulyo', 'Agosto', 'Setyembre', 'Oktubre', 'Nobyembre', 'Disyembre'];
+  const MONTHS_HIL = ['Enero', 'Pebrero', 'Marso', 'Abril', 'Mayo', 'Hunyo', 'Hulyo', 'Agosto', 'Setyembre', 'Oktubre', 'Nobyembre', 'Disyembre'];
+  const getMonthName = (idx) => currentLang === 'tl' ? MONTHS_TL[idx] : (currentLang === 'hil' ? MONTHS_HIL[idx] : MONTHS_EN[idx]);
+
+  // Match YYYY-MM, YYYY/MM, or full ISO dates YYYY-MM-DD
+  let match = s.match(/^(\d{4})[-/_](0?[1-9]|1[0-2])(?:\D.*)?$/);
+  if (match) {
+    const year = match[1];
+    const monthIdx = parseInt(match[2], 10) - 1;
+    return `${getMonthName(monthIdx)} ${year}`;
+  }
+  // Match MM-YYYY, MM/YYYY
+  match = s.match(/^(0?[1-9]|1[0-2])[-/_](\d{4})(?:\D.*)?$/);
+  if (match) {
+    const monthIdx = parseInt(match[1], 10) - 1;
+    const year = match[2];
+    return `${getMonthName(monthIdx)} ${year}`;
+  }
   const m = s.match(/month\s*(\d+(?:[–-]\d+)?)/i);
   if (m) {
     const range = m[1];
@@ -5168,6 +5187,10 @@ export const formatPhaseMonth = (monthStr, currentLang = 'en') => {
     return `Month ${range}`;
   }
   return s;
+};
+
+export const formatPeriodDisplay = (val) => {
+  return formatPhaseMonth(val, 'en');
 };
 
 export const formatOperationName = (opStr, currentLang = 'en') => {

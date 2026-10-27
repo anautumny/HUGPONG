@@ -16,6 +16,7 @@ import QRCodeView from './QRCodeView';
 import { compileAuditReport, fetchAuditReadiness, fetchNextAuditPeriod, selectAuditDeliveryMethod, submitAuditReport, createAuditQrPayload } from '../../services/auditService';
 import AuditMemberReview from './AuditMemberReview';
 import { AUDIT_STATUS, canonicalAuditStatus, auditReportsForFarmPeriod, reportedOperationIds } from '../../domain/auditWorkflow';
+import { formatPeriodDisplay } from '../../utils/formatters';
 
 export default function AuditCompilationModal({
   isOpen = false,
@@ -356,7 +357,7 @@ export default function AuditCompilationModal({
       };
       drawField('FARM MANAGER', managerName, 90, 290, 1020);
       drawField('BLOCK FARM', farmName, 90, 390, 1020);
-      drawField('REPORTING MONTH', reportPeriod, 90, 490, 470);
+      drawField('REPORTING MONTH', formatPeriodDisplay(reportPeriod), 90, 490, 470);
       drawField('CROP YEAR CYCLE', cropYear, 640, 490, 470);
 
       context.fillStyle = '#FFFFFF';
@@ -484,7 +485,7 @@ export default function AuditCompilationModal({
             <div className="w-full sm:w-56 shrink-0 rounded-xl border border-border bg-white dark:bg-surface px-3 py-2">
               <span className="block text-[10px] uppercase font-bold text-hug-muted">Reporting Period</span>
               <span className="block text-sm font-bold text-hug-text">
-                {isLoadingPeriod ? 'Detecting...' : new Date(`${selectedPeriod}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                {isLoadingPeriod ? 'Detecting...' : formatPeriodDisplay(selectedPeriod)}
               </span>
               {periodInfo?.isCarryover && <span className="text-[10px] font-semibold text-amber-700">Oldest unresolved month</span>}
             </div>
@@ -503,13 +504,13 @@ export default function AuditCompilationModal({
             <span className="font-semibold text-[11px]">
               {compilationBlockedByActiveReport
                 ? (latestStatus === AUDIT_STATUS.PENDING_REVIEW
-                  ? `The ${selectedPeriod} report is awaiting SRA review.`
-                  : `The ${selectedPeriod} report is compiled and ready to submit.`)
+                  ? `The ${formatPeriodDisplay(selectedPeriod)} report is awaiting SRA review.`
+                  : `The ${formatPeriodDisplay(selectedPeriod)} report is compiled and ready to submit.`)
                 : eligibleLogs.length > 0
-                ? `${eligibleLogs.length} synchronized operation record(s) ready for the ${selectedPeriod} audit report.`
+                ? `${eligibleLogs.length} synchronized operation record(s) ready for the ${formatPeriodDisplay(selectedPeriod)} audit report.`
                 : matchingMonthLogs.length > 0
-                ? `All operations for ${selectedPeriod} are already included in an audit report.`
-                : `No ACTIVE operations are recorded for ${selectedPeriod}.`}
+                ? `All operations for ${formatPeriodDisplay(selectedPeriod)} are already included in an audit report.`
+                : `No ACTIVE operations are recorded for ${formatPeriodDisplay(selectedPeriod)}.`}
             </span>
             <span className="text-[10px] font-mono text-primary dark:text-primary-light font-bold">
               {blockFarm?.name || blockFarm?.id || 'Assigned Farm'}
@@ -522,7 +523,7 @@ export default function AuditCompilationModal({
               <div className="mb-2 flex items-start gap-2">
                 <div>
                   <p className="mt-0.5 text-[11px] text-hug-muted">
-                    You can compile the available operations for {selectedPeriod}. Plots do not need an operation every month. Follow up only if work was recorded but has not been synchronized.
+                    You can compile the available operations for {formatPeriodDisplay(selectedPeriod)}. Plots do not need an operation every month. Follow up only if work was recorded but has not been synchronized.
                   </p>
                 </div>
               </div>
@@ -657,7 +658,7 @@ export default function AuditCompilationModal({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full text-center text-xs">
             <div className="p-2 rounded-xl bg-bg border border-border">
               <span className="text-[10px] text-hug-muted block">Period</span>
-              <span className="font-bold text-hug-text">{compiledResult?.periodKey || selectedPeriod}</span>
+              <span className="font-bold text-hug-text">{formatPeriodDisplay(compiledResult?.periodKey || selectedPeriod)}</span>
             </div>
             <div className="p-2 rounded-xl bg-bg border border-border">
               <span className="text-[10px] text-hug-muted block">Fields</span>
@@ -685,7 +686,7 @@ export default function AuditCompilationModal({
           <div className="overflow-hidden rounded-xl border border-border bg-bg text-center">
             <div className="bg-[#173D24] px-4 py-2 text-left text-xs font-extrabold tracking-widest text-white">HUGPONG</div>
             <p className="px-4 pt-3 text-sm font-bold text-hug-text">{compiledResult?.blockFarmName || blockFarm?.name || compiledResult?.blockFarmId}</p>
-            <p className="px-3 pt-1 text-xs text-hug-muted">{compiledResult?.periodKey || selectedPeriod} · {compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Crop year not recorded'}</p>
+            <p className="px-3 pt-1 text-xs text-hug-muted">{formatPeriodDisplay(compiledResult?.periodKey || selectedPeriod)} · {compiledResult?.cropYearCycle || compiledResult?.cropYearCycles?.join(', ') || 'Crop year not recorded'}</p>
             <div className="mx-auto my-3 w-fit overflow-hidden rounded-xl bg-white">
               <QRCodeView value={qrPayload} size={238} color="#000000" bgColor="#FFFFFF" className="border-0 p-0 shadow-none" />
             </div>

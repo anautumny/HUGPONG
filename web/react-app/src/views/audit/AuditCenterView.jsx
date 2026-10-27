@@ -356,10 +356,10 @@ export default function AuditCenterView() {
           </div>
         </div>
 
-        {/* Main Content: 2-Column Responsive Layout */}
-        <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-start">
+        {/* Main Content: 2-Column Responsive Layout with Equal-Height Alignment */}
+        <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6 items-stretch">
           {/* Left Column: QR Verifier & Cloud Audit Queue */}
-          <div className="flex flex-col gap-6 w-full">
+          <div className="flex flex-col gap-6 w-full h-full">
             {isSraAdmin && (
               <React.Suspense fallback={<DeferredAuditPanel label="Loading QR tools..." />}>
                 <QRVerifierPanel
@@ -381,11 +381,12 @@ export default function AuditCenterView() {
               }}
               blockFarms={blockFarms}
               title={isSraAdmin ? 'Audit Inbox' : 'Active Audit Reports'}
+              className="flex-1 flex flex-col justify-between"
             />
           </div>
 
-          {/* Right Column: Detailed Audit Dossier Card */}
-          <div className="w-full">
+          {/* Right Column: Detailed Audit Dossier Card (Even Height) */}
+          <div className="w-full h-full flex flex-col">
             <AuditDossierCard
               report={selectedReport}
               blockFarms={blockFarms}
@@ -397,6 +398,7 @@ export default function AuditCenterView() {
               isReturning={isReturning}
               onSubmit={handleSubmitReport}
               onReturn={handleReturnReport}
+              className="h-full flex-1"
             />
           </div>
         </div>

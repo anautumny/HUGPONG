@@ -58,7 +58,8 @@ export default function ProfileScreen({ navigation }) {
   const [showTicketsModal, setShowTicketsModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [ticketTab, setTicketTab] = useState('active');
-  const [ticketForm, setTicketForm] = useState({ title: '', category: 'Synchronization', details: '' });
+  const [ticketForm, setTicketForm] = useState({ title: '', category: 'Synchronization', details: '' });
+  const [ticketErrors, setTicketErrors] = useState({});
   const [ticketsList, setTicketsList] = useState(supportTickets);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isRefreshingTickets, setIsRefreshingTickets] = useState(false);
@@ -412,34 +413,64 @@ export default function ProfileScreen({ navigation }) {
 
                   {/* Subject */}
                   <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_subject', 'Subject / Short Summary')}</Text>
+                    <Text style={s.formLabel}>
+                      {t('ticket_subject', 'Subject / Short Summary')} <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
+                    </Text>
                     <TextInput
-                      style={s.ticketInput}
+                      style={[s.ticketInput, ticketErrors.title && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}
                       placeholder={t('ticket_subject_placeholder', 'e.g. Cannot sync field operation logs')}
                       placeholderTextColor={COLORS.textMuted}
                       value={ticketForm.title}
-                      onChangeText={val => setTicketForm(p => ({ ...p, title: val }))}
+                      onChangeText={val => {
+                        setTicketForm(p => ({ ...p, title: val }));
+                        if (ticketErrors.title) setTicketErrors(p => ({ ...p, title: null }));
+                      }}
                     />
+                    {ticketErrors.title && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                        <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{ticketErrors.title}</Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* Details */}
                   <View style={{ gap: 6 }}>
-                    <Text style={s.formLabel}>{t('ticket_description', 'Detailed Description')}</Text>
+                    <Text style={s.formLabel}>
+                      {t('ticket_description', 'Detailed Description')} <Text style={{ color: COLORS.required, fontWeight: 'normal' }}>*</Text>
+                    </Text>
                     <TextInput
-                      style={[s.ticketInput, s.ticketInputArea]}
+                      style={[s.ticketInput, s.ticketInputArea, ticketErrors.details && { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: '#FFF5F5' }]}
                       placeholder={t('ticket_description_placeholder', 'Describe what happened, any error messages, or what you need help with...')}
                       placeholderTextColor={COLORS.textMuted}
                       multiline
                       value={ticketForm.details}
-                      onChangeText={val => setTicketForm(p => ({ ...p, details: val }))}
+                      onChangeText={val => {
+                        setTicketForm(p => ({ ...p, details: val }));
+                        if (ticketErrors.details) setTicketErrors(p => ({ ...p, details: null }));
+                      }}
                     />
+                    {ticketErrors.details && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                        <Text style={{ fontSize: 11, color: COLORS.danger, fontWeight: '600' }}>{ticketErrors.details}</Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* Submit Button */}
                   <TouchableOpacity
-                    style={[s.ticketSubmitBtn, (!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket) && { opacity: 0.5 }]}
-                    disabled={!ticketForm.title.trim() || !ticketForm.details.trim() || isSubmittingTicket}
+                    style={[s.ticketSubmitBtn, isSubmittingTicket && { opacity: 0.5 }]}
+                    disabled={isSubmittingTicket}
                     onPress={async () => {
+                      const errs = {};
+                      if (!ticketForm.title.trim()) errs.title = 'Please enter a subject.';
+                      if (!ticketForm.details.trim()) errs.details = 'Please provide details for your support request.';
+                      if (Object.keys(errs).length > 0) {
+                        setTicketErrors(errs);
+                        return;
+                      }
+                      setTicketErrors({});
                       if (ticketSubmitLock.current) return;
                       ticketSubmitLock.current = true;
                       setIsSubmittingTicket(true);
@@ -450,7 +481,8 @@ export default function ProfileScreen({ navigation }) {
                           details: ticketForm.details.trim()
                         });
                         setTicketsList([...supportTickets]);
-                        setTicketForm({ title: '', category: 'Synchronization', details: '' });
+                        setTicketForm({ title: '', category: 'Synchronization', details: '' });
+                        setTicketErrors({});
                         setTicketTab('active');
                         Alert.alert(
                           created?.queued ? t('ticket_queued_title', 'Ticket Queued') : t('ticket_submitted_title', 'Ticket Submitted'),
@@ -1049,10 +1081,10 @@ const s = StyleSheet.create({
   ticketCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F4EC', alignItems: 'center', justifyContent: 'center' },
   
   ticketTabWrap: { paddingHorizontal: SPACING.lg, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.background },
-  ticketSegmentTrack: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: COLORS.surfaceSubtle, borderRadius: RADIUS.md, padding: 3, gap: 4 },
-  ticketTabBtn: { flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 7, paddingHorizontal: 2, minHeight: 56, borderRadius: RADIUS.sm },
-  ticketTabBtnActive: { backgroundColor: COLORS.surface, ...SHADOW.card },
-  ticketTabText: { width: '100%', flexShrink: 1, fontSize: 11.5, lineHeight: 14, fontWeight: '700', color: COLORS.textMuted, textAlign: 'center' },
+  ticketSegmentTrack: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: COLORS.surfaceSubtle, borderRadius: RADIUS.full, padding: 3, gap: 4 },
+  ticketTabBtn: { flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 7, paddingHorizontal: 2, minHeight: 56, borderRadius: RADIUS.full },
+  ticketTabBtnActive: { backgroundColor: COLORS.surface, borderRadius: RADIUS.full, ...SHADOW.card },
+  ticketTabText: { width: '100%', flexShrink: 1, fontSize: 11, lineHeight: 14, fontWeight: '600', color: COLORS.textMuted, textAlign: 'center' },
   ticketTabTextActive: { color: COLORS.primaryDark, fontWeight: '800' },
 
   ticketNoticeBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F2F7EF', borderWidth: 1, borderColor: '#DCE8D7', borderRadius: RADIUS.lg, padding: 12 },
