@@ -1,6 +1,7 @@
 'use strict';
 
 const https = require('https');
+const { assertNotBetaSmsDestination } = require('../domain/betaPhones');
 const {
   smsProvider,
   isProduction,
@@ -37,7 +38,8 @@ function iprogMessageContent(message) {
   return String(message || '').replace(/^\[HUGPONG\]\s*/i, '');
 }
 
-function sendSemaphoreSms(number, message, { apiKey = semaphoreApiKey, senderName = semaphoreSenderName } = {}) {
+async function sendSemaphoreSms(number, message, { apiKey = semaphoreApiKey, senderName = semaphoreSenderName, database } = {}) {
+  await assertNotBetaSmsDestination(number, { database });
   return new Promise((resolve, reject) => {
     if (!apiKey) {
       const error = new Error('SMS gateway is not configured.');
@@ -88,8 +90,10 @@ function sendSemaphoreSms(number, message, { apiKey = semaphoreApiKey, senderNam
 async function sendIprogSms(number, message, {
   apiToken = iprogSmsApiToken,
   fetchImpl = globalThis.fetch,
-  timeoutMs = SMS_REQUEST_TIMEOUT_MS
+  timeoutMs = SMS_REQUEST_TIMEOUT_MS,
+  database
 } = {}) {
+  await assertNotBetaSmsDestination(number, { database });
   if (!apiToken) {
     const error = new Error('SMS gateway is not configured.');
     error.code = 'SMS_NOT_CONFIGURED';
@@ -153,7 +157,7 @@ async function sendIprogSms(number, message, {
   }
 }
 
-function createSmsGateway({ provider, production, apiKey, senderName, iprogApiToken, fetchImpl, logger = console } = {}) {
+function createSmsGateway({ provider, production, apiKey, senderName, iprogApiToken, fetchImpl, database, logger = console } = {}) {
   const selectedProvider = String(provider || 'semaphore').trim().toLowerCase();
   if (!['console', 'semaphore', 'iprog'].includes(selectedProvider)) {
     throw new Error('SMS provider must be "console", "semaphore", or "iprog".');
@@ -168,11 +172,13 @@ function createSmsGateway({ provider, production, apiKey, senderName, iprogApiTo
     provider: selectedProvider,
     async send(number, message, metadata = {}) {
       if (selectedProvider === 'semaphore') {
-        return sendSemaphoreSms(number, message, { apiKey, senderName });
+        return sendSemaphoreSms(number, message, { apiKey, senderName, database });
       }
       if (selectedProvider === 'iprog') {
-        return sendIprogSms(number, message, { apiToken: iprogApiToken, fetchImpl });
+        return sendIprogSms(number, message, { apiToken: iprogApiToken, fetchImpl, database });
       }
+
+      await assertNotBetaSmsDestination(number, { database });
 
       const otpSuffix = metadata.otpCode
         ? ` otp=${String(metadata.otpCode)} purpose=${String(metadata.purpose || 'verification')}`

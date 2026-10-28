@@ -110,7 +110,7 @@ export default function TicketsView() {
 
       <div className="flex flex-wrap items-center gap-2 border-b border-border/80 pb-2.5">
         <button type="button" onClick={() => setView('active')} className={`px-4.5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${view === 'active' ? 'bg-primary text-white shadow-xs' : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'}`}>
-          {isSuperAdmin ? 'Inbox' : 'Active'}{!isSuperAdmin && activeCounts.pending > 0 ? ` (${activeCounts.pending} queued)` : ''}
+          {isSuperAdmin ? 'Inbox' : 'Active'}
         </button>
         <button type="button" onClick={() => setView('history')} className={`px-4.5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${view === 'history' ? 'bg-primary text-white shadow-xs' : 'text-hug-muted hover:text-hug-text hover:bg-bg dark:hover:bg-gray-800'}`}>
           Ticket History
@@ -146,9 +146,9 @@ export default function TicketsView() {
           onClose={() => setIsCreateOpen(false)}
           fields={fields}
           user={user}
-          onCreated={(createdTicket, queued) => {
+          onCreated={(createdTicket) => {
             setTickets(current => [createdTicket, ...current.filter(ticket => ticket.id !== createdTicket.id)]);
-            setNotice(queued ? 'Ticket queued for submission. It will be sent automatically when the connection returns.' : 'Ticket submitted successfully and is now Open.');
+            setNotice('Ticket submitted successfully and is now Open.');
           }}
         />
       )}

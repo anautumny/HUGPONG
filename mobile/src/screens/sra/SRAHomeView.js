@@ -22,12 +22,12 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
   const safeAuditReports = Array.isArray(auditReports) ? auditReports : [];
 
   const blockFarmsList = safeBlockFarms.map(bf => {
-    const bfFields = safeFields.filter(f => f.blockFarmId === bf.id || f.blockFarm === bf.name || (bf.code && f.blockFarmId === bf.code));
-    const totalHa = bfFields.reduce((s, f) => s + (Number(f.ha || f.area) || 0), 0);
+    const bfFields = safeFields.filter(f => f.blockFarmId === bf.id);
+    const totalHa = bfFields.reduce((s, f) => s + (Number(f.areaHa ?? f.ha ?? 0) || 0), 0);
     const resolvedMgr = resolveBlockFarmManager(bf);
     return {
       id: bf.id,
-      name: bf.name || (session?.farm || session?.blockFarm || bf.id),
+      name: bf.name || bf.id,
       manager: resolvedMgr,
       plots: bfFields.length,
       ha: totalHa,

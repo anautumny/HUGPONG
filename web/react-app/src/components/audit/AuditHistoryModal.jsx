@@ -270,7 +270,7 @@ export default function AuditHistoryModal({
                         {report.qrHash || report.id}
                       </td>
                       <td className="px-3.5 py-2.5 text-center font-mono whitespace-nowrap">
-                        {logs.length || report.totalLogs || 0}
+                        {report.operationCount ?? report.totalLogs ?? logs.length}
                       </td>
                       <td className="px-3.5 py-2.5 text-right font-mono font-bold whitespace-nowrap">
                         ₱{cost.toLocaleString()}

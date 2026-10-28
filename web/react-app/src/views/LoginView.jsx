@@ -318,7 +318,7 @@ export default function LoginView() {
                 </p>
                 <p className="mt-1 font-medium leading-relaxed">
                   {!networkOnline
-                    ? 'You need to sign in online once before you can access HUGPONG offline features. Your login details will remain on this page.'
+                    ? 'The Web console requires an internet connection. Reconnect and try signing in again.'
                     : 'The server is taking longer than expected. Your login details will remain on this page while you check the connection and try again.'}
                 </p>
               </div>

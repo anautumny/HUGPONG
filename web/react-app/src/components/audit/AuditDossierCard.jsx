@@ -252,7 +252,7 @@ export default function AuditDossierCard({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h4 className="text-xs font-bold text-hug-text uppercase tracking-wider">
-            SRA Monthly Operations Schedule ({report.period || report.month})
+            SRA Monthly Operations Schedule ({report.periodKey || report.period || report.month})
           </h4>
           <span className="text-[11px] text-hug-muted font-mono">
             {operationLogs.length} verified items
@@ -368,7 +368,7 @@ export default function AuditDossierCard({
               <tfoot>
                 <tr className="bg-primary-bg/20 dark:bg-primary/10 font-black border-t-2 border-primary">
                   <td colSpan={6} className="px-3 py-3 text-right text-xs uppercase tracking-wider text-primary dark:text-primary-light">
-                    Total Verified Cost ({report.period || report.month}):
+                    Total Verified Cost ({report.periodKey || report.period || report.month}):
                   </td>
                   <td className="px-3 py-3 text-right font-mono text-sm text-primary dark:text-primary-light font-black">
                     {formatCurrency(totalCost)}

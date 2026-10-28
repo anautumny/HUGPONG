@@ -173,7 +173,7 @@ export default function CustomBottomTabBar({
                   style={styles.syncBadge}
                   accessibilityLabel={`${pendingCount} pending logs`}
                 >
-                  <Text style={styles.syncBadgeText}>
+                  <Text variant="badge" style={styles.syncBadgeText}>
                     {pendingCount > 99 ? '99+' : pendingCount}
                   </Text>
                 </View>
@@ -253,22 +253,23 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -4,
     right: 8,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    minWidth: 20,
+    minHeight: 20,
+    borderRadius: 10,
     backgroundColor: COLORS.accent, // Warm harvest amber
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
+    paddingVertical: 1,
     borderWidth: 1.5,
     borderColor: COLORS.surface,
     ...SHADOW.card,
   },
   syncBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '900',
     color: COLORS.textInverse,
-    lineHeight: 12,
+    lineHeight: 14,
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
@@ -286,12 +287,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tabLabel: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 14,
+    lineHeight: 20,
     letterSpacing: -0.2,
     marginTop: 2,
     textAlign: 'center',
-    minHeight: 28,
+    minHeight: 40,
     width: '100%',
     flexShrink: 1,
     includeFontPadding: false,

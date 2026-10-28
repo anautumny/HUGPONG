@@ -24,6 +24,7 @@ export default function CreateTicketModal({
   const [formError, setFormError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const submitLock = useRef(false);
+  const requestId = useRef(null);
 
   const categoryOptions = TICKET_CATEGORIES.map(c => ({ value: c, label: c }));
   const fieldOptions = [
@@ -54,7 +55,10 @@ export default function CreateTicketModal({
     setIsSubmitting(true);
 
     try {
+      // Retain one request identity if an online response is lost. Nothing is replayed automatically.
+      if (!requestId.current) requestId.current = `TCK-${new Date().getFullYear()}-${globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 20).toUpperCase()}`;
       const payload = {
+        id: requestId.current,
         title: title.trim(),
         category,
         priority: 'NORMAL',
@@ -64,7 +68,8 @@ export default function CreateTicketModal({
 
       const res = await createTicket(payload, user);
       if (res.success) {
-        if (onCreated) onCreated(res.data, res.queued === true);
+        if (onCreated) onCreated(res.data);
+        requestId.current = null;
         setTitle('');
         setDetails('');
         setFieldId('');

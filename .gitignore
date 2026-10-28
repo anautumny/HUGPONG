@@ -143,6 +143,7 @@ scratch/
 *.tmp
 *.bak
 *.hpbak
+/output/private-beta/
 
 # ------------------------------------------------------------------------------
 # Generated Paper Revision & Document QA Artifacts

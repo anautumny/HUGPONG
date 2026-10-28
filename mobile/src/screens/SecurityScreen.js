@@ -14,6 +14,7 @@ import {
 import { useTranslation } from '../services/i18n';
 import { PASSWORD_POLICY_HINT, passwordPolicy, passwordPolicyError } from '../domain/passwordPolicy';
 import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
+import { accountBlockFarmId, blockFarmDisplayName } from '../domain/assignmentPresentation';
 
 export default function SecurityScreen({ navigation }) {
   const { t } = useTranslation();
@@ -49,7 +50,7 @@ export default function SecurityScreen({ navigation }) {
 
   useEffect(() => {
     const unsubscribe = subscribe(() => {
-      setSession(getCurrentSession());
+      setSession({ ...getCurrentSession() });
     });
     return unsubscribe;
   }, []);
@@ -184,8 +185,7 @@ export default function SecurityScreen({ navigation }) {
 
   const userEmployeeId = session?.employeeId || session?.userId || session?.contact || '—';
   const userMobile = session?.mobile || session?.contact || '—';
-  const assignedBlockFarm = blockFarms.find(farm => farm.id === (session?.blockFarmId || session?.affiliatedBlockFarmId));
-  const assignedBlockFarmName = assignedBlockFarm?.name || session?.farm || session?.blockFarm || 'No block farm assigned';
+  const assignedBlockFarmName = blockFarmDisplayName(accountBlockFarmId(session), blockFarms, 'No block farm assigned');
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>

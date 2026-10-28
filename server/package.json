@@ -7,6 +7,11 @@
     "node": ">=24.22.1 <25"
   },
   "scripts": {
+    "beta:nacayao:add-manager": "node scripts/addNacayaoBetaManager.js",
+    "beta:nacayao:plan": "node scripts/manageNacayaoBetaData.js initialize",
+    "beta:nacayao:initialize": "node scripts/manageNacayaoBetaData.js initialize --execute",
+    "beta:nacayao:remove:plan": "node scripts/manageNacayaoBetaData.js remove",
+    "beta:nacayao:remove": "node scripts/manageNacayaoBetaData.js remove --execute",
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "audit:deployment-config": "node scripts/auditDeploymentConfig.js",

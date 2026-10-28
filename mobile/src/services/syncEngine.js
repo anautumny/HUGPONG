@@ -37,6 +37,9 @@ const {
 
 let outboxQueue = [];
 let activeOutboxOwnerId = '';
+let outboxReady = false;
+let outboxStorageError = null;
+let outboxLoadGeneration = 0;
 let syncListeners = [];
 const transientTakeoverGrants = new Map();
 const runOutboxSingleFlight = createSingleFlightRunner();
@@ -241,6 +244,7 @@ function migrateQueuedPayload(type, payload = {}) {
 }
 
 async function persistOutboxQueue(queue = outboxQueue, ownerUserId = activeOutboxOwnerId) {
+  assertOutboxReady();
   const normalizedOwnerId = normalizeOutboxOwnerId(ownerUserId);
   if (!normalizedOwnerId) return Array.isArray(queue) && queue.length === 0;
   return saveItem(localOutboxStorageKey(normalizedOwnerId), queue);
@@ -258,17 +262,25 @@ export function generateCustomOpId(stageNumber = 1) {
  */
 export async function initSyncEngine(userId = '') {
   const normalizedOwnerId = normalizeOutboxOwnerId(userId);
+  const generation = ++outboxLoadGeneration;
+  const previousQueue = activeOutboxOwnerId === normalizedOwnerId ? outboxQueue : [];
+  activeOutboxOwnerId = normalizedOwnerId;
+  outboxReady = false;
+  outboxStorageError = null;
+  outboxQueue = previousQueue;
   try {
-    activeOutboxOwnerId = normalizedOwnerId;
     transientTakeoverGrants.clear();
     if (!activeOutboxOwnerId) {
       outboxQueue = [];
+      outboxReady = true;
       notifySyncEngine();
       return [];
     }
 
-    const savedOutbox = await getItem(localOutboxStorageKey(activeOutboxOwnerId), []);
-    outboxQueue = migrateOutbox(savedOutbox, { migratePayload: migrateQueuedPayload })
+    const savedOutbox = await getItem(localOutboxStorageKey(normalizedOwnerId), [], { strict: true, bypassCache: true });
+    if (generation !== outboxLoadGeneration) return [];
+    if (!Array.isArray(savedOutbox)) throw new Error('The saved synchronization queue is not a valid list.');
+    const restoredQueue = migrateOutbox(savedOutbox, { migratePayload: migrateQueuedPayload })
       .filter(item => item.type !== 'audit_log' && item.type !== 'system_event')
       .map(item => ({
       ...item,
@@ -278,14 +290,31 @@ export async function initSyncEngine(userId = '') {
     // keys instead of manufacturing a second mutation. The former unscoped
     // STORAGE_KEYS.OUTBOX is deliberately left quarantined: its owner cannot
     // be proven, so it must never be replayed under whichever user logs in.
-    await persistOutboxQueue();
+    if (!(await saveItem(localOutboxStorageKey(normalizedOwnerId), restoredQueue))) {
+      throw new Error('The restored synchronization queue could not be saved.');
+    }
+    if (generation !== outboxLoadGeneration) return [];
+    outboxQueue = restoredQueue;
+    outboxReady = true;
     notifySyncEngine();
     return outboxQueue;
   } catch (error) {
     console.warn('[syncEngine] The synchronization queue could not be initialized.');
-    outboxQueue = [];
-    return [];
+    if (generation !== outboxLoadGeneration) return [];
+    outboxStorageError = 'Saved offline work could not be loaded. New saves and synchronization are paused. Retry Sync Now; do not clear local storage.';
+    notifySyncEngine();
+    return [...outboxQueue];
   }
+}
+
+export function getOutboxStorageState() {
+  return { ready: outboxReady, error: outboxStorageError, ownerUserId: activeOutboxOwnerId };
+}
+
+function assertOutboxReady() {
+  if (!outboxReady) throw Object.assign(new Error(outboxStorageError || 'Saved offline work is still loading. Please wait and retry.'), {
+    code: 'QUEUE_STORAGE_UNAVAILABLE'
+  });
 }
 
 /**
@@ -328,6 +357,7 @@ export function getOutboxPressure() {
  * Enqueue a new operation log or field action to the outbox queue
  */
 export async function enqueueOutboxItem(type, payload, options = {}) {
+  assertOutboxReady();
   if (!activeOutboxOwnerId) {
     throw new Error('A signed-in user is required before work can be added to the synchronization queue.');
   }
@@ -415,6 +445,7 @@ export async function enqueueAndFlushMutation(type, payload, options = {}) {
  * Remove an item from the outbox after confirmed upload
  */
 export async function removeOutboxItem(outboxId) {
+  assertOutboxReady();
   outboxQueue = outboxQueue.filter(item => (
     item.mutationId !== outboxId
     && item.outboxId !== outboxId
@@ -426,6 +457,7 @@ export async function removeOutboxItem(outboxId) {
 
 export async function resolveOperationConflict(mutationId, { separate = false, reason = '' } = {}) {
   return runOutboxSingleFlight(async () => {
+    assertOutboxReady();
     const item = outboxQueue.find(queued => queued.mutationId === mutationId);
     const reviewable = item && ['operation_log', 'takeover_log', 'operation_amendment', 'operation_archive'].includes(item.type)
       && ['conflict', 'validation', 'rejected', 'authorization'].includes(item.status);
@@ -460,6 +492,7 @@ export async function resolveOperationConflict(mutationId, { separate = false, r
  * Mark an outbox item as failed
  */
 export async function markOutboxItemFailed(outboxId, errorMessage) {
+  assertOutboxReady();
   const item = outboxQueue.find(i => i.outboxId === outboxId || i.id === outboxId);
   if (item) {
     item.status = 'retryable';
@@ -472,6 +505,7 @@ export async function markOutboxItemFailed(outboxId, errorMessage) {
 }
 
 export async function retryCorrectableOutboxItems() {
+  assertOutboxReady();
   const migrated = migrateOutbox(outboxQueue, { migratePayload: migrateQueuedPayload });
   const requeued = requeueCorrectableMutations(migrated);
   if (requeued.requeuedCount === 0) return 0;
@@ -489,6 +523,7 @@ export async function retryCorrectableOutboxItems() {
  */
 export async function processOutbox(remoteUploadHandler) {
   return runOutboxSingleFlight(async () => {
+    assertOutboxReady();
     if (outboxQueue.length === 0) {
       return { success: true, attemptedCount: 0, processedCount: 0, failedCount: 0, remainingCount: 0, responses: {} };
     }
@@ -677,6 +712,7 @@ export async function flushOutboxToApi() {
  * Clear the entire outbox queue (e.g. on cache wipe)
  */
 export async function clearOutbox() {
+  assertOutboxReady();
   outboxQueue = [];
   await persistOutboxQueue();
   notifySyncEngine();

@@ -9,6 +9,7 @@ import AnimatedBottomSheet from '../AnimatedBottomSheet';
 import { SearchableSelectContent } from '../ui/SearchableSelect';
 import { filterOperationsByCropYearCycle } from '../../services/analyticsSelectors';
 import { hapticFeedback } from '../../utils/haptics';
+import Pagination, { usePagination } from '../ui/Pagination';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -420,8 +421,10 @@ export function CostBreakdownList({
 }
 
 // ── 6. Activity Frequency Ranking List ────────────────────────────
-export function ActivityFrequencyList({ ranking = [] }) {
-  if (!ranking || ranking.length === 0) {
+export function ActivityFrequencyList({ ranking = [], resetKey }) {
+  const activities = Array.isArray(ranking) ? ranking : [];
+  const activityPage = usePagination(activities, { pageSize: 5, expandedPageSize: 5, resetKey });
+  if (activities.length === 0) {
     return (
       <View style={{ paddingVertical: 16, alignItems: 'center' }}>
         <Text style={{ fontSize: 12.5, color: COLORS.textMuted, fontWeight: '500' }}>No operations recorded yet</Text>
@@ -429,11 +432,12 @@ export function ActivityFrequencyList({ ranking = [] }) {
     );
   }
 
-  const totalExec = ranking.reduce((acc, curr) => acc + (curr.count ?? curr.executionCount ?? 0), 0);
+  const totalExec = activities.reduce((acc, curr) => acc + (curr.count ?? curr.executionCount ?? 0), 0);
 
   return (
     <View style={{ gap: 10, marginTop: 4 }}>
-      {ranking.slice(0, 8).map((act, idx) => {
+      <Pagination {...activityPage} label="activities" position="top" />
+      {activityPage.items.map((act, idx) => {
         const actName = act.name ?? act.activity ?? 'Field Operation';
         const execCount = act.count ?? act.executionCount ?? 0;
         const avgCost = act.avgCost ?? act.averageCost ?? 0;
@@ -445,7 +449,7 @@ export function ActivityFrequencyList({ ranking = [] }) {
             <View style={styles.freqCardTopRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
                 <View style={styles.freqRankBadge}>
-                  <Text style={styles.freqRankText}>{idx + 1}</Text>
+                  <Text style={styles.freqRankText}>{activityPage.start + idx}</Text>
                 </View>
                 <Text style={styles.freqTitle} numberOfLines={1}>
                   {actName}

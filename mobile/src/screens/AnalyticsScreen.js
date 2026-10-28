@@ -43,6 +43,7 @@ import { AppText as Text, AppTextInput as TextInput } from '../components/Typogr
 import Pagination, { usePagination } from '../components/ui/Pagination';
 import PriceHistorySheet from '../components/PriceHistorySheet';
 import { hapticFeedback } from '../utils/haptics';
+import AnalyticsTabs from '../components/analytics/AnalyticsTabs';
 
 export default function AnalyticsScreen({ navigation, route }) {
   const { t } = useTranslation();
@@ -354,36 +355,10 @@ export default function AnalyticsScreen({ navigation, route }) {
         />
 
         {/* ── 2. 4 Segmented Navigation Tabs ── */}
-        <View style={s.segmentedTabBar}>
-          {[
-            { key: 'overview', label: 'Overview', icon: 'pie-chart' },
-            { key: 'costs', label: 'Costs', icon: 'cash' },
-            { key: 'operations', label: 'Operations', icon: 'construct' },
-            { key: 'market', label: 'Market', icon: 'trending-up' }
-          ].map(tabItem => {
-            const isActive = activeTab === tabItem.key;
-            return (
-              <TouchableOpacity
-                key={tabItem.key}
-                style={[s.segmentedTabBtn, isActive && s.segmentedTabBtnActive]}
-                onPress={() => {
-                  hapticFeedback.light();
-                  setActiveTab(tabItem.key);
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={tabItem.icon}
-                  size={14}
-                  color={isActive ? COLORS.primary : COLORS.textMuted}
-                />
-                <Text style={[s.segmentedTabText, isActive && s.segmentedTabTextActive]}>
-                  {tabItem.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <AnalyticsTabs activeTab={activeTab} onChange={tab => {
+          hapticFeedback.light();
+          setActiveTab(tab);
+        }} />
 
         {/* ═══════════════════════════════════════════════════════════ */}
         {/* TAB 1: OVERVIEW                                            */}
@@ -551,6 +526,7 @@ export default function AnalyticsScreen({ navigation, route }) {
               </Text>
               <ActivityFrequencyList
                 ranking={operationsAnalytics.frequencyRanking}
+                resetKey={JSON.stringify([session?.employeeId || session?.id, selectedFarmId, selectedFieldId, selectedSeason, selectedPeriod])}
               />
             </Card>
           </View>
@@ -685,40 +661,6 @@ const s = StyleSheet.create({
     lineHeight: 16,
     color: COLORS.warning,
     marginTop: 2
-  },
-  segmentedTabBar: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surfaceSubtle,
-    borderRadius: RADIUS.full,
-    padding: 3,
-    gap: 3
-  },
-  segmentedTabBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 9,
-    paddingHorizontal: 2,
-    minHeight: 38,
-    borderRadius: RADIUS.full
-  },
-  segmentedTabBtnActive: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.full,
-    ...SHADOW.card
-  },
-  segmentedTabText: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    textAlign: 'center'
-  },
-  segmentedTabTextActive: {
-    color: COLORS.primaryDark,
-    fontWeight: '800'
   },
   overviewKpiCard: {
     padding: SPACING.md

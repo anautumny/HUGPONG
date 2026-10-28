@@ -8,6 +8,7 @@
 
 import { friendlyErrorMessage } from '../domain/presentationContract';
 import { fetchOperationPages } from './operationPages';
+import { assertWebOnline } from './onlinePolicy';
 
 // Most HUGPONG records change only after an explicit server mutation. Keep a
 // short shared cache for route changes/focus churn, then revalidate in the
@@ -168,6 +169,7 @@ export function createMutationContext(path, body, suppliedBaseVersion = null) {
 }
 
 export async function authenticatedRequest(path, options = {}) {
+  assertWebOnline();
   const token = options.token || '';
   const method = String(options.method || 'GET').toUpperCase();
   const isMutation = !['GET', 'HEAD'].includes(method);
@@ -205,6 +207,11 @@ export async function authenticatedRequest(path, options = {}) {
       signal: controller.signal
     });
   } catch (cause) {
+    if (options.signal?.aborted) {
+      throw Object.assign(new Error('The request was canceled.'), { code: 'REQUEST_ABORTED' });
+    }
+    clearReadCache();
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('hugpong:api-unavailable'));
     const timedOut = cause?.name === 'AbortError' && !options.signal?.aborted;
     const referenceId = networkReference();
     const message = timedOut
@@ -223,6 +230,10 @@ export async function authenticatedRequest(path, options = {}) {
   const result = await response.json().catch(() => ({}));
 
   if (!response.ok || !result.success) {
+    if (response.status >= 500 && typeof window !== 'undefined') {
+      clearReadCache();
+      window.dispatchEvent(new CustomEvent('hugpong:api-unavailable'));
+    }
     const errorCode = result.code || result.data?.code || '';
     const error = responseErrorFromPayload(result, response.status);
     const waitSeconds = retryAfterSeconds(response, result);
@@ -256,6 +267,7 @@ export async function authenticatedRequest(path, options = {}) {
 }
 
 export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_TTL_MS } = {}) {
+  try { assertWebOnline(); } catch (error) { return Promise.reject(error); }
   const now = Date.now();
   const cached = readCache.get(path);
   if (!force && cached && now - cached.createdAt < maxAgeMs) {

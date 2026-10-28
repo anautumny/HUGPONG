@@ -5,7 +5,8 @@ import {
   Text as NativeText,
   TextInput as NativeTextInput,
 } from 'react-native';
-import { FONT_FAMILY } from '../theme';
+import { FONT_FAMILY, COLORS } from '../theme';
+import { readableTextMetrics } from '../domain/readableTypography';
 
 export { FONT_FAMILY } from '../theme';
 
@@ -37,8 +38,10 @@ const normalizeWeight = (fontWeight) => {
   return Math.min(900, Math.max(300, Math.round(numericWeight / 100) * 100));
 };
 
-const resolveTypographyStyle = (style, requestedFamily) => {
-  const flattened = StyleSheet.flatten(style) || {};
+const resolveTypographyStyle = (style, requestedFamily, compactBadge = false) => {
+  const original = StyleSheet.flatten(style) || {};
+  // Icon counters retain their compact metrics; descriptions use the readable scale.
+  const flattened = compactBadge ? original : readableTextMetrics(original, COLORS.textMuted, COLORS.textSecondary);
   const declaredFamily = requestedFamily || flattened.fontFamily || FONT_FAMILY.body;
 
   // Technical identifiers deliberately retain the platform monospace face.
@@ -46,7 +49,7 @@ const resolveTypographyStyle = (style, requestedFamily) => {
 
   // Preserve icon fonts and any explicitly declared third-party font family.
   if (declaredFamily !== FONT_FAMILY.body && declaredFamily !== FONT_FAMILY.display) {
-    return flattened;
+    return original;
   }
 
   const weight = normalizeWeight(flattened.fontWeight);
@@ -71,19 +74,29 @@ export const AppText = forwardRef(function AppText(
   {
     family,
     style,
+    variant,
     allowFontScaling = true,
     maxFontSizeMultiplier = 1.8,
+    adjustsFontSizeToFit = false,
+    minimumFontScale = 0,
     ...props
   },
   ref,
 ) {
+  const resolvedStyle = resolveTypographyStyle(style, family, variant === 'badge');
+  const explicitSize = resolvedStyle.fontSize;
+  // Small labels wrap/truncate according to their screen layout rather than
+  // shrinking below the shared minimum. Larger headings may still scale to fit.
+  const canShrink = adjustsFontSizeToFit && explicitSize > 14;
   return (
     <NativeText
       ref={ref}
       {...props}
       allowFontScaling={allowFontScaling}
       maxFontSizeMultiplier={maxFontSizeMultiplier}
-      style={[styles.responsiveText, resolveTypographyStyle(style, family)]}
+      adjustsFontSizeToFit={canShrink}
+      minimumFontScale={canShrink ? Math.min(1, Math.max(minimumFontScale, 14 / explicitSize)) : 1}
+      style={[styles.responsiveText, resolvedStyle]}
     />
   );
 });

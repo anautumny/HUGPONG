@@ -19,6 +19,7 @@ import { useTranslation, LANGUAGES } from '../services/i18n';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { canCreateSupportTicket, SUPPORT_TICKET_CATEGORIES } from '../domain/supportTickets';
 import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
+import { accountBlockFarmId, blockFarmDisplayName } from '../domain/assignmentPresentation';
 
 const TICKET_CATEGORY_TRANSLATION_KEYS = {
   'Account / Login': 'ticket_category_account',
@@ -72,10 +73,13 @@ export default function ProfileScreen({ navigation }) {
   const memberFields = fields.filter(field => field.memberUserId === sessionUserId);
   const managedFarm = blockFarms.find(farm => farm.managerUserId === sessionUserId);
   const memberFarm = blockFarms.find(farm => farm.id === memberFields[0]?.blockFarmId);
-  const sessionFarm = blockFarms.find(farm => farm.id === (session?.blockFarmId || session?.affiliatedBlockFarmId));
+  const sessionFarm = blockFarms.find(farm => farm.id === accountBlockFarmId(session));
   const assignedFarm = session?.role === 'Farm Manager'
     ? (managedFarm || sessionFarm)
     : (memberFarm || sessionFarm);
+  const assignedFarmId = assignedFarm?.id || (session?.role === 'Farm Manager'
+    ? accountBlockFarmId(session) || memberFields[0]?.blockFarmId
+    : memberFields[0]?.blockFarmId || accountBlockFarmId(session));
   const activeAdminFarms = blockFarms.filter(farm => String(farm.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
   const farmAreaFromServer = activeAdminFarms.reduce((sum, farm) => sum + Number(
     farm.effectiveAreaHa ?? farm.declaredAreaHa ?? farm.declaredHa ?? farm.allocatedAreaHa ?? 0
@@ -673,7 +677,7 @@ export default function ProfileScreen({ navigation }) {
               key: 'farm_agency',
               icon: 'business', 
               label: session?.role === 'SRA Admin' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm')),
-              value: session?.role === 'SRA Admin' ? 'Sugar Regulatory Administration (SRA)' : (assignedFarm?.name || t('profile_unassigned', 'Unassigned'))
+              value: session?.role === 'SRA Admin' ? 'Sugar Regulatory Administration (SRA)' : blockFarmDisplayName(assignedFarmId, blockFarms, t('profile_unassigned', 'Unassigned'))
             },
             { 
               key: 'field_scope',
@@ -939,9 +943,6 @@ export default function ProfileScreen({ navigation }) {
           </Text>
         </TouchableOpacity>
 
-        <Text style={s.footerNote}>
-          {t('profile_footer', 'v1.0.0 · HUGPONG Agricultural Platform\nOffline data may be cached on this device.')}
-        </Text>
       </ScrollView>
 
       
@@ -1060,7 +1061,6 @@ const s = StyleSheet.create({
     marginTop: 4
   },
   signOutText: { fontSize: 15, fontWeight: '700', color: COLORS.danger },
-  footerNote: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', lineHeight: 18, marginTop: 8 },
 
   // Tickets Modal Styles
   ticketOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

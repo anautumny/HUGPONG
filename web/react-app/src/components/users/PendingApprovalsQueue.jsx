@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { UserCheck, CheckCircle2, Clock, Phone, MapPin, AlertCircle, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import Button from '../ui/Button';
+import { accountBlockFarmId } from '../../domain/assignmentPresentation';
 import {
   DEFAULT_PHONE_VERIFICATION_REASON,
   PHONE_VERIFICATION_REASONS,
@@ -118,7 +119,8 @@ export default function PendingApprovalsQueue({
 
       <div className="divide-y divide-border/50">
         {pagedUsers.map((p) => {
-          const farmName = farmMap.get(p.requestedBlockFarmId) || p.requestedBlockFarmId || 'Unassigned Farm';
+          const displayFarmId = accountBlockFarmId(p);
+          const farmName = farmMap.get(displayFarmId) || displayFarmId || 'Unassigned Farm';
           const isProcessing = processingId === p.id;
           const selectedFarmId = farmSelections[p.id] ?? p.requestedBlockFarmId ?? '';
           const requiresPhoneVerification = !p.phoneVerified;

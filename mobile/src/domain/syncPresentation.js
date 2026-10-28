@@ -1,4 +1,5 @@
 const FRIENDLY_SYNC_REASONS = Object.freeze({
+  QUEUE_STORAGE_UNAVAILABLE: 'Saved offline work could not be loaded. Retry Sync Now without clearing local storage.',
   OFFLINE: 'No connection to the server.',
   SERVER_UNAVAILABLE: 'The HUGPONG server is temporarily unavailable.',
   RATE_LIMITED: 'The server is busy. Synchronization will resume automatically after the required wait.',
@@ -28,6 +29,9 @@ export function syncResultReason(result = {}) {
 }
 
 export function syncResultMessage(result = {}) {
+  if (result.reason === 'QUEUE_STORAGE_UNAVAILABLE') {
+    return `${result.error || FRIENDLY_SYNC_REASONS.QUEUE_STORAGE_UNAVAILABLE}\n\nThe pending count is unknown until the saved queue can be read.`;
+  }
   const remaining = Number(result.remainingCount || 0);
   if (remaining === 0) {
     return `${Number(result.processedCount || 0)} queued change(s) synchronized. No changes remain.`;

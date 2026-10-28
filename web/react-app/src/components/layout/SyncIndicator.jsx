@@ -9,7 +9,7 @@ export default function SyncIndicator({ compact = false }) {
     return (
       <div
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-danger-bg text-danger border border-danger/20"
-        title="Internet connection lost. Live server actions will resume after reconnection; pending work remains saved."
+        title="The Web console requires an internet connection. Reconnect to continue."
         role="status"
         aria-live="polite"
       >

@@ -5,7 +5,6 @@ import {
   subscribeToAuthenticatedLoader
 } from './apiClient';
 import { sortCropYearsNewestFirst, uniqueRecordsById } from '../utils/recordOrdering';
-import { applyPendingStageUpdate } from './cropStageOutbox';
 
 function normalizedRole(user) {
   return String(user?.canonicalRole || user?.role || user?.roleKey || '')
@@ -53,7 +52,7 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
       const cycle = cycleMap.get(field.currentCycleId) || null;
       const member = memberMap.get(field.memberUserId) || null;
       const farm = farmMap.get(field.blockFarmId) || null;
-      return applyPendingStageUpdate({
+      return {
         ...field,
         stageNumber: cycle?.currentStageNumber ?? null,
         isCompleted: Boolean(cycle?.completedAt),
@@ -63,7 +62,7 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
         memberName: member?.displayName || member?.name || field.memberUserId || 'Unassigned',
         memberPhone: member?.phone || member?.contact || '',
         blockFarmName: farm?.name || field.blockFarmId || 'Unknown Farm'
-      }, user);
+      };
     }).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     return { fields, cropCycles, blockFarms, memberUsers };
   }, {

@@ -1,6 +1,6 @@
 # HUGPONG Agricultural Management Platform
 
-HUGPONG is an offline-first sugarcane field-operations and regulatory oversight system for Block Farms in Silay City.
+HUGPONG provides offline-first Android field operations and an online-only Web management console for Block Farms in Silay City.
 
 ## User manual
 
@@ -31,6 +31,10 @@ for hosting and installation verification.
 The mobile app requires an explicit `EXPO_PUBLIC_API_BASE_URL` and the `EXPO_PUBLIC_FIREBASE_*` values listed in `mobile/.env.example`. Web requires the matching `VITE_FIREBASE_*` values in `web/react-app/.env.example`, while the server receives its project identity through credentials or `FIREBASE_PROJECT_ID`. Production values belong in the deployment environment. The mobile app never guesses, probes, or caches alternate API hosts. See [`docs/MOBILE_API_CONNECTIVITY_AND_DEPLOYMENT.md`](docs/MOBILE_API_CONNECTIVITY_AND_DEPLOYMENT.md).
 
 Development reset and test-account creation are explicit, separately gated server scripts. Runtime login screens do not contain mock-session or role-bypass controls.
+
+For the one-time NACAYAO cleanup, five removable beta members and sample operations,
+see [NACAYAO beta data](docs/NACAYAO_BETA_DATA.md). That workflow preserves admin
+accounts and published prices and includes a separate end-of-beta removal command.
 
 Before release, run `npm run verify:release` from the repository root. It checks deployment configuration parity, runtime authority, server and Web tests, the Web production build, and the Android Expo export. The same gate runs in continuous verification. The separate live database audit remains `npm --prefix server run audit:legacy-data`. See [`docs/PHASE_5_RELEASE_READINESS.md`](docs/PHASE_5_RELEASE_READINESS.md) and [`docs/PHASE_6_DEPLOYMENT_AUTOMATION.md`](docs/PHASE_6_DEPLOYMENT_AUTOMATION.md).
 

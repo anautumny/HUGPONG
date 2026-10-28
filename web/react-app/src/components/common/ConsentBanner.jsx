@@ -57,7 +57,7 @@ export default function ConsentBanner() {
             </span>
           </h2>
           <p className="text-xs text-hug-text2 leading-relaxed">
-            HUGPONG uses strictly necessary local storage (session tokens &amp; offline field caches) to maintain agricultural operations. We do <strong>not</strong> use advertising or commercial tracking cookies.
+            HUGPONG uses strictly necessary cookies and storage for sign-in, preferences, and saved forms. The Web console requires an internet connection. We do <strong>not</strong> use advertising or commercial tracking cookies.
           </p>
           <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
             <Link

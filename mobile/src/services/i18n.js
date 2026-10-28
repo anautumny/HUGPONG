@@ -480,7 +480,6 @@ export const TRANSLATIONS = {
     profile_sra_circular: 'SRA Circular Version:',
     profile_central_node: 'Cloud Central Node:',
     profile_operational_uptime: 'Operational (100% Uptime)',
-    profile_footer: 'v1.0.0 · HUGPONG Agricultural Platform\nOffline data may be cached on this device.',
 
     // Security & Password Screen
     sec_title: 'Security & Password',
@@ -2209,7 +2208,6 @@ export const TRANSLATIONS = {
     profile_sra_circular: 'Bersyon ng SRA Circular:',
     profile_central_node: 'Sentral na Node sa Cloud:',
     profile_operational_uptime: 'Gumagana (100% Uptime)',
-    profile_footer: 'v1.0.0 · HUGPONG Agricultural Platform\nMaaaring may offline data na naka-cache sa device na ito.',
 
     // Security & Password Screen
     sec_title: 'Seguridad at Password',
@@ -3940,7 +3938,6 @@ export const TRANSLATIONS = {
     profile_sra_circular: 'Bersyon sang SRA Circular:',
     profile_central_node: 'Sentral nga Node sa Cloud:',
     profile_operational_uptime: 'Naga-andar (100% Uptime)',
-    profile_footer: 'v1.0.0 · HUGPONG Agricultural Platform\nMay offline data nga mahimo ma-cache sa sini nga device.',
 
     // Security & Password Screen
     sec_title: 'Seguridad kag Password',

@@ -139,10 +139,10 @@ export default function LandingView() {
                 01
               </div>
               <h2 className="text-sm font-bold text-hug-text">
-                Offline-First Farm Operations
+                Connected Farm Management
               </h2>
               <p className="text-xs text-hug-muted mt-1 leading-relaxed">
-                Manage block farms and fields, and record six-stage activities, labor, and costs with offline support.
+                Manage block farms and fields online. Use the Android app to record field work offline and synchronize when connected.
               </p>
             </div>
 

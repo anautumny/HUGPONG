@@ -82,7 +82,7 @@ test('language persistence and long-label layouts are guarded against regression
   assert.match(selector, /flexWrap:\s*'wrap'/);
   assert.match(selector, /minWidth:\s*0/);
   assert.match(bottomTabs, /numberOfLines=\{2\}/);
-  assert.match(bottomTabs, /tabLabel:\s*\{[^}]*minHeight:\s*28/);
+  assert.match(bottomTabs, /tabLabel:\s*\{[^}]*fontSize:\s*14[^}]*lineHeight:\s*20[^}]*minHeight:\s*40/);
   assert.match(planner, /useTranslation\(\)/);
   assert.match(syncMonitor, /useTranslation\(\)/);
   assert.match(profile, /t\('ticket_tab_history',\s*'History'\)/);

@@ -51,7 +51,7 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
           title: roleKey === ROLE_KEYS.SUPER_ADMIN ? 'System Sync Monitor' : 'Sync Monitor',
           subtitle: roleKey === ROLE_KEYS.SUPER_ADMIN
             ? 'Platform-wide terminal activity and synchronization health'
-            : 'Network telemetry, offline replication, and outbox state'
+            : 'Mobile device connectivity and pending synchronization'
         };
       case '/support':
         return {

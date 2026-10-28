@@ -8,12 +8,13 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import MobileBottomNav from './MobileBottomNav';
 import { fetchBackupStatus } from '../../services/backupService';
+import WebConnectionRequired from './WebConnectionRequired';
 
 const STORAGE_COLLAPSED_KEY = 'hugpong_sidebar_collapsed';
 
 export default function AppShell() {
-  const { user, roleKey, isAuthenticated, isLoading, logout } = useAuth();
-  const { isOnline, networkOnline, reconnectNotice, dismissReconnectNotice } = useSync();
+  const { user, roleKey, isAuthenticated, isLoading, logout, sessionUnavailable, refreshSession } = useAuth();
+  const { isOnline, networkOnline, apiReachable, retryConnection, reconnectNotice, dismissReconnectNotice } = useSync();
   const navigate = useNavigate();
   const [isReturningToLogin, setIsReturningToLogin] = useState(false);
   const [mutationCooldownSeconds, setMutationCooldownSeconds] = useState(0);
@@ -136,6 +137,12 @@ export default function AppShell() {
     );
   }
 
+  const connectionBlocked = !isOnline || sessionUnavailable;
+  const connectionPrompt = <WebConnectionRequired networkOnline={networkOnline} checking={apiReachable === null}
+    onRetry={() => { retryConnection(); void refreshSession(); }} />;
+
+  if (!isAuthenticated && sessionUnavailable) return connectionPrompt;
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
@@ -166,7 +173,9 @@ export default function AppShell() {
   }
 
   return (
-    <div className="app-shell flex h-screen min-h-0 overflow-hidden bg-bg text-hug-text font-sans print:h-auto print:overflow-visible print:bg-white print:block">
+    <>
+    <div inert={connectionBlocked ? true : undefined} aria-hidden={connectionBlocked || undefined}
+      className="app-shell flex h-screen min-h-0 overflow-hidden bg-bg text-hug-text font-sans print:h-auto print:overflow-visible print:bg-white print:block">
       {/* Desktop Persistent Sidebar */}
       <div className="hidden lg:block h-full flex-shrink-0 print:hidden no-print">
         <Sidebar
@@ -274,31 +283,15 @@ export default function AppShell() {
                   ? 'Restoring connection'
                   : reconnectNotice.phase === 'restored'
                     ? 'Connection restored'
-                    : reconnectNotice.phase === 'attention'
-                      ? 'Connection restored — sync needs attention'
-                      : 'HUGPONG server still unavailable'}
+                    : 'HUGPONG server still unavailable'}
               </p>
               <p className="mt-1 text-xs leading-5 text-hug-muted">
                 {reconnectNotice.phase === 'reconnecting'
-                  ? 'Checking HUGPONG and synchronizing saved changes…'
+                  ? 'Checking the HUGPONG connection…'
                   : reconnectNotice.phase === 'restored'
-                    ? 'Automatic synchronization is complete and live data has been refreshed.'
-                    : reconnectNotice.phase === 'attention'
-                      ? `${reconnectNotice.remainingCount || 1} saved stage update(s) still need review. Open Field Operations to retry or resolve them.`
-                      : 'Your internet is back, but HUGPONG cannot be reached yet. The connection check will retry automatically.'}
+                    ? 'HUGPONG is available. Live data is being refreshed.'
+                    : 'Your internet is back, but HUGPONG cannot be reached yet. The connection check will retry automatically.'}
               </p>
-              {reconnectNotice.phase === 'attention' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    dismissReconnectNotice();
-                    navigate('/operations');
-                  }}
-                  className="mt-3 rounded-xl bg-primary px-3 py-2 text-xs font-bold text-white"
-                >
-                  Open Field Operations
-                </button>
-              )}
             </div>
             {reconnectNotice.phase !== 'reconnecting' && (
               <button
@@ -314,5 +307,7 @@ export default function AppShell() {
         </aside>
       )}
     </div>
+    {connectionBlocked && connectionPrompt}
+    </>
   );
 }

@@ -530,7 +530,7 @@ export default function HomeScreen({ navigation }) {
         right={
         <TouchableOpacity style={s.notifBtn} onPress={openNotifs}>
           <Ionicons name="notifications-outline" size={22} color={COLORS.text} />
-          {unreadCount > 0 && <View style={s.badge}><Text style={s.badgeText}>{unreadCount}</Text></View>}
+          {unreadCount > 0 && <View style={s.badge}><Text variant="badge" style={s.badgeText}>{unreadCount}</Text></View>}
         </TouchableOpacity>
       } />
 
@@ -778,6 +778,7 @@ export default function HomeScreen({ navigation }) {
           <MemberHomeView
             session={session}
             myFields={fields.filter(field => field.memberUserId === (session?.employeeId || session?.id))}
+              blockFarms={blockFarms}
             navigation={navigation}
             onManualSync={handleManualSync}
           />
@@ -869,10 +870,10 @@ const s = StyleSheet.create({
   notifBtn: { position: 'relative', padding: 6 },
   badge: {
     position: 'absolute', top: 2, right: 2,
-    backgroundColor: COLORS.danger, width: 16, height: 16,
-    borderRadius: 8, alignItems: 'center', justifyContent: 'center'
+    backgroundColor: COLORS.danger, minWidth: 20, minHeight: 20, paddingHorizontal: 3, paddingVertical: 2,
+    borderRadius: 10, alignItems: 'center', justifyContent: 'center'
   },
-  badgeText: { color: COLORS.textInverse, fontSize: 9, fontWeight: '800' },
+  badgeText: { color: COLORS.textInverse, fontSize: 11, lineHeight: 14, fontWeight: '800' },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
@@ -1087,7 +1088,7 @@ const s = StyleSheet.create({
   chartBarsRow: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 110 },
   barGroup: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 1 },
   bar: { flex: 1, borderRadius: 3 },
-  chartXAxisRow: { flexDirection: 'row', gap: 4, marginTop: 6, height: 18 },
+  chartXAxisRow: { flexDirection: 'row', gap: 4, marginTop: 6, minHeight: 20 },
   chartXAxisCol: { flex: 1, alignItems: 'center' },
   xLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textAlign: 'center' },
   legendRow: {

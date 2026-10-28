@@ -65,7 +65,7 @@ test('approved affiliation is visible on Web and Mobile before a field is alloca
   assert.match(directory, /MEMBER_AFFILIATION/);
   assert.match(directory, /Awaiting plot allocation/);
   assert.match(webDirectory, /assignment\?\.displayLabel/);
-  assert.match(mobileProfile, /session\?\.blockFarmId \|\| session\?\.affiliatedBlockFarmId/);
+  assert.match(mobileProfile, /accountBlockFarmId\(session\)/);
   assert.match(mobileProfile, /memberFarm \|\| sessionFarm/);
 });
 

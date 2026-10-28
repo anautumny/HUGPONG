@@ -69,7 +69,7 @@ test('reset remains separate from explicit account bootstrap and runtime startup
   assert.doesNotMatch(operationsService, /sample|mock|seed/i);
 });
 
-test('mobile cache epochs invalidate old replicas and React web keeps no legacy database cache', () => {
+test('mobile startup versions its cache without deleting work and React web keeps no legacy database cache', () => {
   const mobileStorage = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'storageService.js'), 'utf8');
   const mobileDataStore = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'data', 'dataStore.js'), 'utf8');
   const webAuth = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'context', 'AuthContext.jsx'), 'utf8');
@@ -81,7 +81,8 @@ test('mobile cache epochs invalidate old replicas and React web keeps no legacy 
 
   assert.match(mobileStorage, /MOBILE_CACHE_SCHEMA_VERSION = '2026_09_17_post_reset_v1'/);
   assert.match(mobileStorage, /expo-secure-store/);
-  assert.match(mobileStorage, /key\.startsWith\('@hugpong_'\)/);
+  const migration = mobileStorage.slice(mobileStorage.indexOf('export async function ensureCurrentCacheSchema()'), mobileStorage.indexOf('export async function getItem('));
+  assert.doesNotMatch(migration, /multiRemove|removeItem|deleteItemAsync|\.clear\(/);
   assert.match(mobileDataStore, /await ensureCurrentCacheSchema\(\)/);
   assert.doesNotMatch(mobileDataStore, /@hugpong_clean_prod_v2/);
   assert.match(webAuth, /localStorage\.removeItem\('hugpong_auth_token'\)/);

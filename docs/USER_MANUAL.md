@@ -170,6 +170,8 @@ Use the left sidebar for workspaces and the account menu for settings, support w
 
 The main tabs are **Home**, **Planner**, **Field Ops**, and **Profile**, subject to role and connection. SRA Admins use **Field Ops** as the Audit Desk and do not have the Planner tab. Analytics and Sync Monitor open from the relevant dashboard or screen controls.
 
+Mobile uses a shared font scale across all tabs, with secondary text at least 14 points and darker supporting text. Your phone's font-size setting also applies; longer descriptions can wrap to additional lines.
+
 For Farm Members and Farm Managers, offline navigation emphasizes field work. Some Home, Profile, and management controls are unavailable until connectivity returns. Farm Member planning remains available within the supported offline navigation.
 
 ### Filters and detail views
@@ -464,6 +466,8 @@ Check the reporting period and effective date. A blank or unquoted period is not
 
 Production costs describe recorded operations; planner estimates describe intended work. A price reference alone does not establish farm income or profit. Cached analytics may be older than live data; inspect the snapshot time where shown.
 
+On Android, the activity frequency ranking shows five activity types per page. Use **Previous** and **Next** to reach all standard and custom activities. Rank numbers continue across pages; activity shares and analytics totals use the complete filtered set. Changing the farm, field, Crop Year Cycle, or reporting period returns the ranking to the first page. Web keeps its full activity grid.
+
 ## 12. Offline work and synchronization
 
 ### 12.1 What remains available
@@ -478,9 +482,11 @@ Production costs describe recorded operations; planner estimates describe intend
 | Current audit QR lookup | Requires the server to retrieve the full report; Android can retain a scan for retry |
 | SRA import, return, certification, publication, or crop-year compilation | Requires server confirmation; do not treat local viewing as an official action |
 | Support creation | Supported local queues retain pending submissions for later delivery |
-| Web operation entry | Drafts can be local; most official actions require connectivity. Supported stage and ticket queues do not make the whole console offline-capable |
+| Web Management Console | Online-only. A live server connection is required for access and submissions; stage changes and support tickets are never queued for automatic offline replay |
 
 Offline work depends on having previously signed in and loaded the authorized data. SRA cached views do not provide an offline pending-review queue or permission to certify.
+
+The Web console blocks interaction when the internet connection or HUGPONG server is unavailable. Reconnect and choose **Retry connection** if needed. Forms already open can remain in memory, and saved form drafts may be retained, but this does not provide offline Web access or background submission. Browser queues saved by older releases are not automatically submitted or deleted; retain them for administrator review before clearing browser storage.
 
 ### 12.2 Read synchronization states
 
@@ -506,6 +512,8 @@ An internet connection and a working HUGPONG server are separate requirements. *
 A retry can resume a saved change without creating a new record. Avoid creating another operation to work around a failed upload. For a conflict, compare the saved and current values with the Farm Manager before deciding how to correct the record.
 
 ### 12.4 Protect local work
+
+If Android cannot read its saved queue, new saves and synchronization pause instead of replacing it with an empty queue. Sync Monitor shows the storage error and an unknown pending count. Retry **Sync Now** after the device can read storage again. Do not clear storage to resolve this error.
 
 Do not uninstall, clear app data, use **Clear Local Cache**, or clear browser storage while drafts or unsynchronized changes are still needed. These actions can remove local work. A phone's local queue is not a substitute for the central business-data backup.
 
@@ -537,7 +545,7 @@ Farm Members, Farm Managers, and SRA Admins can create tickets. Super Admins han
 2. Select a category: Account / Login; Synchronization; Field / Operation Data; Audit / QR; SRA Price; or Other.
 3. Enter a short subject and a clear description of what happened.
 4. Include relevant field, operation, report, or error-reference IDs and the approximate time. Never include your password or SMS code.
-5. Submit once and check its state. **Pending Submission** means it is queued locally; **Open** means the server received it.
+5. Submit once and check its state. On Android, **Pending Submission** means it is queued locally. Web requires an online server response and does not queue support tickets. **Open** means the server received the ticket.
 6. Use **My Tickets** or the Active view to read replies and add a follow-up while the ticket is active.
 7. Use **History** or **Ticket History** for resolved and closed tickets.
 

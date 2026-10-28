@@ -136,7 +136,7 @@ export const COLORS = {
 
 // ── Typography Scale ────────────────────────────────────────────
 // Standardized hierarchy: readable for outdoor and 40+ users
-// Minimum metadata size: 12px; Body: 16px; Titles: 22-24px bold; Section: 18-20px semibold
+// Minimum app text: 14px; Body: 16px; Titles: 22-24px bold; Section: 18-20px semibold
 export const FONT_FAMILY = Object.freeze({
   body: 'Inter',
   display: 'Plus Jakarta Sans',
@@ -153,12 +153,12 @@ export const TYPE = {
   body:          { fontSize: 16, fontWeight: '400', lineHeight: 24 },
   bodyLg:        { fontSize: 16, fontWeight: '400', lineHeight: 24 },
   bodyMd:        { fontSize: 14, fontWeight: '400', lineHeight: 22 },
-  bodySm:        { fontSize: 13, fontWeight: '400', lineHeight: 20 },
+  bodySm:        { fontSize: 14, fontWeight: '400', lineHeight: 20 },
 
   // Forms & UI
   formLabel:     { fontSize: 14, fontWeight: '500', lineHeight: 20 },
   supporting:    { fontSize: 14, fontWeight: '400', lineHeight: 20 },
-  metadata:      { fontSize: 12, fontWeight: '500', lineHeight: 16 },
+  metadata:      { fontSize: 14, fontWeight: '500', lineHeight: 20 },
 
   // Backward compatible display / headings
   displayLg:     { fontFamily: FONT_FAMILY.display, fontSize: 32, fontWeight: '700', letterSpacing: -0.6, lineHeight: 38 },
@@ -171,13 +171,13 @@ export const TYPE = {
   // Labels
   labelLg:       { fontSize: 15, fontWeight: '500', letterSpacing: 0.1 },
   labelMd:       { fontSize: 14, fontWeight: '500', letterSpacing: 0.1 },
-  labelSm:       { fontSize: 13, fontWeight: '500', letterSpacing: 0.1 },
-  labelXs:       { fontSize: 12, fontWeight: '500', letterSpacing: 0.2 },
+  labelSm:       { fontSize: 14, fontWeight: '500', letterSpacing: 0.1 },
+  labelXs:       { fontSize: 14, fontWeight: '500', letterSpacing: 0.2 },
 
-  // Captions & Metadata (min 12px)
-  caption:       { fontSize: 12, fontWeight: '400', lineHeight: 16 },
-  captionBold:   { fontSize: 12, fontWeight: '600', lineHeight: 16 },
-  overline:      { fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
+  // Captions & Metadata (min 14px)
+  caption:       { fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  captionBold:   { fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  overline:      { fontSize: 14, fontWeight: '600', letterSpacing: 0.5 },
 
   // Number / Data displays
   dataXl:        { fontSize: 32, fontWeight: '700', letterSpacing: -0.5 },

@@ -11,12 +11,7 @@ import {
   rejectCropYearCycleRollover
 } from '../../services/fieldsService';
 import { fromOperation } from '../../services/firestoreSchema';
-import {
-  applyPendingStageUpdate,
-  flushCropStageOutbox,
-  subscribeToCropStageOutbox,
-  updateCropStageOfflineFirst
-} from '../../services/cropStageOutbox';
+import { updateCropStage } from '../../services/cropStageService';
 import { subscribeToAuditReports } from '../../services/auditService';
 import {
   appendUniqueArchiveRecords,
@@ -313,28 +308,6 @@ export default function OperationsView() {
   }, [user?.id, user?.employeeId]);
 
   useEffect(() => {
-    const refreshPendingStages = () => {
-      setFieldsData(previous => ({
-        ...previous,
-        fields: (previous.fields || []).map(field => applyPendingStageUpdate(field, user))
-      }));
-    };
-    const flush = () => flushCropStageOutbox(user)
-      .then(result => {
-        if (result.failedEntry) setUpdateSuccess(result.failedEntry.lastError || 'A pending stage change needs review.');
-      })
-      .catch(error => setUpdateSuccess(error.message));
-    const unsubscribe = subscribeToCropStageOutbox(refreshPendingStages);
-    window.addEventListener('hugpong:connection-restored', flush);
-    flush();
-    refreshPendingStages();
-    return () => {
-      unsubscribe();
-      window.removeEventListener('hugpong:connection-restored', flush);
-    };
-  }, [user?.id, user?.employeeId]);
-
-  useEffect(() => {
     if (!isManager) {
       setAuditReports([]);
       return undefined;
@@ -535,7 +508,7 @@ export default function OperationsView() {
     setCompletingStageFieldId(field.id);
     try {
       const grant = capability.takeover ? takeoverGrant : null;
-      const result = await updateCropStageOfflineFirst({
+      const result = await updateCropStage({
         user,
         field,
         currentStageNumber: nextStage,
@@ -545,21 +518,18 @@ export default function OperationsView() {
       setFieldsData(previous => ({
         ...previous,
         fields: (previous.fields || []).map(item => item.id === field.id
-          ? applyPendingStageUpdate({
+          ? {
             ...item,
-            stageNumber: nextStage,
-            isCompleted: completesCycle,
+            stageNumber: result.data.currentStageNumber,
+            isCompleted: Boolean(result.data.completedAt),
             cropCycle: {
               ...(item.cropCycle || {}),
-              currentStageNumber: nextStage,
-              completedAt: completesCycle ? new Date().toISOString() : null
+              ...result.data
             }
-          }, user)
+          }
           : item)
       }));
-      setUpdateSuccess(result.queued
-        ? `Stage ${currentStage} completion is saved offline and pending server validation.`
-        : completesCycle
+      setUpdateSuccess(completesCycle
           ? 'Crop Year Cycle completed and synchronized.'
           : `Stage ${currentStage} completed. Stage ${nextStage} is now active.`);
     } catch (error) {
@@ -1148,7 +1118,7 @@ export default function OperationsView() {
                 const capability = getOperationCapabilities(user, field, takeoverSession);
                 const cycle = field.cropCycle;
                 const cycleSummary = cycle
-                  ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${field.stageNumber || cycle.currentStageNumber || 1}${field.isCompleted ? ' complete' : ''}`, field.stageSyncStatus === 'conflict' ? 'Sync conflict' : field.stageSyncStatus === 'rejected' ? 'Sync rejected' : field.stageSyncPending ? 'Pending sync' : cycle.status]
+                  ? [cycle.cropType || field.cycleType, formatCropYearDisplay(cycle.cropYear || field.cropYear), `Stage ${field.stageNumber || cycle.currentStageNumber || 1}${field.isCompleted ? ' complete' : ''}`, cycle.status]
                     .filter(Boolean).join(' · ')
                   : null;
 

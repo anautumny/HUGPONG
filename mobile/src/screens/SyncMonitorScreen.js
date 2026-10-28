@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe } from '../data/dataStore';
-import { getOutboxDiagnostics, getOutboxPressure, resolveOperationConflict } from '../services/syncEngine';
+import { getOutboxDiagnostics, getOutboxPressure, getOutboxStorageState, resolveOperationConflict } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
@@ -158,6 +158,7 @@ export default function SyncMonitorScreen({ navigation }) {
   }, [navigation, refresh]);
 
   const outbox = React.useMemo(() => getOutboxDiagnostics(), [localRevision]);
+  const storageState = getOutboxStorageState();
   const outboxPage = usePagination(outbox);
   const localPending = outbox.length;
   const queuePressure = React.useMemo(() => getOutboxPressure(), [localRevision]);
@@ -174,7 +175,7 @@ export default function SyncMonitorScreen({ navigation }) {
     ...(own?.sync || {}),
     pendingMutationCount: localPending,
     failedMutationCount: localFailed,
-    state: localFailed > 0 ? 'SYNC_FAILED' : localPending > 0 ? 'PENDING_SYNC' : own?.sync?.state || 'UNKNOWN'
+    state: !storageState.ready || localFailed > 0 ? 'SYNC_FAILED' : localPending > 0 ? 'PENDING_SYNC' : own?.sync?.state || 'UNKNOWN'
   };
 
   const handleSync = async () => {
@@ -213,6 +214,7 @@ export default function SyncMonitorScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={s.content}>
+        {!storageState.ready ? <View style={s.error}><Text style={s.errorText}>{storageState.error || 'Saved offline work is loading. Please wait.'}</Text></View> : null}
         {error ? <View style={s.error}><Text style={s.errorText}>{error}</Text></View> : null}
         {queuePressure.level !== 'normal' ? (
           <View style={[s.backlogNotice, queuePressure.level === 'critical' && s.backlogCritical]}>
@@ -242,7 +244,7 @@ export default function SyncMonitorScreen({ navigation }) {
               <StatusRow label={t('sync_last_active')} value={formatActivity(own?.activity?.lastActiveAt, t, language)} />
               <StatusRow label={t('sync_platform')} value={own?.activity?.lastPlatform || t('sync_not_reported')} />
               <StatusRow label={t('sync_last_successful')} value={formatTime(own?.sync?.lastSuccessfulSyncAt, t, language)} />
-              <StatusRow label={t('sync_pending_device')} value={String(localPending)} />
+              <StatusRow label={t('sync_pending_device')} value={storageState.ready ? String(localPending) : t('sync_not_reported')} />
               <StatusRow label={t('sync_connection')} value={getNetworkStatus() ? t('sync_online') : t('sync_offline')} />
               {!getNetworkStatus() && localPending > 0 ? (
                 <Text style={s.note}>{t('sync_safe_local_note')}</Text>

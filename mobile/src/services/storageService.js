@@ -125,36 +125,26 @@ export function sraOfflineSnapshotStorageKey(userId) {
 }
 
 /**
- * One-way cache epoch migration. Old replicas, sessions, drafts, and outboxes
- * must not survive the controlled development database reset and later replay
- * obsolete documents into the canonical database.
+ * Non-destructive cache version migration. Startup must never erase drafts or
+ * pending work. Scoped queues retain their identity and are still validated by
+ * the API; legacy unscoped queues remain quarantined by the sync engine.
  */
 export async function ensureCurrentCacheSchema() {
   const storedVersion = await AsyncStorage.getItem(STORAGE_KEYS.CACHE_SCHEMA_VERSION);
   if (storedVersion === MOBILE_CACHE_SCHEMA_VERSION) return { reset: false, version: storedVersion };
 
-  const allKeys = await AsyncStorage.getAllKeys();
-  const staleKeys = allKeys.filter(key =>
-    key.startsWith('@hugpong_')
-    && key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION
-    && !PRESERVED_INSTALLATION_KEYS.has(key)
-  );
-  if (staleKeys.length) await AsyncStorage.multiRemove(staleKeys);
-  await Promise.all(Array.from(SECURE_KEYS).map(key => SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS).catch(() => {})));
-  memoryCache.clear();
-  serializedCache.clear();
   await AsyncStorage.setItem(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
   memoryCache.set(STORAGE_KEYS.CACHE_SCHEMA_VERSION, MOBILE_CACHE_SCHEMA_VERSION);
   serializedCache.set(STORAGE_KEYS.CACHE_SCHEMA_VERSION, JSON.stringify(MOBILE_CACHE_SCHEMA_VERSION));
-  return { reset: true, version: MOBILE_CACHE_SCHEMA_VERSION, removedKeyCount: staleKeys.length };
+  return { reset: false, migrated: true, fromVersion: storedVersion, version: MOBILE_CACHE_SCHEMA_VERSION, removedKeyCount: 0 };
 }
 
 /**
  * Get an item from memory cache or AsyncStorage
  */
-export async function getItem(key, defaultValue = null) {
+export async function getItem(key, defaultValue = null, { strict = false, bypassCache = false } = {}) {
   try {
-    if (memoryCache.has(key)) {
+    if (!bypassCache && memoryCache.has(key)) {
       return memoryCache.get(key);
     }
     if (isSecureKey(key)) {
@@ -186,6 +176,11 @@ export async function getItem(key, defaultValue = null) {
     return defaultValue;
   } catch (error) {
     console.warn('[storageService] A local value could not be read.');
+    if (strict) {
+      throw Object.assign(new Error('Saved device data could not be read. Retry without clearing local storage.'), {
+        code: 'LOCAL_STORAGE_READ_FAILED', cause: error
+      });
+    }
     return defaultValue;
   }
 }

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { announceConnectionRestored } from '../services/apiClient';
-import { flushCropStageOutbox } from '../services/cropStageOutbox';
 import { API_STARTUP_TIMEOUT_MS, API_RECOVERY_RETRY_MS } from '../services/connectivityPolicy';
 
 const SyncContext = createContext({
@@ -46,31 +45,12 @@ export function SyncProvider({ children }) {
         announceConnectionRestored();
         return;
       }
-      const startedAt = Date.now();
       setReconnectNotice({ phase: 'reconnecting' });
-      let outboxResult = { processed: 0, remaining: 0, failedEntry: null };
-      try {
-        outboxResult = await flushCropStageOutbox(userRef.current || {});
-      } catch (error) {
-        outboxResult = { processed: 0, remaining: 1, failedEntry: { lastError: error.message } };
-      }
-      if (!active || accountGeneration !== accountGenerationRef.current) return;
-      const remainingLoadingMs = Math.max(0, 600 - (Date.now() - startedAt));
-      if (remainingLoadingMs > 0) {
-        await new Promise(resolve => window.setTimeout(resolve, remainingLoadingMs));
-      }
       if (!active || accountGeneration !== accountGenerationRef.current) return;
       announceConnectionRestored();
-      const needsAttention = Number(outboxResult.remaining || 0) > 0 || Boolean(outboxResult.failedEntry);
-      setReconnectNotice({
-        phase: needsAttention ? 'attention' : 'restored',
-        processedCount: Number(outboxResult.processed || 0),
-        remainingCount: Number(outboxResult.remaining || 0)
-      });
+      setReconnectNotice({ phase: 'restored' });
       if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
-      if (!needsAttention) {
-        noticeTimerRef.current = window.setTimeout(() => setReconnectNotice(null), 5000);
-      }
+      noticeTimerRef.current = window.setTimeout(() => setReconnectNotice(null), 5000);
     }
 
     async function probeApi() {
@@ -126,10 +106,18 @@ export function SyncProvider({ children }) {
       setApiReachable(false);
       setReconnectNotice(null);
     }
+    function handleApiUnavailable() {
+      reconnectPendingRef.current = true;
+      setApiReachable(false);
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(probeApi, API_RECOVERY_RETRY_MS);
+    }
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('focus', probeApi);
+    window.addEventListener('hugpong:api-unavailable', handleApiUnavailable);
+    window.addEventListener('hugpong:retry-connection', probeApi);
     probeApi();
     const interval = window.setInterval(probeApi, 2 * 60 * 1000);
 
@@ -142,10 +130,12 @@ export function SyncProvider({ children }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('focus', probeApi);
+      window.removeEventListener('hugpong:api-unavailable', handleApiUnavailable);
+      window.removeEventListener('hugpong:retry-connection', probeApi);
     };
   }, []);
 
-  const isOnline = networkOnline && apiReachable !== false;
+  const isOnline = networkOnline && apiReachable === true;
   const syncStatus = !networkOnline
     ? 'offline'
     : apiReachable === null
@@ -162,6 +152,7 @@ export function SyncProvider({ children }) {
         apiReachable,
         syncStatus,
         reconnectNotice,
+        retryConnection: () => window.dispatchEvent(new Event('hugpong:retry-connection')),
         dismissReconnectNotice: () => setReconnectNotice(null)
       }}
     >

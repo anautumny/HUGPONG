@@ -223,18 +223,19 @@ test('Audit Center keeps the inspection panel empty until a report is explicitly
   assert.match(auditCenter, /AuditHistoryModal[\s\S]*onSelectReport=\{\(report\) => setSelectedReport\(report\)\}/);
 });
 
-test('web field operations queues stage completion offline and labels it pending', () => {
+test('web field operations completes stages only through the live authoritative API', () => {
   const operations = fs.readFileSync(path.resolve(testDir, '../src/views/operations/OperationsView.jsx'), 'utf8');
-  const outbox = fs.readFileSync(path.resolve(testDir, '../src/services/cropStageOutbox.js'), 'utf8');
+  const stageService = fs.readFileSync(path.resolve(testDir, '../src/services/cropStageService.js'), 'utf8');
   const fields = fs.readFileSync(path.resolve(testDir, '../src/services/fieldsService.js'), 'utf8');
 
-  assert.match(operations, /updateCropStageOfflineFirst/);
+  assert.match(operations, /updateCropStage/);
   assert.match(operations, /Complete Stage/);
-  assert.match(operations, /Pending sync/);
-  assert.match(outbox, /hugpong_crop_stage_outbox_v1/);
-  assert.match(outbox, /navigator\.onLine === false/);
-  assert.match(outbox, /_mutation: mutation/);
-  assert.match(fields, /applyPendingStageUpdate/);
+  assert.doesNotMatch(operations, /Pending sync|saved offline/);
+  assert.match(stageService, /assertWebOnline\(\)/);
+  assert.match(stageService, /authenticatedRequest/);
+  assert.match(stageService, /baseVersion:/);
+  assert.doesNotMatch(stageService, /localStorage|queued/);
+  assert.doesNotMatch(fields, /applyPendingStageUpdate/);
 });
 
 test('server, web, and Android serialize the same canonical operation record', async () => {

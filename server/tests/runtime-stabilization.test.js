@@ -297,9 +297,10 @@ test('reconnection reports progress and honors the persisted automatic-sync pref
   assert.match(rootNavigator, /Open Sync Monitor/);
   assert.match(mobileTranslations, /reconnect_synced_msg/);
 
-  assert.match(webSyncContext, /flushCropStageOutbox/);
+  assert.doesNotMatch(webSyncContext, /flushCropStageOutbox/);
   assert.match(webSyncContext, /announceConnectionRestored/);
-  assert.match(webAppShell, /Automatic synchronization is complete/);
+  assert.match(webAppShell, /HUGPONG is available\. Live data is being refreshed/);
+  assert.match(webAppShell, /connectionBlocked && connectionPrompt/);
   assert.match(webAppShell, /hugpong:mutation-rate-limited/);
   assert.match(webAppShell, /Submissions are temporarily paused to protect your data/);
   assert.match(webApiClient, /hugpong:connection-restored/);

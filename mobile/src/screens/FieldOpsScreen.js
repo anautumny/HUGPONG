@@ -58,6 +58,7 @@ import {
 } from '../services/archiveViewService';
 import { exportAuditReportPdf } from '../services/auditPdfService';
 import { AppText as Text, AppTextInput as TextInput } from '../components/Typography';
+import { accountBlockFarmId, blockFarmDisplayName, managedBlockFarmIds } from '../domain/assignmentPresentation';
 import {
   DEFAULT_PHONE_VERIFICATION_REASON,
   PHONE_VERIFICATION_REASONS,
@@ -96,13 +97,13 @@ function LedgerCountBadges({ submittedCount = 0, draftCount = 0, showDrafts = fa
       {submittedCount > 0 && (
         <View style={[s.topbarLedgerCountBadge, s.topbarSubmittedBadge]}>
           <Ionicons name="checkmark" size={8} color="#fff" />
-          <Text style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(submittedCount)}</Text>
+          <Text variant="badge" style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(submittedCount)}</Text>
         </View>
       )}
       {showDrafts && draftCount > 0 && (
         <View style={[s.topbarLedgerCountBadge, s.topbarDraftBadge]}>
           <Ionicons name="document-text" size={8} color="#fff" />
-          <Text style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(draftCount)}</Text>
+          <Text variant="badge" style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(draftCount)}</Text>
         </View>
       )}
     </View>
@@ -864,18 +865,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     };
   }, []);
 
-  const managedFarmIds = new Set(
-    canonicalBlockFarms
-      .filter(farm => 
-        farm.managerUserId === sessionUserId ||
-        farm.managerName === session?.name ||
-        farm.id === session?.blockFarmId ||
-        farm.name === session?.blockFarm ||
-        farm.name === session?.farm
-      )
-      .map(farm => farm.id)
-  );
-  if (session?.blockFarmId) managedFarmIds.add(session.blockFarmId);
+  const managedFarmIds = managedBlockFarmIds(canonicalBlockFarms, sessionUserId);
 
   const accessibleFields = (fields || []).filter(field => {
     if (activeRole === 'Farm Member') {
@@ -894,10 +884,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         );
       }
       return (
-        managedFarmIds.has(field.blockFarmId) ||
-        field.managerUserId === sessionUserId ||
-        (session?.farm && (field.blockFarm === session.farm || field.blockFarmName === session.farm)) ||
-        (session?.blockFarm && (field.blockFarm === session.blockFarm || field.blockFarmName === session.blockFarm))
+        managedFarmIds.has(field.blockFarmId) || field.memberUserId === sessionUserId
       );
     }
     return true;
@@ -908,7 +895,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const scopedFields = activeRole === 'Farm Manager' && deviceOnline && managerFieldFilter === 'my'
     ? personalFields
     : accessibleFields;
-  const targetFarm = canonicalBlockFarms.find(farm => managedFarmIds.has(farm.id))?.name || session?.farm || session?.blockFarm || 'Unassigned Block Farm';
+  const targetFarm = blockFarmDisplayName([...managedFarmIds][0], canonicalBlockFarms, 'Unassigned Block Farm');
   const [selectedFarm, setSelectedFarm] = useState('All');
   const [selectedField, setSelectedField] = useState(() => {
     const curSess = getCurrentSession() || {};
@@ -927,23 +914,9 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (curSess.role === 'Farm Manager') {
       const ownField = (fields || []).find(field => field?.memberUserId === userId || (curSess.fieldId && field?.id === curSess.fieldId));
       if (ownField) return ownField;
-      const farmIds = new Set(
-        canonicalBlockFarms
-          .filter(farm => 
-            farm.managerUserId === userId || 
-            farm.managerName === curSess.name ||
-            farm.id === curSess.blockFarmId ||
-            farm.name === curSess.blockFarm ||
-            farm.name === curSess.farm
-          )
-          .map(farm => farm.id)
-      );
-      if (curSess.blockFarmId) farmIds.add(curSess.blockFarmId);
+      const farmIds = managedBlockFarmIds(canonicalBlockFarms, userId);
       const foundField = (fields || []).find(field => 
-        farmIds.has(field.blockFarmId) ||
-        field.managerUserId === userId ||
-        (curSess.farm && (field.blockFarm === curSess.farm || field.blockFarmName === curSess.farm)) ||
-        (curSess.blockFarm && (field.blockFarm === curSess.blockFarm || field.blockFarmName === curSess.blockFarm))
+        farmIds.has(field.blockFarmId)
       );
       return foundField || null;
     }
@@ -1581,7 +1554,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       setManagerAssignForm({
         userId: fieldToEdit.memberUserId || '',
         fieldId: fieldToEdit.id,
-        blockFarm: fieldToEdit.blockFarm || defaultFarm,
+        blockFarm: defaultFarm || fieldToEdit.blockFarmId || '',
         blockFarmId: fieldToEdit.blockFarmId || matchedBf?.id || '',
         ha: fieldToEdit.ha == null ? '' : String(fieldToEdit.ha),
         isEditing: true
@@ -1682,8 +1655,10 @@ export default function FieldOpsScreen({ navigation, route }) {
         report,
         reportId,
         month: selectedAudit.month || displayPeriod(report.periodKey),
-        blockFarm: report.blockFarmName || selectedAudit.blockFarm || session?.farm || session?.blockFarm || 'Block farm not provided',
-        managerName: report.compiledByName || selectedAudit.compiledByName || session?.name || session?.displayName || report.compiledByUserId || 'Farm Manager',
+        blockFarm: report.blockFarmName || blockFarmDisplayName(report.blockFarmId, blockFarms, 'Block farm not provided'),
+        managerName: report.compiledByName || selectedAudit.compiledByName
+          || (report.compiledByUserId === (session?.employeeId || session?.id) ? session?.name || session?.displayName : '')
+          || report.compiledByUserId || 'Farm Manager',
         cropYearCycle: report.cropYearCycle || report.cropYearCycles?.join(', ') || selectedAudit.cropYearCycle || 'Not specified',
         totalCost: report.totalCost,
         totalHectares: report.hectaresAudited,
@@ -2513,7 +2488,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
       Alert.alert(
         'SRA Seal Issued',
-        `SRA certification recorded for ${report.blockFarm || session?.farm || session?.blockFarm || 'the submitted block farm'} (${report.month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}).\n\nCertified By: ${auditorName}\nThe certification is recorded on this audit report.`,
+        `SRA certification recorded for ${certifiedReport.blockFarmName || blockFarmDisplayName(certifiedReport.blockFarmId || report.blockFarmId, blockFarms, 'the submitted block farm')} (${displayPeriod(certifiedReport.periodKey || certifiedReport.period || report.periodKey || report.period || report.month)}).\n\nCertified By: ${auditorName}\nThe certification is recorded on this audit report.`,
         [{ text: 'OK' }]
       );
     } catch (e) {
@@ -6009,8 +5984,8 @@ export default function FieldOpsScreen({ navigation, route }) {
               ? (session?.district || session?.location || t('sra_oversight_scope_sub', 'SRA regulatory oversight scope'))
               : activeRole === 'Farm Manager'
               ? (managerLedgerScope === 'all'
-                ? `${targetFarm || (session?.farm || session?.blockFarm || 'Assigned block farm')} · All Plots (${fields.length} Plots)`
-                : `${selectedField?.id} (${selectedField?.ha || 0} Ha) · ${selectedField?.member || selectedField?.memberName || 'Farm Member'} · ${targetFarm || (session?.farm || session?.blockFarm || 'Assigned block farm')}`)
+                ? `${targetFarm} · All Plots (${accessibleFields.length} Plots)`
+                : `${safeField.id} (${safeField.ha || 0} Ha) · ${resolveFieldMember(safeField)} · ${resolveFieldBlockFarm(safeField)}`)
               : `${t('my_field', 'Field')} ${safeField.id} · ${safeField.member}`
           }
           onBackPress={handleCloseHistoryModal}
@@ -6400,7 +6375,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
                         <Ionicons name="document-text" size={16} color={COLORS.primary} />
-                        <Text style={{ fontSize: 14.5, fontWeight: '900', color: COLORS.text, flex: 1 }}>{formatPhaseMonth ? formatPhaseMonth(audit.month) : audit.month} {t('audit_report_suffix', 'Audit Report')}</Text>
+                        <Text style={{ fontSize: 14.5, fontWeight: '900', color: COLORS.text, flex: 1 }}>{displayPeriod(audit.periodKey || audit.period || audit.month)} {t('audit_report_suffix', 'Audit Report')}</Text>
                       </View>
                       {audit.status === 'CERTIFIED' ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.xs, flexShrink: 0 }}>
@@ -6430,7 +6405,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted }}>{t('summary_metrics_lbl', 'Summary Metrics:')}</Text>
                         <Text style={{ fontSize: 11.5, fontWeight: '800', color: COLORS.text, flexShrink: 1, textAlign: 'right' }}>
-                          {(audit.fieldsReported != null ? audit.fieldsReported : 1)} {t('plots_word', 'Plots')} · {(audit.logsCount != null ? audit.logsCount : (audit.totalLogs || 0))} {t('logs_unit', 'Logs')} · ₱{Number(audit.totalCost || 0).toLocaleString()}
+                          {audit.fieldCount ?? audit.fieldsReported ?? 0} {t('plots_word', 'Plots')} · {audit.operationCount ?? audit.logsCount ?? audit.totalLogs ?? 0} {t('logs_unit', 'Logs')} · ₱{Number(audit.totalCost || 0).toLocaleString()}
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
@@ -7946,10 +7921,10 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                   <View style={{ backgroundColor: '#F9FAF7', padding: 8, borderRadius: RADIUS.md, marginVertical: 6, gap: 4 }}>
                     <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
-                      <Text style={{ fontWeight: '700' }}>Block Farm:</Text> {u.blockFarm || session?.farm || session?.blockFarm || 'No block farm assigned'}
+                      <Text style={{ fontWeight: '700' }}>Block Farm:</Text> {blockFarmDisplayName(accountBlockFarmId(u), canonicalBlockFarms, 'No block farm assigned')}
                     </Text>
                     <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
-                      <Text style={{ fontWeight: '700' }}>Requested Plot / Area:</Text> {u.fieldId || 'Auto-assign'} ({u.area || '1.5 Ha'})
+                      <Text style={{ fontWeight: '700' }}>Allocated Plot:</Text> {u.assignment?.fieldIds?.join(', ') || u.assignment?.fieldId || u.fieldId || 'No plot allocated yet'}
                     </Text>
                     <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>
                       <Text style={{ fontWeight: '700' }}>Applied:</Text> {u.regDate || 'Recently'}
@@ -8504,7 +8479,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       </View>
 
                       <Text style={{ fontSize: 12.5, color: '#78350F', lineHeight: 18, marginTop: 4 }}>
-                        Your Farm Member account is registered under <Text style={{ fontWeight: '800' }}>{sess.farm || sess.blockFarm || 'your Block Farm'}</Text>. Your Farm Manager has not yet allocated a sugarcane field plot to your account in the cooperative registry.
+                        Your Farm Member account is registered under <Text style={{ fontWeight: '800' }}>{blockFarmDisplayName(accountBlockFarmId(sess), canonicalBlockFarms, 'a Block Farm awaiting assignment')}</Text>. Your Farm Manager has not yet allocated a sugarcane field plot to your account in the cooperative registry.
                       </Text>
 
                       <View style={{ marginTop: 12, padding: 10, backgroundColor: '#FFF', borderRadius: RADIUS.md, borderWidth: 1, borderColor: '#FEF0D0' }}>
@@ -8587,7 +8562,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               const actorId = session?.employeeId || session?.id || '';
               const assignedFarm = blockFarms.find(farm => farm.managerUserId === actorId);
               const targetFarmId = assignedFarm?.id || '';
-              const targetFarm = assignedFarm?.name || assignedFarm?.code || session?.farm || session?.blockFarm || 'Unassigned Block Farm';
+              const targetFarm = assignedFarm?.name || assignedFarm?.code || assignedFarm?.id || 'Unassigned Block Farm';
               const farmFields = accessibleFields.filter(field => !targetFarmId || field.blockFarmId === targetFarmId);
               const farmFieldIds = new Set(farmFields.map(field => field.id));
               const totalHa = farmFields.reduce((sum, f) => sum + (Number(f.ha) || 0), 0) || 0;
@@ -8637,47 +8612,37 @@ export default function FieldOpsScreen({ navigation, route }) {
                   borderColor: '#E2EBDC',
                   ...SHADOW.card,
                 }}>
-                  {/* Card Header & Badge */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                        <Ionicons name="shield-checkmark" size={13} color={COLORS.primary} />
-                        <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.primary, letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                          {t('monthly_audit_package_badge', 'Monthly Regulatory Audit')}
+                  {/* Keep the long farm name full-width; the badge must not squeeze it. */}
+                  <View style={s.monthlyAuditHeader}>
+                    <View style={s.monthlyAuditEyebrow}>
+                      <Ionicons name="shield-checkmark" size={13} color={COLORS.primary} />
+                      <Text style={s.monthlyAuditLabel}>
+                        {t('monthly_audit_package_badge', 'Monthly Regulatory Audit')}
+                      </Text>
+                    </View>
+                    <Text style={s.monthlyAuditFarmName}>{targetFarm}</Text>
+                    <Text style={s.monthlyAuditPeriod}>
+                      {t('audit_period_label', 'Period')}: <Text style={{ fontWeight: '700', color: COLORS.text }}>{compileMonth}</Text>
+                    </Text>
+                    <View style={s.monthlyAuditStatusRow}>
+                      <Text style={s.monthlyAuditArea}>{totalHa.toFixed(2)} Ha</Text>
+                      <View style={[s.monthlyAuditStatusBadge, {
+                        backgroundColor: farmLogs.length === 0 && !monthReport ? '#F4F7F2' : (statusNeedsAttention ? '#FEF3C7' : '#EBF7EE'),
+                        borderColor: farmLogs.length === 0 && !monthReport ? '#E2EBDC' : (statusNeedsAttention ? '#F6D98B' : '#B7E4C7'),
+                      }]}>
+                        <Ionicons
+                          name={farmLogs.length === 0 && !monthReport ? 'document-text-outline' : (statusNeedsAttention ? 'time-outline' : 'checkmark-circle')}
+                          size={12}
+                          color={farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success)}
+                        />
+                        <Text style={[s.monthlyAuditStatusText, {
+                          color: farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success),
+                        }]}>
+                          {farmLogs.length === 0 && !monthReport ? '0 Logs' : statusText}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: 16, fontWeight: '900', color: COLORS.text }}>
-                        {targetFarm}
-                      </Text>
-                      {monthReport?.remainingOperationCount > 0 && <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 6 }}>{monthReport.remainingOperationCount} more operations were available at compilation. Complete this version's review, then compile the next version.</Text>}
-                      <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
-                        {t('audit_period_label', 'Period')}: <Text style={{ fontWeight: '700', color: COLORS.text }}>{compileMonth}</Text> · {totalHa.toFixed(2)} Ha
-                      </Text>
                     </View>
-                    <View style={{
-                      backgroundColor: farmLogs.length === 0 && !monthReport ? '#F4F7F2' : (statusNeedsAttention ? '#FEF3C7' : '#EBF7EE'),
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: RADIUS.full,
-                      borderWidth: 1,
-                      borderColor: farmLogs.length === 0 && !monthReport ? '#E2EBDC' : (statusNeedsAttention ? '#F6D98B' : '#B7E4C7'),
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4
-                    }}>
-                      <Ionicons 
-                        name={farmLogs.length === 0 && !monthReport ? "document-text-outline" : (statusNeedsAttention ? "time-outline" : "checkmark-circle")}
-                        size={12} 
-                        color={farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success)}
-                      />
-                      <Text style={{ 
-                        fontSize: 11, 
-                        fontWeight: '800', 
-                        color: farmLogs.length === 0 && !monthReport ? COLORS.textMuted : (statusNeedsAttention ? '#B45309' : COLORS.success)
-                      }}>
-                        {farmLogs.length === 0 && !monthReport ? '0 Logs' : statusText}
-                      </Text>
-                    </View>
+                    {monthReport?.remainingOperationCount > 0 && <Text style={s.monthlyAuditNote}>{monthReport.remainingOperationCount} more operations were available at compilation. Complete this version's review, then compile the next version.</Text>}
                   </View>
 
                   <Text style={{ fontSize: 12, lineHeight: 18, color: COLORS.textMuted, marginBottom: 10 }}>
@@ -9305,11 +9270,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                 );
               }
 
-              const repFields = activeReport.fieldCount || activeReport.fieldSnapshots?.length || 0;
+              const repFields = activeReport.fieldCount ?? activeReport.fieldSnapshots?.length ?? 0;
               const repCost = Number(activeReport.totalCost || 0);
-              const repLogs = activeReport.operationCount || activeReport.operationSnapshots?.length || 0;
+              const repLogs = activeReport.operationCount ?? activeReport.operationSnapshots?.length ?? 0;
               const repDate = activeReport.submittedAt || activeReport.compiledAt || activeReport.dateGenerated || activeReport.date || '—';
-              const repTitle = `${activeReport.blockFarmName || activeReport.blockFarmId || selectedFarm} — ${activeReport.periodKey ? displayPeriod(activeReport.periodKey) : compileMonth} Report`;
+              const repTitle = `${activeReport.blockFarmName || activeReport.blockFarmId || 'Block Farm'} — ${displayPeriod(activeReport.periodKey || activeReport.period || activeReport.month)} Report`;
               const repExportId = activeReport.reportId || activeReport.id || activeReport.periodKey || activeReport.period || activeReport.month || 'report';
               const isExportingReport = exportingAuditId === repExportId;
 
@@ -10010,7 +9975,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   {t('member_label', 'Farm Member')}: {safeField.member || 'Assigned Farm Member'} · {Number(safeField.ha) > 0 ? `${safeField.ha} Ha` : 'Area not recorded'}
                 </Text>
                 <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
-                  {selectedField?.blockFarm || safeField?.blockFarm || session?.farm || session?.blockFarm || 'No block farm assigned'} · Current Stage: {getFieldStageLabel(safeField)}
+                  {resolveFieldBlockFarm(safeField)} · Current Stage: {getFieldStageLabel(safeField)}
                 </Text>
               </View>
             )}
@@ -10245,6 +10210,16 @@ const s = StyleSheet.create({
   scannerBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
   // Audit Card
+  monthlyAuditHeader: { gap: 4, marginBottom: 8 },
+  monthlyAuditEyebrow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  monthlyAuditLabel: { flex: 1, fontSize: 14, fontWeight: '800', color: COLORS.primary, letterSpacing: 0.3, textTransform: 'uppercase' },
+  monthlyAuditFarmName: { fontSize: 16, fontWeight: '900', color: COLORS.text },
+  monthlyAuditPeriod: { fontSize: 14, color: COLORS.textSecondary },
+  monthlyAuditStatusRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: 8, rowGap: 4 },
+  monthlyAuditArea: { fontSize: 14, color: COLORS.textSecondary },
+  monthlyAuditStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full, borderWidth: 1, maxWidth: '100%', flexShrink: 1 },
+  monthlyAuditStatusText: { fontSize: 14, fontWeight: '800' },
+  monthlyAuditNote: { fontSize: 14, color: COLORS.textSecondary, marginTop: 2 },
   auditCard: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING.lg, gap: SPACING.sm, ...SHADOW.card },
   auditHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   auditTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, flex: 1 },
@@ -10400,19 +10375,21 @@ const s = StyleSheet.create({
     alignItems: 'flex-end',
   },
   topbarLedgerCountBadge: {
-    minWidth: 22,
-    height: 16,
-    borderRadius: 8,
+    minWidth: 24,
+    minHeight: 20,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 1,
     paddingHorizontal: 3,
+    paddingVertical: 2,
   },
   topbarSubmittedBadge: { backgroundColor: COLORS.primary },
   topbarDraftBadge: { backgroundColor: '#C97A00' },
   topbarLedgerBadgeText: {
-    fontSize: 9,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
     color: '#fff',
   },

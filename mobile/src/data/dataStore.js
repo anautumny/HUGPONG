@@ -1,5 +1,5 @@
 import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
-import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
+import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, getOutboxStorageState, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
 import { fieldEnrollmentIntent } from '../services/enrollmentIntentService';
 import { fetchOperationPages } from '../services/operationPages';
@@ -773,14 +773,15 @@ export const resolveFieldMemberId = (field) => {
 export const resolveFieldBlockFarm = (field) => {
   if (!field) return 'Unassigned';
   const bf = blockFarms.find(b => b.id === field.blockFarmId);
-  return bf ? bf.name : 'Unassigned';
+  // A missing name replica does not mean the canonical assignment is absent.
+  return bf?.name || field.blockFarmId || 'Unassigned';
 };
 
 export const resolveBlockFarmManager = (blockFarm) => {
   if (!blockFarm) return 'Unassigned';
   const u = users.find(user => (user.id || user.employeeId) === blockFarm.managerUserId);
   if (u) return u.displayName || u.name || u.id || u.employeeId;
-  return 'Unassigned';
+  return blockFarm.managerUserId || 'Unassigned';
 };
 
 export const getSortedPrices = () => {
@@ -1238,7 +1239,7 @@ let CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
 let IS_SYNCED = true;
 
 export const getCurrentSession = () => CURRENT_SESSION || DEFAULT_GUEST_SESSION;
-export const getIsSynced = () => IS_SYNCED;
+export const getIsSynced = () => IS_SYNCED && getOutboxStorageState().ready;
 
 const canReportAgriculturalSyncTelemetry = (session = CURRENT_SESSION) => {
   if (!session?.employeeId && !session?.id) return false;
@@ -3173,6 +3174,18 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
 
   mobileSyncPromise = (async () => {
     console.info(`[SYNC] Trigger: ${trigger}`);
+    let storageState = getOutboxStorageState();
+    if (!storageState.ready && storageState.error) {
+      await initSyncEngine(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+      storageState = getOutboxStorageState();
+    }
+    if (!storageState.ready) {
+      IS_SYNCED = false;
+      notify();
+      return { success: false, reason: 'QUEUE_STORAGE_UNAVAILABLE',
+        error: storageState.error || 'Saved offline work is still loading. Retry Sync Now.',
+        attemptedCount: 0, processedCount: 0, failedCount: 1, remainingCount: getOutboxCount(), responses: {} };
+    }
     const remainingBefore = getOutboxCount();
     const userInitiatedTrigger = trigger === 'MANUAL_SYNC' || trigger === 'AUDIT_PRECHECK';
     if (!userInitiatedTrigger && !isAutomaticSyncEnabled()) {

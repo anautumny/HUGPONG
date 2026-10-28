@@ -602,8 +602,8 @@ export function fromAuditReportDocument(id, value = {}) {
   const fieldAreas = new Map();
   operations.forEach(item => fieldAreas.set(item.fieldId, Math.max(fieldAreas.get(item.fieldId) || 0, Number(item.areaHa || 0))));
   const derivedFieldCount = Number(
-    value.fieldsReported ??
     value.fieldCount ??
+    value.fieldsReported ??
     (Array.isArray(value.fieldSnapshots) && value.fieldSnapshots.length > 0
       ? value.fieldSnapshots.length
       : (fieldAreas.size > 0
@@ -617,10 +617,10 @@ export function fromAuditReportDocument(id, value = {}) {
     reportId: id,
     periodKey: value.periodKey || value.period,
     month: value.periodKey || value.period,
-    totalLogs: operations.length,
-    logsCount: operations.length,
-    totalCost: operations.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
-    totalHectares: Number(value.hectaresAudited || Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0)),
+    totalLogs: Number(value.operationCount ?? operations.length),
+    logsCount: Number(value.operationCount ?? operations.length),
+    totalCost: Number(value.totalCost ?? operations.reduce((sum, item) => sum + Number(item.totalCost || 0), 0)),
+    totalHectares: Number(value.hectaresAudited ?? Array.from(fieldAreas.values()).reduce((sum, area) => sum + area, 0)),
     fieldCount: derivedFieldCount,
     fieldsReported: derivedFieldCount,
     dateGenerated: value.dateGenerated || (value.compiledAt ? new Date(value.compiledAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (value.createdAt ? new Date(value.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')),

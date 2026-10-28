@@ -8,14 +8,15 @@ test('the React application shell rejects unauthenticated route access', () => {
   assert.match(source, /<Navigate to="\/login" replace state=\{\{ from: location \}\} \/>/);
 });
 
-test('SRA web sessions degrade offline without being treated as logged out', () => {
+test('all Web roles require a live connection and cannot restore authority from cached browser profiles', () => {
   const shellSource = fs.readFileSync(new URL('../src/components/layout/AppShell.jsx', import.meta.url), 'utf8');
   const authSource = fs.readFileSync(new URL('../src/context/AuthContext.jsx', import.meta.url), 'utf8');
 
-  assert.match(shellSource, /!isOnline && roleKey === ROLE_KEYS\.SRA_ADMIN/);
-  assert.match(shellSource, /No internet connection\. You remain signed in/);
+  assert.match(shellSource, /const connectionBlocked = !isOnline \|\| sessionUnavailable/);
+  assert.match(shellSource, /connectionBlocked && connectionPrompt/);
   assert.match(authSource, /response\.status === 401 \|\| response\.status === 403 \|\| response\.ok/);
-  assert.match(authSource, /retaining cached session/);
+  assert.doesNotMatch(authSource, /retaining cached session|localStorage\.getItem\('hugpong_user'\)/);
+  assert.match(authSource, /setSessionUnavailable\(true\)/);
 });
 
 test('legacy compatibility routing remains outside the React component tree', () => {

@@ -12,16 +12,19 @@ import { SUGARCANE_STAGES } from '../../constants/cropStages';
 import { formatCropYearDisplay } from '../../utils/dataHelpers';
 import { STAGE_DISPLAY_LABELS } from '../../domain/presentationContract';
 import { AppText as Text } from '../../components/Typography';
+import { accountBlockFarmId, blockFarmDisplayName } from '../../domain/assignmentPresentation';
 
 function MemberHomeView({
   session = {},
   myFields = [],
+  blockFarms = [],
   navigation,
   onManualSync
 }) {
   const { t, formatStageName } = useTranslation();
   const hasPlot = Array.isArray(myFields) && myFields.length > 0 && myFields[0] && myFields[0].id && myFields[0].id !== 'Unassigned (Pending Manager Allocation)';
   const primaryField = hasPlot ? myFields[0] : null;
+  const farmName = blockFarmDisplayName(primaryField?.blockFarmId || accountBlockFarmId(session), blockFarms, t('block_farm', 'Block Farm'));
   const currentStage = primaryField
     ? SUGARCANE_STAGES.find(stage => stage.stageNumber === Number(primaryField.stageNumber))
     : null;
@@ -48,7 +51,7 @@ function MemberHomeView({
                   <Text style={[s.memberIdBadgeText, { color: '#B45309' }]}>ID: {session?.employeeId || session?.contact || '—'}</Text>
                 </View>
               </View>
-              <Text style={[s.fieldFarm, { color: '#B45309' }]}>{session?.farm || session?.blockFarm || t('block_farm', 'Block Farm')}</Text>
+              <Text style={[s.fieldFarm, { color: '#B45309' }]}>{farmName}</Text>
             </View>
             <View style={[s.haBadge, { backgroundColor: '#FEF3C7' }]}>
               <Text style={[s.haText, { color: '#B45309' }]}>
@@ -90,7 +93,7 @@ function MemberHomeView({
                   <Text style={s.memberIdBadgeText}>ID: {session?.employeeId || primaryField.memberId || session?.contact || '—'}</Text>
                 </View>
               </View>
-              <Text style={s.fieldFarm}>{session?.farm || session?.blockFarm || primaryField.blockFarm || t('block_farm', 'Block Farm')}</Text>
+              <Text style={s.fieldFarm}>{farmName}</Text>
             </View>
             <View style={s.haBadge}>
               <Text style={s.haText}>{primaryField.ha} Ha</Text>

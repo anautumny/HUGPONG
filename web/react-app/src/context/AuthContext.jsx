@@ -1,32 +1,31 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { roleKeyFromUser } from '../utils/authRouting';
 import { getWebClientInstanceId, reportWebActivity, resetWebTelemetryState } from '../services/telemetryService';
 import { clearAuthenticatedReadState, responseErrorFromPayload, webClientHeaders } from '../services/apiClient';
-import { API_STARTUP_TIMEOUT_MS } from '../services/connectivityPolicy';
+import { API_STARTUP_TIMEOUT_MS, API_RECOVERY_RETRY_MS } from '../services/connectivityPolicy';
+import { assertWebOnline } from '../services/onlinePolicy';
+import { createSessionGuard } from '../services/sessionGuard';
 
 const AuthContext = createContext(null);
 const LOGIN_REQUEST_TIMEOUT_MS = API_STARTUP_TIMEOUT_MS;
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem('hugpong_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [roleKey, setRoleKey] = useState(() => {
-    return localStorage.getItem('hugpong_role') || '';
-  });
+  const [user, setUser] = useState(null);
+  const [roleKey, setRoleKey] = useState('');
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [sessionExpiredNotice, setSessionExpiredNotice] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const sessionRequests = useRef(null);
+  if (!sessionRequests.current) sessionRequests.current = createSessionGuard();
 
   const clearSession = useCallback((notice = '') => {
+    sessionRequests.current.invalidate();
     clearAuthenticatedReadState();
     resetWebTelemetryState();
     setUser(null);
     setRoleKey('');
+    setSessionUnavailable(false);
+    setIsLoading(false);
     if (notice) setSessionExpiredNotice(notice);
     localStorage.removeItem('hugpong_auth_token');
     localStorage.removeItem('hugpong_user');
@@ -34,25 +33,32 @@ export function AuthProvider({ children }) {
   }, []);
 
   const saveSession = useCallback((sessionUser, canonicalRoleKey) => {
+    sessionRequests.current.invalidate();
     clearAuthenticatedReadState();
     resetWebTelemetryState();
     setUser(sessionUser);
     setRoleKey(canonicalRoleKey);
     setSessionExpiredNotice('');
+    setSessionUnavailable(false);
+    setIsLoading(false);
     // Browser authentication is held only in the server's HttpOnly cookie.
     // Remove any token left by an older client build.
     localStorage.removeItem('hugpong_auth_token');
-    if (sessionUser) localStorage.setItem('hugpong_user', JSON.stringify(sessionUser));
-    if (canonicalRoleKey) localStorage.setItem('hugpong_role', canonicalRoleKey);
+    localStorage.removeItem('hugpong_user');
+    localStorage.removeItem('hugpong_role');
   }, []);
 
-  const refreshSession = useCallback(async () => {
+  const refreshSession = useCallback(() => sessionRequests.current.refresh(async ({ controller, isCurrent }) => {
+    if (!isCurrent()) return { stale: true };
+    const timeout = window.setTimeout(() => controller.abort(), API_STARTUP_TIMEOUT_MS);
     try {
+      assertWebOnline();
       const response = await fetch('/auth/session', {
         headers: webClientHeaders(),
-        credentials: 'include'
+        credentials: 'include', signal: controller.signal
       });
       const data = await response.json().catch(() => ({}));
+      if (!isCurrent()) return { stale: true };
 
       if (response.ok && data.authenticated && data.user) {
         const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
@@ -66,24 +72,37 @@ export function AuthProvider({ children }) {
         }
         return { user: null, roleKey: '', authenticated: false };
       } else {
-        // A gateway/API outage is not an authentication decision. Keep the
-        // previously issued local session and let the connectivity UI explain
-        // that live, server-authoritative actions are temporarily unavailable.
-        console.warn(`[AuthContext] Session endpoint unavailable (${response.status}); retaining cached session.`);
-        return { user, roleKey, authenticated: Boolean(user) };
+        setSessionUnavailable(true);
+        return { user: null, roleKey: '', authenticated: false, unavailable: true };
       }
     } catch (err) {
+      if (!isCurrent()) return { stale: true };
       console.warn('[AuthContext] Session resolution is temporarily unavailable.');
-      // If server unreachable, retain cached session for offline degradation if previously saved
-      return { user, roleKey, authenticated: Boolean(user) };
+      setSessionUnavailable(true);
+      return { user: null, roleKey: '', authenticated: false, unavailable: true };
     } finally {
-      setIsLoading(false);
+      window.clearTimeout(timeout);
+      if (isCurrent()) setIsLoading(false);
     }
-  }, [clearSession, saveSession, user, roleKey]);
+  }), [clearSession, saveSession, user]);
 
   useEffect(() => {
     refreshSession();
   }, []);
+
+  useEffect(() => {
+    const revalidate = () => { void refreshSession(); };
+    window.addEventListener('hugpong:connection-restored', revalidate);
+    return () => window.removeEventListener('hugpong:connection-restored', revalidate);
+  }, [refreshSession]);
+
+  useEffect(() => {
+    if (!sessionUnavailable) return undefined;
+    const retry = window.setInterval(() => {
+      if (navigator.onLine !== false) void refreshSession();
+    }, API_RECOVERY_RETRY_MS);
+    return () => window.clearInterval(retry);
+  }, [sessionUnavailable, refreshSession]);
 
   useEffect(() => {
     const handleRevokedSession = event => {
@@ -116,6 +135,7 @@ export function AuthProvider({ children }) {
   }, [isLoading, user?.employeeId]);
 
   const login = async (contactNumber, password) => {
+    sessionRequests.current.invalidate();
     setSessionExpiredNotice('');
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), LOGIN_REQUEST_TIMEOUT_MS);
@@ -142,6 +162,7 @@ export function AuthProvider({ children }) {
       throw error;
     } finally {
       window.clearTimeout(timeout);
+      setIsLoading(false);
     }
     const data = await res.json().catch(() => ({}));
 
@@ -271,6 +292,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
+    sessionRequests.current.invalidate();
     try {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
     } catch (e) {
@@ -288,6 +310,7 @@ export function AuthProvider({ children }) {
         isAuthenticated: Boolean(user && user.phoneVerified !== false && (user.requiresPasswordChange !== true || user.passwordChanged === true)),
         hasPendingVerificationUser: user,
         sessionExpiredNotice,
+        sessionUnavailable,
         isLoading,
         login,
         logout,

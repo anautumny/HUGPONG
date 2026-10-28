@@ -475,11 +475,11 @@ export function SearchableSelect({
               disabled={disabled}
               activeOpacity={0.65}
               accessibilityRole="button"
-              accessibilityLabel={`More options (${options.length})`}
+              accessibilityLabel="View all options"
             >
               <Ionicons name="ellipsis-horizontal-circle-outline" size={15} color={COLORS.primary} style={{ marginRight: 5 }} />
               <Text style={styles.capsulePillMoreText}>
-                {`More (${options.length})`}
+                View all
               </Text>
             </TouchableOpacity>
           )}

@@ -29,6 +29,7 @@ function harness() {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     Fragment: 'Fragment',
+    memo: component => component,
     createContext(defaultValue) {
       const context = { _currentValue: defaultValue, Provider: ({ value, children }) => { context._currentValue = value; return children; } };
       return context;
@@ -93,6 +94,7 @@ function harness() {
         formatPeriodDisplay: (s) => s
       };
       if (name.endsWith('/pagination')) return load('utils/pagination.js');
+      if (name.endsWith('/ui/Pagination')) return { __esModule: true, default: 'Pagination', usePagination: load('components/ui/Pagination.js').usePagination };
       if (name.endsWith('/notificationIdentity')) return load('domain/notificationIdentity.js');
       if (name.endsWith('/haptics')) return { hapticFeedback: { light: () => {}, success: () => {}, warning: () => {}, error: () => {} } };
       if (name.endsWith('/BlurTargetContext')) return { useBlurTarget: () => ({ requestBlur: () => {}, releaseBlur: () => {} }), BlurTargetProvider: ({ children }) => children };
@@ -138,6 +140,96 @@ function find(tree, predicate) {
   }
   return null;
 }
+
+test('analytics tabs retain full labels and selection on narrow screens and large system fonts', () => {
+  for (const dimensions of [
+    { width: 320, height: 640, fontScale: 1 },
+    { width: 366, height: 740, fontScale: 1 },
+    { width: 366, height: 740, fontScale: 1.8 },
+    { width: 768, height: 1024, fontScale: 1 },
+  ]) {
+    const runtime = harness();
+    const Tabs = runtime.load('components/analytics/AnalyticsTabs.js', {
+      'react-native': { ...native, useWindowDimensions: () => dimensions },
+    }).default;
+    let activeTab = 'overview';
+    const render = () => runtime.render(Tabs, { activeTab, onChange: key => { activeTab = key; } });
+    let tree = render();
+    assert.equal(tree.type, 'ScrollView');
+    assert.equal(tree.props.horizontal, true, 'large fonts can overflow horizontally without wrapping');
+    for (const [key, label] of [['overview', 'Overview'], ['costs', 'Costs'], ['operations', 'Operations'], ['market', 'Market']]) {
+      const button = find(tree, node => node.props?.accessibilityLabel === label);
+      const text = find(button, node => node.type === 'Text');
+      assert.deepEqual(text.props.children, [label]);
+      assert.equal(text.props.numberOfLines, 1);
+      assert.equal(flatten(text.props.style).fontSize, 14);
+      assert.equal(flatten(text.props.style).flexShrink, 0);
+      assert.equal(flatten(button.props.style).flexShrink, 0);
+      assert.equal(flatten(button.props.style).flex, undefined, 'tabs use intrinsic widths, not equal narrow columns');
+      button.props.onPress();
+      assert.equal(activeTab, key);
+      tree = render();
+      assert.equal(find(tree, node => node.props?.accessibilityLabel === label).props.accessibilityState.selected, true);
+    }
+    assert.equal(Boolean(find(tree, node => node.type === 'Ionicons')), dimensions.width === 768);
+  }
+});
+
+test('Member Home shows the field farm instead of a stale session name and retains affiliation without a plot', () => {
+  const runtime = harness();
+  const assignments = runtime.load('domain/assignmentPresentation.js');
+  const Home = runtime.load('screens/member/MemberHomeView.js', {
+    '../../domain/assignmentPresentation': assignments,
+    '../../constants/cropStages': { SUGARCANE_STAGES: [] },
+    '../../utils/dataHelpers': { formatCropYearDisplay: value => value },
+    '../../domain/presentationContract': { STAGE_DISPLAY_LABELS: {} },
+  }).default;
+  const props = { session: { employeeId: 'MEM-1', blockFarmId: 'BF-A', farm: 'Stale Session Farm' },
+    blockFarms: [{ id: 'BF-A', name: 'NACAYAO' }, { id: 'BF-B', name: 'Other Farm' }],
+    myFields: [{ id: 'FLD-1', blockFarmId: 'BF-B', ha: 1, stageNumber: 1 }], navigation: { navigate() {} } };
+  let tree = runtime.render(Home, props);
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children.includes('Other Farm')));
+  assert.equal(JSON.stringify(tree).includes('Stale Session Farm'), false);
+  tree = runtime.render(Home, { ...props, myFields: [] });
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children.includes('NACAYAO')));
+});
+
+test('Web pending review shows the actual affiliated farm for an existing account awaiting phone verification', () => {
+  const runtime = harness();
+  const Queue = runtime.load('../../web/react-app/src/components/users/PendingApprovalsQueue.jsx', {
+    'lucide-react': Object.fromEntries(['UserCheck', 'CheckCircle2', 'Clock', 'Phone', 'MapPin', 'AlertCircle', 'Check', 'ChevronLeft', 'ChevronRight'].map(name => [name, name])),
+    '../ui/Button': { __esModule: true, default: 'Button' },
+    '../../domain/assignmentPresentation': runtime.load('domain/assignmentPresentation.js'),
+    '../../domain/phoneVerification': { DEFAULT_PHONE_VERIFICATION_REASON: 'OTHER', PHONE_VERIFICATION_REASONS: [], isOtherPhoneVerificationReason: () => true },
+  }).default;
+  const tree = runtime.render(Queue, {
+    pendingUsers: [{ id: 'MEM-1', status: 'ACTIVE', name: 'Member', canonicalRole: 'MEMBER_FARMER', affiliatedBlockFarmId: 'BF-A', phoneVerified: false }],
+    blockFarms: [{ id: 'BF-A', name: 'NACAYAO' }], currentUser: { canonicalRole: 'SRA_ADMIN' },
+  });
+  assert.ok(JSON.stringify(tree).includes('NACAYAO'));
+  assert.equal(JSON.stringify(tree).includes('Unassigned Farm'), false);
+});
+
+test('Web audit dossier labels use the canonical report month rather than blank or stale legacy aliases', () => {
+  const runtime = harness();
+  const Dossier = runtime.load('../../web/react-app/src/components/audit/AuditDossierCard.jsx', {
+    'lucide-react': Object.fromEntries(['FileText', 'Printer', 'ShieldCheck', 'Calendar', 'Building', 'User', 'Hash', 'CheckCircle2', 'Clock', 'QrCode'].map(name => [name, name])),
+    '../ui/Badge': { __esModule: true, default: 'Badge' },
+    '../ui/Button': { __esModule: true, default: 'Button' },
+    '../ui/ConfirmDialog': { __esModule: true, default: 'ConfirmDialog' },
+    '../ui/Textarea': { __esModule: true, default: 'Textarea' },
+    '../ui/Table': { PaginationFooter: 'PaginationFooter' },
+    '../../domain/auditWorkflow': { AUDIT_STATUS: { COMPILED: 'COMPILED', PENDING_SUBMISSION: 'PENDING_SUBMISSION', PENDING_REVIEW: 'PENDING_REVIEW', CERTIFIED: 'CERTIFIED' }, canonicalAuditStatus: value => value, auditStatusLabel: value => value },
+  }).default;
+  const tree = runtime.render(Dossier, { report: { id: 'REPORT-1', blockFarmId: 'BF-A', periodKey: '2026-09', period: 'STALE MONTH', status: 'COMPILED', totalCost: 1000,
+    operationSnapshots: [{ fieldId: 'FLD-1', operationName: 'Weeding', performedOn: '2026-09-01', quantity: { value: 1, unit: 'ha' }, totalCost: 1000, laborEntries: [], lineItems: [] }] }, blockFarms: [{ id: 'BF-A', name: 'NACAYAO' }] });
+  for (const label of ['SRA Monthly Operations Schedule', 'Total Verified Cost']) {
+    const node = find(tree, item => item.props?.children?.some(child => typeof child === 'string' && child.includes(label)));
+    assert.ok(node, label);
+    assert.ok(node.props.children.includes('2026-09'), label);
+    assert.equal(node.props.children.includes('STALE MONTH'), false, label);
+  }
+});
 
 test('the Mobile price browser reaches older pages and ignores responses after closing', async () => {
   const runtime = harness();
@@ -441,6 +533,51 @@ test('mobile pages cover every record once, clamp after deletions, and reset for
   page = render([], 'monthly');
   assert.equal(page.start, 0); assert.equal(page.end, 0); assert.equal(page.page, 1);
   assert.deepEqual(records, original, 'paging does not mutate API records');
+});
+
+test('Mobile activity paging reaches custom activities beyond the old eight-item limit and preserves full-set shares', () => {
+  const runtime = harness();
+  const pagination = runtime.load('components/ui/Pagination.js');
+  const { ActivityFrequencyList } = runtime.load('components/analytics/AnalyticsComponents.js', {
+    '../AnimatedBottomSheet': 'Sheet', '../ui': {},
+    '../ui/SearchableSelect': { SearchableSelectContent: 'Picker' }, '../PriceReferenceCard': 'PriceReferenceCard',
+    '../../services/analyticsSelectors': {},
+  });
+  const ranking = Array.from({ length: 13 }, (_, index) => ({
+    name: `${index < 8 ? 'Standard' : 'Custom'} activity ${index + 1}`, count: 1, totalCost: 100, avgCost: 100
+  }));
+  const original = structuredClone(ranking);
+  const text = node => Array.isArray(node) ? node.map(text).join(' ')
+    : node && typeof node === 'object' ? text(node.props?.children) : String(node ?? '');
+  const cards = tree => tree.props.children.flat(Infinity).filter(node => node?.type === 'View');
+  const render = (items = ranking, resetKey = 'BF-1:2026-2027:ALL') => runtime.render(ActivityFrequencyList, { ranking: items, resetKey });
+  let tree = render();
+  const visited = [];
+  for (let page = 1; page <= 3; page++) {
+    const pager = find(tree, node => node.type === 'Pagination');
+    assert.equal(pager.props.page, page);
+    assert.ok(cards(tree).length <= 5);
+    assert.equal(pager.props.total, 13);
+    cards(tree).forEach(card => {
+      const name = ranking.find(item => text(card).includes(item.name)).name;
+      visited.push(name);
+      assert.match(text(card), /8%/, 'share uses all 13 activities, including those on other pages');
+    });
+    const controls = pagination.default(pager.props);
+    const next = find(controls, node => node.props?.accessibilityLabel === 'Next page of activities');
+    assert.equal(next.props.disabled, page === 3);
+    if (page < 3) { next.props.onPress(); tree = render(); }
+  }
+  assert.deepEqual(visited, ranking.map(item => item.name));
+  const rank = find(cards(tree)[0], node => node.type === 'Text' && typeof node.props.children[0] === 'number');
+  assert.equal(rank.props.children[0], 11, 'rank numbers continue on later pages');
+  tree = render(ranking.slice(0, 2));
+  assert.equal(find(tree, node => node.type === 'Pagination').props.page, 1);
+  tree = render(ranking, 'BF-2:2026-2027:2026-10');
+  assert.equal(find(tree, node => node.type === 'Pagination').props.page, 1);
+  tree = render([], 'BF-2:2026-2027:2026-10');
+  assert.equal(find(tree, node => node.type === 'Pagination'), null);
+  assert.deepEqual(ranking, original, 'paging never changes analytics records or totals');
 });
 
 test('selection searches IDs and descriptions, preserves raw values, and resets on reopening', () => {
