@@ -142,7 +142,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
         title: 'Block Farm Assignment Pending',
         description: 'You are currently not linked to a specific Block Farm. Contact your SRA Admin.',
         type: 'warning',
-        to: '/profile',
+        to: '/settings',
         actionLabel: 'Check Profile'
       });
     }

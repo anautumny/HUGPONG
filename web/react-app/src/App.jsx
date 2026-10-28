@@ -172,7 +172,7 @@ export default function App() {
                 <Route path="/registry" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><FarmFieldRegistryView /></RoleRoute>} />
                 <Route path="/operations" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><OperationsView /></RoleRoute>} />
                 <Route path="/takeover" element={<RoleRoute allowed={[ROLE_KEYS.FARM_MANAGER]}><TakeOverView /></RoleRoute>} />
-                <Route path="/prices" element={<RoleRoute allowed={[ROLE_KEYS.SRA_ADMIN]}><PricesView /></RoleRoute>} />
+                <Route path="/prices" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><PricesView /></RoleRoute>} />
                 <Route path="/audit" element={<RoleRoute allowed={AGRICULTURAL_ROLES}><AuditCenterView /></RoleRoute>} />
                 <Route path="/users" element={<RoleRoute allowed={MANAGEMENT_ROLES}><UsersRouteErrorBoundary><UsersView /></UsersRouteErrorBoundary></RoleRoute>} />
                 <Route path="/sync" element={<RoleRoute allowed={SYNC_MONITOR_ROLES}><SyncView /></RoleRoute>} />

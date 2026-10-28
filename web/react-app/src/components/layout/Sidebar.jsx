@@ -146,6 +146,12 @@ export default function Sidebar({
             id: 'nav-mgr-analytics'
           },
           {
+            label: 'SRA Price Monitor',
+            to: '/prices',
+            icon: TrendingUp,
+            id: 'nav-mgr-prices'
+          },
+          {
             label: 'Sync Monitor',
             to: '/sync',
             icon: RefreshCw,

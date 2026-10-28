@@ -9,6 +9,7 @@ import {
   TrendingUp,
   RefreshCw,
   Users,
+  LifeBuoy,
   Menu
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -49,7 +50,7 @@ export default function MobileBottomNav({ onOpenMobileDrawer = () => {} }) {
       { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
       { label: 'Users', to: '/users', icon: Users },
       { label: 'Sync Hub', to: '/sync', icon: RefreshCw },
-      { label: 'Audit', to: '/audit', icon: FileCheck },
+      { label: 'Support', to: '/support', icon: LifeBuoy },
     ];
   };
 
