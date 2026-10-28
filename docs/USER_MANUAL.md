@@ -2,9 +2,13 @@
 
 Sugarcane block-farm management and SRA oversight
 
-**Edition:** 1.0 | **Prepared:** 20 October 2026 | **Application baseline:** Beta 1.0.4
+**Edition:** 1.1 | **Updated:** 28 October 2026 | **Application baseline:** Beta 1.0.8
 
 For Farm Members, Farm Managers, SRA Admins, and Super Admins using the Web Management Console and Android application.
+
+Official website: https://hugpong-beta.onrender.com. Use the Android download button on that website for the current signed installer. Install an update over the existing app; do not uninstall when you still need local drafts or unsynchronized work.
+
+This manual explains how to use the application. The separate HUGPONG System Guide explains the backend, data flow, analytics, examples, and beta-testing questions. The PDF edition uses black text, white backgrounds, and 12-point Times New Roman throughout.
 
 ## Contents
 
@@ -196,12 +200,15 @@ If no field appears, your account may still need assignment. A newly registered 
 ### 6.2 Prepare a plan
 
 1. Open **Planner** and choose your own field.
-2. Select the crop stage and an operation from the catalogue, or use a permitted custom operation.
-3. Enter the requested quantities, units, rates, labor, materials, and planning details.
-4. Review the estimate and schedule information shown by the planner.
-5. Save the plan, or transfer an intended operation to a draft using the available action.
+2. Confirm the current crop stage and choose an offered catalogue operation, or use a permitted custom operation.
+3. Choose the calendar date and enter estimated labor, material, and other costs, with any useful notes.
+4. Review the estimated total and schedule date shown by the planner.
+5. Save the schedule. Select its operation-input action when you are ready to record the actual work.
+6. Review the operation form opened in Field Ops. Save a draft or submit the actual operation there. Opening this form from Planner does not automatically create a draft or submitted operation.
 
 A plan is an estimate. It does not prove that field work happened and does not become a submitted operation until you record and submit the actual work. Reminder delivery depends on the device's notification permission and settings.
+
+The calendar-selected date is carried into the operation form opened from Planner and is read-only there. If it does not match the actual work date, correct the schedule/calendar selection before recording that work.
 
 ### 6.3 Save a draft
 
@@ -294,7 +301,9 @@ Farm Managers provision Farm Members within their allowed scope. SRA Admins and 
 4. Wait for authorization for that specific field.
 5. Record or amend the permitted operation and review the result.
 
-Takeover authorization is time-limited. Reauthorize if it expires or you switch to a different field. The system preserves the manager's identity and **Manager Takeover** provenance. A takeover entry is distinct from an amendment. Planning and drafts are available to the field owner; takeover does not transfer ownership.
+Takeover authorization is time-limited, normally five minutes in this release. Reauthorize if it expires or you switch to a different field. Both authorization and takeover work require a live connection; a previously authorized takeover does not become an offline permission. The system preserves the manager's identity and **Manager Takeover** provenance. A takeover entry is distinct from an amendment. Planning and drafts are available to the field owner; takeover does not transfer ownership.
+
+The authorization summary identifies the selected plot, owner, area, Block Farm, and Current Stage. A farm ID displayed instead of a name means the name is not currently available; it does not by itself mean the assignment is missing. Report a persistent incorrect assignment to your administrator rather than changing another field's records.
 
 ## 8. Crop stages and cycle renewal
 
@@ -384,16 +393,17 @@ Compiling, delivering, importing, and certifying are separate actions. Generatin
 
 1. Synchronize the relevant field operations for your assigned Block Farm and reporting period.
 2. Review the proposed month. The system prioritizes unresolved reporting work; follow the period offered and any validation message.
-3. Compile the eligible submitted operations. Drafts are not audit entries.
-4. Review the report ID, farm, month, version, fields, operation count, area, and costs.
-5. Select **Send Through Cloud** or **Generate QR Transfer**.
-6. For Cloud delivery, wait for server confirmation that the report is awaiting SRA review. A queued delivery is still waiting to be sent.
-7. For QR delivery, display or save the QR image and give it to the SRA reviewer through the organization's reporting process.
-8. Reopen the report to check its status and any return reason.
+3. Open the server-generated member review. Review members with no monthly records and account-activity attention items. Calling a member is optional and opens your phone application; it does not automatically mark the member contacted or verified.
+4. Select **Compile Available Operations** to continue. Opening the member review alone does not create a report. A plot without recorded work does not block compilation. At least one eligible synchronized operation is required, and only included fields contribute to reported coverage.
+5. Review the report ID, farm, month, version, fields, operation count, area, and costs.
+6. Select **Send Through Cloud** or **Generate QR Transfer**.
+7. For Cloud delivery, wait for server confirmation that the report is awaiting SRA review. A queued delivery is still waiting to be sent.
+8. For QR delivery, display or save the QR image and give it to the SRA reviewer through the organization's reporting process.
+9. Reopen the report to check its status and any return reason.
 
 Current QR codes contain a compact report reference and integrity information. The server retrieves and verifies the full report. They are not standalone offline copies of all operations. If the report was prepared locally, ensure the canonical report has reached the server before expecting the reference to resolve.
 
-Android can retain supported locally prepared reporting work and queue supported Cloud delivery. Final compilation and delivery are established by server acceptance. Unsynchronized operations for the selected farm and period must be resolved first.
+Starting official monthly compilation requires an online readiness check. Android can retain supported pending delivery work, but the report is official only after server acceptance. Unsynchronized operations for the selected farm and period must be resolved first. Do not treat a pending delivery as a report already received by SRA.
 
 ### 10.3 SRA Admin: open and verify a report
 
@@ -461,12 +471,20 @@ Check the reporting period and effective date. A blank or unquoted period is not
 1. Choose the available farm scope.
 2. Select the Crop Year Cycle or reporting period.
 3. Select **All Fields** or a particular Field independently of the year.
-4. Review **Crop Progress**, **Production Cost**, **Cost Breakdown**, **Farm Operations**, and price-reference information.
+4. On Android, use **Overview**, **Costs**, **Operations**, and **Market**. These show crop progress, production costs, category breakdown, activity frequency, and price-reference information. On Web, use the corresponding analytics sections and filters.
 5. Check filters and synchronization before comparing values between devices.
 
 Production costs describe recorded operations; planner estimates describe intended work. A price reference alone does not establish farm income or profit. Cached analytics may be older than live data; inspect the snapshot time where shown.
 
 On Android, the activity frequency ranking shows five activity types per page. Use **Previous** and **Next** to reach all standard and custom activities. Rank numbers continue across pages; activity shares and analytics totals use the complete filtered set. Changing the farm, field, Crop Year Cycle, or reporting period returns the ranking to the first page. Web keeps its full activity grid.
+
+**How analytics helps:** crop progress identifies where fields are in the six-stage cycle; cost summaries show recorded spending; category breakdowns identify the main cost drivers; activity frequency shows repeated work; Market provides dated SRA reference prices. Use these to ask better follow-up questions and compare equivalent periods and field areas. The application does not forecast yield, guarantee profit, or prove work happened merely because an entry was submitted.
+
+**How to read the numbers:** operation totals count eligible records, not the number of crop stages. A custom activity appears under its recorded operation name. A stage can have several operations. Activity share is the activity's record count divided by all eligible filtered records. Average operation cost is its total recorded cost divided by its record count.
+
+**Example:** 5 Land Preparation records out of 30 total operations give about 17% after rounding. If those 5 entries cost PHP 5,000 in total, their average is PHP 1,000 per entry. Five activities shown on a page do not mean only five exist.
+
+The labor/worker summary is not a count of unique people. In this release, it aggregates recorded worker-count values; inspect entry details before interpreting it as person-days. Cost-per-hectare values also depend on the area used by that card or comparison row. The System Guide explains these limits and worked examples.
 
 ## 12. Offline work and synchronization
 
@@ -475,7 +493,7 @@ On Android, the activity frequency ranking shows five activity types per page. U
 | Task | Offline expectation |
 | --- | --- |
 | Farm Member field work | Supported plans, local drafts, operation capture, and stage changes can remain on the device for later submission |
-| Farm Manager field work | Supported field changes and already authorized actions may be queued; new Takeover authorization requires the server |
+| Farm Manager field work | Supported work on the manager's own assigned plot may remain local; acting on another owner's plot through Takeover requires a live connection |
 | New field enrollment or cycle renewal | Requires an online server response |
 | New sign-in, account recovery, or verification | Requires the server |
 | SRA mobile reference viewing | Last account-scoped analytics and certified history can be read as timestamped cached data when available |
@@ -514,6 +532,8 @@ A retry can resume a saved change without creating a new record. Avoid creating 
 ### 12.4 Protect local work
 
 If Android cannot read its saved queue, new saves and synchronization pause instead of replacing it with an empty queue. Sync Monitor shows the storage error and an unknown pending count. Retry **Sync Now** after the device can read storage again. Do not clear storage to resolve this error.
+
+Normal application cache-version upgrades preserve pending queues and drafts. This does not protect against uninstalling the app, manually clearing its data, device loss, or a damaged device. Synchronize and check acceptance before changing phones.
 
 Do not uninstall, clear app data, use **Clear Local Cache**, or clear browser storage while drafts or unsynchronized changes are still needed. These actions can remove local work. A phone's local queue is not a substitute for the central business-data backup.
 
@@ -616,6 +636,8 @@ Recovery recreates missing business records in the same project. It does not ove
 | Account is temporarily locked | Follow the displayed wait instruction. Repeated retries and restarting do not reset the lockout. |
 | SMS does not arrive | Check the registered number and resend timer. Use authorized review when offered, including the current Smart/TNT alternative. |
 | No assigned field appears | Check filters and connection; ask the Farm Manager to verify the account-to-field assignment. |
+| A farm or manager ID appears instead of a name | The relationship may exist while its name is not loaded. Refresh/synchronize and confirm the assignment with the responsible administrator. |
+| A selector has View all | It opens the full searchable list. An All Plots choice is a filter option and is not an additional physical plot. |
 | Enrollment fails | Verify parent farm, owner, positive hectares, available farm area, and a live connection. Wait for the server-issued ID. |
 | Field is locked for renewal | Ask the manager to review the pending cycle request and compile outstanding operations. The next cycle begins after approval. |
 | Save says Unsynced | The change is local. Open Sync Monitor after reconnecting and inspect the remaining count. |
@@ -670,6 +692,10 @@ When escalating an issue, provide the affected User ID, device/app version, farm
 
 ### Document control
 
-This edition covers the Beta 1.0.4 application baseline and repository workflows reviewed on 20 October 2026. Review the manual when navigation, permissions, reporting, or synchronization behavior changes. Your administrator supplies the official deployment address and support contact.
+This edition covers the deployed Beta 1.0.8 application and repository workflows reviewed on 28 October 2026. It includes online-only Web access, durable Mobile queues, paged activity rankings, current audit-readiness behavior, canonical assignment labels, and the recent UI/UX finalization. Buttons may differ by role, assignment, language, connection, and later app version.
+
+The NACAYAO beta demonstration batch contains one test manager and five test members with five plots. Sample operations are test data; published SRA price references are separate real data. Test phone profiles are not verified personal contacts and are not suitable for an SMS-delivery test. Obtain test credentials privately from the beta coordinator; passwords are intentionally not printed in this manual. Never reuse a demonstration account as a permanent real-person account without the authorized replacement process.
+
+Document changes require no database/schema, Server/API, Web, or Mobile code changes. This manual describes both clients' existing behavior and preserves the server as the authority for official actions. Signed-in workflows, device installation, accessibility rendering, and offline recovery still require beta acceptance; automated tests are not proof that every device scenario has passed.
 
 Repository operator references: [Backup and Recovery Runbook](BACKUP_AND_RECOVERY_RUNBOOK.md), [Crop Year Compilations](CROP_YEAR_COMPILATIONS.md), and [Mobile Connectivity and Deployment](MOBILE_API_CONNECTIVITY_AND_DEPLOYMENT.md).
