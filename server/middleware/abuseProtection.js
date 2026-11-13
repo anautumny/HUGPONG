@@ -32,6 +32,15 @@ function normalizedPath(req) {
   return String(req?.originalUrl || req?.url || '/').split(/[?#]/, 1)[0].replace(/\/{2,}/g, '/');
 }
 
+function isMutationRequest(req) {
+  const method = String(req.method || 'GET').toUpperCase();
+  // This authenticated POST only reads account-owned state. Keep it subject
+  // to read/network budgets without consuming the submission budget.
+  const readOnlyQuery = method === 'POST'
+    && normalizedPath(req).replace(/\/$/, '') === '/api/notifications/state/query';
+  return MUTATION_METHODS.has(method) && !readOnlyQuery;
+}
+
 function isKnownPath(path) {
   return KNOWN_WEB_PATHS.has(path)
     || /^\/(?:api|auth|assets)(?:\/|$)/.test(path)
@@ -115,7 +124,7 @@ function earlyPolicies(req, limits) {
     { key: `early:burst:${ip}`, policy: limits.burst },
     { key: `early:sustained:${ip}`, policy: limits.sustained }
   ];
-  if (MUTATION_METHODS.has(method)) policies.push({ key: `early:mutation:${ip}`, policy: limits.mutation });
+  if (isMutationRequest(req)) policies.push({ key: `early:mutation:${ip}`, policy: limits.mutation });
   if (path === '/auth' || path.startsWith('/auth/')) policies.push({ key: `early:auth:${ip}`, policy: limits.authentication });
   if (MUTATION_METHODS.has(method) && (path === '/api/backups' || path.startsWith('/api/backups/'))) {
     policies.push({ key: `early:backup:${ip}`, policy: limits.backupUpload });
@@ -159,7 +168,7 @@ function createAuthenticatedApiRateLimit({
     const userId = String(req.authUser?.employeeId || req.session?.user?.employeeId || '').trim();
     if (!userId) return next();
     const ip = normalizeNetworkKey(req);
-    const mutation = MUTATION_METHODS.has(String(req.method || 'GET').toUpperCase());
+    const mutation = isMutationRequest(req);
     const userPolicy = mutation ? limits.mutationUser : limits.readUser;
     const pairPolicy = mutation ? limits.mutationUserAndIp : limits.readUserAndIp;
     const category = mutation ? 'mutation' : 'read';
@@ -177,5 +186,5 @@ module.exports = {
   AUTHENTICATED_LIMITS,
   createEarlyAbuseProtection,
   createAuthenticatedApiRateLimit,
-  _test: { BoundedWindowStore, applyPolicies, earlyPolicies, isKnownPath, normalizedPath }
+  _test: { BoundedWindowStore, applyPolicies, earlyPolicies, isKnownPath, normalizedPath, isMutationRequest }
 };

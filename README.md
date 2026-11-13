@@ -25,8 +25,8 @@ Together, they help keep field work and farm oversight connected.
 
 ## Try HUGPONG
 
-**[Open the Web Console](https://hugpong-beta.onrender.com)** | **[Download the Android App](https://hugpong-beta.onrender.com/downloads/android/1.0.8)**
+**[Open the Web Console](https://hugpong.org)** | **[Download Android 1.1.0](https://hugpong.org/downloads/android/1.1.0)**
 
-HUGPONG is currently available as **Beta 1.0.8**.
+The current stable release target is **HUGPONG 1.1.0**. Deployment and verification status are recorded in [the release report](docs/RELEASE_1.1.0_2026-11-13.md).
 
 For guidance, see the [User Manual](output/pdf/HUGPONG_User_Manual.pdf) or [System Guide](output/pdf/HUGPONG_System_Guide.pdf).

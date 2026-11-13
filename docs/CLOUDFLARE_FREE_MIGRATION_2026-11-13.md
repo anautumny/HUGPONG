@@ -19,6 +19,10 @@ Firebase stays canonical. No business schema migration, reset, fixture insertion
 - `cloudflare/scripts/build.cjs`, package/lock and `wrangler.jsonc`: Node-compatible bundle, free-compatible SQLite migration, no Containers or paid activation. Current config intentionally leaves custom-domain attachment for the verified cutover.
 - `.gitignore`: excludes Worker local secret/runtime files. `.github/workflows/verify.yml`: installs locked build tools and runs a deployment dry run after the existing release gate.
 
+## Current rollout status
+
+Production handover is now active at `https://hugpong.org`; `www` redirects to root. Render was suspended by the user. Readiness and live asset checks pass, Firebase indexes are all ready, and Expo FCM v1 is configured. See [RELEASE_1.1.0_2026-11-13.md](RELEASE_1.1.0_2026-11-13.md) for current evidence and remaining device/workload validation. Preparation references to preflight or pending domain attachment elsewhere in this document are historical.
+
 ## Web
 
 The same React application and relative `/auth`, `/api`, `/downloads` requests are served at the new origin. API permissions, HttpOnly secure sessions and origin checks are still enforced by the existing server. Static responses retain the server's existing security policy. No duplicate client datastore or new mutation API was introduced.

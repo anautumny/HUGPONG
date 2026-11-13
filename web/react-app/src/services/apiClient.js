@@ -209,12 +209,17 @@ export async function authenticatedRequest(path, options = {}) {
   const requestAuthGeneration = authenticatedReadGeneration;
   const token = options.token || '';
   const method = String(options.method || 'GET').toUpperCase();
-  const isMutation = !['GET', 'HEAD'].includes(method);
+  // Match the server's endpoint semantics: querying notification state is a
+  // read even though IDs are sent in a POST body. Announcing it as a write
+  // would recursively invalidate the notification inbox subscription.
+  const requestPath = String(path).split(/[?#]/, 1)[0].replace(/\/{2,}/g, '/').replace(/\/$/, '');
+  const readOnlyQuery = method === 'POST' && requestPath === '/api/notifications/state/query';
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !readOnlyQuery;
   const cooldownSeconds = isMutation ? getMutationCooldownRemainingSeconds() : 0;
   if (cooldownSeconds > 0) throw localMutationCooldownError(cooldownSeconds);
   let requestBody = options.body;
 
-  if (path.startsWith('/api/') && !['GET', 'HEAD'].includes(method) && requestBody && typeof requestBody === 'object' && !requestBody._mutation) {
+  if (path.startsWith('/api/') && isMutation && requestBody && typeof requestBody === 'object' && !requestBody._mutation) {
     requestBody = {
       ...requestBody,
       _mutation: createMutationContext(path, requestBody, options.baseVersion)
@@ -297,7 +302,7 @@ export async function authenticatedRequest(path, options = {}) {
     throw error;
   }
 
-  if (!['GET', 'HEAD'].includes(method) && requestAuthGeneration === authenticatedReadGeneration) {
+  if (isMutation && requestAuthGeneration === authenticatedReadGeneration) {
     announceServerMutation(path);
   }
 
@@ -350,10 +355,11 @@ export function subscribeToAuthenticatedResource(path, {
   let lastSuccessfulRefreshAt = 0;
   let errorRetryTimer = null;
   let retryAttempt = 0;
+  let retryNotBefore = 0;
   const resources = affectedResources(path);
 
   const refresh = async ({ force = false } = {}) => {
-    if (!active) return;
+    if (!active || Date.now() < retryNotBefore) return;
     if (inFlight) {
       // A mutation can complete while an older GET is still in flight. Never
       // let that stale response become the final subscription value; queue one
@@ -369,9 +375,11 @@ export function subscribeToAuthenticatedResource(path, {
       retryAttempt = 0;
       if (active && !forcedRefreshQueued && typeof onData === 'function') onData(result);
     } catch (error) {
+      retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
       if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
-        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+        const delay = Math.max(retryNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, delay);
       }
     } finally {
       inFlight = false;
@@ -426,9 +434,10 @@ export function subscribeToAuthenticatedLoader(load, {
   let lastSuccessfulRefreshAt = 0;
   let errorRetryTimer = null;
   let retryAttempt = 0;
+  let retryNotBefore = 0;
 
   const refresh = async ({ force = false } = {}) => {
-    if (!active) return;
+    if (!active || Date.now() < retryNotBefore) return;
     if (inFlight) {
       if (force) forcedRefreshQueued = true;
       return;
@@ -442,9 +451,11 @@ export function subscribeToAuthenticatedLoader(load, {
       retryAttempt = 0;
       if (active && generation === authenticatedReadGeneration && !forcedRefreshQueued && typeof onData === 'function') onData(value);
     } catch (error) {
+      retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
       if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
-        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+        const delay = Math.max(retryNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, delay);
       }
     } finally {
       inFlight = false;

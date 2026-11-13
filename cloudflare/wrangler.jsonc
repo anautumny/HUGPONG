@@ -16,12 +16,16 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HugpongGateway"] }],
   "vars": {
     "NODE_ENV": "production",
-    "GATEWAY_MODE": "preflight",
+    "GATEWAY_MODE": "active",
     "FIREBASE_PROJECT_ID": "hugpong-production",
     "CORS_ORIGINS": "https://hugpong.org",
     "SMS_PROVIDER": "iprog"
   },
   "workers_dev": true,
+  "routes": [
+    { "pattern": "hugpong.org", "custom_domain": true },
+    { "pattern": "www.hugpong.org", "custom_domain": true }
+  ],
   "preview_urls": false,
   "observability": { "enabled": false }
 }

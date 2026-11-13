@@ -7,7 +7,7 @@ const path = require('node:path');
 const {
   createEarlyAbuseProtection,
   createAuthenticatedApiRateLimit,
-  _test: { BoundedWindowStore, applyPolicies, isKnownPath }
+  _test: { BoundedWindowStore, applyPolicies, isKnownPath, earlyPolicies, isMutationRequest }
 } = require('../middleware/abuseProtection');
 const {
   shouldAggregateDiagnostic,
@@ -127,6 +127,32 @@ test('known routes avoid the scanner budget while unknown paths are grouped safe
   assert.equal(isKnownPath('/wp-admin.php'), false);
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/api/logs/secret-document-id?x=1' })), '/api/logs/*');
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/wp-admin.php' })), '/unknown');
+});
+
+test('notification POST queries use read budgets on Web and Android without exempting writes', () => {
+  const limits = {
+    readUser: { max: 3, windowMs: 1000 }, readUserAndIp: { max: 3, windowMs: 1000 },
+    mutationUser: { max: 1, windowMs: 1000 }, mutationUserAndIp: { max: 1, windowMs: 1000 }
+  };
+  const middleware = createAuthenticatedApiRateLimit({ limits, now: () => 500 });
+  const query = requestDouble({ method: 'POST', originalUrl: '/api/notifications/state/query', authUser: { employeeId: '01000001' } });
+  let accepted = 0;
+  for (let i = 0; i < 3; i++) middleware(query, responseDouble(), () => accepted++);
+  assert.equal(accepted, 3);
+  const readBlocked = responseDouble();
+  middleware(query, readBlocked, () => accepted++);
+  assert.equal(readBlocked.statusCode, 429, 'read queries remain bounded');
+  const write = { ...query, originalUrl: '/api/notifications/state' };
+  middleware(write, responseDouble(), () => accepted++);
+  assert.equal(accepted, 4, 'reads leave the submission budget available');
+  const writeBlocked = responseDouble();
+  middleware(write, writeBlocked, () => accepted++);
+  assert.equal(writeBlocked.statusCode, 429, 'real writes retain their limit');
+  assert.equal(earlyPolicies(query, {}).some(item => item.key.startsWith('early:mutation:')), false);
+  assert.equal(earlyPolicies(write, {}).some(item => item.key.startsWith('early:mutation:')), true);
+  assert.equal(isMutationRequest({ ...query, originalUrl: '/api/notifications/state/query/?limit=1' }), false);
+  assert.equal(isMutationRequest({ ...query, originalUrl: '/api/notifications/state/query/other' }), true);
+  assert.equal(isMutationRequest({ ...query, method: 'DELETE' }), true);
 });
 
 test('only rate-limit abuse and important security responses are aggregated for persistence', () => {

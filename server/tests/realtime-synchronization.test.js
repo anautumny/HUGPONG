@@ -194,12 +194,12 @@ test('stream role policy preserves platform restrictions instead of expanding Me
   }
 });
 
-function webRuntime(fetchImpl) {
+function webRuntime(fetchImpl, overrides = {}) {
   const window = new EventTarget();
   class CustomEvent extends Event { constructor(type, options = {}) { super(type); this.detail = options.detail; } }
   const context = { window, CustomEvent, navigator: { onLine: true }, document: { visibilityState: 'visible' },
     fetch: fetchImpl, AbortController, setTimeout, clearTimeout, setInterval, clearInterval,
-    crypto: require('node:crypto').webcrypto, assertWebOnline() {}, fetchOperationPages: null };
+    crypto: require('node:crypto').webcrypto, assertWebOnline() {}, fetchOperationPages: null, ...overrides };
   vm.createContext(context);
   const source = read('web/react-app/src/services/apiClient.js')
     .replace(/^import .*;\r?\n/gm, '').replaceAll('import.meta.env.VITE_APP_VERSION', "'test'")
@@ -207,6 +207,78 @@ function webRuntime(fetchImpl) {
   vm.runInContext(source, context);
   return context;
 }
+
+test('reading notification state does not recursively refresh the inbox; actual changes still refresh it', async t => {
+  const calls = [];
+  const runtime = webRuntime(async (url, options) => {
+    calls.push({ url, options });
+    if (calls.length > 8) throw new Error('notification refresh loop');
+    return { ok: true, json: async () => ({ success: true, data: [{ id: 'NOTICE-1' }] }) };
+  });
+  const pending = [];
+  const stop = runtime.subscribeToAuthenticatedResource('/api/notifications/inbox?limit=50', {
+    onData: () => pending.push(runtime.authenticatedRequest('/api/notifications/state/query', {
+      method: 'POST', body: { ids: ['NOTICE-1'], expectedUserId: '01000001' }
+    }))
+  });
+  t.after(stop);
+  await tick(); await tick();
+  assert.equal(calls.length, 2, 'one inbox read and one state query, without feedback');
+  assert.equal(JSON.parse(calls[1].options.body)._mutation, undefined);
+  await runtime.authenticatedRequest('/api/notifications/state', { method: 'POST', body: { ids: ['NOTICE-1'], action: 'read' } });
+  await tick(); await Promise.all(pending);
+  assert.equal(calls.filter(call => call.url.includes('/inbox')).length, 2);
+  assert.ok(JSON.parse(calls.find(call => call.url === '/api/notifications/state').options.body)._mutation);
+});
+
+test('notification read throttling cannot pause submissions; real write throttling still does', async () => {
+  const runtime = webRuntime(async () => ({ ok: false, status: 429,
+    headers: { get: () => '265' }, json: async () => ({ success: false, error: 'Too many requests.' }) }));
+  let pauseEvents = 0;
+  runtime.window.addEventListener('hugpong:mutation-rate-limited', () => pauseEvents++);
+  await assert.rejects(runtime.authenticatedRequest('/api/notifications/state/query', { method: 'POST', body: { ids: ['N'] } }), { status: 429, retryAfterMs: 265000 });
+  assert.equal(pauseEvents, 0);
+  assert.equal(runtime.getMutationCooldownRemainingSeconds(), 0);
+  await assert.rejects(runtime.authenticatedRequest('/api/notifications/state', { method: 'POST', body: { ids: ['N'], action: 'read' } }), { status: 429 });
+  assert.equal(pauseEvents, 1);
+  assert.ok(runtime.getMutationCooldownRemainingSeconds() > 0);
+});
+
+test('resource and loader subscriptions respect Retry-After even on focus, reconnect and invalidation', async () => {
+  for (const useLoader of [false, true]) {
+    const timers = new Map();
+    let count = 0;
+    const runtime = webRuntime(async () => {
+      count++;
+      return { ok: false, status: 429, headers: { get: () => '265' },
+        json: async () => ({ success: false, error: 'Too many requests.' }) };
+    }, { setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) });
+    const stop = useLoader
+      ? runtime.subscribeToAuthenticatedLoader(({ force }) => runtime.authenticatedRead('/api/notifications/inbox', { force }), { resources: ['notifications'] })
+      : runtime.subscribeToAuthenticatedResource('/api/notifications/inbox');
+    try {
+      await tick();
+      assert.equal(count, 1);
+      assert.ok([...timers.values()].some(timer => timer.delay >= 264000));
+      runtime.window.dispatchEvent(new Event('focus'));
+      runtime.announceConnectionRestored();
+      runtime.invalidateAuthenticatedResources(['notifications']);
+      await tick();
+      assert.equal(count, 1, 'events cannot bypass the server retry deadline');
+    } finally { stop(); }
+    assert.equal(timers.size, 0);
+  }
+});
+
+test('empty notification inboxes do not request account state', async () => {
+  const context = { calls: 0, authenticatedRequest: () => { context.calls++; }, Promise };
+  vm.createContext(context);
+  vm.runInContext(read('web/react-app/src/services/notificationService.js').replace(/^import .*;\r?\n/gm, '').replace(/export /g, ''), context);
+  const result = await context.fetchNotificationState('01000001', []);
+  assert.equal(result.success, true);
+  assert.equal(result.data.length, 0);
+  assert.equal(context.calls, 0);
+});
 
 test('Web shared reads deduplicate; remote changes during loads supersede stale responses and empty results remove rows', async t => {
   let resolveOld;
@@ -230,6 +302,27 @@ test('Web shared reads deduplicate; remote changes during loads supersede stale 
   assert.equal(seenA.at(-1).data.length, 0);
   assert.equal(seenB.at(-1).data.length, 0);
   assert.equal(runtime.peekAuthenticatedRead('/api/fields').data.length, 0);
+});
+
+test('Android notification queries do not trigger refresh; business mutations still do', async () => {
+  const calls = [], mutations = [];
+  const context = {
+    auth: { currentUser: { uid: '01000001' } }, STORAGE_KEYS: { AUTH_TOKEN: 'token' },
+    getItem: async () => 'existing-token', getMobileClientInstanceId: async () => 'existing-device',
+    mobileHeaders: () => ({}), parseResponse: async value => value,
+    fetchFromApi: async (url, options) => { calls.push({ url, options }); return { success: true, data: [] }; },
+    mutationListeners: new Set([url => mutations.push(url)])
+  };
+  vm.createContext(context);
+  const source = read('mobile/src/services/authService.js');
+  vm.runInContext(source.slice(source.indexOf('export async function authenticatedRequest('),
+    source.indexOf('export async function loginWithServer(')).replace('export ', ''), context);
+  await context.authenticatedRequest('/api/notifications/state/query', { method: 'POST', body: { ids: ['NOTICE-1'], expectedUserId: '01000001' } });
+  assert.equal(calls.length, 1);
+  assert.equal(mutations.length, 0);
+  assert.equal(JSON.parse(calls[0].options.body).expectedUserId, '01000001');
+  await context.authenticatedRequest('/api/prices', { method: 'POST', body: { price: 100 } });
+  assert.deepEqual(mutations, ['/api/prices']);
 });
 
 test('Web logout blocks old authenticated reads and disposed subscriptions receive no further updates', async () => {

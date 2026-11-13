@@ -1,4 +1,10 @@
-# HUGPONG 1.1.0 release preparation
+# HUGPONG 1.1.0 release
+
+**Rollout update:** `hugpong.org` and `www.hugpong.org` are connected; Web and API are deployed in active mode. The user confirmed Render was suspended with auto-deploy disabled, and its old readiness endpoint returned 503. The session secret was matched to preserve token validation. The notification refresh correction and latest tests are recorded in [NOTIFICATION_RATE_LIMIT_FIX_2026-11-13.md](NOTIFICATION_RATE_LIMIT_FIX_2026-11-13.md). Preparation details below referring to preflight or pending domain cutover are historical.
+
+The EAS Android build finished: **1.1.0**, code **12**, package `com.hugpong.app`, source `bc79bf6fe693098504dd3ab83e27771989dee31c`. Passive manifest/domain, size/hash and certificate metadata checks passed; the certificate fingerprint matches EAS's existing signing identity. Independent cryptographic signature verification was not run because the user declined installing the local verification tools. APK SHA-256: `8e70c6d2b91bee9f72b7fd4b02faa8a991792e09535a9b22440b38a1c04f1d00`. The APK and checksum are uploaded to a GitHub draft; public distribution remains pending until publication and route checks.
+
+Expo FCM v1 credentials are now configured for the existing Firebase project. Google's validate-only request passed; no physical notification delivery was tested. Installed phones need an in-place APK upgrade for the new API domain/native configuration; retain app data and pending offline submissions. Physical role/device acceptance and representative bulk/report/backup capacity tests remain outstanding.
 
 The user requested Web and Android deployment of the accumulated changes and a stable **1.1.0** APK, with Beta branding removed. The final backend uses the existing **hugpong-production** Firebase project and **https://hugpong.org**. Free hosting only; no paid service or plan upgrade was activated.
 

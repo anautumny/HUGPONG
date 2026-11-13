@@ -17,7 +17,7 @@ export function preflightRejection(request, mode) {
   // Deployment-not-ready is expected, so do not send this through the server's
   // application-error diagnostic writer. Liveness still runs the actual app.
   return Response.json({ success: false, status: 'preflight',
-    error: 'The gateway is undergoing deployment verification. Please try again after activation.',
+    error: 'HUGPONG is being updated. Sign-in and submissions will be available shortly.',
     code: 'GATEWAY_PREFLIGHT' }, { status: 503, headers: {
       'Cache-Control': 'no-store', 'Retry-After': '60', 'X-Hugpong-Gateway-Mode': 'preflight'
     } });

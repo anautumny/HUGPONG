@@ -38,7 +38,8 @@ export class HugpongGateway extends DurableObject {
       await gateway.changeFeed.hydrate();
       if (this.tasks) await this.tasks.initialize();
       else await ctx.storage.deleteAlarm();
-      this.http = httpServerHandler(createServer(gateway.app));
+      this.http = httpServerHandler(createServer((req, res) =>
+        background.runWithBackgroundTasks(promise => ctx.waitUntil(promise), () => gateway.app(req, res))));
       if (!this.preflight) gateway.runtimeLifecycle.markReady();
     });
   }
@@ -52,8 +53,7 @@ export class HugpongGateway extends DurableObject {
     // in-memory setTimeout to rediscover the durable notification intent.
     if (mutation) await this.tasks.wake(60000);
     try {
-      const response = await background.runWithBackgroundTasks(promise => this.ctx.waitUntil(promise),
-        () => this.http.fetch(request, this.env, this.ctx));
+      const response = await this.http.fetch(request, this.env, this.ctx);
       response.headers.set('X-Hugpong-Gateway-Mode', this.preflight ? 'preflight' : 'active');
       return response;
     } finally {

@@ -4,6 +4,7 @@ import { authenticatedRequest } from './apiClient';
 // bypass cached GET projections; a delayed caller from another session is
 // rejected by the server's expectedUserId precondition.
 export function fetchNotificationState(userId, ids) {
+  if (Array.isArray(ids) && ids.length === 0) return Promise.resolve({ success: true, data: [] });
   return authenticatedRequest('/api/notifications/state/query', {
     method: 'POST', body: { ids, expectedUserId: userId },
   });
