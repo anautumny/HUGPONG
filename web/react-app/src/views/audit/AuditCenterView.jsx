@@ -24,6 +24,8 @@ import {
 import { subscribeToOperationsData } from '../../services/operationsService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
+import { subscribeToAuthenticatedLoader, subscribeToAuthenticatedResource } from '../../services/apiClient';
+import { fromReport } from '../../services/firestoreSchema';
 
 const QRVerifierPanel = lazyWithRecovery(() => import('../../components/audit/QRVerifierPanel'), 'audit-qr-verifier');
 const AuditCompilationModal = lazyWithRecovery(() => import('../../components/audit/AuditCompilationModal'), 'audit-compilation');
@@ -74,6 +76,32 @@ export default function AuditCenterView() {
   const [historyCursor, setHistoryCursor] = useState(null);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    const id = selectedReport?.id || selectedReport?.reportId;
+    if (!id) return undefined;
+    return subscribeToAuthenticatedResource(`/api/audit-reports/${encodeURIComponent(id)}`, {
+      onData: response => { if (response.data) setSelectedReport(fromReport(id, response.data)); },
+      onError: error => {
+        if ([403, 404].includes(error.status)) setSelectedReport(null);
+        setReportsError(error.message);
+      }
+    });
+  }, [selectedReport?.id, selectedReport?.reportId]);
+
+  useEffect(() => {
+    if (roleKey !== ROLE_KEYS.SRA_ADMIN) return undefined;
+    if (!showHistoryModal) return undefined;
+    return subscribeToAuthenticatedLoader(() => fetchAuditPage({ view: 'history', limit: 20 }), {
+      resources: ['audit-reports'],
+      onData: response => {
+        setHistoryReports(response.data || []);
+        setHistoryCursor(response.nextCursor || null);
+        setHistoryHasMore(Boolean(response.hasMore));
+      },
+      onError: error => setReportsError(error.message)
+    });
+  }, [roleKey, showHistoryModal]);
 
   const isFarmManager = roleKey === ROLE_KEYS.FARM_MANAGER;
   const isSraAdmin = roleKey === ROLE_KEYS.SRA_ADMIN;

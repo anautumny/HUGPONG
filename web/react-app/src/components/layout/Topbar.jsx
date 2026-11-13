@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import SyncIndicator from './SyncIndicator';
+import NotificationBell from './NotificationBell';
 
 export default function Topbar({ onOpenMobileDrawer = () => {} }) {
   const { pathname } = useLocation();
@@ -131,6 +132,7 @@ export default function Topbar({ onOpenMobileDrawer = () => {} }) {
       {/* Right: Sync Indicator + Quick Theme Switch */}
       <div className="flex items-center gap-2.5 flex-shrink-0">
         <SyncIndicator compact={false} />
+        <NotificationBell />
 
         {/* Quick theme toggle button */}
         <button

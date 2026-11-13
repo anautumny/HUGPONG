@@ -41,7 +41,7 @@ export default function LandingView() {
         {/* Navigation Links */}
         <nav className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm font-semibold text-hug-text2">
           <a
-            href="https://github.com/Mattaeeee/HUGPONG/releases"
+            href="https://github.com/anautumny/HUGPONG/releases"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-primary transition-colors hidden sm:flex items-center gap-1.5"
@@ -110,11 +110,11 @@ export default function LandingView() {
             {ANDROID_APK_URL ? (
               <a
                 href={ANDROID_APK_URL}
-                download="HUGPONG-Beta.apk"
+                download={`HUGPONG-${androidRelease.version}.apk`}
                 className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface hover:bg-surface-subtle text-hug-text border border-border text-sm font-semibold shadow-2xs hover:border-primary/40 transition-all cursor-pointer"
               >
                 <Download className="w-4 h-4 text-hug-muted" />
-                <span>Download Android APK</span>
+                <span>Download Android v{androidRelease.version}</span>
               </a>
             ) : (
               <button

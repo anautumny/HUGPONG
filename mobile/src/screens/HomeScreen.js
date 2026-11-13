@@ -1,4 +1,5 @@
 import PriceReferenceCard from '../components/PriceReferenceCard';
+import { getSystemNotifications } from '../services/systemNotificationService';
 import { priceText } from '../utils/pricePresentation';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert, Linking, AppState } from 'react-native';
@@ -19,6 +20,7 @@ import {
   CONNECTIVITY_STATUS
 } from '../services/networkService';
 import { createAccountNotificationState } from '../services/notificationStateService';
+import { subscribeToCloudChanges } from '../data/dataStore';
 import { requestApplicationNotificationPermission } from '../services/recoveryNotificationService';
 import { notificationEventId } from '../domain/notificationIdentity';
 import { getOutboxQueue } from '../services/syncEngine';
@@ -184,13 +186,23 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     }
   }
 
+  for (const event of getSystemNotifications(session)) {
+    if (dismissedIds.has(event.id)) continue;
+    const existing = notifs.findIndex(item => item.id === event.id);
+    const item = { id: event.id, title: event.title, msg: event.body, type: event.type,
+      icon: event.type === 'price' ? 'trending-up' : 'shield-checkmark-outline', color: '#267326',
+      time: event.createdAt, createdAt: event.createdAt, unread: !readIds.has(event.id),
+      actionType: event.type === 'price' ? 'price' : 'verification' };
+    if (existing >= 0) notifs[existing] = item; else notifs.push(item);
+  }
   return sortNewestFirst(notifs, ['createdAt']);
 };
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen({ navigation, route }) {
   const { t, formatSyncTime } = useTranslation();
   const [chartMode, setChartMode] = useState('weekly');
   const [showNotifs, setShowNotifs] = useState(false);
+  useEffect(() => { if (route?.params?.openNotifications) setShowNotifs(true); }, [route?.params?.notificationId]);
   const [notificationPermission, setNotificationPermission] = useState(null);
   const [session, setSessionState] = useState(getCurrentSession());
   const [synced, setSyncedState] = useState(getIsSynced());
@@ -237,9 +249,12 @@ export default function HomeScreen({ navigation }) {
     client.refresh(ids(), { force: true });
     const unsubData = subscribe(() => { if (isCurrent()) client.refresh(ids()); });
     const unsubNet = subscribeToNetwork(online => { if (online && isCurrent()) client.refresh(ids(), { force: true }); });
+    const unsubCloud = subscribeToCloudChanges(event => {
+      if (isCurrent() && (event.reset || event.resources?.includes('notifications'))) client.refresh(ids(), { force: true });
+    });
     return () => {
       active = false;
-      unsubData(); unsubNet();
+      unsubData(); unsubNet(); unsubCloud();
       if (notificationClientRef.current === client) notificationClientRef.current = null;
     };
   }, [session?.employeeId, session?.id]);
@@ -286,9 +301,7 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const pendingSyncCount = React.useMemo(() => {
-    return getPendingSyncCount(session);
-  }, [operationLogs, synced, session]);
+  const pendingSyncCount = getPendingSyncCount(session);
 
   const unreadCount = React.useMemo(() => notifs.filter(n => n.unread && !readNotifIds.has(n.id)).length, [notifs, readNotifIds]);
 
@@ -296,8 +309,8 @@ export default function HomeScreen({ navigation }) {
     const unsubscribe = subscribe(() => {
       const sess = getCurrentSession();
       setSyncedState(getIsSynced());
-      setSessionState(sess);
-      setFieldsState(fields);
+      setSessionState({ ...sess });
+      setFieldsState([...fields]);
       setNotifs(generateDynamicNotifications(sess, draftLogs, operationLogs, readNotifIds, dismissedNotifIds));
       setPriceData({
         livePrice: currentPrice.value,
@@ -530,7 +543,13 @@ export default function HomeScreen({ navigation }) {
         right={
         <TouchableOpacity style={s.notifBtn} onPress={openNotifs}>
           <Ionicons name="notifications-outline" size={22} color={COLORS.text} />
-          {unreadCount > 0 && <View style={s.badge}><Text variant="badge" style={s.badgeText}>{unreadCount}</Text></View>}
+          {unreadCount > 0 && (
+            <View style={s.badge}>
+              <Text variant="badge" numberOfLines={1} style={s.badgeText}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       } />
 
@@ -869,11 +888,27 @@ const s = StyleSheet.create({
   scroll: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xl * 2 },
   notifBtn: { position: 'relative', padding: 6 },
   badge: {
-    position: 'absolute', top: 2, right: 2,
-    backgroundColor: COLORS.danger, minWidth: 20, minHeight: 20, paddingHorizontal: 3, paddingVertical: 2,
-    borderRadius: 10, alignItems: 'center', justifyContent: 'center'
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: COLORS.danger,
+    minWidth: 20,
+    minHeight: 20,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  badgeText: { color: COLORS.textInverse, fontSize: 11, lineHeight: 14, fontWeight: '800' },
+  badgeText: {
+    color: COLORS.textInverse,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+    flexShrink: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,

@@ -5,6 +5,20 @@ const crypto = require('node:crypto');
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { COLLECTIONS, nowIso } = require('../schema/firestoreSchema');
+const { notificationInbox } = require('../services/systemNotificationService');
+const { pageLimit } = require('../services/cursorPagination');
+
+router.get('/inbox', requireAuth, async (req, res) => {
+  try {
+    const user = req.authUser || req.session.user;
+    const userId = user.employeeId || user.userId;
+    const account = await db.collection(COLLECTIONS.USERS).doc(userId).get();
+    const result = await notificationInbox(db, { ...account.data(), employeeId: userId }, {
+      cursor: req.query.cursor, limit: pageLimit(req.query.limit)
+    });
+    return res.json({ success: true, ...result });
+  } catch (error) { return res.status(error.status || 500).json({ success: false, error: error.message }); }
+});
 
 // State belongs to the authenticated account. Callers cannot select another
 // user, change notification content, or reverse an existing read/dismissal.

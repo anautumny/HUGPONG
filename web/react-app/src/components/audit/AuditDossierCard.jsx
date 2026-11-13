@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   FileText,
+  Download,
   Printer,
   ShieldCheck,
   Calendar,
@@ -37,6 +38,18 @@ export default function AuditDossierCard({
   const [certificationNotes, setCertificationNotes] = useState('');
   const [returnReason, setReturnReason] = useState('');
   const [operationPage, setOperationPage] = useState(1);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+
+  const handleDownloadPdf = async () => {
+    if (isDownloadingPdf) return;
+    setIsDownloadingPdf(true); setPdfError('');
+    try {
+      const { downloadAuditReportPdf } = await import('../../services/auditPdfService');
+      downloadAuditReportPdf(report, { blockFarms, currentUser });
+    } catch (error) { setPdfError(error.message || 'The PDF could not be downloaded.'); }
+    finally { setIsDownloadingPdf(false); }
+  };
 
   useEffect(() => {
     setOperationPage(1);
@@ -429,6 +442,8 @@ export default function AuditDossierCard({
             </Button>
           )}
 
+          {isCertified && <Button variant="secondary" size="md" icon={Download} onClick={handleDownloadPdf} isLoading={isDownloadingPdf} loadingText="Preparing PDF...">Download PDF</Button>}
+          {pdfError && <p role="alert" className="text-sm text-danger">{pdfError}</p>}
           {/* Printable Report View Button */}
           {isCertified && <Button
             variant="secondary"

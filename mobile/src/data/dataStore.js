@@ -3,6 +3,8 @@ import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, getO
 import { createClientRecordId } from '../services/secureId';
 import { fieldEnrollmentIntent } from '../services/enrollmentIntentService';
 import { fetchOperationPages } from '../services/operationPages';
+import { startRealtimeSync } from '../services/realtimeService';
+import { overlayPendingFieldChanges } from '../domain/pendingFieldReplica';
 import { recoverAbandonedDraftClaims } from '../domain/draftRecovery';
 import { publishTerminalTelemetry, reportMobileActivity, reportMobileSync, resetMobileTelemetryState } from '../services/telemetryService';
 import { auth } from '../firebase/config';
@@ -12,6 +14,7 @@ import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConn
 import {
   loginWithServer,
   refreshMobileSessionFromFirebase,
+  refreshServerSession,
   verifyPasswordWithServer,
   changePasswordWithServer,
   changePhoneWithServer,
@@ -21,7 +24,9 @@ import {
   requestPhoneVerificationReviewWithServer,
   verifyPhoneWithServer,
   logoutFromServer,
-  authenticatedRequest
+  authenticatedRequest,
+  subscribeToServerMutations,
+  setServerReadRevision
 } from '../services/authService';
 import {
   ROLES,
@@ -275,7 +280,7 @@ const applySraOfflineSnapshot = (snapshot, session) => {
   operationLogs.push(...sortOperationsNewestFirst((Array.isArray(snapshot.operationLogs) ? snapshot.operationLogs : [])
     .filter(Boolean)
     .map(record => fromOperationLogDocument(record.id, record))));
-  priceHistory.push(...sortNewestFirst(restoredPrices, ['effectiveDate', 'publishedAt']));
+  priceHistory.push(...sortNewestFirst(restoredPrices, ['effectiveDate'], ['publishedAt']));
   sraCertifiedAuditHistory.push(...sortNewestFirst(restoredCertifiedHistory, ['certifiedAt', 'compiledAt', 'createdAt']));
   sraOfflineSnapshotStatus = {
     available: true,
@@ -785,7 +790,7 @@ export const resolveBlockFarmManager = (blockFarm) => {
 };
 
 export const getSortedPrices = () => {
-  return sortNewestFirst(priceHistory, ['effectiveDate', 'publishedAt']);
+  return sortNewestFirst(priceHistory, ['effectiveDate'], ['publishedAt']);
 };
 
 // ── Dynamic Current Price & Market Observation ──────────────
@@ -1005,9 +1010,9 @@ export const logoutUser = async (options = {}) => {
 };
 
 // ── User Directory & Authentication ──────────────────────────
-export const authenticateUser = async (contactOrId, password) => {
+export const authenticateUser = async (contactOrId, password, sessionAcknowledged = false) => {
   try {
-    const result = await loginWithServer(contactOrId, password);
+    const result = await loginWithServer(contactOrId, password, sessionAcknowledged);
     const roleUpper = String(result.user?.canonicalRole || result.user?.role || '').toUpperCase().replace(/ /g, '_');
     if (roleUpper === 'SUPER_ADMIN' || result.user?.role === 'Super Admin') {
       await logoutFromServer();
@@ -1602,6 +1607,49 @@ export const requestCurrentPhoneVerificationReview = async () => {
   }
 };
 
+export const refreshCurrentAccountSession = async () => {
+  const owner = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+  if (!owner || !getNetworkStatus()) return null;
+  const wasVerified = CURRENT_SESSION.phoneVerified === true;
+  const result = await refreshServerSession(await getItem(STORAGE_KEYS.AUTH_TOKEN), {
+    isCurrent: () => owner === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')
+  });
+  if (owner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return null;
+  CURRENT_SESSION = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+  await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+  notify();
+  if (!wasVerified && CURRENT_SESSION.phoneVerified === true) await restartCloudSyncIfReady();
+  return result;
+};
+
+const persistCurrentPrices = async owner => {
+  if (owner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return;
+  if (canonicalRole(CURRENT_SESSION.role) === ROLES.SRA_ADMIN) {
+    const key = sraOfflineSnapshotStorageKey(owner);
+    const snapshot = await getItem(key, null);
+    if (owner === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '') && snapshot?.ownerUserId === owner) {
+      await saveItem(key, { ...snapshot, prices: JSON.parse(JSON.stringify(priceHistory)) });
+    }
+  } else await saveItem(STORAGE_KEYS.PRICES, priceHistory);
+};
+
+export const refreshFromSystemNotification = async (resources = []) => {
+  if (!CURRENT_SESSION || !getNetworkStatus()) return;
+  if (resources.includes('session') && CURRENT_SESSION.phoneVerified !== true) await refreshCurrentAccountSession();
+  if (resources.includes('prices') && CURRENT_SESSION.phoneVerified === true && CURRENT_SESSION.requiresPasswordChange !== true) {
+    const owner = String(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
+    const result = await authenticatedRequest('/api/prices?limit=52', { headers: { 'Cache-Control': 'no-cache' } });
+    if (owner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id)) return;
+    const records = responseRecords(result).map(record => fromPriceDocument(record.id, record));
+    priceHistory.splice(0, priceHistory.length, ...sortNewestFirst(records, ['effectiveDate'], ['publishedAt']));
+    notify();
+    await persistCurrentPrices(owner);
+  }
+  if (activeCloudRefresh) return activeCloudRefresh({ force: true, extended: resources.includes('users'), resources });
+};
+
+export const notifySystemInboxChanged = () => notify();
+
 export const approveFieldCropCycleRollover = async (fieldId, options = {}) => {
   const cleanId = String(fieldId || '').trim().toUpperCase();
   const targetField = fields.find(field => String(field.id || '').trim().toUpperCase() === cleanId);
@@ -2132,6 +2180,7 @@ export const calculateSRAWeekLabel = (dateInput = new Date()) => {
 };
 
 export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetricTon, sugarPriceStatus = 'REPORTED', molassesPriceStatus = 'REPORTED', weekLabel, circularNumber, source, effectiveDate }) => {
+  const publicationOwner = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
   const sugar = sugarPriceStatus === 'REPORTED' ? Number(sugarPricePerLkg) : null;
   const molasses = molassesPriceStatus === 'REPORTED' ? Number(molassesPricePerMetricTon) : null;
   if ((sugarPriceStatus === 'REPORTED' && (!Number.isFinite(sugar) || sugar <= 0)) || (molassesPriceStatus === 'REPORTED' && (!Number.isFinite(molasses) || molasses <= 0))) {
@@ -2158,10 +2207,11 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
     throw new Error('The server did not confirm the published price record.');
   }
   const confirmed = fromPriceDocument(outcome.response.data.id, outcome.response.data);
+  if (publicationOwner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) throw new Error('The sign-in account changed.');
   const existingIndex = priceHistory.findIndex(priceRecord => priceRecord.id === confirmed.id);
   if (existingIndex >= 0) priceHistory[existingIndex] = confirmed;
   else priceHistory.unshift(confirmed);
-  await saveItem(STORAGE_KEYS.PRICES, priceHistory);
+  await persistCurrentPrices(publicationOwner);
   notify();
   return confirmed;
 };
@@ -2601,7 +2651,11 @@ export const resetLocalCache = async () => {
 // The durable outbox remains responsible for offline mutations; this refresh
 // only replaces canonical read replicas after a successful API response.
 const responseRecords = response => Array.isArray(response?.data) ? response.data : [];
-const CLOUD_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const cloudChangeListeners = new Set();
+export const subscribeToCloudChanges = listener => {
+  cloudChangeListeners.add(listener);
+  return () => cloudChangeListeners.delete(listener);
+};
 const CLOUD_REFRESH_FRESHNESS_MS = 5 * 60 * 1000;
 const CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
@@ -2609,6 +2663,18 @@ export const listenToCloudSync = () => {
   let active = true;
   let requestInFlight = false;
   let refreshTimer = null;
+  let stopStream = null;
+  let unsubscribeNetwork = null;
+  let unsubscribeMutations = null;
+  let forcedRefreshQueued = false;
+  let extendedRefreshQueued = false;
+  let sessionRefreshQueued = false;
+  let refreshRetryTimer = null;
+  let refreshRetryAttempt = 0;
+  const replicaResponses = new Map();
+  const pendingResources = new Set();
+  let fullRefreshQueued = false;
+  let refreshGeneration = 0;
   let appState = AppState.currentState;
   let appStateSubscription = null;
   let lastSuccessfulRefreshAt = 0;
@@ -2620,15 +2686,29 @@ export const listenToCloudSync = () => {
 
   const stop = () => {
     active = false;
-    if (refreshTimer) clearInterval(refreshTimer);
+    setServerReadRevision();
+    if (refreshTimer) clearTimeout(refreshTimer);
+    clearTimeout(refreshRetryTimer);
+    stopStream?.();
+    stopStream = null;
+    unsubscribeNetwork?.();
+    unsubscribeMutations?.();
     refreshTimer = null;
     appStateSubscription?.remove?.();
     appStateSubscription = null;
     if (activeCloudRefresh === refresh) activeCloudRefresh = null;
   };
 
-  const refresh = async ({ force = false, extended = false } = {}) => {
-    if (!active || requestInFlight || (appState && appState !== 'active') || !getNetworkStatus()) return;
+  const refresh = async ({ force = false, extended = false, session = false, resources = null } = {}) => {
+    if (!active || (appState && appState !== 'active') || !getNetworkStatus()) return;
+    if (requestInFlight) {
+      if (force) forcedRefreshQueued = true;
+      extendedRefreshQueued ||= extended;
+      sessionRefreshQueued ||= session;
+      if (!resources) fullRefreshQueued = true;
+      else resources.forEach(resource => pendingResources.add(resource));
+      return;
+    }
     if (!force && Date.now() - lastSuccessfulRefreshAt < CLOUD_REFRESH_FRESHNESS_MS) return true;
 
     const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
@@ -2638,6 +2718,16 @@ export const listenToCloudSync = () => {
       && CURRENT_SESSION?.pendingFirstLoginVerification !== true;
     const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
 
+    if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return false;
+    if (requestInFlight) {
+      forcedRefreshQueued ||= force;
+      extendedRefreshQueued ||= extended;
+      sessionRefreshQueued ||= session;
+      if (!resources) fullRefreshQueued = true;
+      else resources.forEach(resource => pendingResources.add(resource));
+      return;
+    }
+
     if (!token || !activeRole || !sessionUserId || !accountReady
       || !auth?.currentUser || auth.currentUser.uid !== sessionUserId) {
       stop();
@@ -2645,7 +2735,21 @@ export const listenToCloudSync = () => {
     }
 
     requestInFlight = true;
+    const requestGeneration = ++refreshGeneration;
+    clearTimeout(refreshRetryTimer);
     try {
+      const needsResource = path => !resources || resources.includes(path.split('/')[2]?.split('?')[0]) || resources.includes('session');
+      const readReplica = async path => {
+        if (!needsResource(path) && replicaResponses.has(path)) return replicaResponses.get(path);
+        const response = await authenticatedRequest(path);
+        if (active && requestGeneration === refreshGeneration) replicaResponses.set(path, response);
+        return response;
+      };
+      if (session) {
+        const result = await authenticatedRequest('/auth/session');
+        if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return false;
+        CURRENT_SESSION = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+      }
       const includeExtended = extended
         || Date.now() - lastExtendedRefreshAt >= CLOUD_EXTENDED_REFRESH_INTERVAL_MS;
       const canReadUserDirectory = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
@@ -2664,20 +2768,39 @@ export const listenToCloudSync = () => {
         certifiedHistoryResponse,
         auditEventsResponse
       ] = await Promise.all([
-        authenticatedRequest('/api/block-farms'),
-        authenticatedRequest('/api/fields'),
-        authenticatedRequest('/api/crop-cycles'),
-        fetchOperationPages(authenticatedRequest, () => active && (getCurrentSession()?.employeeId || getCurrentSession()?.id) === sessionUserId && auth?.currentUser?.uid === sessionUserId),
-        authenticatedRequest('/api/prices?limit=52'),
-        includeExtended ? authenticatedRequest('/api/tickets') : Promise.resolve(null),
-        includeExtended ? authenticatedRequest('/api/tickets?view=history&limit=20') : Promise.resolve(null),
-        includeExtended && canReadUserDirectory ? authenticatedRequest('/api/users?limit=50') : Promise.resolve(null),
-        canReadAuditReports ? authenticatedRequest('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
-        includeExtended && activeRole === ROLES.SRA_ADMIN ? authenticatedRequest('/api/audit-reports?view=history&limit=50') : Promise.resolve(null),
-        includeExtended && canReadAuditEvents ? authenticatedRequest('/api/audit-events?limit=50') : Promise.resolve(null)
+        readReplica('/api/block-farms'),
+        readReplica('/api/fields'),
+        readReplica('/api/crop-cycles'),
+        !needsResource('/api/logs') && replicaResponses.has('/api/logs') ? replicaResponses.get('/api/logs')
+          : fetchOperationPages(authenticatedRequest, () => active && (getCurrentSession()?.employeeId || getCurrentSession()?.id) === sessionUserId && auth?.currentUser?.uid === sessionUserId)
+            .then(response => {
+              if (active && requestGeneration === refreshGeneration) replicaResponses.set('/api/logs', response);
+              return response;
+            }),
+        readReplica('/api/prices?limit=52').then(response => {
+          // An unrelated failing endpoint must not hold back an authorized price update.
+          if (active && requestGeneration === refreshGeneration && !forcedRefreshQueued
+            && startingUserId === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) {
+            const next = responseRecords(response).map(record => fromPriceDocument(record.id, record));
+            const ordered = sortNewestFirst(next, ['effectiveDate'], ['publishedAt']);
+            if (JSON.stringify(priceHistory) !== JSON.stringify(ordered)) {
+              priceHistory.splice(0, priceHistory.length, ...ordered);
+              notify();
+            }
+          }
+          return response;
+        }),
+        includeExtended ? readReplica('/api/tickets') : Promise.resolve(null),
+        includeExtended ? readReplica('/api/tickets?view=history&limit=20') : Promise.resolve(null),
+        includeExtended && canReadUserDirectory ? readReplica('/api/users?limit=50') : Promise.resolve(null),
+        canReadAuditReports ? readReplica('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
+        includeExtended && activeRole === ROLES.SRA_ADMIN ? readReplica('/api/audit-reports?view=history&limit=50') : Promise.resolve(null),
+        includeExtended && canReadAuditEvents ? readReplica('/api/audit-events?limit=50') : Promise.resolve(null)
       ]);
 
-      if (!active) return;
+      if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')
+        || auth?.currentUser?.uid !== startingUserId) return false;
+      if (forcedRefreshQueued) return false;
 
       const remoteBlockFarms = uniqueRecordsById(responseRecords(blockFarmResponse)
         .map(record => fromBlockFarmDocument(record.id, record)));
@@ -2686,8 +2809,9 @@ export const listenToCloudSync = () => {
       const cycleById = new Map(remoteCycles.map(cycle => [cycle.id, cycle]));
       const mappedFields = responseRecords(fieldsResponse)
         .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
-      const remoteFields = mappedFields.filter(field => field.status !== 'ARCHIVED');
+      const remoteFields = overlayPendingFieldChanges(mappedFields.filter(field => field.status !== 'ARCHIVED'), getOutboxQueue(), sessionUserId);
       const remoteArchivedFields = mappedFields.filter(field => field.status === 'ARCHIVED');
+      const authorizedFieldIds = new Set(mappedFields.map(field => String(field.id)));
 
       const canonicalRemoteLogs = responseRecords(logsResponse)
         .filter(record => record.cycleId && (record.status === 'ACTIVE' || record.status === 'ARCHIVED'))
@@ -2698,6 +2822,7 @@ export const listenToCloudSync = () => {
           (item.type === 'operation_log' || item.type === 'takeover_log')
           && ['queued', 'retryable', 'failed', 'syncing'].includes(item.status)
           && item.payload?.id
+          && authorizedFieldIds.has(String(item.payload.fieldId))
           && !remoteLogIds.has(item.payload.id)
         )
         .map(item => ({
@@ -2716,7 +2841,7 @@ export const listenToCloudSync = () => {
           console.warn('[Mobile] An invalid server price record was ignored.');
         }
       });
-      const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate', 'publishedAt']);
+      const orderedRemotePrices = sortNewestFirst(remotePrices, ['effectiveDate'], ['publishedAt']);
 
       const pendingTicketOverlays = includeExtended
         ? supportTickets.filter(ticket => ticket.status === SUPPORT_TICKET_STATUS.PENDING_SUBMISSION)
@@ -2766,34 +2891,19 @@ export const listenToCloudSync = () => {
         .filter(item => ['audit_report', 'audit_submission', 'audit_return', 'audit_certification', 'audit_qr_import'].includes(item.type))
         .map(item => String(item.payload?.id || item.payload?.reportId || '').trim())
         .filter(Boolean));
-      const pendingAuditOverlays = auditReports.filter(report => pendingAuditIds.has(String(report.reportId || report.id || '').trim()));
+      const authorizedAuditFarmIds = new Set(remoteBlockFarms
+        .filter(farm => String(farm.managerUserId || '') === sessionUserId)
+        .map(farm => String(farm.id)));
+      const pendingAuditOverlays = auditReports.filter(report => activeRole === ROLES.FARM_MANAGER
+        && authorizedAuditFarmIds.has(String(report.blockFarmId))
+        && pendingAuditIds.has(String(report.reportId || report.id || '').trim()));
       const reconciledReportsById = new Map(remoteReports.map(report => [String(report.reportId || report.id), report]));
       pendingAuditOverlays.forEach(report => {
         const reportId = String(report.reportId || report.id);
         reconciledReportsById.set(reportId, { ...(reconciledReportsById.get(reportId) || {}), ...report });
       });
-      // Manager audit reports are append-only lifecycle records. A background
-      // read may have started before compilation was acknowledged, so its
-      // response can omit the just-created report. Preserve the manager's
-      // canonical local acknowledgement until a later scoped read includes it.
-      // SRA inbox reads deliberately do not use this merge because omission
-      // there can mean a report was certified and moved into history.
-      if (activeRole === ROLES.FARM_MANAGER) {
-        const assignedFarmIds = new Set(remoteBlockFarms
-          .filter(farm => String(farm.managerUserId || '').trim() === sessionUserId)
-          .map(farm => String(farm.id)));
-        auditReports.forEach(report => {
-          const reportId = String(report?.reportId || report?.id || '').trim();
-          if (!reportId) return;
-          if (!assignedFarmIds.has(String(report.blockFarmId || ''))) return;
-          const remoteReport = reconciledReportsById.get(reportId);
-          const localUpdatedAt = Date.parse(report.updatedAt || report.compiledAt || report.createdAt || '') || 0;
-          const remoteUpdatedAt = Date.parse(remoteReport?.updatedAt || remoteReport?.compiledAt || remoteReport?.createdAt || '') || 0;
-          if (!remoteReport || localUpdatedAt > remoteUpdatedAt) {
-            reconciledReportsById.set(reportId, { ...(remoteReport || {}), ...report });
-          }
-        });
-      }
+      // Confirmed server snapshots replace replicas, including omissions. Only
+      // durable pending intent is overlaid above; removed records stay removed.
       const reconciledReports = sortNewestFirst(Array.from(reconciledReportsById.values()), ['compiledAt', 'createdAt']);
       const remoteHistory = includeExtended && canReadAuditEvents
         ? sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt'])
@@ -2912,6 +3022,7 @@ export const listenToCloudSync = () => {
         });
       }
       if (active) notify();
+      refreshRetryAttempt = 0;
       lastSuccessfulRefreshAt = refreshCompletedAt;
       if (includeExtended) lastExtendedRefreshAt = lastSuccessfulRefreshAt;
       return true;
@@ -2921,25 +3032,74 @@ export const listenToCloudSync = () => {
         return false;
       }
       console.warn('[Mobile] Server data refresh was deferred.');
+      if (active && ![401, 403].includes(error.status)) {
+        refreshRetryTimer = setTimeout(() => { void refresh({ force: true, extended, session, resources }); }, Math.min(30000, 1000 * 2 ** Math.min(refreshRetryAttempt++, 5)));
+      }
       return false;
     } finally {
       requestInFlight = false;
+      if (active && forcedRefreshQueued) {
+        const next = { force: true, extended: extendedRefreshQueued, session: sessionRefreshQueued,
+          resources: fullRefreshQueued ? null : [...pendingResources] };
+        forcedRefreshQueued = extendedRefreshQueued = sessionRefreshQueued = false;
+        fullRefreshQueued = false;
+        pendingResources.clear();
+        return await refresh(next);
+      }
     }
   };
 
   activeCloudRefresh = refresh;
-  // Cached secondary data survives restarts, so reopening the app within the
-  // extended window performs only the smaller operational refresh.
-  stop.initialRefresh = refresh();
-  // Foregrounding and explicit sync still refresh immediately. The periodic
-  // fallback is intentionally infrequent because one refresh fans out across
-  // several server-authoritative resources.
-  refreshTimer = setInterval(refresh, CLOUD_REFRESH_INTERVAL_MS);
+  // Establish a complete scoped replica when an authenticated owner starts.
+  stop.initialRefresh = refresh({ force: true, extended: true, session: true });
+  // Batch remote invalidations; only affected endpoints re-read the database.
+  const scheduleRefresh = event => {
+    if (event.revision) setServerReadRevision(event.revision);
+    for (const listener of cloudChangeListeners) {
+      try { listener(event); } catch { /* Isolate view errors. */ }
+    }
+    const resources = event.resources || [];
+    if (!event.reset && resources.length && resources.every(resource => ['terminal-diagnostics', 'diagnostics', 'system-diagnostics', 'notifications'].includes(resource))) return;
+    forcedRefreshQueued ||= requestInFlight;
+    extendedRefreshQueued ||= Boolean(event.reset || resources.some(resource => ['users', 'tickets', 'audit-reports', 'audit-events', 'recovery-reviews'].includes(resource)));
+    sessionRefreshQueued ||= Boolean(event.reset || resources.includes('session'));
+    fullRefreshQueued ||= Boolean(event.reset);
+    resources.forEach(resource => pendingResources.add(resource));
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      const next = { force: true, extended: extendedRefreshQueued, session: sessionRefreshQueued,
+        resources: fullRefreshQueued ? null : [...pendingResources] };
+      extendedRefreshQueued = sessionRefreshQueued = false;
+      fullRefreshQueued = false;
+      pendingResources.clear();
+      void refresh(next);
+    }, 100);
+  };
+  const resumeStream = () => {
+    if (active && !stopStream && getNetworkStatus() && (!appState || appState === 'active')) {
+      stopStream = startRealtimeSync(scheduleRefresh, () => {
+        // Use the existing authentication handler to revoke invalid sessions.
+        void authenticatedRequest('/auth/session').catch(() => {});
+      });
+    }
+  };
+  unsubscribeNetwork = subscribeToNetwork(online => {
+    if (!online) { stopStream?.(); stopStream = null; }
+    else {
+      resumeStream();
+      void refresh({ force: true, extended: true, session: true });
+    }
+  });
+  unsubscribeMutations = subscribeToServerMutations(path => scheduleRefresh({ resources: [path.split('/')[2], 'audit-events', 'session'] }));
+  resumeStream();
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
     appState = nextState;
+    if (nextState !== 'active') { stopStream?.(); stopStream = null; }
     if (returnedToForeground) {
-      refresh();
+      resumeStream();
+      void refresh({ force: true, extended: true, session: true });
       if (getOutboxCount() > 0) performMobileSync('APP_FOREGROUND').catch(() => {});
     }
   });
@@ -2948,16 +3108,20 @@ export const listenToCloudSync = () => {
 
 let activeCloudSyncStop = null;
 let activeCloudRefresh = null;
+let cloudSyncGeneration = 0;
 
 const stopActiveCloudSync = () => {
+  cloudSyncGeneration += 1;
   if (typeof activeCloudSyncStop === 'function') activeCloudSyncStop();
   activeCloudSyncStop = null;
 };
 
 export const restartCloudSyncIfReady = async () => {
   stopActiveCloudSync();
+  const generation = cloudSyncGeneration;
 
   const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (generation !== cloudSyncGeneration) return false;
   const activeRole = canonicalRole(CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
   const sessionUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
   const accountReady = CURRENT_SESSION?.phoneVerified === true

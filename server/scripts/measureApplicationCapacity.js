@@ -135,6 +135,7 @@ async function authenticateProfile(configuration, fetchImplementation, platform)
     body: {
       identifier: configuration.identifier,
       password: configuration.password,
+      sessionAcknowledged: true,
       clientPlatform: platform,
       clientInstanceId: `phase4-${platform}`
     }

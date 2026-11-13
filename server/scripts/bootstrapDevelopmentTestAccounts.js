@@ -68,7 +68,7 @@ async function request(path, { method = 'GET', token, body, expectedStatus } = {
 async function login(account, password = PASSWORD) {
   const result = await request('/auth/login', {
     method: 'POST',
-    body: { contactNumber: account.userId, password }
+    body: { contactNumber: account.userId, password, sessionAcknowledged: true }
   });
   return result.token;
 }

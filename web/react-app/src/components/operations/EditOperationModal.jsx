@@ -6,7 +6,7 @@ import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { meaningfulAmendmentChanges } from '../../domain/amendmentPresentation';
 import { Button, FormField, Input, Modal, Select, Textarea } from '../ui';
 import { createClientRecordId } from '../../utils/secureId';
-import { OPERATION_UNITS } from '../../domain/operationUnits';
+import { canonicalOperationUnit, operationUnitOptions } from '../../domain/operationUnits';
 import { formatCurrency } from '../../utils/formatters';
 
 const createLineItem = () => ({
@@ -14,7 +14,7 @@ const createLineItem = () => ({
   itemType: 'EXPENSE',
   description: '',
   quantity: 1,
-  unit: 'ha',
+  unit: 'HA',
   unitCost: 0,
   subtotal: 0
 });
@@ -24,7 +24,7 @@ const normalizedLineItem = item => ({
   itemType: item.itemType || 'EXPENSE',
   description: String(item.description || ''),
   quantity: Number(item.quantity ?? item.qty ?? 0),
-  unit: item.unit || 'ha',
+  unit: canonicalOperationUnit(item.unit) || item.unit || 'HA',
   unitCost: Number(item.unitCost || 0),
   subtotal: Number(item.subtotal ?? item.subTotal ?? 0)
 });
@@ -67,7 +67,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
       workerRate: workerRate ? String(workerRate) : '',
       inputMode: lineItems.length > 0 ? 'group' : 'direct',
       directQty: String(directQty),
-      directUnit: quantity?.unit || operation.inputUnit || 'ha',
+      directUnit: canonicalOperationUnit(quantity?.unit || operation.inputUnit) || quantity?.unit || operation.inputUnit || 'HA',
       directRate: directQty > 0 ? String(baseCost / directQty) : '',
       lineItems
     });
@@ -110,7 +110,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
       }
       const expenseTotal = current.lineItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
       const quantity = Number(current.areaHa || 1) || 1;
-      return { ...current, inputMode: 'direct', directQty: String(quantity), directUnit: 'ha', directRate: String(expenseTotal / quantity) };
+      return { ...current, inputMode: 'direct', directQty: String(quantity), directUnit: 'HA', directRate: String(expenseTotal / quantity) };
     });
   };
 
@@ -165,7 +165,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
       itemType: item.itemType || 'EXPENSE',
       description: String(item.description || '').trim(),
       quantity: Number(item.quantity || 0),
-      unit: item.unit || 'ha',
+      unit: item.unit || 'HA',
       unitCost: Number(item.unitCost || 0),
       subtotal: Number(item.quantity || 0) * Number(item.unitCost || 0)
     })) : [];
@@ -179,7 +179,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
       rate: workerRate,
       subtotal: workersCount * workDays * workerRate
     }] : [];
-    const quantity = form.inputMode === 'direct' ? { value: Number(form.directQty || 0), unit: form.directUnit || 'ha', inputName: form.operationName.trim() } : null;
+    const quantity = form.inputMode === 'direct' ? { value: Number(form.directQty || 0), unit: form.directUnit || 'HA', inputName: form.operationName.trim() } : null;
     if (form.inputMode === 'direct' && (!Number.isFinite(quantity.value) || quantity.value <= 0 || !Number.isFinite(Number(form.directRate)) || Number(form.directRate) < 0)) return setError('Enter a valid quantity and unit rate for Direct Input.');
 
     const changes = {
@@ -284,16 +284,16 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
               {form.lineItems.map((item, index) => (
                 <div key={item.lineItemId || index} className="space-y-2 rounded-xl border border-border bg-bg/40 p-3">
                   <div className="flex items-start gap-2"><Input className="flex-1" value={item.description} onChange={event => changeLineItem(index, 'description', event.target.value)} placeholder="Description / material name" disabled={controlsDisabled} /><button type="button" className="rounded-lg p-2 text-danger hover:bg-danger-bg disabled:opacity-40" onClick={() => setForm(current => ({ ...current, lineItems: current.lineItems.filter((_, itemIndex) => itemIndex !== index) }))} disabled={controlsDisabled} aria-label="Remove cost item"><Trash2 className="h-4 w-4" /></button></div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2"><Input type="number" min="0.01" step="0.01" value={item.quantity} onChange={event => changeLineItem(index, 'quantity', event.target.value)} placeholder="Quantity" disabled={controlsDisabled} /><Select value={item.unit} onChange={event => changeLineItem(index, 'unit', event.target.value)} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} disabled={controlsDisabled} /><Input type="number" min="0" step="0.01" prefix="₱" value={item.unitCost} onChange={event => changeLineItem(index, 'unitCost', event.target.value)} placeholder="Unit cost" disabled={controlsDisabled} /></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2"><Input type="number" min="0.01" step="0.01" value={item.quantity} onChange={event => changeLineItem(index, 'quantity', event.target.value)} placeholder="Quantity" disabled={controlsDisabled} /><Select value={item.unit} onChange={event => changeLineItem(index, 'unit', event.target.value)} options={operationUnitOptions(item.unit)} disabled={controlsDisabled} /><Input type="number" min="0" step="0.01" prefix="₱" value={item.unitCost} onChange={event => changeLineItem(index, 'unitCost', event.target.value)} placeholder="Unit cost" disabled={controlsDisabled} /></div>
                   <p className="text-right text-sm font-black text-primary">{formatCurrency(Number(item.quantity || 0) * Number(item.unitCost || 0))}</p>
                 </div>
               ))}
               {form.lineItems.length === 0 && <div className="rounded-xl border border-primary/20 bg-primary-bg/60 px-3 py-4 text-center text-xs font-semibold text-primary">No items added yet. Use Add Expense / Material below.</div>}
-              {showNewExpense && <div className="space-y-3 rounded-xl border border-primary/30 bg-primary-bg/40 p-3"><Input value={pendingExpense.description} onChange={event => setPendingExpense(current => ({ ...current, description: event.target.value }))} placeholder="Material or expense" /><div className="grid grid-cols-1 sm:grid-cols-3 gap-2"><Input type="number" min="0.01" step="0.01" value={pendingExpense.quantity} onChange={event => setPendingExpense(current => ({ ...current, quantity: event.target.value }))} placeholder="Quantity" /><Select value={pendingExpense.unit} onChange={event => setPendingExpense(current => ({ ...current, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} /><Input type="number" min="0" step="0.01" prefix="₱" value={pendingExpense.unitCost} onChange={event => setPendingExpense(current => ({ ...current, unitCost: event.target.value }))} placeholder="Unit cost" /></div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => { setShowNewExpense(false); setPendingExpense(createLineItem()); }}>Cancel</Button><Button type="button" variant="primary" size="sm" onClick={confirmExpense}>Confirm Item</Button></div></div>}
+              {showNewExpense && <div className="space-y-3 rounded-xl border border-primary/30 bg-primary-bg/40 p-3"><Input value={pendingExpense.description} onChange={event => setPendingExpense(current => ({ ...current, description: event.target.value }))} placeholder="Material or expense" /><div className="grid grid-cols-1 sm:grid-cols-3 gap-2"><Input type="number" min="0.01" step="0.01" value={pendingExpense.quantity} onChange={event => setPendingExpense(current => ({ ...current, quantity: event.target.value }))} placeholder="Quantity" /><Select value={pendingExpense.unit} onChange={event => setPendingExpense(current => ({ ...current, unit: event.target.value }))} options={operationUnitOptions(pendingExpense.unit)} /><Input type="number" min="0" step="0.01" prefix="₱" value={pendingExpense.unitCost} onChange={event => setPendingExpense(current => ({ ...current, unitCost: event.target.value }))} placeholder="Unit cost" /></div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => { setShowNewExpense(false); setPendingExpense(createLineItem()); }}>Cancel</Button><Button type="button" variant="primary" size="sm" onClick={confirmExpense}>Confirm Item</Button></div></div>}
               <Button type="button" variant="outline" size="sm" icon={Plus} onClick={() => setShowNewExpense(true)} disabled={controlsDisabled || showNewExpense} className="w-full border-dashed">Add Expense / Material</Button>
             </div>
           ) : (
-            <div className="space-y-3 rounded-2xl border border-border p-3"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><FormField label="Quantity" required><Input type="number" min="0.01" step="0.01" value={form.directQty} onChange={event => setForm({ ...form, directQty: event.target.value })} disabled={controlsDisabled} /></FormField><FormField label="Unit Rate / Cost" required><Input type="number" min="0" step="0.01" prefix="₱" value={form.directRate} onChange={event => setForm({ ...form, directRate: event.target.value })} disabled={controlsDisabled} /></FormField></div><FormField label="Unit"><Select value={form.directUnit} onChange={event => setForm({ ...form, directUnit: event.target.value })} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} disabled={controlsDisabled} /></FormField><div className="rounded-xl border border-primary/25 bg-primary-bg/55 p-3"><p className="text-xs font-bold text-hug-muted">Estimated direct cost</p><p className="mt-1 text-xl font-black text-primary">{formatCurrency(costs.base)}</p></div></div>
+            <div className="space-y-3 rounded-2xl border border-border p-3"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><FormField label="Quantity" required><Input type="number" min="0.01" step="0.01" value={form.directQty} onChange={event => setForm({ ...form, directQty: event.target.value })} disabled={controlsDisabled} /></FormField><FormField label="Unit Rate / Cost" required><Input type="number" min="0" step="0.01" prefix="₱" value={form.directRate} onChange={event => setForm({ ...form, directRate: event.target.value })} disabled={controlsDisabled} /></FormField></div><FormField label="Unit"><Select value={form.directUnit} onChange={event => setForm({ ...form, directUnit: event.target.value })} options={operationUnitOptions(form.directUnit)} disabled={controlsDisabled} /></FormField><div className="rounded-xl border border-primary/25 bg-primary-bg/55 p-3"><p className="text-xs font-bold text-hug-muted">Estimated direct cost</p><p className="mt-1 text-xl font-black text-primary">{formatCurrency(costs.base)}</p></div></div>
           )}
 
           <div className="rounded-2xl bg-[#1E4D2B] p-4 text-white"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wider text-white/70">Total Operation Cost</p><p className="mt-1 text-2xl font-black">{formatCurrency(costs.total)}</p></div><div className="rounded-xl bg-white/10 px-3 py-2 text-right"><p className="text-[11px] text-white/70">Per Hectare</p><p className="text-sm font-black">{formatCurrency(costs.perHa)} / ha</p></div></div></div>

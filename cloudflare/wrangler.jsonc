@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hugpong",
+  "main": "dist/worker.mjs",
+  "no_bundle": true,
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_server_modules"],
+  "build": { "command": "npm run build:worker", "watch_dir": ["src", "../server"] },
+  "assets": {
+    "directory": "../web/react-app/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "durable_objects": { "bindings": [{ "name": "GATEWAY", "class_name": "HugpongGateway" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HugpongGateway"] }],
+  "vars": {
+    "NODE_ENV": "production",
+    "GATEWAY_MODE": "preflight",
+    "FIREBASE_PROJECT_ID": "hugpong-production",
+    "CORS_ORIGINS": "https://hugpong.org",
+    "SMS_PROVIDER": "iprog"
+  },
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false }
+}

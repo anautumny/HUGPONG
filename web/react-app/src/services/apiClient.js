@@ -10,16 +10,17 @@ import { friendlyErrorMessage } from '../domain/presentationContract';
 import { fetchOperationPages } from './operationPages';
 import { assertWebOnline } from './onlinePolicy';
 
-// Most HUGPONG records change only after an explicit server mutation. Keep a
-// short shared cache for route changes/focus churn, then revalidate in the
-// background on a deliberately bounded cadence.
+// Keep a short shared cache for navigation; the authenticated change stream
+// invalidates it after remote writes. Screen subscriptions do not poll.
 const READ_CACHE_TTL_MS = 2 * 60 * 1000;
-const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const DEFAULT_REFRESH_INTERVAL_MS = 0;
 const FOCUS_REFRESH_MIN_AGE_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
 let authenticatedReadGeneration = 0;
+let readRevision = 0;
+let serverReadRevision = '';
 let mutationCooldownUntil = 0;
 const WEB_APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '1.0.0');
 
@@ -31,6 +32,7 @@ function browserOs() {
 export function webClientHeaders() {
   return {
     'x-client-platform': 'web',
+    ...(serverReadRevision ? { 'x-hugpong-sync-revision': serverReadRevision } : {}),
     'x-app-version': WEB_APP_VERSION,
     'x-device-model': 'browser',
     'x-device-os': browserOs()
@@ -93,10 +95,12 @@ const RELATED_RESOURCES = Object.freeze({
   fields: ['fields', 'crop-cycles', 'logs', 'audit-events'],
   'crop-cycles': ['crop-cycles', 'fields', 'logs', 'audit-events'],
   logs: ['logs', 'fields', 'crop-cycles', 'audit-events'],
-  prices: ['prices', 'audit-events'],
+  prices: ['prices', 'audit-events', 'notifications'],
   tickets: ['tickets', 'audit-events'],
-  users: ['users', 'fields', 'block-farms', 'audit-events'],
+  users: ['users', 'fields', 'block-farms', 'audit-events', 'notifications'],
   'audit-reports': ['audit-reports', 'audit-events'],
+  'crop-year-compilations': ['crop-year-compilations'],
+  'recovery-reviews': ['recovery-reviews', 'users'],
   'audit-events': ['audit-events'],
   telemetry: ['terminal-diagnostics'],
   'terminal-diagnostics': ['terminal-diagnostics'],
@@ -109,6 +113,10 @@ export function affectedResources(path) {
 }
 
 function clearReadCache(resources = []) {
+  readRevision += 1;
+  // Detach obsolete requests so a forced read cannot join a pre-change GET.
+  // Existing callers are protected by their subscription's queued refresh.
+  inFlightReads.clear();
   const affected = new Set(resources);
   if (!affected.size) {
     readCache.clear();
@@ -119,6 +127,32 @@ function clearReadCache(resources = []) {
   }
 }
 
+export function invalidateAuthenticatedResources(resources = [], revision = '') {
+  if (/^[a-f0-9]{64}$/.test(revision)) serverReadRevision = revision;
+  clearReadCache(resources);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hugpong:server-mutation', {
+      detail: { resources, all: resources.length === 0 }
+    }));
+    if (!resources.length || resources.includes('session')) {
+      window.dispatchEvent(new CustomEvent('hugpong:session-recheck'));
+    }
+  }
+}
+
+// For paginated/modular views that already own their request lifecycle.
+export function subscribeToResourceInvalidation(resources, listener) {
+  const changed = event => {
+    if (!resources.length || mutationAffects(event, resources)) listener();
+  };
+  window.addEventListener('hugpong:server-mutation', changed);
+  window.addEventListener('hugpong:connection-restored', listener);
+  return () => {
+    window.removeEventListener('hugpong:server-mutation', changed);
+    window.removeEventListener('hugpong:connection-restored', listener);
+  };
+}
+
 // Browser API responses are authorization-scoped even when their URL is the
 // same. Advance the generation at every login/logout boundary so neither a
 // cached response nor an older in-flight request can cross into another
@@ -126,6 +160,7 @@ function clearReadCache(resources = []) {
 export function clearAuthenticatedReadState() {
   authenticatedReadGeneration += 1;
   mutationCooldownUntil = 0;
+  serverReadRevision = '';
   readCache.clear();
   inFlightReads.clear();
 }
@@ -154,6 +189,7 @@ function canRefreshInBackground() {
 }
 
 function mutationAffects(event, resources) {
+  if (event?.detail?.all) return true;
   const changed = new Set(event?.detail?.resources || affectedResources(event?.detail?.path));
   return resources.some(resource => changed.has(resource));
 }
@@ -170,6 +206,7 @@ export function createMutationContext(path, body, suppliedBaseVersion = null) {
 
 export async function authenticatedRequest(path, options = {}) {
   assertWebOnline();
+  const requestAuthGeneration = authenticatedReadGeneration;
   const token = options.token || '';
   const method = String(options.method || 'GET').toUpperCase();
   const isMutation = !['GET', 'HEAD'].includes(method);
@@ -251,7 +288,8 @@ export async function authenticatedRequest(path, options = {}) {
         }));
       }
     }
-    if (response.status === 401 && typeof window !== 'undefined') {
+    if (response.status === 401 && requestAuthGeneration !== authenticatedReadGeneration) error.code = 'AUTH_CONTEXT_CHANGED';
+    if (response.status === 401 && requestAuthGeneration === authenticatedReadGeneration && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('hugpong:session-revoked', {
         detail: { code: errorCode, message: error.message }
       }));
@@ -259,7 +297,7 @@ export async function authenticatedRequest(path, options = {}) {
     throw error;
   }
 
-  if (!['GET', 'HEAD'].includes(method)) {
+  if (!['GET', 'HEAD'].includes(method) && requestAuthGeneration === authenticatedReadGeneration) {
     announceServerMutation(path);
   }
 
@@ -276,6 +314,7 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
   if (inFlightReads.has(path)) return inFlightReads.get(path);
 
   const requestGeneration = authenticatedReadGeneration;
+  const requestRevision = readRevision;
   const isFullOperationsRead = /^\/api\/logs(?:\?|$)/.test(path) && !/[?&](limit|cursor)=/.test(path);
   const request = (isFullOperationsRead
     ? fetchOperationPages(authenticatedRequest, () => requestGeneration === authenticatedReadGeneration, path)
@@ -286,7 +325,7 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
         error.code = 'AUTH_CONTEXT_CHANGED';
         throw error;
       }
-      readCache.set(path, { value, createdAt: Date.now() });
+      if (requestRevision === readRevision) readCache.set(path, { value, createdAt: Date.now() });
       return value;
     })
     .finally(() => {
@@ -309,6 +348,8 @@ export function subscribeToAuthenticatedResource(path, {
   let inFlight = false;
   let forcedRefreshQueued = false;
   let lastSuccessfulRefreshAt = 0;
+  let errorRetryTimer = null;
+  let retryAttempt = 0;
   const resources = affectedResources(path);
 
   const refresh = async ({ force = false } = {}) => {
@@ -321,12 +362,17 @@ export function subscribeToAuthenticatedResource(path, {
       return;
     }
     inFlight = true;
+    clearTimeout(errorRetryTimer);
     try {
       const result = await authenticatedRead(path, { force });
       lastSuccessfulRefreshAt = Date.now();
+      retryAttempt = 0;
       if (active && !forcedRefreshQueued && typeof onData === 'function') onData(result);
     } catch (error) {
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
+      if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
+        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+      }
     } finally {
       inFlight = false;
       if (active && forcedRefreshQueued) {
@@ -358,6 +404,7 @@ export function subscribeToAuthenticatedResource(path, {
   }
   return () => {
     active = false;
+    clearTimeout(errorRetryTimer);
     if (timer) clearInterval(timer);
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', handleFocus);
@@ -375,19 +422,36 @@ export function subscribeToAuthenticatedLoader(load, {
 } = {}) {
   let active = true;
   let inFlight = false;
+  let forcedRefreshQueued = false;
   let lastSuccessfulRefreshAt = 0;
+  let errorRetryTimer = null;
+  let retryAttempt = 0;
 
   const refresh = async ({ force = false } = {}) => {
-    if (!active || inFlight) return;
+    if (!active) return;
+    if (inFlight) {
+      if (force) forcedRefreshQueued = true;
+      return;
+    }
     inFlight = true;
+    clearTimeout(errorRetryTimer);
+    const generation = authenticatedReadGeneration;
     try {
       const value = await load({ force });
       lastSuccessfulRefreshAt = Date.now();
-      if (active && typeof onData === 'function') onData(value);
+      retryAttempt = 0;
+      if (active && generation === authenticatedReadGeneration && !forcedRefreshQueued && typeof onData === 'function') onData(value);
     } catch (error) {
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
+      if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
+        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+      }
     } finally {
       inFlight = false;
+      if (active && forcedRefreshQueued) {
+        forcedRefreshQueued = false;
+        void refresh({ force: true });
+      }
     }
   };
 
@@ -412,6 +476,7 @@ export function subscribeToAuthenticatedLoader(load, {
 
   return () => {
     active = false;
+    clearTimeout(errorRetryTimer);
     if (timer) clearInterval(timer);
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', handleFocus);

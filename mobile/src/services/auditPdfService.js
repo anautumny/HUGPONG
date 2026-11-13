@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import { formatCropYearDisplay } from '../utils/dataHelpers';
 import { auditCropYearCycles } from '../domain/auditWorkflow';
 
-import { auditReportLayout, operationMonth } from '../utils/auditReportLayout';
+import { auditReportLayout, operationMonth, reportingMonthLabel } from '../utils/auditReportLayout';
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -162,6 +162,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   }
   const cropYearDisplay = cropYearCycles.map(formatCropYearDisplay).join(' / ');
   const layout = auditReportLayout(report, operations);
+  const paperSize = layout.columns.length > 24 ? 'A3' : 'A4';
 
   const directOperations = operations.filter(log => !isMillingOperation(log));
   const millingOperations = operations.filter(isMillingOperation);
@@ -195,8 +196,8 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
       ${millingOperations.length > 0 ? `<tr class="section-row"><td colspan="${layout.columnCount}">Milling Expenses</td></tr>${millingRows}<tr class="total-row"><td colspan="${layout.columnCount - 1}">TOTAL MILLING EXPENSES</td><td class="number">${formatNumber(millingCostPerHa)}</td></tr>` : ''}
       <tr class="grand-row"><td colspan="${layout.columnCount - 1}">TOTAL COST OF PRODUCTION</td><td class="number">${formatNumber(grandTotalPerHa)}</td></tr>`;
 
-  const yearHeaders = layout.years.map(year => '<th colspan="12">Calendar year ' + year + '</th>').join('');
-  const monthHeaders = layout.columns.map(month => '<th>' + Number(month.slice(5)) + '</th>').join('');
+  const yearHeaders = layout.groups.map(group => '<th colspan="' + group.columns.length + '">' + escapeHtml(group.label) + '</th>').join('');
+  const monthHeaders = layout.columns.map(month => '<th title="' + escapeHtml(reportingMonthLabel(month)) + '">' + layout.columnLabels[month] + '</th>').join('');
   const managerId = String(report.compiledByUserId || '').trim();
   const managerName = reportActorName(report.compiledByName, managerId, currentUser, 'Farm Manager');
   const inspectorId = isCertified ? String(report.certifiedByUserId || '').trim() : '';
@@ -213,7 +214,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <style>
-        @page { size: A4 landscape; margin: 8mm; }
+        @page { size: ${paperSize} landscape; margin: 8mm; }
         * { box-sizing: border-box; }
         body { margin: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; line-height: 1.2; }
         .sheet { width: 100%; }
@@ -257,7 +258,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         <section class="report-header">
           <div class="meta">
             <div>REPORT ID</div><div class="value">${escapeHtml(reportId)}</div>
-            <div>REPORTING MONTH</div><div class="value">${escapeHtml(period)}</div>
+            <div>REPORTING MONTH</div><div class="value">${escapeHtml(reportingMonthLabel(period))}</div>
             <div>CROP YEAR CYCLE</div><div class="value">${escapeHtml(cropYearDisplay)}</div>
             <div>NAME OF BLOCK FARM</div><div class="value">${escapeHtml(farmName)}</div>
             <div>ADDRESS</div><div class="value">${escapeHtml(farmAddress)}</div>
@@ -270,6 +271,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
           </div>
         </section>
         <p>Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
+        <p>${escapeHtml(layout.timelineNote)}</p>
 
         <table>
           <thead>

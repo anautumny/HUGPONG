@@ -12,7 +12,6 @@ const {
 } = require('../schema/firestoreSchema');
 const { publishSraPrice } = require('../services/priceService');
 const { decoratePriceHistory, buildPriceAnalytics } = require('../services/priceAnalyticsService');
-const { sortNewestFirst } = require('../services/recordOrdering');
 const { readMutationContext } = require('../services/mutationContext');
 const { decodeCursor, pageEnvelope } = require('../services/cursorPagination');
 
@@ -27,15 +26,23 @@ router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGE
     }
     let query = db.collection(COLLECTIONS.SRA_PRICES)
       .orderBy('effectiveDate', 'desc')
-      .orderBy('__name__', 'desc');
+      .orderBy('publishedAt', 'desc')
+      .orderBy('__name__', 'asc');
     const cursor = decodeCursor(req.query.cursor);
-    if (cursor) query = query.startAfter(cursor.value, cursor.id);
+    if (cursor) {
+      let values;
+      try { values = JSON.parse(cursor.value); } catch { /* Older cursor: re-open from its actual record. */ }
+      if (!Array.isArray(values) || values.length !== 2) {
+        const previous = await db.collection(COLLECTIONS.SRA_PRICES).doc(cursor.id).get();
+        if (!previous.exists) return res.status(400).json({ success: false, error: 'Price cursor expired. Reload price history.' });
+        values = [previous.data().effectiveDate, previous.data().publishedAt];
+      }
+      query = query.startAfter(...values, cursor.id);
+    }
     const snapshot = await query.limit(requestedLimit + 1).get();
-    const { documents, page } = pageEnvelope(snapshot.docs, requestedLimit, document => document.data().effectiveDate);
-    const data = decoratePriceHistory(sortNewestFirst(
-      snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })),
-      ['effectiveDate']
-    )).filter(row => documents.some(document => document.id === row.id));
+    const { documents, page } = pageEnvelope(snapshot.docs, requestedLimit, document => JSON.stringify([document.data().effectiveDate, document.data().publishedAt]));
+    const data = decoratePriceHistory(snapshot.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })))
+      .filter(row => documents.some(document => document.id === row.id));
     if (data.length) data[0].priceAnalytics = buildPriceAnalytics(data);
     return res.json({ success: true, count: data.length, data, page });
   } catch (error) {
@@ -50,9 +57,6 @@ router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) =
     const publication = await publishSraPrice(db, req.body, {
       publishedByUserId: req.session.user.employeeId || req.session.user.userId
     });
-    const history = await db.collection(COLLECTIONS.SRA_PRICES).orderBy('effectiveDate', 'desc').limit(100).get();
-    const projected = decoratePriceHistory(history.docs.map(doc => ({ id: doc.id, ...buildSraPrice(doc.data()) })));
-    publication.data = projected.find(row => row.id === publication.data.id) || publication.data;
     return res.status(publication.created ? 201 : 200).json({ success: true, ...publication });
   } catch (error) {
     const status = error.statusCode || (/already exists/i.test(error.message) ? 409 : 400);

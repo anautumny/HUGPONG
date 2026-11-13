@@ -14,7 +14,7 @@
       "autoIncrement": true,
       "distribution": "internal",
       "environment": "preview",
-      "env": { "EXPO_PUBLIC_API_BASE_URL": "https://hugpong-beta.onrender.com" },
+      "env": { "EXPO_PUBLIC_API_BASE_URL": "https://hugpong.org" },
       "android": {
         "buildType": "apk"
       }
@@ -23,7 +23,7 @@
       "node": "24.22.1",
       "autoIncrement": true,
       "environment": "production",
-      "env": { "EXPO_PUBLIC_API_BASE_URL": "https://hugpong-beta.onrender.com" }
+      "env": { "EXPO_PUBLIC_API_BASE_URL": "https://hugpong.org" }
     }
   },
   "submit": {

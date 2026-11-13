@@ -8,7 +8,7 @@ function createAndroidDownloadHandler({ release, fetchArtifact = fetch } = {}) {
     let artifact;
     try {
       artifact = new URL(release.downloadUrl);
-      if (artifact.protocol !== 'https:' || artifact.hostname !== 'github.com'
+      if (!/^\d+\.\d+\.\d+$/.test(release.version) || artifact.protocol !== 'https:' || artifact.hostname !== 'github.com'
         || !/^\/anautumny\/HUGPONG\/releases\/download\/[^/]+\/[^/]+\.apk$/.test(artifact.pathname)
         || artifact.username || artifact.password || artifact.search || artifact.hash) throw new Error('Unapproved artifact');
     } catch {
@@ -38,7 +38,7 @@ function createAndroidDownloadHandler({ release, fetchArtifact = fetch } = {}) {
       }
       res.status(upstream.status);
       res.set('Content-Type', 'application/vnd.android.package-archive');
-      res.set('Content-Disposition', 'attachment; filename="HUGPONG-Beta.apk"');
+      res.set('Content-Disposition', `attachment; filename="HUGPONG-${release.version}.apk"`);
       res.set('Cache-Control', 'public, max-age=300');
       for (const header of ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
         const value = upstream.headers.get(header);

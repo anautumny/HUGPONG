@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
-import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe } from '../data/dataStore';
+import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe, subscribeToCloudChanges } from '../data/dataStore';
 import { getOutboxDiagnostics, getOutboxPressure, getOutboxStorageState, resolveOperationConflict } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
@@ -137,6 +137,9 @@ export default function SyncMonitorScreen({ navigation }) {
   }), []);
 
   React.useEffect(() => {
+    const unsubscribeChanges = subscribeToCloudChanges(event => {
+      if (navigation.isFocused?.() && (event.reset || event.resources?.includes('terminal-diagnostics'))) void refresh();
+    });
     let timer = null;
     const stop = () => {
       if (timer) clearInterval(timer);
@@ -151,6 +154,7 @@ export default function SyncMonitorScreen({ navigation }) {
     const unsubscribeBlur = navigation.addListener('blur', stop);
     if (navigation.isFocused?.()) start();
     return () => {
+      unsubscribeChanges();
       stop();
       unsubscribeFocus();
       unsubscribeBlur();

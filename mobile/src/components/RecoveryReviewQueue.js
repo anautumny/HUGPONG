@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { AppText as Text } from './Typography';
 import { decidePasswordRecoveryReview, fetchPasswordRecoveryReviews } from '../services/authService';
+import { subscribeToCloudChanges } from '../data/dataStore';
 
 export default function RecoveryReviewQueue() {
   const [reviews, setReviews] = useState([]);
@@ -25,7 +26,12 @@ export default function RecoveryReviewQueue() {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    return subscribeToCloudChanges(event => {
+      if (event.reset || event.resources?.includes('recovery-reviews')) void load();
+    });
+  }, []);
 
   const decide = (review, approve) => {
     Alert.alert(

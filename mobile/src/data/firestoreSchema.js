@@ -273,7 +273,7 @@ export function toFieldDocument(value = {}) {
   };
 }
 
-function canonicalLineItems(value) {
+function canonicalLineItems(value, preserveUnits = false) {
   const input = Array.isArray(value.lineItems) ? value.lineItems : (Array.isArray(value.subItems) ? value.subItems : []);
   return input.map((item, index) => {
     const quantity = Number(item.quantity ?? item.qty ?? 0);
@@ -285,7 +285,7 @@ function canonicalLineItems(value) {
         : 'EXPENSE',
       description: String(item.description || '').trim(),
       quantity,
-      unit: canonicalOperationUnit(item.unit) || String(item.unit || '').trim(),
+      unit: (preserveUnits ? null : canonicalOperationUnit(item.unit)) || String(item.unit || '').trim(),
       unitCost,
       subtotal: quantity * unitCost
     };
@@ -345,9 +345,12 @@ function canonicalPhotoEvidence(value) {
 export function toOperationLogDocument(value = {}, context = {}) {
   const status = String(context.status || value.status || 'ACTIVE').toUpperCase();
   if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw new Error('Operation log status must be ACTIVE or ARCHIVED.');
-  const quantityValue = value.quantity && typeof value.quantity === 'object'
+  const sourceQuantity = value.quantity && typeof value.quantity === 'object'
     ? value.quantity
     : ((value.inputQty || value.qty) ? { value: Number(value.inputQty || value.qty), unit: value.inputUnit || value.unit || '', inputName: value.inputName || '' } : null);
+  const quantityValue = sourceQuantity && !context.preserveUnits
+    ? { ...sourceQuantity, unit: canonicalOperationUnit(sourceQuantity.unit) || sourceQuantity.unit }
+    : sourceQuantity;
   const fieldId = String(value.fieldId || '').trim().toUpperCase();
   const cycleId = String(context.cycleId || value.cycleId || '').trim().toUpperCase();
   const submittedByUserId = context.submittedByUserId || value.submittedByUserId || value.loggedById || '';
@@ -355,7 +358,7 @@ export function toOperationLogDocument(value = {}, context = {}) {
   const archivedAt = status === 'ARCHIVED' ? (context.archivedAt || value.archivedAt || null) : null;
   const archivedByUserId = status === 'ARCHIVED' ? (context.archivedByUserId || value.archivedByUserId || null) : null;
   if (status === 'ARCHIVED' && (!archivedAt || !archivedByUserId)) throw new Error('ARCHIVED operation logs require archive metadata.');
-  const normalizedLineItems = canonicalLineItems(value);
+  const normalizedLineItems = canonicalLineItems(value, context.preserveUnits);
   const normalizedLaborEntries = canonicalLaborEntries(value);
   const totalCost = Number(value.totalCost ?? value.cost ?? 0);
   const componentCost = [...normalizedLineItems, ...normalizedLaborEntries]
@@ -455,7 +458,7 @@ export function fromOperationLogDocument(id, value = {}) {
 }
 
 export function operationSnapshot(id, value) {
-  const log = toOperationLogDocument(value, { cycleId: value.cycleId, submittedByUserId: value.submittedByUserId || value.loggedById, status: value.status || 'ACTIVE' });
+  const log = toOperationLogDocument(value, { cycleId: value.cycleId, submittedByUserId: value.submittedByUserId || value.loggedById, status: value.status || 'ACTIVE', preserveUnits: true });
   return {
     operationLogId: id,
     fieldId: log.fieldId,

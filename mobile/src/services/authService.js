@@ -16,15 +16,32 @@ import {
 const MOBILE_APP_VERSION = String(Constants.expoConfig?.version || '1.0.0');
 const MOBILE_OS = `${Platform.OS} ${Platform.Version}`.slice(0, 80);
 const MOBILE_DEVICE_MODEL = String(Platform.constants?.Model || Platform.constants?.model || 'unknown').slice(0, 80);
+let serverReadRevision = '';
+export function setServerReadRevision(revision = '') {
+  serverReadRevision = /^[a-f0-9]{64}$/.test(revision) ? revision : '';
+}
 
 function mobileHeaders(clientInstanceId) {
   return {
     'x-client-platform': 'mobile',
+    ...(serverReadRevision ? { 'x-hugpong-sync-revision': serverReadRevision } : {}),
     'x-client-instance-id': clientInstanceId,
     'x-app-version': MOBILE_APP_VERSION,
     'x-device-model': MOBILE_DEVICE_MODEL,
     'x-device-os': MOBILE_OS
   };
+}
+
+const mutationListeners = new Set();
+export function subscribeToServerMutations(listener) {
+  mutationListeners.add(listener);
+  return () => mutationListeners.delete(listener);
+}
+
+export async function mobileStreamHeaders() {
+  const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('No authenticated server session is available.');
+  return { ...mobileHeaders(await getMobileClientInstanceId()), Authorization: `Bearer ${token}`, Accept: 'text/event-stream' };
 }
 
 function mobileNetworkReference() {
@@ -147,6 +164,7 @@ export async function publicAuthGet(path) {
 }
 
 export async function authenticatedRequest(path, options = {}) {
+  const requestUserId = auth?.currentUser?.uid || '';
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
   const clientInstanceId = await getMobileClientInstanceId();
   if (!token) throw new Error('No authenticated server session is available.');
@@ -162,9 +180,18 @@ export async function authenticatedRequest(path, options = {}) {
     body: hasRequestBody ? JSON.stringify(options.body) : undefined
   });
   try {
-    return await parseResponse(response);
+    const result = await parseResponse(response);
+    if (path.startsWith('/api/') && !['GET', 'HEAD'].includes(String(options.method || 'GET').toUpperCase())
+      && !path.startsWith('/api/notifications/') && !path.startsWith('/api/terminal-diagnostics/')
+      && !path.startsWith('/api/diagnostics/') && !path.endsWith('/qr/verify')) {
+      for (const listener of mutationListeners) {
+        try { listener(path); } catch { /* A view must not reject a committed mutation. */ }
+      }
+    }
+    return result;
   } catch (error) {
-    if (error.status === 401) {
+    if (error.status === 401 && requestUserId === (auth?.currentUser?.uid || '')
+      && token === await getItem(STORAGE_KEYS.AUTH_TOKEN)) {
       await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
       if (auth) await signOut(auth).catch(() => {});
     }
@@ -172,16 +199,18 @@ export async function authenticatedRequest(path, options = {}) {
   }
 }
 
-export async function loginWithServer(identifier, password) {
-  const result = await publicAuthRequest('/auth/login', { contactNumber: identifier, password, clientPlatform: 'mobile' });
+export async function loginWithServer(identifier, password, sessionAcknowledged = false) {
+  const result = await publicAuthRequest('/auth/login', { contactNumber: identifier, password, sessionAcknowledged, clientPlatform: 'mobile' });
   await signInToFirebase(result.firebaseCustomToken);
   await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
   return result;
 }
 
-export async function refreshServerSession(token) {
-  const result = await authenticatedRequest('/auth/session', { token });
+export async function refreshServerSession(token, { isCurrent = () => true } = {}) {
+  const result = await authenticatedRequest('/auth/session', { token, headers: { 'Cache-Control': 'no-cache' } });
+  if (!isCurrent()) throw Object.assign(new Error('The sign-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
   await signInToFirebase(result.firebaseCustomToken);
+  if (!isCurrent()) throw Object.assign(new Error('The sign-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
   await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
   return result;
 }
@@ -320,6 +349,9 @@ export async function decidePasswordRecoveryReview(reviewId, approve) {
 
 export async function logoutFromServer(options = {}) {
   if (options.skipRemote !== true) {
+    try {
+      await authenticatedRequest('/auth/push-device/unregister', { method: 'POST', body: {} });
+    } catch { /* Offline logout still completes locally. */ }
     try {
       await authenticatedRequest('/auth/logout', { method: 'POST', body: {} });
     } catch (error) {

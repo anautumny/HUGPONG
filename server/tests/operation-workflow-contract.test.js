@@ -113,10 +113,11 @@ test('server rejects an operation submission with no recorded work details', () 
 });
 
 test('operation units use one standardized list while normalizing legacy spellings', () => {
-  assert.deepEqual(OPERATION_UNITS, ['ha', 'm²', 'bag', 'kg', 'L', 'ton', 'lac', 'pass', 'day', 'worker', 'trip']);
+  assert.deepEqual(OPERATION_UNITS, ['HA', 'ton', 'laksa', 'bag', 'liter', 'pcs', 'strip', 'Sample', 'pass', 'trip']);
   assert.equal(canonicalOperationUnit('bags'), 'bag');
-  assert.equal(canonicalOperationUnit('liters'), 'L');
-  assert.equal(canonicalOperationUnit('sqm'), 'm²');
+  assert.equal(canonicalOperationUnit('liters'), 'liter');
+  assert.equal(canonicalOperationUnit('lac'), 'laksa');
+  assert.equal(canonicalOperationUnit('sqm'), null);
 });
 
 test('server normalizes the itemized planner operation under one parent title', () => {
@@ -136,7 +137,7 @@ test('server normalizes the itemized planner operation under one parent title', 
   assert.equal(plan[4].length, 1);
   assert.equal(plan[4][0].id, 'SRA-08');
   assert.equal(plan[4][0].name, 'Weeding Operations (Hilamon & Herbicides)');
-  assert.equal(plan[4][0].unit, 'ha');
+  assert.equal(plan[4][0].unit, 'HA');
   assert.equal(plan[4][0].parentOperationDefinitionId, null);
   assert.equal(plan[4][0].inputType, 'group');
   assert.deepEqual(plan[4][0].childOperations, []);

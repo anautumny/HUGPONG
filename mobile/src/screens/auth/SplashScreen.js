@@ -68,7 +68,6 @@ export default function SplashScreen({ navigation }) {
           Agricultural Operations Platform
         </AnimatedText>
       </View>
-      <AnimatedText style={[s.version, { opacity: tagOpacity }]}>Beta</AnimatedText>
     </View>
   );
 }
@@ -80,5 +79,4 @@ const s = StyleSheet.create({
   logoImg: { width: 140, height: 140 },
   logoText: { fontFamily: FONT_FAMILY.display, fontSize: 32, fontWeight: '800', color: COLORS.primary, letterSpacing: 4 },
   tagline: { fontSize: 14, color: COLORS.textSecondary, letterSpacing: 1, fontWeight: '400' },
-  version: { fontSize: 12, color: COLORS.textMuted },
 });

@@ -504,7 +504,7 @@ test('governance and support reads use server-scoped APIs instead of client coll
   assert.doesNotMatch([ticketsService, maintenanceService, telemetryService, usersService].join('\n'), /\bonSnapshot\b|collection\(db/);
   for (const endpoint of ['/api/block-farms', '/api/fields', '/api/crop-cycles', '/api/logs', '/api/prices', '/api/tickets', '/api/users', '/api/audit-reports', '/api/audit-events']) {
     if (endpoint === '/api/logs') assert.match(mobileStore, /fetchOperationPages\(authenticatedRequest/);
-    else assert.match(mobileStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
+    else assert.match(mobileStore, new RegExp(`readReplica\\('${endpoint}(?:\\?[^']*)?'`));
   }
   assert.doesNotMatch(mobileStore, /firebase\/firestore|\bonSnapshot\b|collection\(db|doc\(db/);
 });

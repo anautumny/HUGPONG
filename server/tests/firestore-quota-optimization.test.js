@@ -107,15 +107,16 @@ test('server cache is mounted after live API authorization and cleared by succes
 
 test('mobile uses tiered quota-aware refreshes without clearing skipped secondary data', () => {
   const mobile = source('../../mobile/src/data/dataStore.js');
-  assert.match(mobile, /CLOUD_REFRESH_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(mobile, /startRealtimeSync\(scheduleRefresh/);
+  assert.doesNotMatch(mobile, /setInterval\(refresh/);
   assert.match(mobile, /CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 \* 60 \* 60 \* 1000/);
   assert.match(mobile, /getCachedItem\(STORAGE_KEYS\.CLOUD_REFRESH_META/);
   assert.match(mobile, /saveItem\(STORAGE_KEYS\.CLOUD_REFRESH_META/);
-  assert.match(mobile, /includeExtended \? authenticatedRequest\('\/api\/tickets'\) : Promise\.resolve\(null\)/);
-  assert.match(mobile, /includeExtended && canReadUserDirectory \? authenticatedRequest\('\/api\/users\?limit=50'\)/);
+  assert.match(mobile, /includeExtended \? readReplica\('\/api\/tickets'\) : Promise\.resolve\(null\)/);
+  assert.match(mobile, /includeExtended && canReadUserDirectory \? readReplica\('\/api\/users\?limit=50'\)/);
   assert.match(mobile, /if \(includeExtended\) \{[\s\S]{0,100}supportTickets\.length = 0/);
   assert.match(mobile, /if \(includeExtended && canReadAuditEvents\) \{[\s\S]{0,100}systemHistory\.length = 0/);
-  assert.match(mobile, /authenticatedRequest\('\/api\/prices\?limit=52'\)/);
+  assert.match(mobile, /readReplica\('\/api\/prices\?limit=52'\)/);
 });
 
 test('price reads are bounded on the server and explicit on both clients', () => {
@@ -127,5 +128,5 @@ test('price reads are bounded on the server and explicit on both clients', () =>
   assert.match(pricesRoute, /pageEnvelope\(snapshot.docs, requestedLimit/);
   assert.match(webPrices, /subscribeToAuthenticatedResource\('\/api\/prices\?limit=52'/);
   assert.match(webPrices, /fetchPrices\(\{ cursor, limit = 100 \}/);
-  assert.match(mobile, /authenticatedRequest\('\/api\/prices\?limit=52'\)/);
+  assert.match(mobile, /readReplica\('\/api\/prices\?limit=52'\)/);
 });

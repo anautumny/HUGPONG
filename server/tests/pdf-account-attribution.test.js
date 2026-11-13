@@ -42,7 +42,7 @@ test('audit PDFs derive their Crop Year Cycle from authoritative report snapshot
     assert.match(source, /auditCropYearCycles/);
     assert.match(source, /auditReportLayout/);
     assert.doesNotMatch(source, /nextCropYearCycle/);
-    assert.match(source, /Calendar year/);
+    assert.match(source, /layout\.groups/);
     assert.match(source, /CROP YEAR CYCLE|Crop Year Cycle/);
     assert.doesNotMatch(source, /Following Period/i);
     assert.doesNotMatch(source, /HUG-SRA-AUDIT/);

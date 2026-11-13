@@ -37,6 +37,9 @@ test('Expo Go skips notification module initialization while native builds retai
   assert.doesNotMatch(service, /import \* as Notifications from 'expo-notifications'/);
   assert.match(service, /Constants\.appOwnership === 'expo'/);
   assert.match(service, /if \(isExpoGo\) return null/);
-  assert.match(service, /require\('expo-notifications'\)/);
+  assert.match(service, /getApplicationNotificationModule\(\)/);
+  const shared = fs.readFileSync(path.join(root, 'mobile', 'src', 'services', 'recoveryNotificationService.js'), 'utf8');
+  assert.match(shared, /require\('expo-notifications'\)/);
+  assert.match(shared, /if \(isExpoGo\) return null/);
   assert.match(service, /reason: 'EXPO_GO'/);
 });

@@ -7,7 +7,7 @@ import {
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
 import { getOperationDefinition, getOperationsForStage } from '../../domain/operationCatalogue';
-import { OPERATION_UNITS } from '../../domain/operationUnits';
+import { canonicalOperationUnit, operationUnitOptions } from '../../domain/operationUnits';
 import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { createClientRecordId } from '../../utils/secureId';
@@ -83,7 +83,7 @@ export default function TakeOverView() {
 
   // Direct Mode inputs
   const [directQty, setDirectQty] = useState('');
-  const [directUnit, setDirectUnit] = useState('ha');
+  const [directUnit, setDirectUnit] = useState('HA');
   const [directRate, setDirectRate] = useState('');
 
   // Form submission
@@ -186,7 +186,7 @@ export default function TakeOverView() {
       setInputMode('direct');
       setSubItems([]);
       setDirectQty(areaHa || '1');
-      setDirectUnit('ha');
+      setDirectUnit('HA');
       setDirectRate('0');
       return;
     }
@@ -202,13 +202,13 @@ export default function TakeOverView() {
     if (tmpl.childOperations?.length) {
       setSubItems([]);
       setDirectQty(String(firstChild?.perHa || '1'));
-      setDirectUnit(firstChild?.unit || 'ha');
+      setDirectUnit(canonicalOperationUnit(firstChild?.unit) || firstChild?.unit || 'HA');
       setDirectRate(String(firstChild?.rate || '0'));
     } else if (tmpl.isGroup && tmpl.subItems) {
       setSubItems([]);
     } else {
       setDirectQty(String(tmpl.perHa || tmpl.quantity || '1'));
-      setDirectUnit(tmpl.unit || 'ha');
+      setDirectUnit(canonicalOperationUnit(tmpl.unit) || tmpl.unit || 'HA');
       setDirectRate(String(tmpl.rate || tmpl.costPerHa || '0'));
     }
   };
@@ -246,7 +246,7 @@ export default function TakeOverView() {
     setCustomChildName('');
     const child = childId === 'CUSTOM' ? null : getOperationDefinition(childId);
     setDirectQty(String(child?.perHa || areaHa || '1'));
-    setDirectUnit(child?.unit || 'ha');
+    setDirectUnit(canonicalOperationUnit(child?.unit) || child?.unit || 'HA');
     setDirectRate(String(child?.rate || '0'));
   };
 
@@ -875,7 +875,7 @@ export default function TakeOverView() {
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
                     <Input value={newExpense.description} onChange={event => setNewExpense(previous => ({ ...previous, description: event.target.value }))} placeholder="Material or expense" />
                     <Input type="number" min="0.01" step="0.1" value={newExpense.quantity} onChange={event => setNewExpense(previous => ({ ...previous, quantity: event.target.value }))} placeholder="Quantity" />
-                    <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} />
+                    <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={operationUnitOptions(newExpense.unit)} />
                     <Input type="number" min="0" value={newExpense.unitCost} onChange={event => setNewExpense(previous => ({ ...previous, unitCost: event.target.value }))} placeholder="Unit cost" />
                   </div>
                   <div className="flex justify-end gap-2">
@@ -914,7 +914,7 @@ export default function TakeOverView() {
                   <Select
                     value={directUnit}
                     onChange={(e) => setDirectUnit(e.target.value)}
-                    options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))}
+                    options={operationUnitOptions(directUnit)}
                   />
                 </FormField>
                 <FormField label="Rate (₱)">

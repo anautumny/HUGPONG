@@ -22,7 +22,7 @@ test('APK button endpoint streams an attachment without a browser redirect or UR
   const response = await fetch(base + '1.0.2?url=https://attacker.invalid');
   assert.equal(response.status, 200);
   assert.equal(response.redirected, false);
-  assert.match(response.headers.get('content-disposition'), /attachment; filename="HUGPONG-Beta.apk"/);
+  assert.match(response.headers.get('content-disposition'), /attachment; filename="HUGPONG-1\.0\.2\.apk"/);
   assert.equal(response.headers.get('content-type'), 'application/vnd.android.package-archive');
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
   assert.equal(requested.url, release.downloadUrl);

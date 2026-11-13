@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw, Search, ShieldCheck, SquareTerminal } from 'lucide-react';
 import { fetchDiagnostics } from '../../services/diagnosticsService';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 
 const LEVEL_STYLES = {
   ERROR: 'text-red-300',
@@ -70,6 +71,7 @@ export default function DiagnosticsConsoleView() {
 
   useEffect(() => {
     load();
+    return subscribeToResourceInvalidation(['diagnostics'], load);
   }, [load]);
 
   const counts = useMemo(() => ({

@@ -274,7 +274,8 @@ test('Web takeover authorization expires and resets when changing fields or acco
     '../../services/operationsService': { createOperation: async () => ({ success: true }) },
     '../../constants/cropStages': { CROP_STAGE_MAX: 6, SUGARCANE_STAGES: [{ stageNumber: 1, name: 'Land Preparation' }] },
     '../../domain/operationCatalogue': { getOperationsForStage: () => [], getOperationDefinition: () => null },
-    '../../domain/operationUnits': { OPERATION_UNITS: ['ha'] },
+    '../../domain/operationUnits': { canonicalOperationUnit: unit => unit === 'ha' ? 'HA' : unit,
+      operationUnitOptions: () => [{ value: 'HA', label: 'HA' }] },
     '../../domain/sugarcaneVarieties': { SUGARCANE_VARIETIES: [] },
     '../../services/apiClient': {}, '../../utils/secureId': { createClientRecordId: () => 'LOG-TEST' },
     '../../domain/operationSubmission': runtime.load('../../web/react-app/src/domain/operationSubmission.js'),
@@ -468,6 +469,7 @@ test('Mobile Home immediately renders read/dismiss changes and keeps them after 
     '../services/networkService': { getNetworkStatus: () => true, subscribeToNetwork: () => () => {} },
     '../services/syncEngine': { getOutboxQueue: () => [] },
     '../services/recoveryNotificationService': { requestApplicationNotificationPermission: async () => ({ supported: true, granted: true }) },
+    '../services/systemNotificationService': { getSystemNotifications: () => [] },
     '../services/notificationStateService': {
       createAccountNotificationState: (userId, isCurrent, onChange) => service.createNotificationStateClient({ userId, isCurrent, onChange,
         readCache: async () => null, writeCache: async () => true,
@@ -476,6 +478,7 @@ test('Mobile Home immediately renders read/dismiss changes and keeps them after 
     },
     '../data/dataStore': {
       getCurrentSession: () => account, getIsSynced: () => true,
+      subscribeToCloudChanges: () => () => {},
       currentPrice: {}, currentMarketObservation: {}, priceAnalytics: {},
       fields: [], cropCycles: [], blockFarms: [], draftLogs: [], operationLogs: [],
       getPendingSyncCount: () => 0,

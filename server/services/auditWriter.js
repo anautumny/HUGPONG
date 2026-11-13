@@ -2,6 +2,7 @@
 
 const { COLLECTIONS, nowIso } = require('../schema/firestoreSchema');
 const { createAuditEventId } = require('../domain/systemIds');
+const { queueSystemNotification } = require('./systemNotificationService');
 
 function clean(value) {
   return String(value || '').trim();
@@ -32,6 +33,7 @@ function queueAuditEvent(writer, database, input) {
   const id = input.id || createAuditEventId();
   const record = buildAuditEvent(input);
   writer.create(database.collection(COLLECTIONS.AUDIT_LOGS).doc(id), record);
+  queueSystemNotification(writer, database, { id, ...record });
   return { id, ...record };
 }
 

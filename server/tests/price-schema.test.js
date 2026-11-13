@@ -30,13 +30,15 @@ function validInput(overrides = {}) {
 function fakeFirestore() {
   const records = new Map();
   const audits = new Map();
+  const notifications = new Map();
   let createCount = 0;
   const database = {
     records,
     audits,
+    notifications,
     get createCount() { return createCount; },
     collection(name) {
-      const target = name === 'sra_prices' ? records : audits;
+      const target = name === 'sra_prices' ? records : name === 'notification_events' ? notifications : audits;
       const query = {
         filters: [],
         ordering: null,
@@ -124,6 +126,7 @@ test('price publication creates exactly one record and an identical retry is ide
   assert.equal(database.createCount, 1);
   assert.equal(database.records.size, 1);
   assert.equal(database.audits.size, 1);
+  assert.equal(database.notifications.size, 1, 'the publication and its notification intent commit exactly once');
   assert.equal(first.data.effectiveDate, '2026-09-17');
   assert.equal(first.data.sugarPriceChange, null);
   assert.equal(first.data.molassesPriceChange, null);

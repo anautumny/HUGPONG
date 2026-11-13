@@ -10,6 +10,7 @@ import FirstLoginVerifyModal from '../components/auth/FirstLoginVerifyModal';
 import FirstLoginPasswordModal from '../components/auth/FirstLoginPasswordModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import sugarcaneBg from '../assets/sugarcane-bg.jpg';
+import { normalizeLoginIdentifier, loginIdentifierInput } from '../domain/loginIdentifier';
 
 const LOGIN_LOCKOUT_STORAGE_KEY = 'hugpong_login_lockout_until';
 
@@ -86,6 +87,7 @@ export default function LoginView() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMessage('');
 
     if (lockoutRemaining > 0) {
@@ -97,17 +99,14 @@ export default function LoginView() {
     const newFieldErrors = {};
     if (!identifier.trim()) {
       newFieldErrors.identifier = 'User ID or mobile number is required.';
+    } else if (!normalizeLoginIdentifier(identifier)) {
+      newFieldErrors.identifier = 'Enter an 8-digit User ID or a valid mobile number (09XXXXXXXXX or 639XXXXXXXXX).';
     }
     if (!password) {
       newFieldErrors.password = 'Password is required.';
     }
     if (Object.keys(newFieldErrors).length > 0) {
       setFieldErrors(newFieldErrors);
-      return;
-    }
-
-    if (!consentChecked) {
-      setErrorMessage('Please acknowledge and agree to the Privacy Policy (RA 10173) and Terms to proceed.');
       return;
     }
 
@@ -119,7 +118,7 @@ export default function LoginView() {
     setIsSubmitting(true);
 
     try {
-      const result = await login(identifier.trim(), password);
+      const result = await login(identifier.trim(), password, consentChecked);
       localStorage.removeItem(LOGIN_LOCKOUT_STORAGE_KEY);
       setLockoutUntil(0);
       setLockoutRemaining(0);
@@ -146,7 +145,10 @@ export default function LoginView() {
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setIsSubmitting(false);
-      if (err.code === 'LOGIN_RATE_LIMITED' || err.status === 429) {
+      if (err.code === 'SESSION_ACKNOWLEDGEMENT_REQUIRED') {
+        setFieldErrors({ consent: err.message });
+        document.getElementById('login-consent-checkbox')?.focus();
+      } else if (err.code === 'LOGIN_RATE_LIMITED' || err.status === 429) {
         applyServerLockout(err.data);
         setErrorMessage(err.message || 'Too many login attempts. Please try again later.');
       } else if (err.isNetworkError || err.code === 'LOGIN_REQUEST_TIMEOUT' || err.code === 'LOGIN_NETWORK_UNAVAILABLE') {
@@ -348,10 +350,13 @@ export default function LoginView() {
               <input
                 id="contact-input"
                 type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={identifier}
                 onChange={(e) => {
-                  setIdentifier(e.target.value);
-                  if (fieldErrors.identifier) setFieldErrors(prev => ({ ...prev, identifier: null }));
+                  setIdentifier(loginIdentifierInput(e.target.value, identifier));
+                  setErrorMessage('');
+                  setFieldErrors(prev => ({ ...prev, identifier: null, consent: null }));
                 }}
                 placeholder="e.g. 03000001 or 09170000003"
                 className={`w-full pl-10 pr-3.5 py-2.5 rounded-xl border ${
@@ -361,6 +366,7 @@ export default function LoginView() {
                 } bg-surface-subtle/80 focus:bg-surface text-sm text-hug-text focus:outline-none transition-all font-medium placeholder:text-hug-muted/70`}
                 autoComplete="username"
                 disabled={isSubmitting || lockoutRemaining > 0}
+                aria-invalid={Boolean(fieldErrors.identifier)}
                 required
               />
             </div>
@@ -396,7 +402,8 @@ export default function LoginView() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-                  if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: null }));
+                  setErrorMessage('');
+                  setFieldErrors(prev => ({ ...prev, password: null, consent: null }));
                 }}
                 placeholder="••••••••"
                 className={`w-full pl-10 pr-10 py-2.5 rounded-xl border ${
@@ -432,7 +439,13 @@ export default function LoginView() {
                 type="checkbox"
                 id="login-consent-checkbox"
                 checked={consentChecked}
-                onChange={(e) => setConsentChecked(e.target.checked)}
+                onChange={(e) => {
+                  setConsentChecked(e.target.checked);
+                  setFieldErrors(prev => ({ ...prev, consent: null }));
+                }}
+                disabled={isSubmitting}
+                aria-invalid={Boolean(fieldErrors.consent)}
+                aria-describedby={fieldErrors.consent ? 'login-consent-error' : undefined}
                 className="mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 focus:outline-none h-4 w-4 shrink-0 accent-primary cursor-pointer"
               />
               <span className="leading-snug">
@@ -446,6 +459,7 @@ export default function LoginView() {
                 </Link>.
               </span>
             </label>
+            {fieldErrors.consent && <p id="login-consent-error" className="mt-1.5 text-xs font-semibold text-danger" role="alert">{fieldErrors.consent}</p>}
           </div>
 
           {/* Submit Button */}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "937587930133",
+    "project_id": "hugpong-production",
+    "storage_bucket": "hugpong-production.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:937587930133:android:be8766d4a19d60217d4a1c",
+        "android_client_info": {
+          "package_name": "com.hugpong.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApHnxxy1PoVu5v_WiCmW9UtUiS997orNs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

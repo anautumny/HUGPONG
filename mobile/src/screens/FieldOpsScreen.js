@@ -16,6 +16,7 @@ import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId }
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { fetchAuditReadiness, fetchAuditReport, importAuditQr, verifyAuditQr } from '../services/mutationService';
 import { archivedFields } from '../data/dataStore';
+import { subscribeToCloudChanges } from '../data/dataStore';
 import { useTranslation } from '../services/i18n';
 import AuditHistoryModal from '../components/AuditHistoryModal';
 import CropYearCompilationScreen from '../components/CropYearCompilationScreen';
@@ -46,7 +47,7 @@ import {
 import { INITIAL_CROP_STAGES } from '../constants/cropStages';
 import { SRA_OPERATIONS_CATALOGUE, getOperationDefinition, getOperationsForStage } from '../domain/operationCatalogue';
 import { SUGARCANE_VARIETIES } from '../domain/sugarcaneVarieties';
-import { OPERATION_UNITS } from '../domain/operationUnits';
+import { OPERATION_UNITS, canonicalOperationUnit } from '../domain/operationUnits';
 import { operationPresentation, STAGE_DISPLAY_LABELS } from '../domain/presentationContract';
 import { amendmentEditor, amendmentSummary, formatAmendmentChanges, formatDate as formatAmendmentDate } from '../domain/amendmentPresentation';
 import {
@@ -97,13 +98,13 @@ function LedgerCountBadges({ submittedCount = 0, draftCount = 0, showDrafts = fa
       {submittedCount > 0 && (
         <View style={[s.topbarLedgerCountBadge, s.topbarSubmittedBadge]}>
           <Ionicons name="checkmark" size={8} color="#fff" />
-          <Text variant="badge" style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(submittedCount)}</Text>
+          <Text variant="badge" numberOfLines={1} style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(submittedCount)}</Text>
         </View>
       )}
       {showDrafts && draftCount > 0 && (
         <View style={[s.topbarLedgerCountBadge, s.topbarDraftBadge]}>
           <Ionicons name="document-text" size={8} color="#fff" />
-          <Text variant="badge" style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(draftCount)}</Text>
+          <Text variant="badge" numberOfLines={1} style={s.topbarLedgerBadgeText}>{ledgerBadgeCount(draftCount)}</Text>
         </View>
       )}
     </View>
@@ -683,7 +684,7 @@ const CompactLogItem = React.memo(function CompactLogItem({
               </Text>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <Text style={{ fontSize: 12, color: COLORS.textSecondary, fontWeight: '500', flexGrow: 1, flexBasis: 160, minWidth: 0 }}>
-                  {log.inputQty} {log.inputUnit || 'ha'} {log.directRate ? `× ₱${Number(log.directRate).toLocaleString()} / ${log.inputUnit || 'ha'}` : ''}
+                  {log.inputQty} {log.inputUnit || 'HA'} {log.directRate ? `× ₱${Number(log.directRate).toLocaleString()} / ${log.inputUnit || 'HA'}` : ''}
                 </Text>
                 <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>
                   ₱{Number(log.totalCost != null ? log.totalCost : (log.cost || 0)).toLocaleString()}
@@ -850,6 +851,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [session, setSessionLocal] = useState(() => getCurrentSession() || {});
   const [activeRole, setActiveRole] = useState(getCurrentSession().role);
   const [deviceOnline, setDeviceOnline] = useState(getNetworkStatus());
+  const [dataRevision, setDataRevision] = useState(0);
   const pendingAuditPage = usePagination(auditReports.filter(report => canonicalAuditStatus(report.status) === AUDIT_STATUS.PENDING_REVIEW), {
     resetKey: session?.employeeId || session?.id,
   });
@@ -1071,11 +1073,12 @@ export default function FieldOpsScreen({ navigation, route }) {
     } else if (scopedFields.length === 0 && selectedField) {
       setSelectedField(null);
     }
-  }, [route?.params, fields, managerFieldFilter, deviceOnline]);
+  }, [route?.params, dataRevision, managerFieldFilter, deviceOnline]);
 
   // Real-time bidirectional synchronization listener with Cloud Firestore & Web
   useEffect(() => {
     const unsubscribe = subscribe(() => {
+      setDataRevision(value => value + 1);
       setSyncedState(getIsSynced());
       setSessionLocal(getCurrentSession() || {});
       setLogs([...operationLogs]);
@@ -1203,7 +1206,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     workers: [],
     subItems: [],
     inputQty: '',
-    inputUnit: 'ha',
+    inputUnit: 'HA',
     inputName: '',
     taskId: null,
     variety: '',
@@ -2349,6 +2352,27 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (showSRAInspectModal) auditInspectionCloseRequestedRef.current = false;
   }, [showSRAInspectModal]);
 
+  useEffect(() => {
+    const reportId = scannedAuditReport?.reportId || scannedAuditReport?.id;
+    if (!showSRAInspectModal || !reportId) return undefined;
+    let active = true;
+    let generation = 0;
+    const unsubscribe = subscribeToCloudChanges(event => {
+      if (!getNetworkStatus() || (!event.reset && !event.resources?.includes('audit-reports'))) return;
+      const requestGeneration = ++generation;
+      void fetchAuditReport(reportId).then(response => {
+        if (active && generation === requestGeneration && response.data) {
+          setScannedAuditReport({ ...fromAuditReportDocument(reportId, response.data), integrityStatus: 'VERIFIED' });
+        }
+      }).catch(error => {
+        if (!active || generation !== requestGeneration) return;
+        if ([403, 404].includes(error.status)) setScannedAuditReport(null);
+        setAuditInspectionError(error.message || 'The latest audit report could not be loaded.');
+      });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [showSRAInspectModal, scannedAuditReport?.reportId, scannedAuditReport?.id]);
+
   const closeAuditInspection = () => {
     if (auditInspectionCloseRequestedRef.current || isAuditActionPending || isCertifyingAudit) return;
     auditInspectionCloseRequestedRef.current = true;
@@ -2679,7 +2703,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     let initialSubItems = [];
     let totalCost = 0;
     let directQty = '';
-    let directUnit = selectedChild?.unit || targetOp.unit || 'ha';
+    let directUnit = selectedChild?.unit || targetOp.unit || 'HA';
     let directRate = selectedChild?.rate || targetOp.rate || targetOp.costPerHa || 0;
 
     if (isGrp) {
@@ -2786,7 +2810,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       workers: [],
       subItems: [],
       inputQty: Number(safeField.ha) > 0 ? String(safeField.ha) : '',
-      inputUnit: 'ha',
+      inputUnit: 'HA',
       inputName: '',
       variety: stageNum === 2 ? String(cropCycles.find(cycle => cycle.id === safeField.currentCycleId)?.variety || '') : '',
       taskId: targetTask?.id || `S${stageNum}`,
@@ -3231,7 +3255,7 @@ export default function FieldOpsScreen({ navigation, route }) {
         inputType: 'direct',
         subItems: [],
         inputQty: String(inputQty),
-        inputUnit: firstChild.unit || 'ha',
+        inputUnit: firstChild.unit || 'HA',
         directRate: String(firstChild.rate || 0),
         cost: String(inputQty * Number(firstChild.rate || 0))
       }));
@@ -3280,7 +3304,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       inputType: 'direct',
       subItems: [],
       inputQty: String(inputQty),
-      inputUnit: child?.unit || 'ha',
+      inputUnit: child?.unit || 'HA',
       directRate: String(child?.rate || 0),
       cost: String(inputQty * Number(child?.rate || 0))
     }));
@@ -3369,7 +3393,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       people: '',
       subItems: initialSubItems,
       inputQty: '',
-      inputUnit: targetOp.unit || 'bags',
+      inputUnit: targetOp.unit || 'bag',
       inputName: '',
       variety: targetOp.stageNumber === 2 ? String(cropCycles.find(cycle => cycle.id === safeField.currentCycleId)?.variety || '') : '',
       period: p.period || formatDisplayDate(new Date()),
@@ -3490,13 +3514,16 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
 
     if (asSubmit && !logForm.isGroup) {
+      const savedOperation = logForm.id ? operationLogs.find(log => log.id === logForm.id) : null;
+      const unchangedPreviousUnit = savedOperation
+        && String(savedOperation.quantity?.unit || savedOperation.inputUnit || '') === String(logForm.inputUnit || '');
       const directQuantity = Number(logForm.inputQty);
       const directRateValue = Number(logForm.directRate);
       if (!String(logForm.inputQty ?? '').trim() || !Number.isFinite(directQuantity) || directQuantity <= 0) {
         Alert.alert('Quantity Required', 'Enter a quantity greater than zero before submitting this operation.');
         return;
       }
-      if (!String(logForm.inputUnit || '').trim()) {
+      if (!canonicalOperationUnit(logForm.inputUnit) && !unchangedPreviousUnit) {
         Alert.alert('Unit Required', 'Select the unit used for this operation.');
         return;
       }
@@ -3797,12 +3824,12 @@ export default function FieldOpsScreen({ navigation, route }) {
           : 'EXPENSE',
         description: si.description || finalActivityName,
         qty: parseFloat(si.qty) || 1,
-        unit: si.unit || 'ha',
+        unit: si.unit || 'HA',
         unitCost: parseFloat(si.unitCost) || 0,
         subTotal: parseFloat(si.subTotal) || 0,
       })),
       inputQty: logForm.inputQty || '',
-      inputUnit: logForm.inputUnit || 'ha',
+      inputUnit: logForm.inputUnit || 'HA',
       inputName: logForm.inputName || '',
       createdAt: new Date().toISOString(),
       date: formatDisplayDate(operationDate),
@@ -3883,7 +3910,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               `The existing operation ID ${logForm.id} was updated without creating a duplicate.\n\nAudit Reason: ${reason}\nAmended by: ${getCurrentSession().name}`
             );
             setLogEditAuth({ reason: '' });
-            setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
+            setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bag', inputName: '', taskId: null, isSubmit: true });
             closeOperationEditor();
             return;
           }
@@ -4075,7 +4102,7 @@ export default function FieldOpsScreen({ navigation, route }) {
           }
         }
       } else {
-        setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bags', inputName: '', taskId: null, isSubmit: true });
+        setLogForm({ id: null, fieldId: safeField.id, saveFieldId: true, activity: '', cost: '', period: formatDisplayDate(new Date()), hectares: '', people: '', inputQty: '', inputUnit: 'bag', inputName: '', taskId: null, isSubmit: true });
       }
     } catch (error) {
       Alert.alert('Operation Not Submitted', error?.message || 'Review the required operation details and try again.');
@@ -4300,7 +4327,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       })),
       subItems: draft.subItems || [],
       inputQty: draft.inputQty ? draft.inputQty.toString() : '',
-      inputUnit: draft.inputUnit || 'bags',
+      inputUnit: draft.inputUnit || 'bag',
       inputName: draft.inputName || '',
       directRate: draft.directRate != null ? String(draft.directRate) : '',
       isGroup: draft.isGroup ?? draft.inputType === 'group',
@@ -4610,7 +4637,7 @@ export default function FieldOpsScreen({ navigation, route }) {
       hectares: log.hectares ? log.hectares.toString() : (selectedField?.ha == null ? '' : String(selectedField.ha)),
       people: log.people ? log.people.toString() : '',
       inputQty: log.inputQty ? log.inputQty.toString() : '',
-      inputUnit: log.inputUnit || 'bags',
+      inputUnit: log.inputUnit || 'bag',
       inputName: log.inputName || '',
       directRate: log.directRate != null ? String(log.directRate) : (log.quantity?.value ? String(Number(log.baseCost || 0) / Number(log.quantity.value)) : ''),
       parentOperationDefinitionId: log.parentOperationDefinitionId || null,
@@ -4846,7 +4873,7 @@ export default function FieldOpsScreen({ navigation, route }) {
     if (!archivePreferenceScope || hydratedArchivePreferenceScope !== archivePreferenceScope) return;
     if (archiveState.isCleared) return;
     loadArchivePage({ append: false });
-  }, [showHistoryModal, logTab, archiveFilters, archivePreferenceScope, hydratedArchivePreferenceScope]);
+  }, [showHistoryModal, logTab, archiveFilters, archivePreferenceScope, hydratedArchivePreferenceScope, logs]);
 
   const updateArchiveFilter = (key, value) => {
     setArchiveFilters(previous => ({ ...previous, [key]: value }));
@@ -6750,7 +6777,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                         isGroup: false,
                         inputType: 'direct',
                         inputQty: String(haVal),
-                        inputUnit: 'ha',
+                        inputUnit: 'HA',
                         directRate: String(directRate),
                         cost: String(totalFromSub || Math.round(haVal * directRate))
                       }));
@@ -6861,11 +6888,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                                   key={u}
                                   style={[
                                     { paddingHorizontal: 10, paddingVertical: 5, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
-                                    item.unit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                                    canonicalOperationUnit(item.unit) === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
                                   ]}
                                   onPress={() => updateSubItemRow(index, 'unit', u)}
                                 >
-                                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: item.unit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
+                                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: canonicalOperationUnit(item.unit) === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
                                 </TouchableOpacity>
                               ))}
                             </View>
@@ -6932,7 +6959,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                         placeholder="1.0"
                         placeholderTextColor={COLORS.textMuted}
                       />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>{logForm.inputUnit || 'ha'}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted }}>{logForm.inputUnit || 'HA'}</Text>
                     </View>
                   </View>
 
@@ -6964,11 +6991,11 @@ export default function FieldOpsScreen({ navigation, route }) {
                           key={u}
                           style={[
                             { paddingHorizontal: 14, paddingVertical: 7, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
-                            logForm.inputUnit === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
+                            canonicalOperationUnit(logForm.inputUnit) === u && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg }
                           ]}
                           onPress={() => setLogForm(p => ({ ...p, inputUnit: u }))}
                         >
-                          <Text style={{ fontSize: 12.5, fontWeight: '700', color: logForm.inputUnit === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
+                          <Text style={{ fontSize: 12.5, fontWeight: '700', color: canonicalOperationUnit(logForm.inputUnit) === u ? COLORS.primary : COLORS.textSecondary }}>{u}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
@@ -10360,12 +10387,12 @@ const s = StyleSheet.create({
   // Topbar Ledger Button
   topbarLedgerBtn: {
     position: 'relative',
-    minWidth: 52,
+    minWidth: 54,
     minHeight: 40,
     justifyContent: 'center',
     alignItems: 'flex-start',
     paddingLeft: 6,
-    paddingRight: 28,
+    paddingRight: 30,
   },
   topbarLedgerBadgeStack: {
     position: 'absolute',
@@ -10375,15 +10402,15 @@ const s = StyleSheet.create({
     alignItems: 'flex-end',
   },
   topbarLedgerCountBadge: {
-    minWidth: 24,
+    minWidth: 20,
     minHeight: 20,
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 1,
-    paddingHorizontal: 3,
-    paddingVertical: 2,
+    gap: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
   },
   topbarSubmittedBadge: { backgroundColor: COLORS.primary },
   topbarDraftBadge: { backgroundColor: '#C97A00' },
@@ -10392,6 +10419,9 @@ const s = StyleSheet.create({
     lineHeight: 14,
     fontWeight: '800',
     color: '#fff',
+    flexShrink: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
 
   // Dedicated Full History Modal

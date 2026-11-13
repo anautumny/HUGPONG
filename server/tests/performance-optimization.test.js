@@ -80,10 +80,11 @@ test('Firestore-heavy background work is bounded and coalesced across clients an
   const syncContext = source('../../web/react-app/src/context/SyncContext.jsx');
 
   assert.match(webApi, /READ_CACHE_TTL_MS = 2 \* 60 \* 1000/);
-  assert.match(webApi, /DEFAULT_REFRESH_INTERVAL_MS = 30 \* 60 \* 1000/);
+  assert.match(webApi, /DEFAULT_REFRESH_INTERVAL_MS = 0/);
   assert.match(webApi, /FOCUS_REFRESH_MIN_AGE_MS = 10 \* 60 \* 1000/);
   assert.match(dashboard, /\/api\/prices\?limit=2/);
-  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(mobileStore, /replicaResponses = new Map/);
+  assert.match(mobileStore, /startRealtimeSync\(scheduleRefresh/);
   assert.match(mobileStore, /CLOUD_REFRESH_FRESHNESS_MS = 5 \* 60 \* 1000/);
   assert.match(mobileStore, /CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 \* 60 \* 60 \* 1000/);
   assert.match(mobileStorage, /serializedCache\.get\(key\) === jsonValue/);

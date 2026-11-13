@@ -13,6 +13,7 @@ import {
 import { fromOperation } from '../../services/firestoreSchema';
 import { updateCropStage } from '../../services/cropStageService';
 import { subscribeToAuditReports } from '../../services/auditService';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 import {
   appendUniqueArchiveRecords,
   fetchArchivedOperations,
@@ -341,6 +342,8 @@ export default function OperationsView() {
     }));
     setHydratedArchivePreferenceKey(archivePreferenceKey);
   }, [archivePreferenceKey]);
+
+  useEffect(() => subscribeToResourceInvalidation(['logs', 'fields'], () => setArchiveReloadKey(value => value + 1)), []);
 
   const loadArchivePage = useCallback(async ({ append = false } = {}) => {
     if (append && archiveLoadMoreLockRef.current) return;

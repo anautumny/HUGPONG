@@ -117,7 +117,7 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
 
     const prices = sortNewestFirst(
       (pricesResult.data || []).map(price => fromPrice(price.id, price)),
-      ['effectiveDate']
+      ['effectiveDate'], ['publishedAt']
     );
     const fields = (fieldsResult.data || [])
       .map(field => fromField(field.id, field))

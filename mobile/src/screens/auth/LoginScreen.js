@@ -1,12 +1,14 @@
 import VerificationMethodChoices from '../../components/VerificationMethodChoices';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing, Platform } from 'react-native';
+import { View, Image, StyleSheet, TouchableOpacity, KeyboardAvoidingView, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing, Platform, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import {
   authenticateUser,
-  isValidUserIdentifier,
+  getCurrentSession,
+  subscribe,
+  refreshCurrentAccountSession,
   logoutUser,
   requestCurrentPhoneVerification,
   requestCurrentPhoneVerificationReview,
@@ -26,6 +28,8 @@ import LegalPolicyModal from '../../components/LegalPolicyModal';
 import OtpCodeInput from '../../components/OtpCodeInput';
 import { STORAGE_KEYS, getItem, removeItem, saveItem } from '../../services/storageService';
 import { passwordPolicy } from '../../domain/passwordPolicy';
+import { normalizeLoginIdentifier, loginIdentifierInput } from '../../domain/loginIdentifier';
+import { startRealtimeSync } from '../../services/realtimeService';
 import { AppText as Text, AppTextInput as TextInput } from '../../components/Typography';
 
 const LOGO = require('../../../assets/icon-foreground.png');
@@ -35,6 +39,7 @@ export default function LoginScreen({ navigation, route }) {
   const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [sessionAcknowledged, setSessionAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [authError, setAuthError] = useState(() => String(route?.params?.sessionNotice || ''));
@@ -184,18 +189,42 @@ export default function LoginScreen({ navigation, route }) {
     return () => clearInterval(timer);
   }, [phoneVerificationResendSeconds > 0]);
 
+  useEffect(() => {
+    if (!showPhoneVerificationModal || phoneVerificationStep !== 'review' || !deviceOnline) return;
+    let active = true, checking = false, queuedCheck = false, stream = null;
+    const owner = authenticatedUser?.employeeId || authenticatedUser?.id;
+    const accept = () => {
+      const session = getCurrentSession();
+      if (!active || !owner || (session?.employeeId || session?.id) !== owner || session.phoneVerified !== true) return;
+      setAuthenticatedUser(session); setShowPhoneVerificationModal(false);
+      if (session.requiresPasswordChange === true) {
+        setNewPassword(''); setConfirmPassword(''); setFirstLoginError(''); setShowFirstLoginModal(true);
+      } else navigation.replace('MainTabs');
+    };
+    const refresh = async event => {
+      if (!active || (!event.reset && !event.resources?.some(resource => ['users', 'session'].includes(resource)))) return;
+      if (checking) { queuedCheck = true; return; }
+      checking = true;
+      try { await refreshCurrentAccountSession(); accept(); } catch { /* Preserve the verification screen offline. */ }
+      finally { checking = false; if (queuedCheck) { queuedCheck = false; void refresh({ reset: true }); } }
+    };
+    const resume = () => { if (!stream && AppState.currentState === 'active') stream = startRealtimeSync(refresh, () => {}, { setupOnly: true }); };
+    const stopData = subscribe(accept);
+    const foreground = AppState.addEventListener('change', state => {
+      if (state === 'active') resume(); else { stream?.(); stream = null; }
+    });
+    resume(); accept();
+    return () => { active = false; stream?.(); stopData(); foreground.remove(); };
+  }, [showPhoneVerificationModal, phoneVerificationStep, deviceOnline, authenticatedUser?.employeeId, authenticatedUser?.id]);
+
   const validate = () => {
     const e = {};
     const raw = String(contactNumber || '').trim();
-    const cleaned = raw.replace(/\D/g, '');
-    const isId = /^0[1-4]\d{6}$/.test(raw) || /^0[1-4]\d{6}$/.test(cleaned);
-    const isPhone = (cleaned.startsWith('09') && cleaned.length === 11) || (cleaned.startsWith('639') && cleaned.length === 12);
-
-    if (!isId && !isPhone && !isValidUserIdentifier(raw)) {
+    if (!normalizeLoginIdentifier(raw)) {
       e.contactNumber = t('auth_enter_valid_id_or_phone', 'Enter your 8-digit User ID (e.g. 04000001) or 11-digit mobile number (09XXXXXXXXX)');
     }
-    if (password.length < 8) {
-      e.password = t('auth_pw_min_length', 'Password must be at least 8 characters');
+    if (!password) {
+      e.password = t('auth_password_required');
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -227,7 +256,7 @@ export default function LoginScreen({ navigation, route }) {
         return;
       }
 
-      const res = await authenticateUser(contactNumber, password);
+      const res = await authenticateUser(contactNumber, password, sessionAcknowledged);
 
       if (!res.success) {
         if (res.isNetworkError) {
@@ -236,7 +265,9 @@ export default function LoginScreen({ navigation, route }) {
             : API_UNAVAILABLE_MESSAGE);
           return;
         }
-        if (res.code === 'LOGIN_RATE_LIMITED' || res.status === 429) {
+        if (res.code === 'SESSION_ACKNOWLEDGEMENT_REQUIRED') {
+          setErrors({ sessionAcknowledged: t('auth_session_ack_required') });
+        } else if (res.code === 'LOGIN_RATE_LIMITED' || res.status === 429) {
           await applyServerLockout(res.data);
           setAuthError(res.error || t('auth_lockout_60'));
         } else {
@@ -569,17 +600,17 @@ export default function LoginScreen({ navigation, route }) {
                   style={s.input}
                   value={contactNumber}
                   onChangeText={v => {
-                    setContactNumber(v);
-                    setErrors(p => ({ ...p, contactNumber: null }));
+                    setContactNumber(loginIdentifierInput(v, contactNumber));
+                    setErrors(p => ({ ...p, contactNumber: null, sessionAcknowledged: null }));
                     setAuthError('');
                   }}
                   onFocus={() => setFocusedField('contactNumber')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder="04000001 or 0919 444 8888"
+                  placeholder="04000001 or 09194448888"
                   placeholderTextColor={COLORS.textMuted}
-                  keyboardType="default"
-                  maxLength={20}
-                  editable={lockoutSeconds === 0}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  editable={!loading && lockoutSeconds === 0}
                   autoComplete="username"
                   autoCapitalize="none"
                   returnKeyType="next"
@@ -613,7 +644,7 @@ export default function LoginScreen({ navigation, route }) {
                   value={password}
                   onChangeText={v => {
                     setPassword(v);
-                    setErrors(p => ({ ...p, password: null }));
+                    setErrors(p => ({ ...p, password: null, sessionAcknowledged: null }));
                     setAuthError('');
                   }}
                   onFocus={() => setFocusedField('password')}
@@ -621,7 +652,7 @@ export default function LoginScreen({ navigation, route }) {
                   placeholder="••••••••"
                   placeholderTextColor={COLORS.textMuted}
                   secureTextEntry={!showPw}
-                  editable={lockoutSeconds === 0}
+                  editable={!loading && lockoutSeconds === 0}
                   autoComplete="password"
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
@@ -648,6 +679,28 @@ export default function LoginScreen({ navigation, route }) {
             <TouchableOpacity style={s.forgotWrap} onPress={() => navigation.navigate('ForgotPassword')}>
               <Text style={s.forgotText}>{t('auth_forgot_pw', 'Forgot Password?')}</Text>
             </TouchableOpacity>
+
+            {/* The server checks credentials before reporting a missing acknowledgement. */}
+            <View style={s.acknowledgementGroup}>
+              <TouchableOpacity
+                style={s.acknowledgementRow}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: sessionAcknowledged, disabled: loading }}
+                accessibilityLabel={t('auth_session_ack')}
+                disabled={loading}
+                onPress={() => {
+                  setSessionAcknowledged(value => !value);
+                  setErrors(value => ({ ...value, sessionAcknowledged: null }));
+                }}
+              >
+                <Ionicons name={sessionAcknowledged ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
+                <Text style={s.acknowledgementText}>{t('auth_session_ack')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" onPress={() => setShowLegalModal(true)}>
+                <Text style={s.acknowledgementLink}>{t('auth_session_ack_read')}</Text>
+              </TouchableOpacity>
+              {errors.sessionAcknowledged && <Text accessibilityRole="alert" style={s.errorText}>{errors.sessionAcknowledged}</Text>}
+            </View>
 
             {/* Sign In Button */}
             <TouchableOpacity
@@ -1190,6 +1243,10 @@ const s = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.primary
   },
+  acknowledgementGroup: { marginBottom: SPACING.md, gap: 6 },
+  acknowledgementRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  acknowledgementText: { flex: 1, color: COLORS.textMuted, fontSize: 12, lineHeight: 18 },
+  acknowledgementLink: { color: COLORS.primary, fontSize: 12, fontWeight: '700', marginLeft: 30 },
   legalNoticeRow: {
     flexDirection: 'row',
     justifyContent: 'center',

@@ -148,8 +148,8 @@ test('Web and Mobile expose server-authoritative cursor loading', () => {
     assert.match(client, /cursor=\$\{encodeURIComponent\(nextCursor\)\}/);
     assert.match(client, /\.loadMore = async/);
   }
-  assert.match(mobileStore, /authenticatedRequest\('\/api\/users\?limit=50'\)/);
-  assert.match(mobileStore, /authenticatedRequest\('\/api\/audit-events\?limit=50'\)/);
+  assert.match(mobileStore, /readReplica\('\/api\/users\?limit=50'\)/);
+  assert.match(mobileStore, /readReplica\('\/api\/audit-events\?limit=50'\)/);
   assert.match(mobileStore, /export const loadMoreUserDirectory/);
   assert.match(mobileStore, /export const loadMoreAuditEvents/);
   assert.match(mobileTelemetry, /\/api\/terminal-diagnostics\?\$\{query\.toString\(\)\}/);

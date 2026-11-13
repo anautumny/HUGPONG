@@ -1,6 +1,38 @@
 {
   "indexes": [
     {
+      "collectionGroup": "notification_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "dispatchState",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAtMs",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sra_prices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "effectiveDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "publishedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "operation_logs",
       "queryScope": "COLLECTION",
       "fields": [

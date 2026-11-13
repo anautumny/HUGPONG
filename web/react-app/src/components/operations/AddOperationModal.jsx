@@ -13,7 +13,7 @@ import {
 } from '../../services/operationsService';
 import { CROP_STAGE_MAX, SUGARCANE_STAGES } from '../../constants/cropStages';
 import { SRA_OPERATIONS_CATALOGUE, getOperationDefinition, getSelectableOperationsForStage } from '../../domain/operationCatalogue';
-import { OPERATION_UNITS } from '../../domain/operationUnits';
+import { canonicalOperationUnit, operationUnitOptions } from '../../domain/operationUnits';
 import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { formatCurrency, formatHectares } from '../../utils/formatters';
@@ -73,7 +73,7 @@ export default function AddOperationModal({
 
   // Direct Mode inputs
   const [directQty, setDirectQty] = useState('');
-  const [directUnit, setDirectUnit] = useState('ha');
+  const [directUnit, setDirectUnit] = useState('HA');
   const [directRate, setDirectRate] = useState('');
 
   // Submission state
@@ -136,9 +136,9 @@ export default function AddOperationModal({
       });
       setAdvanceStage(Boolean(draft.advanceStage));
       setVariety(draft.variety || '');
-      setSubItems(Array.isArray(draft.subItems) ? draft.subItems : []);
+      setSubItems(Array.isArray(draft.subItems) ? draft.subItems.map(item => ({ ...item, unit: canonicalOperationUnit(item.unit) || item.unit })) : []);
       setDirectQty(String(draft.directQty || ''));
-      setDirectUnit(draft.directUnit || 'ha');
+      setDirectUnit(canonicalOperationUnit(draft.directUnit) || draft.directUnit || 'HA');
       setDirectRate(String(draft.directRate || ''));
       setShowNewExpense(false);
       return;
@@ -166,13 +166,13 @@ export default function AddOperationModal({
     if (tmpl.childOperations?.length) {
       setSubItems([]);
       setDirectQty(String(firstChild?.perHa || '1'));
-      setDirectUnit(firstChild?.unit || 'ha');
+      setDirectUnit(canonicalOperationUnit(firstChild?.unit) || firstChild?.unit || 'HA');
       setDirectRate(String(firstChild?.rate || '0'));
     } else if (tmpl.isGroup && tmpl.subItems) {
       setSubItems([]);
     } else {
       setDirectQty(String(tmpl.perHa || tmpl.quantity || '1'));
-      setDirectUnit(tmpl.unit || 'ha');
+      setDirectUnit(canonicalOperationUnit(tmpl.unit) || tmpl.unit || 'HA');
       setDirectRate(String(tmpl.rate || tmpl.costPerHa || '0'));
     }
   };
@@ -196,7 +196,7 @@ export default function AddOperationModal({
       setInputMode('direct');
       setSubItems([]);
       setDirectQty(areaHa || '1');
-      setDirectUnit('ha');
+      setDirectUnit('HA');
       setDirectRate('0');
       return;
     }
@@ -230,14 +230,14 @@ export default function AddOperationModal({
     setCustomChildName('');
     if (childId === 'CUSTOM') {
       setDirectQty(areaHa || '1');
-      setDirectUnit('ha');
+      setDirectUnit('HA');
       setDirectRate('0');
       return;
     }
     const child = getOperationDefinition(childId);
     if (child) {
       setDirectQty(String(child.perHa || '1'));
-      setDirectUnit(child.unit || 'ha');
+      setDirectUnit(canonicalOperationUnit(child.unit) || child.unit || 'HA');
       setDirectRate(String(child.rate || '0'));
     }
   };
@@ -376,7 +376,7 @@ export default function AddOperationModal({
       }
     } else if (!String(directQty ?? '').trim() || !Number.isFinite(Number(directQty)) || Number(directQty) <= 0) {
       errors.directQty = 'Enter a quantity greater than zero.';
-    } else if (!String(directUnit || '').trim()) {
+    } else if (!canonicalOperationUnit(directUnit)) {
       errors.directQty = 'Select a unit.';
     } else if (!String(directRate ?? '').trim() || !Number.isFinite(Number(directRate)) || Number(directRate) < 0) {
       errors.directRate = 'Enter a valid unit rate or cost.';
@@ -967,7 +967,7 @@ export default function AddOperationModal({
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
                   <Input className="sm:col-span-2" value={newExpense.description} onChange={event => setNewExpense(previous => ({ ...previous, description: event.target.value }))} placeholder="Material or expense" />
                   <Input type="number" min="0.01" step="0.1" value={newExpense.quantity} onChange={event => setNewExpense(previous => ({ ...previous, quantity: event.target.value }))} placeholder="Quantity" />
-                  <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))} />
+                  <Select value={newExpense.unit} onChange={event => setNewExpense(previous => ({ ...previous, unit: event.target.value }))} options={operationUnitOptions(newExpense.unit)} />
                   <Input type="number" min="0" value={newExpense.unitCost} onChange={event => setNewExpense(previous => ({ ...previous, unitCost: event.target.value }))} placeholder="Unit cost" />
                 </div>
                 {validationErrors.newExpense && <p className="text-xs font-semibold text-danger">{validationErrors.newExpense}</p>}
@@ -1008,7 +1008,7 @@ export default function AddOperationModal({
                 id="direct-unit"
                 value={directUnit}
                 onChange={(e) => setDirectUnit(e.target.value)}
-                options={OPERATION_UNITS.map(unit => ({ value: unit, label: unit }))}
+                options={operationUnitOptions(directUnit)}
               />
             </FormField>
             <FormField id="direct-rate" label="Rate / Unit (₱)" error={validationErrors.directRate}>

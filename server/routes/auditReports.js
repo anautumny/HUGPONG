@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { auditSnapshotBatch } = require('../domain/auditSnapshotBatch');
-const { auditReportLayout } = require('../domain/auditReportLayout');
+const { auditReportLayout, reportingMonthLabel } = require('../domain/auditReportLayout');
 const { scanScopedDocumentIds } = require('../services/scopedQueryFallback');
 const { cleanText } = require('../services/diagnosticService');
 const router = express.Router();
@@ -71,6 +71,8 @@ function normalizedReport(document) {
     cropYearCycle: cropYearCycles.length === 1 ? cropYearCycles[0] : null,
     cropYearCycles,
     reportingCalendarYears: auditReportLayout(value).years,
+    reportingMonthLabel: reportingMonthLabel(periodKey),
+    reportingTimeline: auditReportLayout(value),
     continuationCropYearCycle: cropYearCycles[1] || null,
     status: canonicalAuditStatus(value.status) || value.status,
     periodKey,

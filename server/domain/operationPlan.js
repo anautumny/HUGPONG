@@ -21,11 +21,18 @@ function text(value, label, max = 300) {
   return normalized;
 }
 
-function normalizePlanItem(item, label) {
+function planUnit(value, label, previousValue) {
+  const canonical = canonicalOperationUnit(value);
+  if (canonical) return canonical;
+  const raw = String(value || '').trim();
+  if (raw && previousValue != null && raw === String(previousValue).trim()) return raw;
+  invalid(`${label}.unit is not supported.`);
+}
+
+function normalizePlanItem(item, label, previousItem) {
   const quantity = finite(item.qty ?? item.quantity, `${label}.quantity`);
   const unitCost = finite(item.unitCost ?? item.rate, `${label}.unitCost`);
-  const unit = canonicalOperationUnit(item.unit);
-  if (!unit) invalid(`${label}.unit is not supported.`);
+  const unit = planUnit(item.unit, label, previousItem?.unit);
   return {
     id: text(item.id || item.lineItemId, `${label}.id`, 120),
     category: ['material', 'equipment', 'expense'].includes(String(item.category || '').toLowerCase())
@@ -39,7 +46,7 @@ function normalizePlanItem(item, label) {
   };
 }
 
-function normalizeOperation(operation, stageNumber, index) {
+function normalizeOperation(operation, stageNumber, index, previousOperation) {
   const label = `customOperations[${stageNumber}][${index}]`;
   const id = text(operation.id, `${label}.id`, 120);
   const selectedDefinition = getOperationDefinition(id);
@@ -49,8 +56,7 @@ function normalizeOperation(operation, stageNumber, index) {
   if (definition && definition.stageNumber !== stageNumber) invalid(`${id} does not belong to Stage ${stageNumber}.`);
   const isItemizedWeeding = definition?.id === 'SRA-08';
   const isGroup = isItemizedWeeding || operation.isGroup === true || operation.inputType === 'group';
-  const unit = isGroup ? 'ha' : canonicalOperationUnit(operation.unit || 'ha');
-  if (!unit) invalid(`${label}.unit is not supported.`);
+  const unit = isGroup ? 'HA' : planUnit(operation.unit || 'HA', label, previousOperation?.unit);
   const suppliedSubItems = Array.isArray(operation.subItems) ? operation.subItems : [];
   const legacyChildSubItems = isItemizedWeeding
     ? [
@@ -62,13 +68,14 @@ function normalizeOperation(operation, stageNumber, index) {
           id: String(childDefinition.id || child.id).replace(/^SRA-/, 'SI-'),
           description: childDefinition.name || child.name,
           qty: child.perHa ?? 1,
-          unit: child.unit || 'ha',
+          unit: child.unit || 'HA',
           unitCost: child.rate ?? 0
         };
       })
     : [];
   const rawSubItems = suppliedSubItems.length ? suppliedSubItems : legacyChildSubItems;
-  const subItems = rawSubItems.map((item, itemIndex) => normalizePlanItem(item, `${label}.subItems[${itemIndex}]`));
+  const subItems = rawSubItems.map((item, itemIndex) => normalizePlanItem(item, `${label}.subItems[${itemIndex}]`,
+    previousOperation?.subItems?.find(previous => previous.id === (item.id || item.lineItemId))));
   const configuredChildren = Array.isArray(operation.childOperations) ? operation.childOperations : [];
   const childSource = isItemizedWeeding
     ? []
@@ -83,8 +90,8 @@ function normalizeOperation(operation, stageNumber, index) {
     if (childDefinition && childDefinition.parentOperationDefinitionId !== definition?.id) {
       invalid(`${label}.childOperations[${childIndex}] does not belong under ${definition?.id || id}.`);
     }
-    const childUnit = canonicalOperationUnit(child.unit || 'ha');
-    if (!childUnit) invalid(`${label}.childOperations[${childIndex}].unit is not supported.`);
+    const childUnit = planUnit(child.unit || 'HA', `${label}.childOperations[${childIndex}]`,
+      previousOperation?.childOperations?.find(previous => previous.id === child.id)?.unit);
     const perHa = finite(child.perHa ?? 1, `${label}.childOperations[${childIndex}].perHa`);
     const rate = finite(child.rate ?? 0, `${label}.childOperations[${childIndex}].rate`);
     return {
@@ -121,7 +128,7 @@ function normalizeOperation(operation, stageNumber, index) {
   };
 }
 
-function normalizeCustomOperationsPlan(value) {
+function normalizeCustomOperationsPlan(value, { previousPlan = {} } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('customOperations must be an object keyed by stage number.');
   const normalized = {};
   for (const [stageKey, operations] of Object.entries(value)) {
@@ -130,7 +137,9 @@ function normalizeCustomOperationsPlan(value) {
     if (!Array.isArray(operations) || operations.length > 100) invalid(`customOperations[${stageKey}] must be an array with at most 100 operations.`);
     const byOperationId = new Map();
     operations.forEach((operation, index) => {
-      const normalizedOperation = normalizeOperation(operation || {}, stageNumber, index);
+      const previousOperation = Array.isArray(previousPlan?.[stageKey])
+        ? previousPlan[stageKey].find(previous => previous.id === operation?.id) : null;
+      const normalizedOperation = normalizeOperation(operation || {}, stageNumber, index, previousOperation);
       const existing = byOperationId.get(normalizedOperation.id);
       if (existing?.isGroup && normalizedOperation.isGroup) {
         const mergedItems = new Map(existing.subItems.map(item => [item.id, item]));

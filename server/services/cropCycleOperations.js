@@ -405,7 +405,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       updatedAt: timestamp,
       amendments: existing.amendments || []
     };
-    const canonicalUpdate = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    const canonicalUpdate = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp, previousRecord: existing });
     assertOperationFitsField(canonicalUpdate.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
     const amendableFields = [
       'operationName', 'childOperationName', 'variety', 'performedOn', 'areaHa',
@@ -432,7 +432,7 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
           changes: authoritativeChanges
         }
       ]
-    }, { submittedByUserId: existing.submittedByUserId, now: timestamp });
+    }, { submittedByUserId: existing.submittedByUserId, now: timestamp, previousRecord: existing });
     if (fixedStageNumber === 2 && variety && variety !== String(activeCycle.cycle.variety || '').trim()) {
       transaction.update(activeCycle.cycleRef, { variety, updatedAt: timestamp });
     }

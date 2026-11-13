@@ -41,6 +41,8 @@ async function publishSraPrice(database, input, context = {}) {
     const previousQuery = database.collection(COLLECTIONS.SRA_PRICES)
       .where('effectiveDate', '<', basePayload.effectiveDate)
       .orderBy('effectiveDate', 'desc')
+      .orderBy('publishedAt', 'desc')
+      .orderBy('__name__', 'asc')
       .limit(1);
     const previousSnapshot = await transaction.get(previousQuery);
     const previous = previousSnapshot.docs?.[0]?.data?.() || null;

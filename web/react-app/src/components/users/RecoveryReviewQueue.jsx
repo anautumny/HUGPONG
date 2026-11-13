@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock3, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { decideRecoveryReview, fetchRecoveryReviews } from '../../services/recoveryReviewService';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 
 function formatTime(value) {
   const date = new Date(value);
@@ -29,7 +30,10 @@ export default function RecoveryReviewQueue() {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    return subscribeToResourceInvalidation(['recovery-reviews'], () => { void load({ force: true }); });
+  }, []);
 
   const decide = async (review, approve) => {
     const confirmed = window.confirm(approve

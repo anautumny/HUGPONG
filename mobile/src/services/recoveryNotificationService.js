@@ -8,6 +8,8 @@ const TOKEN_TIMEOUT_MS = 10_000;
 let notificationModule = null;
 let notificationHandlerReady = false;
 let applicationPermissionRequest = null;
+let systemNotificationHandler = null;
+export function setSystemNotificationHandler(handler) { systemNotificationHandler = handler; }
 
 const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
@@ -16,18 +18,22 @@ function getNotificationModule() {
   if (!notificationModule) notificationModule = require('expo-notifications');
   if (!notificationHandlerReady) {
     notificationModule.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
+      handleNotification: async notification => {
+        const show = notification?.request?.content?.data?.hugpongType !== 'system-update'
+          || await systemNotificationHandler?.(notification) === true;
+        return ({
+        shouldShowBanner: show,
+        shouldShowList: show,
+        shouldPlaySound: show,
         shouldSetBadge: false,
         priority: notificationModule.AndroidNotificationPriority.HIGH
-      })
+      }); }
     });
     notificationHandlerReady = true;
   }
   return notificationModule;
 }
+export const getApplicationNotificationModule = getNotificationModule;
 
 async function withTimeout(promise, timeoutMs) {
   let timer;

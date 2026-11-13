@@ -5,6 +5,7 @@ import { clearAuthenticatedReadState, responseErrorFromPayload, webClientHeaders
 import { API_STARTUP_TIMEOUT_MS, API_RECOVERY_RETRY_MS } from '../services/connectivityPolicy';
 import { assertWebOnline } from '../services/onlinePolicy';
 import { createSessionGuard } from '../services/sessionGuard';
+import { startRealtimeSync } from '../services/realtimeService';
 
 const AuthContext = createContext(null);
 const LOGIN_REQUEST_TIMEOUT_MS = API_STARTUP_TIMEOUT_MS;
@@ -32,9 +33,9 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('hugpong_role');
   }, []);
 
-  const saveSession = useCallback((sessionUser, canonicalRoleKey) => {
+  const saveSession = useCallback((sessionUser, canonicalRoleKey, { preserveReadState = false } = {}) => {
     sessionRequests.current.invalidate();
-    clearAuthenticatedReadState();
+    if (!preserveReadState) clearAuthenticatedReadState();
     resetWebTelemetryState();
     setUser(sessionUser);
     setRoleKey(canonicalRoleKey);
@@ -62,7 +63,9 @@ export function AuthProvider({ children }) {
 
       if (response.ok && data.authenticated && data.user) {
         const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
-        saveSession(data.user, resolvedRole);
+        saveSession(data.user, resolvedRole, {
+          preserveReadState: Boolean(user && user.employeeId === data.user.employeeId && roleKeyFromUser(user) === resolvedRole)
+        });
         return { user: data.user, roleKey: resolvedRole, authenticated: true };
       } else if (response.status === 401 || response.status === 403 || response.ok) {
         if (user) {
@@ -93,8 +96,17 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const revalidate = () => { void refreshSession(); };
     window.addEventListener('hugpong:connection-restored', revalidate);
-    return () => window.removeEventListener('hugpong:connection-restored', revalidate);
+    window.addEventListener('hugpong:session-recheck', revalidate);
+    return () => {
+      window.removeEventListener('hugpong:connection-restored', revalidate);
+      window.removeEventListener('hugpong:session-recheck', revalidate);
+    };
   }, [refreshSession]);
+
+  useEffect(() => {
+    if (isLoading || !user || user.phoneVerified !== true || user.requiresPasswordChange === true) return undefined;
+    return startRealtimeSync();
+  }, [isLoading, user?.employeeId, user?.phoneVerified, user?.requiresPasswordChange]);
 
   useEffect(() => {
     if (!sessionUnavailable) return undefined;
@@ -134,7 +146,7 @@ export function AuthProvider({ children }) {
     };
   }, [isLoading, user?.employeeId]);
 
-  const login = async (contactNumber, password) => {
+  const login = async (contactNumber, password, sessionAcknowledged = false) => {
     sessionRequests.current.invalidate();
     setSessionExpiredNotice('');
     const controller = new AbortController();
@@ -148,7 +160,7 @@ export function AuthProvider({ children }) {
           ...webClientHeaders(),
           'x-client-instance-id': getWebClientInstanceId()
         },
-        body: JSON.stringify({ contactNumber, password, clientPlatform: 'web' }),
+        body: JSON.stringify({ contactNumber, password, sessionAcknowledged, clientPlatform: 'web' }),
         credentials: 'include',
         signal: controller.signal
       });

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const { normalizeStructuredName } = require('../domain/personName');
+const { normalizeLoginIdentifier } = require('../domain/loginIdentifier');
 const { resolveAccountAssignments } = require('../services/accountAuthorization');
 const { db, auth } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
@@ -44,6 +45,7 @@ const {
   completeAssistedRecovery
 } = require('../services/assistedPasswordRecoveryService');
 const { normalizeExpoPushToken } = require('../services/mobilePushService');
+const { registerPushDevice, unregisterPushDevice } = require('../services/systemNotificationService');
 
 const VERIFICATION_CODE_SEND_LIMIT = 3;
 const VERIFICATION_CODE_WINDOW_MS = 60 * 60 * 1000;
@@ -56,11 +58,7 @@ const LOGIN_LOCKOUT_MESSAGE = 'Too many login attempts. Please try again later.'
 
 function canonicalLoginIdentifier(req) {
   const raw = String(req.body?.contactNumber || req.body?.identifier || '').trim().toLowerCase();
-  const digits = raw.replace(/\D/g, '');
-  if (/^0[1-4]\d{6}$/.test(digits)) return digits;
-  if (/^639\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
-  if (/^09\d{9}$/.test(digits)) return digits;
-  return raw.slice(0, 160);
+  return normalizeLoginIdentifier(raw) || raw.slice(0, 160);
 }
 
 function loginRateLimitData(publicState) {
@@ -537,18 +535,24 @@ router.post('/login', (req, res, next) => {
   if (!String(identifier || '').trim() || !password) {
     return res.status(400).json({ success: false, error: 'User ID or contact number and password are required.' });
   }
+  if (!normalizeLoginIdentifier(identifier)) {
+    return res.status(400).json({ success: false, error: 'Enter an 8-digit User ID or a valid Philippine mobile number. Letters are not allowed.', code: 'INVALID_LOGIN_IDENTIFIER' });
+  }
+  if (typeof password !== 'string') {
+    return res.status(400).json({ success: false, error: 'Password is required.' });
+  }
   return next();
 }, loginIpRateLimit, loginAccountRateLimit, loginRateLimit, async (req, res) => {
-  const identifier = req.body?.contactNumber || req.body?.identifier;
+  const identifier = normalizeLoginIdentifier(req.body?.contactNumber || req.body?.identifier);
   const password = req.body?.password;
   if (!db) return res.status(503).json({ success: false, error: 'Authentication service is unavailable.' });
   try {
     const matchedUser = await findUser(identifier);
     if (!matchedUser) return rejectedLogin(req, res);
-    if (matchedUser.status !== 'ACTIVE') return res.status(403).json({ success: false, error: 'This account is not active.' });
     if (!(await verifyCurrentPassword(matchedUser.id, password))) {
       return rejectedLogin(req, res);
     }
+    if (matchedUser.status !== 'ACTIVE') return res.status(403).json({ success: false, error: 'This account is not active.' });
     await Promise.all([
       loginRateLimit.reset(req),
       loginAccountRateLimit.reset(req)
@@ -562,6 +566,16 @@ router.post('/login', (req, res, next) => {
       return res.status(403).json({
         success: false,
         error: platformRestrictionMessage(sessionUser.canonicalRole, clientPlatform)
+      });
+    }
+    // Check credentials first, without issuing a cookie session or any tokens
+    // until the user explicitly acknowledges this sign-in on either client.
+    if (req.body?.sessionAcknowledged !== true) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please acknowledge the Privacy Policy and Terms to continue.',
+        code: 'SESSION_ACKNOWLEDGEMENT_REQUIRED',
+        data: { field: 'sessionAcknowledged' }
       });
     }
     sessionUser.platform = clientPlatform;
@@ -583,6 +597,24 @@ router.post('/login', (req, res, next) => {
     res.locals.diagnosticError = error;
     return res.status(500).json({ success: false, error: 'Authentication could not be completed.' });
   }
+});
+
+// Setup sessions may register for their verification decision before account
+// readiness; application records remain protected by the existing API gate.
+router.post('/push-device', requireAuth, async (req, res) => {
+  try {
+    const user = req.authUser || req.session.user;
+    if (user.platform !== 'mobile') return res.status(403).json({ success: false, error: 'Mobile authentication is required.' });
+    const data = await registerPushDevice(db, user, { token: req.body?.token, clientInstanceId: req.headers['x-client-instance-id'] });
+    return res.json({ success: true, data });
+  } catch (error) { return res.status(error.status || 500).json({ success: false, error: error.message }); }
+});
+
+router.post('/push-device/unregister', requireAuth, async (req, res) => {
+  try {
+    await unregisterPushDevice(db, req.authUser || req.session.user, req.headers['x-client-instance-id']);
+    return res.json({ success: true });
+  } catch (error) { return res.status(error.status || 500).json({ success: false, error: error.message }); }
 });
 
 router.post('/registration-otp/request', otpRequestRateLimit, async (req, res) => {

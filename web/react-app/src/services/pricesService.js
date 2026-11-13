@@ -33,7 +33,7 @@ export function calculateSRAWeekLabel(dateString) {
 export function subscribeToPrices({ onUpdate, onError }) {
   return subscribeToAuthenticatedResource('/api/prices?limit=52', {
     onData: response => {
-      const prices = sortNewestFirst((response.data || []).map(item => fromPrice(item.id, item)), ['effectiveDate']);
+      const prices = sortNewestFirst((response.data || []).map(item => fromPrice(item.id, item)), ['effectiveDate'], ['publishedAt']);
       onUpdate({
         prices,
         page: response.page,

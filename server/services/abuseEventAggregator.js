@@ -16,6 +16,7 @@ const IMPORTANT_SECURITY_CODES = Object.freeze([
   'API_PERMISSION_POLICY_MISSING'
 ]);
 const buckets = new Map();
+const { trackBackgroundTask } = require('./backgroundTasks');
 
 function endpointGroup(req) {
   const path = String(req?.originalUrl || req?.url || '/').split(/[?#]/, 1)[0].toLowerCase();
@@ -59,7 +60,7 @@ function flushBucket(key) {
     retry: { aggregatedCount: bucket.count, firstSeenAt: bucket.firstSeenAt, lastSeenAt: bucket.lastSeenAt }
   };
   logPrivateDiagnostic(details);
-  void recordDiagnostic(bucket.db, details);
+  return recordDiagnostic(bucket.db, details);
 }
 
 function queueAggregatedDiagnostic(db, details) {
@@ -74,7 +75,14 @@ function queueAggregatedDiagnostic(db, details) {
   if (!bucket) {
     const referenceId = createReferenceId(module);
     const req = requestSnapshot(details.req, endpoint);
-    const timer = setTimeout(() => flushBucket(key), AGGREGATION_WINDOW_MS);
+    let finish;
+    const completion = new Promise(resolve => { finish = resolve; });
+    const timer = setTimeout(() => {
+      Promise.resolve().then(() => flushBucket(key)).then(finish, finish);
+    }, AGGREGATION_WINDOW_MS);
+    // Keep the original aggregation window while letting a Durable Object
+    // retain the eventual write after the initiating response has completed.
+    trackBackgroundTask(completion);
     timer.unref?.();
     bucket = {
       db,

@@ -356,8 +356,8 @@ test('mobile sync keeps writes in the outbox and refreshes canonical lifecycle r
   const syncSource = fs.readFileSync(path.join(__dirname, '..', '..', 'mobile', 'src', 'services', 'syncEngine.js'), 'utf8');
   const webSource = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'operationReadService.js'), 'utf8');
 
-  assert.match(source, /authenticatedRequest\('\/api\/crop-cycles'\)/);
-  assert.match(source, /authenticatedRequest\('\/api\/fields'\)/);
+  assert.match(source, /readReplica\('\/api\/crop-cycles'\)/);
+  assert.match(source, /readReplica\('\/api\/fields'\)/);
   assert.match(source, /fetchOperationPages\(authenticatedRequest/);
   assert.doesNotMatch(source, /\bonSnapshot\b|collection\(db/);
   assert.doesNotMatch(source, /const localOnly/);

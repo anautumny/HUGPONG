@@ -24,7 +24,8 @@ import RootNavigator from './src/navigation/RootNavigator';
 import { LanguageProvider } from './src/services/i18n';
 import { BlurTargetProvider } from './src/context/BlurTargetContext';
 import { checkConnectivity, startNetworkMonitor, stopNetworkMonitor } from './src/services/networkService';
-import { fields, getCurrentSession, performMobileSync, subscribe } from './src/data/dataStore';
+import { fields, getCurrentSession, performMobileSync, subscribe, subscribeToCloudChanges, refreshFromSystemNotification, notifySystemInboxChanged } from './src/data/dataStore';
+import { startSystemNotifications } from './src/services/systemNotificationService';
 import { reportMobileActivity } from './src/services/telemetryService';
 import { createMobileReference, reportMobileDiagnostic } from './src/services/clientDiagnostics';
 import { COLORS } from './src/theme';
@@ -67,6 +68,16 @@ const MOBILE_FONTS = {
 };
 
 function HugpongApp() {
+  useEffect(() => startSystemNotifications({
+    getSession: getCurrentSession, subscribe, subscribeToCloudChanges,
+    refreshResources: refreshFromSystemNotification, onChange: notifySystemInboxChanged,
+    onOpen: data => {
+      const session = getCurrentSession();
+      if (navigationRef.isReady() && session?.phoneVerified === true && session?.requiresPasswordChange !== true) {
+        navigationRef.navigate('MainTabs', { screen: 'Home', params: { screen: 'HomeMain', params: { openNotifications: true, notificationId: data.notificationId } } });
+      }
+    }
+  }), []);
   const pendingPlannerDate = useRef(null);
   const pendingRecoveryReview = useRef(false);
   const openPlannerReminder = useCallback((response) => {

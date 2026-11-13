@@ -8,6 +8,7 @@ const {
   logPrivateDiagnostic
 } = require('../services/diagnosticService');
 const { queueAggregatedDiagnostic, shouldAggregateDiagnostic } = require('../services/abuseEventAggregator');
+const { trackBackgroundTask } = require('../services/backgroundTasks');
 
 function isRoutineGuestSessionProbe(req, statusCode, payload = {}) {
   const endpoint = String(req?.originalUrl || req?.url || '').split(/[?#]/, 1)[0];
@@ -70,7 +71,7 @@ function safeErrorResponses(db) {
       const persist = !routineGuestProbe && shouldPersistErrorDiagnostic(res.statusCode, payload.code);
       if (!aggregate && persist) {
         logPrivateDiagnostic(details);
-        void recordDiagnostic(db, details);
+        trackBackgroundTask(recordDiagnostic(db, details));
       }
       return sendJson(createSafeErrorEnvelope({ status: res.statusCode, payload, req, referenceId }));
     };

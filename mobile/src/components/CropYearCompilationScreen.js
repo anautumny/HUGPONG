@@ -8,6 +8,7 @@ import { SearchableSelect, ScreenHeader } from './ui';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
 import { fetchCropYearOptions, previewCropYear, fetchCropYearCompilations, compileCropYear, exportCropYearCompilation } from '../services/cropYearCompilationService';
 import { formatPeriodDisplay } from '../services/i18n';
+import { subscribeToCloudChanges } from '../data/dataStore';
 
 const money = value => `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -24,6 +25,10 @@ export default function CropYearCompilationScreen({ onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  useEffect(() => subscribeToCloudChanges(event => {
+    if (event.reset || event.resources?.some(resource => ['crop-year-compilations', 'audit-reports', 'fields'].includes(resource))) setReload(value => value + 1);
+  }), []);
+  useEffect(() => { setCurrent(null); }, [cropYearCycle, blockFarmId]);
   const [online, setOnline] = useState(getNetworkStatus());
   useEffect(() => subscribeToNetwork(setOnline), []);
   useEffect(() => {
@@ -44,7 +49,7 @@ export default function CropYearCompilationScreen({ onClose }) {
   useEffect(() => {
     if (!cropYearCycle || !online) { setBusy(false); return undefined; }
     let active = true;
-    setBusy(true); setError(''); setPreview(null); setCurrent(null); setHistory([]); setCursor(null);
+    setBusy(true); setError(''); setPreview(null); setHistory([]); setCursor(null);
     Promise.all([previewCropYear({ cropYearCycle, blockFarmId }), fetchCropYearCompilations({ cropYearCycle, blockFarmId })])
       .then(([nextPreview, saved]) => {
         if (!active) return;

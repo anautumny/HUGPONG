@@ -1,8 +1,8 @@
 import React from 'react';
-import { Printer, X } from 'lucide-react';
+import { Download, Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { auditReportLayout, operationMonth } from '../../utils/auditReportLayout';
+import { auditReportLayout, operationMonth, reportingMonthLabel } from '../../utils/auditReportLayout';
 import { formatCropYearDisplay } from '../../utils/formatters';
 import { auditCropYearCycles } from '../../domain/auditWorkflow';
 
@@ -67,6 +67,8 @@ export default function PrintableAuditReport({
   isOpenModal = true,
   onClose = () => {}
 }) {
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const [downloadError, setDownloadError] = React.useState('');
   if (!report) return null;
 
   // ── 1. Resolve Dynamic Farm & Report Metadata from System ─────────
@@ -140,6 +142,16 @@ export default function PrintableAuditReport({
     window.print();
   };
 
+  const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true); setDownloadError('');
+    try {
+      const { downloadAuditReportPdf } = await import('../../services/auditPdfService');
+      downloadAuditReportPdf(report, { blockFarms, currentUser });
+    } catch (error) { setDownloadError(error.message || 'The PDF could not be downloaded.'); }
+    finally { setIsDownloading(false); }
+  };
+
   const documentSheet = (
     <div
       id="printable-audit-container"
@@ -154,7 +166,7 @@ export default function PrintableAuditReport({
           <div className="font-mono font-bold normal-case">{reportId}</div>
 
           <div className="text-gray-900 font-bold">REPORTING MONTH</div>
-          <div className="font-bold">{periodStr}</div>
+          <div className="font-bold">{reportingMonthLabel(periodStr)}</div>
 
           <div className="text-gray-900 font-bold">CROP YEAR CYCLE</div>
           <div className="font-extrabold tracking-wide">{cropYearDisplay || 'Not recorded'}</div>
@@ -187,6 +199,7 @@ export default function PrintableAuditReport({
         )}
       </div>
       <p className="mb-2 text-[8px] normal-case">Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
+      <p className="mb-2 text-[8px] normal-case">{layout.timelineNote}</p>
 
       {/* ── Master SRA Compilation Grid Table ───────────────────────────── */}
       <div className="w-full overflow-x-auto print:overflow-visible">
@@ -196,16 +209,16 @@ export default function PrintableAuditReport({
             <tr className="bg-[#edd446] text-black uppercase font-bold text-center border-b border-black">
               <th rowSpan={2} className="border border-black p-1 w-6">NO</th>
               <th rowSpan={2} className="border border-black p-1 text-left min-w-[150px] max-w-[220px]">OPERATION</th>
-              {layout.years.map(year => <th key={year} colSpan={12} className="border border-black p-0.5 font-bold tracking-wider">Calendar year {year}</th>)}
+              {layout.groups.map(group => <th key={group.year} colSpan={group.columns.length} className="border border-black p-0.5 font-bold tracking-wider">{group.label}</th>)}
               <th rowSpan={2} className="border border-black p-1 w-12">TOTAL</th>
               <th rowSpan={2} className="border border-black p-1 w-8">QTY</th>
               <th rowSpan={2} className="border border-black p-1 w-8">UNIT</th>
               <th rowSpan={2} className="border border-black p-1 w-14">UNIT COST</th>
               <th rowSpan={2} className="border border-black p-1 w-16">COST PER HECTARE</th>
             </tr>
-            {/* Months are grouped by their recorded calendar year. */}
+            {/* Numeric calendar months follow the first and last included records. */}
             <tr className="bg-[#edd446] text-black font-bold text-center border-b border-black text-[8px]">
-              {layout.columns.map(month => <th key={month} className="border border-black p-0.5 w-5 font-bold">{Number(month.slice(5))}</th>)}
+              {layout.columns.map(month => <th key={month} title={reportingMonthLabel(month)} className="border border-black p-0.5 w-5 font-bold">{layout.columnLabels[month]}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -415,6 +428,17 @@ export default function PrintableAuditReport({
         <div className="text-xs font-bold text-hug-text px-2 hidden sm:block">
           SRA Compilation Format (A4 Landscape)
         </div>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={handleDownload}
+          icon={Download}
+          isLoading={isDownloading}
+          loadingText="Preparing PDF..."
+        >
+          Download PDF
+        </Button>
+        {downloadError && <span role="alert" className="max-w-60 text-xs text-danger">{downloadError}</span>}
         <Button
           variant="primary"
           size="md"

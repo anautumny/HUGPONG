@@ -55,7 +55,7 @@ test('web and mobile branding use the canonical icon foreground', () => {
   const splashPlugin = expoConfig.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen');
   assert.equal(splashPlugin[1].image, './assets/icon-foreground.png');
   assert.equal(expoConfig.web.favicon, './assets/icon-foreground.png');
-  assert.match(mobileSplash, />Beta<\/AnimatedText>/);
+  assert.doesNotMatch(mobileSplash, />Beta<\/AnimatedText>/);
   assert.doesNotMatch(mobileSplash, />v1\.0\.0<\/AnimatedText>/);
   assert.equal(
     fs.readFileSync(path.join(root, 'web/react-app/public/icon-foreground.png')).equals(
@@ -370,7 +370,7 @@ test('mobile cloud refresh starts only after the Firebase and server sessions ag
   assert.match(dataStore, /const token = await getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
   assert.match(dataStore, /if \(!token \|\| !activeRole \|\| !sessionUserId \|\| !accountReady\) return false/);
   assert.match(dataStore, /await restartCloudSyncIfReady\(\)/);
-  assert.match(dataStore, /stop\.initialRefresh = refresh\(\)/);
+  assert.match(dataStore, /stop\.initialRefresh = refresh\(\{ force: true, extended: true, session: true \}\)/);
   assert.match(dataStore, /activeRole === ROLES\.SRA_ADMIN/);
   assert.match(dataStore, /await activeCloudSyncStop\.initialRefresh/);
   assert.doesNotMatch(dataStore, /__unassigned__|\*\*unassigned\*\*/);
@@ -437,14 +437,14 @@ test('mobile canonical reads use role-scoped server APIs without direct Firestor
     '/api/audit-events'
   ]) {
     if (endpoint === '/api/logs') assert.match(dataStore, /fetchOperationPages\(authenticatedRequest/);
-    else assert.match(dataStore, new RegExp(`authenticatedRequest\\('${endpoint}(?:\\?[^']*)?'`));
+    else assert.match(dataStore, new RegExp(`readReplica\\('${endpoint}(?:\\?[^']*)?'`));
   }
   assert.doesNotMatch(dataStore, /firebase\/firestore|\bonSnapshot\b|collection\(db|doc\(db/);
 });
 
 test('Farm Member refresh never requests manager or SRA audit resources', () => {
   assert.match(dataStore, /const canReadAuditReports = \[ROLES\.FARM_MANAGER, ROLES\.SRA_ADMIN\]\.includes\(activeRole\)/);
-  assert.match(dataStore, /canReadAuditReports \? authenticatedRequest\('\/api\/audit-reports'/);
+  assert.match(dataStore, /canReadAuditReports \? readReplica\('\/api\/audit-reports'/);
   assert.match(dataStore, /canonicalRole\(CURRENT_SESSION\?\.role \|\| CURRENT_SESSION\?\.roleKey\) !== ROLES\.SRA_ADMIN[\s\S]*return \{ reports: \[\], hasMore: false, nextCursor: null \}/);
   assert.doesNotMatch(dataStore, /isMember \? Promise\.resolve\(\{ data: \[\] \}\) : authenticatedRequest\('\/api\/audit-reports'/);
 });

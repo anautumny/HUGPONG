@@ -4,7 +4,8 @@
 
 const { initializeApp, cert, getApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
-const { getFirestore, FieldPath, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore, initializeFirestore, FieldPath, FieldValue } = require('firebase-admin/firestore');
+const { isCloudflareRuntime } = require('./services/runtimePlatform');
 // Local compatibility facade for existing routes/scripts. All SDK entry points
 // are modular; Firebase Admin 14 removed the legacy root namespace.
 const admin = { initializeApp, credential: { cert }, app: getApp,
@@ -29,7 +30,23 @@ let db = null;
 let auth = null;
 
 try {
-  if (fs.existsSync(serviceAccountPath)) {
+  if (isCloudflareRuntime()) {
+    // A Worker secret, never a bundled JSON file or a client environment value.
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || 'null');
+    if (!serviceAccount?.private_key || !serviceAccount?.client_email || !serviceAccount?.project_id) {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must contain the server Firebase service account.');
+    }
+    if (configuredProjectId && serviceAccount.project_id !== configuredProjectId) {
+      throw new Error('Firebase credential project does not match FIREBASE_PROJECT_ID.');
+    }
+    const app = initializeApp({ credential: cert(serviceAccount), projectId: serviceAccount.project_id });
+    db = initializeFirestore(app, { preferRest: true });
+    // Workers' Node HTTP bridge delivers raw compressed bodies to the SDK's
+    // streaming REST parser. Request identity encoding for this transport only.
+    db.settings({ customHeaders: { 'accept-encoding': 'identity' } });
+    isInitialized = true;
+    hasServiceAccount = true;
+  } else if (fs.existsSync(serviceAccountPath)) {
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
     const projectId = String(serviceAccount.project_id || configuredProjectId).trim();
     if (!projectId) throw new Error('Firebase project ID is missing from the service account and environment.');
@@ -58,7 +75,7 @@ try {
     hasServiceAccount = false;
   }
 
-  db = admin.firestore();
+  db ||= admin.firestore();
   auth = admin.auth();
 } catch (error) {
   console.warn('[HUGPONG Server] Firebase Admin initialization note:', cleanText(error.message));

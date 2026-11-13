@@ -26,6 +26,9 @@ const COLLECTIONS = Object.freeze({
   OTP_CHALLENGES: 'otp_challenges',
   MUTATION_RECEIPTS: 'mutation_receipts',
   NOTIFICATION_STATES: 'notification_states',
+  NOTIFICATION_EVENTS: 'notification_events',
+  NOTIFICATION_DELIVERIES: 'notification_deliveries',
+  MOBILE_PUSH_DEVICES: 'mobile_push_devices',
   PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges',
   PASSWORD_RECOVERY_REVIEWS: 'password_recovery_reviews',
   SYSTEM_METADATA: 'system_metadata'
@@ -230,7 +233,16 @@ function cleanObject(value) {
   return clean;
 }
 
-function lineItems(value) {
+function operationUnit(value, label, previousValue) {
+  const canonical = canonicalOperationUnit(value);
+  if (canonical) return canonical;
+  const raw = requiredString(value, label, { max: 40 });
+  // Only server-loaded existing data may retain a retired unit in an amendment.
+  if (previousValue != null && raw === String(previousValue).trim()) return raw;
+  throw new Error(`${label} is not a supported operation unit.`);
+}
+
+function lineItems(value, previousItems = []) {
   if (!Array.isArray(value)) return [];
   return value.map((item, index) => {
     const quantityValue = finiteNumber(item.quantity, `lineItems[${index}].quantity`, { min: 0.01 });
@@ -239,8 +251,8 @@ function lineItems(value) {
     if (Math.abs((quantityValue * unitCost) - subtotal) > 0.01) {
       throw new Error(`lineItems[${index}].subtotal must equal quantity multiplied by unitCost.`);
     }
-    const unit = canonicalOperationUnit(item.unit);
-    if (!unit) throw new Error(`lineItems[${index}].unit is not a supported operation unit.`);
+    const previousItem = Array.isArray(previousItems) ? previousItems.find(previous => previous.lineItemId === item.lineItemId) : null;
+    const unit = operationUnit(item.unit, `lineItems[${index}].unit`, previousItem?.unit);
     return {
       lineItemId: requiredString(item.lineItemId, `lineItems[${index}].lineItemId`, { max: 120 }),
       itemType: enumValue(item.itemType || 'EXPENSE', ['MATERIAL', 'EXPENSE', 'EQUIPMENT'], `lineItems[${index}].itemType`),
@@ -274,11 +286,11 @@ function laborEntries(value) {
   });
 }
 
-function quantity(value) {
+function quantity(value, previousValue) {
   if (value == null) return null;
   return {
     value: finiteNumber(value.value, 'quantity.value', { min: 0.01 }),
-    unit: requiredString(value.unit, 'quantity.unit', { max: 40 }),
+    unit: operationUnit(value.unit, 'quantity.unit', previousValue?.unit),
     inputName: optionalString(value.inputName, { max: 120 })
   };
 }
@@ -338,7 +350,7 @@ function buildOperationLog(input, context = {}) {
     throw new Error('ARCHIVED operation logs require archivedAt and archivedByUserId.');
   }
 
-  const normalizedLineItems = lineItems(input.lineItems);
+  const normalizedLineItems = lineItems(input.lineItems, context.previousRecord?.lineItems);
   const normalizedLaborEntries = laborEntries(input.laborEntries);
   const requestedTotal = finiteNumber(input.totalCost, 'totalCost', { min: 0 });
   if (input.quantity == null
@@ -377,7 +389,7 @@ function buildOperationLog(input, context = {}) {
     peopleCount: normalizedLaborEntries.length
       ? normalizedLaborEntries.reduce((sum, item) => sum + item.workerCount, 0)
       : integer(input.peopleCount, 'peopleCount', { min: 0, max: 10000 }),
-    quantity: quantity(input.quantity),
+    quantity: quantity(input.quantity, context.previousRecord?.quantity),
     baseCost,
     totalCost: requestedTotal,
     lineItems: normalizedLineItems,

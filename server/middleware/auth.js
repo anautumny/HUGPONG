@@ -29,7 +29,8 @@ function pruneAccountReadCache(now = Date.now()) {
   }
 }
 
-function readAccount(userId) {
+function readAccount(userId, fresh = false) {
+  if (fresh) return db.collection(COLLECTIONS.USERS).doc(userId).get();
   const now = Date.now();
   const cached = accountReadCache.get(userId);
   if (cached && cached.expiresAt > now) return Promise.resolve(cached.snapshot);
@@ -47,7 +48,9 @@ function readAccount(userId) {
       }
       return snapshot;
     })
-    .finally(() => inFlightAccountReads.delete(userId));
+    .finally(() => {
+      if (inFlightAccountReads.get(userId) === request) inFlightAccountReads.delete(userId);
+    });
   inFlightAccountReads.set(userId, request);
   return request;
 }
@@ -55,6 +58,7 @@ function readAccount(userId) {
 function invalidateAuthenticatedAccounts() {
   accountCacheGeneration += 1;
   accountReadCache.clear();
+  inFlightAccountReads.clear();
 }
 
 function bearerToken(req) {
@@ -85,7 +89,7 @@ async function requireAuth(req, res, next) {
 
   const userId = String(presented.employeeId || presented.uid || '').trim();
   try {
-    const snapshot = await readAccount(userId);
+    const snapshot = await readAccount(userId, String(req.headers?.['cache-control'] || '').includes('no-cache'));
     if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
       return rejectAuthentication(req, res, 'The account is no longer authorized.', 'ACCOUNT_INACTIVE');
     }

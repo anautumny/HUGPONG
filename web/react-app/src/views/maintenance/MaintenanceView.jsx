@@ -3,6 +3,7 @@ import { AlertCircle } from 'lucide-react';
 import { checkSystemHealth, fetchSystemDiagnostics, subscribeToAuditLogs } from '../../services/maintenanceService';
 import SystemHealthSummary from '../../components/maintenance/SystemHealthSummary';
 import SystemAuditLedger from '../../components/maintenance/SystemAuditLedger';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 
 export default function MaintenanceView() {
   const [healthData, setHealthData] = useState(null);
@@ -66,11 +67,7 @@ export default function MaintenanceView() {
   useEffect(() => {
     runHealthCheck();
     loadSystemInventory();
-    const inventoryTimer = setInterval(() => {
-      if (document.visibilityState !== 'hidden' && navigator.onLine !== false) {
-        loadSystemInventory();
-      }
-    }, 5 * 60 * 1000);
+    const unsubscribeInventory = subscribeToResourceInvalidation(['system-diagnostics'], () => loadSystemInventory({ force: true }));
 
     setIsLogsLoading(true);
     const unsubLogs = subscribeToAuditLogs({
@@ -89,7 +86,7 @@ export default function MaintenanceView() {
     setLoadMoreAuditLogs(() => unsubLogs.loadMore || null);
 
     return () => {
-      clearInterval(inventoryTimer);
+      unsubscribeInventory();
       if (typeof unsubLogs === 'function') unsubLogs();
     };
   }, []);

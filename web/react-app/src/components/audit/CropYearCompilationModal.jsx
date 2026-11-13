@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarRange, Printer } from 'lucide-react';
+import { CalendarRange, Download, Printer } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Select from '../ui/Select';
 import { fetchCropYearOptions, previewCropYear, fetchCropYearCompilations, compileCropYear, printCropYearCompilation } from '../../services/cropYearCompilationService';
 import { formatPeriodDisplay } from '../../utils/formatters';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 
 const money = value => Number(value || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -21,6 +22,8 @@ export default function CropYearCompilationModal({ onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  useEffect(() => subscribeToResourceInvalidation(['crop-year-compilations', 'audit-reports', 'fields'], () => setReload(value => value + 1)), []);
+  useEffect(() => { setCurrent(null); }, [cropYearCycle, blockFarmId]);
 
   useEffect(() => {
     let active = true;
@@ -37,7 +40,7 @@ export default function CropYearCompilationModal({ onClose }) {
   useEffect(() => {
     if (!cropYearCycle) return undefined;
     let active = true;
-    setBusy(true); setError(''); setPreview(null); setCurrent(null); setHistory([]); setCursor(null);
+    setBusy(true); setError(''); setPreview(null); setHistory([]); setCursor(null);
     Promise.all([previewCropYear({ cropYearCycle, blockFarmId }), fetchCropYearCompilations({ cropYearCycle, blockFarmId })])
       .then(([nextPreview, saved]) => {
         if (!active) return;
@@ -70,6 +73,14 @@ export default function CropYearCompilationModal({ onClose }) {
     catch (reason) { setError(reason.message); }
     finally { setSaving(false); }
   };
+  const downloadPdf = async () => {
+    setSaving(true); setError('');
+    try {
+      const { downloadCropYearCompilationPdf } = await import('../../services/auditPdfService');
+      downloadCropYearCompilationPdf(current);
+    } catch (reason) { setError(reason.message); }
+    finally { setSaving(false); }
+  };
   const report = current || preview;
   const loading = busy || optionsBusy;
 
@@ -93,7 +104,8 @@ export default function CropYearCompilationModal({ onClose }) {
         <div className="flex flex-wrap gap-2">
           <Button onClick={save} disabled={saving || loading || !preview?.operationCount}>{saving ? 'Please wait…' : 'Compile Crop Year'}</Button>
           <Button variant="secondary" onClick={() => setReload(value => value + 1)} disabled={saving || loading}>Refresh certified reports</Button>
-          {current && <Button variant="secondary" onClick={print} disabled={saving} icon={Printer}>Print / Save PDF</Button>}
+          {current && <Button variant="secondary" onClick={downloadPdf} disabled={saving} icon={Download}>Download PDF</Button>}
+          {current && <Button variant="secondary" onClick={print} disabled={saving} icon={Printer}>Print</Button>}
         </div>
         {!report.operationCount && <p className="text-sm text-hug-muted">No certified monthly operations match this selection.</p>}
         {!!report.monthlySummaries.length && <div className="overflow-x-auto rounded-xl border border-border"><table className="w-full text-left text-sm"><caption className="p-3 text-left font-bold text-hug-text">Included monthly totals</caption><thead className="bg-surface-subtle text-xs text-hug-muted"><tr><th className="p-3">Month</th><th className="p-3">Farms</th><th className="p-3">Operations</th><th className="p-3">Cost</th></tr></thead><tbody>{report.monthlySummaries.map(month => <tr key={month.periodKey} className="border-t border-border"><td className="p-3 font-semibold">{formatPeriodDisplay(month.periodKey)}</td><td className="p-3">{month.blockFarmCount}</td><td className="p-3">{month.operationCount}</td><td className="p-3">{money(month.totalCost)}</td></tr>)}</tbody></table></div>}

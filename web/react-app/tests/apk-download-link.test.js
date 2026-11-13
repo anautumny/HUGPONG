@@ -11,7 +11,7 @@ const landingSource = fs.readFileSync(
 );
 
 test('landing header keeps the GitHub Releases link', () => {
-  assert.match(landingSource, /href="https:\/\/github\.com\/Mattaeeee\/HUGPONG\/releases"/);
+  assert.match(landingSource, /href="https:\/\/github\.com\/anautumny\/HUGPONG\/releases"/);
   assert.match(landingSource, /GitHub Releases \(APK\)/);
 });
 
@@ -20,7 +20,7 @@ test('main Android button uses the versioned same-origin attachment endpoint', (
   assert.match(release.downloadUrl, /^https:\/\/github\.com\/anautumny\/HUGPONG\/releases\/download\/[^/]+\/[^/]+\.apk$/);
   assert.match(landingSource, /\/downloads\/android\/\$\{encodeURIComponent\(androidRelease\.version\)\}/);
   assert.match(landingSource, /href=\{ANDROID_APK_URL\}/);
-  assert.match(landingSource, /download="HUGPONG-Beta\.apk"/);
+  assert.match(landingSource, /download=\{`HUGPONG-\$\{androidRelease\.version\}\.apk`\}/);
   assert.doesNotMatch(
     landingSource,
     /href="https:\/\/github\.com\/Mattaeeee\/HUGPONG\/releases"[\s\S]{0,300}Download Android APK/

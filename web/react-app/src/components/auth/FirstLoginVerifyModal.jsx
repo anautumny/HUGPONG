@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Smartphone, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import OtpCodeInput from './OtpCodeInput';
+import { createChangeStream } from '../../services/changeStream';
+import { webClientHeaders } from '../../services/apiClient';
 
 export default function FirstLoginVerifyModal({
   isOpen,
@@ -24,6 +26,43 @@ export default function FirstLoginVerifyModal({
   const [verificationStep, setVerificationStep] = useState('choice');
   const [verificationMethod, setVerificationMethod] = useState(null);
   const verificationAttemptRef = useRef('');
+  const verifiedCallback = useRef(onVerificationSuccess);
+  verifiedCallback.current = onVerificationSuccess;
+  useEffect(() => {
+    if (!isOpen || verificationStep !== 'review') return;
+    let active = true, running = false, queued = false, stopStream = null;
+    const owner = pendingUser?.employeeId || pendingUser?.id;
+    const headers = { ...webClientHeaders(), 'Cache-Control': 'no-cache', ...(pendingToken ? { Authorization: `Bearer ${pendingToken}` } : {}) };
+    const check = async () => {
+      if (!active) return;
+      if (running) { queued = true; return; }
+      running = true;
+      try {
+        const response = await fetch('/auth/session', { headers, credentials: 'include', cache: 'no-store' });
+        const result = await response.json();
+        if (active && response.ok && result.success && result.user?.phoneVerified === true
+          && (result.user.employeeId || result.user.id) === owner) {
+          active = false; stopStream?.(); verifiedCallback.current(result);
+        }
+      } catch { /* Preserve the verification screen offline. */ }
+      finally { running = false; if (queued) { queued = false; void check(); } }
+    };
+    const resume = () => {
+      if (stopStream || navigator.onLine === false || document.visibilityState === 'hidden') return;
+      stopStream = createChangeStream({ connect: signal => fetch('/auth/session/events', { headers, credentials: 'include', signal }),
+        onChange: event => { if (event.reset || event.resources?.some(resource => ['users', 'session'].includes(resource))) void check(); } });
+    };
+    const visibility = () => {
+      if (navigator.onLine === false || document.visibilityState === 'hidden') { stopStream?.(); stopStream = null; }
+      else resume();
+    };
+    window.addEventListener('online', visibility); window.addEventListener('offline', visibility);
+    document.addEventListener('visibilitychange', visibility); resume();
+    return () => {
+      active = false; stopStream?.(); window.removeEventListener('online', visibility); window.removeEventListener('offline', visibility);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [isOpen, verificationStep, pendingUser?.employeeId, pendingUser?.id, pendingToken]);
 
   // The user must explicitly choose SMS or authorized review on first login.
   useEffect(() => {

@@ -1026,8 +1026,8 @@ test('web and mobile cache reconciliation defer to canonical server lifecycle st
   assert.doesNotMatch(webSource, /canonicalLocalOnly|localOnly|pendingCreateOverlays/);
   assert.match(mobileSource, /pendingCreateOverlays/);
   assert.doesNotMatch(mobileSource, /const localOnly/);
-  assert.match(mobileSource, /authenticatedRequest\('\/api\/crop-cycles'\)/);
-  assert.match(mobileSource, /authenticatedRequest\('\/api\/fields'\)/);
+  assert.match(mobileSource, /readReplica\('\/api\/crop-cycles'\)/);
+  assert.match(mobileSource, /readReplica\('\/api\/fields'\)/);
   assert.match(mobileSource, /fetchOperationPages\(authenticatedRequest/);
   assert.doesNotMatch(mobileSource, /\bonSnapshot\b|collection\(db/);
 });

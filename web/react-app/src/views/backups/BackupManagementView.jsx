@@ -19,6 +19,7 @@ import {
   validateBackup
 } from '../../services/backupService';
 import { PaginationFooter } from '../../components/ui/Table';
+import { subscribeToResourceInvalidation } from '../../services/apiClient';
 
 const RESTORE_CONFIRMATION = 'RECOVER MISSING RECORDS';
 const ACTIVITY_PAGE_SIZE = 10;
@@ -98,6 +99,7 @@ export default function BackupManagementView() {
   }, []);
 
   useEffect(() => { void refreshStatus(); }, [refreshStatus]);
+  useEffect(() => subscribeToResourceInvalidation(['backups'], () => { void refreshStatus({ force: true }); }), [refreshStatus]);
 
   const createBackup = async event => {
     event.preventDefault();

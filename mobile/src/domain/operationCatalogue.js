@@ -13,11 +13,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     inputType: 'direct',
     isGroup: false,
     perHa: 1,
-    unit: 'ha',
+    unit: 'HA',
     rate: 100,
     costPerHa: 100,
     subItems: [
-      { id: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', qty: 1, unit: 'ha', unitCost: 100, subTotal: 100 }
+      { id: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', qty: 1, unit: 'HA', unitCost: 100, subTotal: 100 }
     ]
   },
   {
@@ -29,12 +29,12 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'prep',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 12000,
     subItems: [
-      { id: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1, unit: 'ha', unitCost: 5000, subTotal: 5000 },
-      { id: 'SI-02-2', description: '2nd Pass Disc Harrowing', qty: 1, unit: 'ha', unitCost: 4000, subTotal: 4000 },
-      { id: 'SI-02-3', description: 'Furrowing / Tudling', qty: 1, unit: 'ha', unitCost: 3000, subTotal: 3000 }
+      { id: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', qty: 1, unit: 'HA', unitCost: 5000, subTotal: 5000 },
+      { id: 'SI-02-2', description: '2nd Pass Disc Harrowing', qty: 1, unit: 'HA', unitCost: 4000, subTotal: 4000 },
+      { id: 'SI-02-3', description: 'Furrowing / Tudling', qty: 1, unit: 'HA', unitCost: 3000, subTotal: 3000 }
     ]
   },
   {
@@ -46,10 +46,10 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'plant',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 15000,
     subItems: [
-      { id: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', qty: 5, unit: 'lac', unitCost: 3000, subTotal: 15000 }
+      { id: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', qty: 5, unit: 'laksa', unitCost: 3000, subTotal: 15000 }
     ]
   },
   {
@@ -61,11 +61,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'plant',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 5000,
     subItems: [
-      { id: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', qty: 5, unit: 'lac', unitCost: 600, subTotal: 3000 },
-      { id: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', qty: 5, unit: 'lac', unitCost: 400, subTotal: 2000 }
+      { id: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', qty: 5, unit: 'laksa', unitCost: 600, subTotal: 3000 },
+      { id: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', qty: 5, unit: 'laksa', unitCost: 400, subTotal: 2000 }
     ]
   },
   {
@@ -77,7 +77,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'fert',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 15800,
     subItems: [
       { id: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', qty: 2, unit: 'bag', unitCost: 1600, subTotal: 3200 },
@@ -112,7 +112,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'weed',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 3000,
     subItems: [
       { id: 'SI-07-1', description: '1st Off-barring (Pahubas)', qty: 2, unit: 'pass', unitCost: 750, subTotal: 1500 },
@@ -128,12 +128,12 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'weed',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 6000,
     subItems: [
-      { id: 'SI-08-1', description: 'Manual Weeding (1st Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-2', description: 'Manual Weeding (2nd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 },
-      { id: 'SI-08-3', description: 'Manual Weeding (3rd Round)', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
+      { id: 'SI-08-1', description: 'Manual Weeding (1st Round)', qty: 1, unit: 'HA', unitCost: 2000, subTotal: 2000 },
+      { id: 'SI-08-2', description: 'Manual Weeding (2nd Round)', qty: 1, unit: 'HA', unitCost: 2000, subTotal: 2000 },
+      { id: 'SI-08-3', description: 'Manual Weeding (3rd Round)', qty: 1, unit: 'HA', unitCost: 2000, subTotal: 2000 }
     ]
   },
   {
@@ -145,7 +145,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'fert',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 2500,
     subItems: [
       { id: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', qty: 1.5, unit: 'bag', unitCost: 1600, subTotal: 2400 },
@@ -162,11 +162,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     inputType: 'direct',
     isGroup: false,
     perHa: 1,
-    unit: 'ha',
+    unit: 'HA',
     rate: 2500,
     costPerHa: 2500,
     subItems: [
-      { id: 'SI-10-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 1, unit: 'ha', unitCost: 2500, subTotal: 2500 }
+      { id: 'SI-10-1', description: 'Final Hilling-Up / Pasungkal Pass', qty: 1, unit: 'HA', unitCost: 2500, subTotal: 2500 }
     ]
   },
   {
@@ -230,11 +230,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     inputType: 'direct',
     isGroup: false,
     perHa: 1,
-    unit: 'ha',
+    unit: 'HA',
     rate: 2000,
     costPerHa: 2000,
     subItems: [
-      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'ha', unitCost: 2000, subTotal: 2000 }
+      { id: 'SI-14-1', description: 'Trash farming, field clearing & drainage', qty: 1, unit: 'HA', unitCost: 2000, subTotal: 2000 }
     ]
   }
 ];
@@ -256,7 +256,7 @@ export const getDefaultStageOperations = stageNumber => (
         ? operation.rate
         : (operation.subItems && operation.subItems[0] ? operation.subItems[0].unitCost : operation.costPerHa || 0),
       category: operation.category || 'prep',
-      unit: operation.unit || 'ha',
+      unit: operation.unit || 'HA',
       costPerHa: operation.costPerHa || 0,
       subItems: (operation.subItems || []).map(subItem => ({ ...subItem })),
       childOperations: (operation.childOperations || []).map(child => ({ ...child }))

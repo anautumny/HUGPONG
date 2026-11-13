@@ -7,6 +7,7 @@
 
 import { formatCropYear as formatCropYearValue } from '../utils/formatters.js';
 import { canonicalAuditStatus } from '../domain/auditWorkflow.js';
+import { canonicalOperationUnit } from '../domain/operationUnits.js';
 
 export const COLLECTIONS = Object.freeze({
   USERS: 'users',
@@ -281,8 +282,11 @@ export const toCycle = (field, value) => {
 export const toOperation = (value, context = {}) => {
   const status = String(context.status || value.status || 'ACTIVE').toUpperCase();
   if (!['ACTIVE', 'ARCHIVED'].includes(status)) throw new Error('Operation log status must be ACTIVE or ARCHIVED.');
-  const quantity = value.quantity && typeof value.quantity === 'object' ? value.quantity :
+  const sourceQuantity = value.quantity && typeof value.quantity === 'object' ? value.quantity :
     ((value.inputQty || value.qty) ? { value: Number(value.inputQty || value.qty), unit: value.inputUnit || value.unit || '', inputName: value.inputName || '' } : null);
+  const quantity = sourceQuantity && !context.preserveUnits
+    ? { ...sourceQuantity, unit: canonicalOperationUnit(sourceQuantity.unit) || sourceQuantity.unit }
+    : sourceQuantity;
   const fieldId = String(value.fieldId || '').trim().toUpperCase();
   const operationCycleId = String(context.cycleId || value.cycleId || '').trim().toUpperCase();
   const submittedByUserId = context.submittedByUserId || value.submittedByUserId || value.loggedById || '';
@@ -325,7 +329,7 @@ export const toOperation = (value, context = {}) => {
     quantity,
     baseCost: Number(value.baseCost ?? 0),
     totalCost: Number(value.totalCost ?? value.cost ?? 0),
-    lineItems: lineItems(value),
+    lineItems: lineItems(value).map(item => context.preserveUnits ? item : ({ ...item, unit: canonicalOperationUnit(item.unit) || item.unit })),
     laborEntries: normalizedLaborEntries,
     photoEvidence: photoEvidence(value.photoEvidence),
     isSupplemental: Boolean(value.isSupplemental),
@@ -366,7 +370,7 @@ export const fromOperation = (id, value) => ({
 });
 
 export const snapshot = (id, value) => {
-  const log = toOperation(value, { status: value.status || 'ACTIVE' });
+  const log = toOperation(value, { status: value.status || 'ACTIVE', preserveUnits: true });
   return {
     operationLogId: id,
     fieldId: log.fieldId,

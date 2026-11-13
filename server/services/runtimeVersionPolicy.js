@@ -1,6 +1,9 @@
 'use strict';
 
 function assertSupportedNodeVersion(version = process.versions.node) {
+  // Workers implements Node compatibility APIs, not a Node server installation.
+  // The standalone Node version requirement remains unchanged.
+  if (version === process.versions.node && require('./runtimePlatform').isCloudflareRuntime()) return;
   const match = String(version).match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   const [major, minor, patch] = match ? match.slice(1).map(Number) : [];
   if (major !== 24 || minor < 22 || minor === 22 && patch < 1) {

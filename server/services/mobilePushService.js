@@ -40,13 +40,15 @@ async function sendExpoPushNotification(expoPushToken, message, {
         data: message?.data && typeof message.data === 'object' ? message.data : {},
         sound: 'default',
         priority: 'high',
-        channelId: 'account-recovery'
+        channelId: message?.channelId || 'account-recovery',
+        ...(message?.ttl ? { ttl: message.ttl } : {}),
+        ...(message?.tag ? { tag: message.tag } : {})
       }),
       signal: controller.signal
     });
     const payload = await response.json().catch(() => ({}));
     const ticket = Array.isArray(payload?.data) ? payload.data[0] : payload?.data;
-    if (!response.ok || ticket?.status === 'error') {
+    if (!response.ok || ticket?.status !== 'ok' || !ticket?.id) {
       return {
         success: false,
         code: String(ticket?.details?.error || ticket?.message || `PUSH_HTTP_${response.status}`).slice(0, 100)
@@ -78,6 +80,25 @@ function recoveryDecisionMessage(reviewId, status) {
   };
 }
 
+async function checkExpoPushReceipt(ticketId, { fetchImpl = globalThis.fetch, accessToken = expoPushAccessToken, timeoutMs = PUSH_REQUEST_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  try {
+    const response = await fetchImpl('https://exp.host/--/api/v2/push/getReceipts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+      body: JSON.stringify({ ids: [ticketId] }), signal: controller.signal
+    });
+    const payload = await response.json();
+    if (!response.ok) return { pending: true };
+    const receipt = payload.data?.[ticketId];
+    if (!receipt) return { pending: true };
+    return receipt.status === 'ok' ? { success: true }
+      : { success: false, code: String(receipt.details?.error || 'PUSH_RECEIPT_ERROR').slice(0, 100) };
+  } catch { return { pending: true }; }
+  finally { clearTimeout(timer); }
+}
+
 async function deliverRecoveryDecisionNotification(database, { reviewId, expoPushToken, status }) {
   const token = normalizeExpoPushToken(expoPushToken);
   if (!database || !reviewId || !token) return { success: false, skipped: true };
@@ -96,6 +117,7 @@ module.exports = {
   EXPO_PUSH_ENDPOINT,
   normalizeExpoPushToken,
   sendExpoPushNotification,
+  checkExpoPushReceipt,
   recoveryDecisionMessage,
   deliverRecoveryDecisionNotification
 };

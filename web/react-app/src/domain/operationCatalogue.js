@@ -10,11 +10,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'prep',
     inputType: 'direct',
     isGroup: false,
-    unit: 'ha',
+    unit: 'HA',
     rate: 100,
     costPerHa: 100,
     subItems: [
-      { lineItemId: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', quantity: 1, unit: 'ha', unitCost: 100, subtotal: 100 }
+      { lineItemId: 'SI-01-1', description: 'Soil Laboratory Sampling & Analysis', quantity: 1, unit: 'HA', unitCost: 100, subtotal: 100 }
     ]
   },
   {
@@ -24,12 +24,12 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'prep',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 12000,
     subItems: [
-      { lineItemId: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', quantity: 1, unit: 'ha', unitCost: 5000, subtotal: 5000 },
-      { lineItemId: 'SI-02-2', description: '2nd Pass Disc Harrowing', quantity: 1, unit: 'ha', unitCost: 4000, subtotal: 4000 },
-      { lineItemId: 'SI-02-3', description: 'Furrowing / Tudling', quantity: 1, unit: 'ha', unitCost: 3000, subtotal: 3000 }
+      { lineItemId: 'SI-02-1', description: '1st Pass Disc Plowing (Tractor)', quantity: 1, unit: 'HA', unitCost: 5000, subtotal: 5000 },
+      { lineItemId: 'SI-02-2', description: '2nd Pass Disc Harrowing', quantity: 1, unit: 'HA', unitCost: 4000, subtotal: 4000 },
+      { lineItemId: 'SI-02-3', description: 'Furrowing / Tudling', quantity: 1, unit: 'HA', unitCost: 3000, subtotal: 3000 }
     ]
   },
   {
@@ -39,10 +39,10 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'plant',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 15000,
     subItems: [
-      { lineItemId: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', quantity: 5, unit: 'lac', unitCost: 3000, subtotal: 15000 }
+      { lineItemId: 'SI-03-1', description: 'Seedpieces (Patdan acquisition - 40,000 pts/ha)', quantity: 5, unit: 'laksa', unitCost: 3000, subtotal: 15000 }
     ]
   },
   {
@@ -52,11 +52,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'plant',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 5000,
     subItems: [
-      { lineItemId: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', quantity: 5, unit: 'lac', unitCost: 600, subtotal: 3000 },
-      { lineItemId: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', quantity: 5, unit: 'lac', unitCost: 400, subtotal: 2000 }
+      { lineItemId: 'SI-04-1', description: 'Cutting, Bundling, Loading & Transport of Seedpieces', quantity: 5, unit: 'laksa', unitCost: 600, subtotal: 3000 },
+      { lineItemId: 'SI-04-2', description: 'Distributing and Planting Seedpieces in Furrows', quantity: 5, unit: 'laksa', unitCost: 400, subtotal: 2000 }
     ]
   },
   {
@@ -66,7 +66,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'fert',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 15800,
     subItems: [
       { lineItemId: 'SI-05-1', description: 'Application of 46-00-00 (Urea)', quantity: 2, unit: 'bag', unitCost: 1600, subtotal: 3200 },
@@ -96,7 +96,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'weed',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 3000,
     subItems: [
       { lineItemId: 'SI-07-1', description: '1st Off-barring (Pahubas) - Tractor/Animal', quantity: 2, unit: 'pass', unitCost: 750, subtotal: 1500 },
@@ -110,12 +110,12 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'weed',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 6000,
     subItems: [
-      { lineItemId: 'SI-08-1', description: 'Manual Weeding (1st Round)', quantity: 1, unit: 'ha', unitCost: 2000, subtotal: 2000 },
-      { lineItemId: 'SI-08-2', description: 'Manual Weeding (2nd Round)', quantity: 1, unit: 'ha', unitCost: 2000, subtotal: 2000 },
-      { lineItemId: 'SI-08-3', description: 'Manual Weeding (3rd Round)', quantity: 1, unit: 'ha', unitCost: 2000, subtotal: 2000 }
+      { lineItemId: 'SI-08-1', description: 'Manual Weeding (1st Round)', quantity: 1, unit: 'HA', unitCost: 2000, subtotal: 2000 },
+      { lineItemId: 'SI-08-2', description: 'Manual Weeding (2nd Round)', quantity: 1, unit: 'HA', unitCost: 2000, subtotal: 2000 },
+      { lineItemId: 'SI-08-3', description: 'Manual Weeding (3rd Round)', quantity: 1, unit: 'HA', unitCost: 2000, subtotal: 2000 }
     ]
   },
   {
@@ -125,7 +125,7 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'fert',
     inputType: 'group',
     isGroup: true,
-    unit: 'ha',
+    unit: 'HA',
     costPerHa: 2500,
     subItems: [
       { lineItemId: 'SI-09-1', description: '2nd Dose Urea (Side-dressing)', quantity: 1.5, unit: 'bag', unitCost: 1600, subtotal: 2400 },
@@ -139,11 +139,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'weed',
     inputType: 'direct',
     isGroup: false,
-    unit: 'ha',
+    unit: 'HA',
     rate: 2500,
     costPerHa: 2500,
     subItems: [
-      { lineItemId: 'SI-10-1', description: 'Final Hilling-up / Pasungkal Pass', quantity: 1, unit: 'ha', unitCost: 2500, subtotal: 2500 }
+      { lineItemId: 'SI-10-1', description: 'Final Hilling-up / Pasungkal Pass', quantity: 1, unit: 'HA', unitCost: 2500, subtotal: 2500 }
     ]
   },
   {
@@ -195,11 +195,11 @@ export const SRA_OPERATIONS_CATALOGUE = [
     category: 'prep',
     inputType: 'direct',
     isGroup: false,
-    unit: 'ha',
+    unit: 'HA',
     rate: 2000,
     costPerHa: 2000,
     subItems: [
-      { lineItemId: 'SI-14-1', description: 'Trash farming, field clearing & drainage', quantity: 1, unit: 'ha', unitCost: 2000, subtotal: 2000 }
+      { lineItemId: 'SI-14-1', description: 'Trash farming, field clearing & drainage', quantity: 1, unit: 'HA', unitCost: 2000, subtotal: 2000 }
     ]
   }
 ];

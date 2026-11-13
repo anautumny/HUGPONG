@@ -2,13 +2,12 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getOperationCapabilities } from '../domain/operationAuthorization';
 import { collectPlannerEntries, plannerReminderMessage } from '../domain/plannerNotifications';
+import { getApplicationNotificationModule } from './recoveryNotificationService';
 
 const CHANNEL_ID = 'planner-reminders';
 const MANAGED_TYPE = 'planner-reminder';
 let lastFingerprint = '';
 let activeSync = null;
-let notificationModule = null;
-let notificationHandlerReady = false;
 
 const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
@@ -17,20 +16,7 @@ function getNotificationModule() {
   // which intentionally throws in Expo Go as of SDK 53. Local reminders remain
   // enabled in development and production builds where the native module exists.
   if (isExpoGo) return null;
-  if (!notificationModule) notificationModule = require('expo-notifications');
-  if (!notificationHandlerReady) {
-    notificationModule.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        priority: notificationModule.AndroidNotificationPriority.DEFAULT
-      })
-    });
-    notificationHandlerReady = true;
-  }
-  return notificationModule;
+  return getApplicationNotificationModule();
 }
 
 

@@ -38,7 +38,7 @@ export default function PricesView() {
       onUpdate: ({ prices, page, currentPrice, previousPrice, isLoading, error }) => {
         if (!active) return;
         setPrices(previous => historyExtended.current
-          ? sortNewestFirst([...new Map([...previous, ...prices].map(row => [row.id, row])).values()], ['effectiveDate'])
+          ? sortNewestFirst([...new Map([...previous, ...prices].map(row => [row.id, row])).values()], ['effectiveDate'], ['publishedAt'])
           : prices || []);
         if (!historyExtended.current) setHistoryPage(page);
         setCurrentPrice(currentPrice);
@@ -68,7 +68,7 @@ export default function PricesView() {
       if (ownerRef.current !== owner) return;
       const older = (response.data || []).map(row => fromPrice(row.id, row));
       historyExtended.current = true;
-      setPrices(previous => sortNewestFirst([...new Map([...previous, ...older].map(row => [row.id, row])).values()], ['effectiveDate']));
+      setPrices(previous => sortNewestFirst([...new Map([...previous, ...older].map(row => [row.id, row])).values()], ['effectiveDate'], ['publishedAt']));
       setHistoryPage(response.page);
       setError(null);
     } catch (err) {

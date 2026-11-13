@@ -306,7 +306,6 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
     if (!operationAuthorization(req.session.user, { id: fieldId, ...snapshot.data() }).canPlan) {
       return res.status(403).json({ success: false, error: 'Farm plans can only be changed for your own assigned field.' });
     }
-    const customOperations = normalizeCustomOperationsPlan(req.body.customOperations);
     const mutationContext = readMutationContext(req, { requireVersion: true });
     const result = await db.runTransaction(async transaction => {
       const latestSnapshot = await transaction.get(ref);
@@ -315,8 +314,9 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
       if (!operationAuthorization(req.session.user, { id: fieldId, ...latest }).canPlan) {
         throw Object.assign(new Error('Farm plans can only be changed for your own assigned field.'), { status: 403 });
       }
+      const customOperations = normalizeCustomOperationsPlan(req.body.customOperations, { previousPlan: latest.customOperations });
       if (JSON.stringify(latest.customOperations || {}) === JSON.stringify(customOperations)) {
-        return { replayed: true, updatedAt: latest.updatedAt };
+        return { replayed: true, updatedAt: latest.updatedAt, customOperations };
       }
       assertBaseVersion(latest.updatedAt, { ...mutationContext, requireVersion: true }, fieldId, { id: fieldId, ...latest });
       const updatedAt = nowIso();
@@ -330,9 +330,9 @@ router.put('/:id/custom-operations', requireAuth, requireRole([ROLES.FARM_MANAGE
         details: `Updated the operation plan for field ${fieldId}.`,
         createdAt: updatedAt
       });
-      return { replayed: false, updatedAt };
+      return { replayed: false, updatedAt, customOperations };
     });
-    return res.json({ success: true, replayed: result.replayed, data: { id: fieldId, customOperations, updatedAt: result.updatedAt } });
+    return res.json({ success: true, replayed: result.replayed, data: { id: fieldId, customOperations: result.customOperations, updatedAt: result.updatedAt } });
   } catch (error) {
     return res.status(error.status || 400).json({ success: false, error: error.message, data: error.data });
   }

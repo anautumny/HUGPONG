@@ -7,6 +7,8 @@ const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { isCloudflareRuntime } = require('./services/runtimePlatform');
+const cloudflareRuntime = isCloudflareRuntime();
 const {
   sessionSecret,
   corsOrigins,
@@ -20,6 +22,7 @@ const FirestoreSessionStore = require('./services/firestoreSessionStore');
 const { startOperationalCleanup } = require('./services/operationalCleanupService');
 const { invalidateAccountAssignments } = require('./services/accountAuthorization');
 const { createScopedReadCache } = require('./services/scopedReadCache');
+const { createChangeFeed } = require('./services/changeFeed');
 const { COLLECTIONS } = require('./schema/firestoreSchema');
 const { requireAuth, invalidateAuthenticatedAccounts } = require('./middleware/auth');
 const { requireAccountReady, requireApiPermission } = require('./middleware/requestPermissions');
@@ -59,20 +62,20 @@ const recoveryReviewRoutes = require('./routes/recoveryReviews');
 
 const app = express();
 const scopedReadCache = createScopedReadCache();
+const changeFeed = createChangeFeed({ database: db, singleWriter: cloudflareRuntime, invalidate: (resources = []) => {
+  scopedReadCache.invalidate(resources);
+  if (!resources.length || resources.some(resource => ['session', 'users', 'fields', 'block-farms'].includes(resource))) {
+    invalidateAccountAssignments(db);
+    invalidateAuthenticatedAccounts();
+  }
+} });
 const runtimeLifecycle = createRuntimeLifecycle();
 app.disable('x-powered-by');
 app.set('query parser', 'simple');
 if (isProduction) app.set('trust proxy', 1);
 
 app.use((req, res, next) => {
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Referrer-Policy', 'no-referrer');
-  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  if (isProduction) {
-    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    res.set('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com");
-  }
+  res.set(require('./services/httpSecurityHeaders').httpSecurityHeaders(isProduction));
   next();
 });
 
@@ -194,11 +197,16 @@ app.use('/auth', (req, res, next) => {
   }
   next();
 });
+app.use(changeFeed.revalidateRequest);
+app.use(changeFeed.mutationMiddleware);
 app.use('/auth', authRoutes);
+// Only revision metadata is exposed here; setup accounts still cannot read API data.
+app.get('/auth/session/events', requireAuth, changeFeed.stream);
 // Every application-data request is re-authorized against the live account,
 // onboarding state, client platform, and an explicit method/path role policy.
 // Unknown API routes fail closed until a policy is deliberately added.
 app.use('/api', requireAuth, createAuthenticatedApiRateLimit(), requireAccountReady, requireApiPermission);
+app.get('/api/sync/events', changeFeed.stream);
 // Successful GET responses are cached only after live account authorization.
 // Mutations always reach their authoritative route and clear this presentation
 // cache after success; database validation and writes are never cached.
@@ -312,6 +320,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start Server
+function startNodeServer() {
 const server = app.listen(port, host, () => {
   if (db) {
     runtimeLifecycle.markReady();
@@ -329,15 +338,18 @@ console.log(`  Authentication & Role Protection: ACTIVE`);
 configureHttpServer(server, { requestTimeoutMs });
 
 const operationalCleanup = isProduction && db ? startOperationalCleanup(db) : null;
+const notificationDelivery = db ? require('./services/systemNotificationService').startNotificationDelivery(db) : null;
 const gracefulShutdown = installGracefulShutdown({
   server,
   lifecycle: runtimeLifecycle,
-  cleanup: operationalCleanup,
+  cleanup: { stop() { operationalCleanup?.stop(); notificationDelivery?.stop(); changeFeed.stop(); } },
   gracePeriodMs: shutdownGracePeriodMs
 });
 server.on('close', () => {
   runtimeLifecycle.beginDrain();
   operationalCleanup?.stop();
+  notificationDelivery?.stop();
+  changeFeed.stop();
   gracefulShutdown.remove();
 });
 
@@ -351,3 +363,10 @@ server.on('error', (err) => {
     process.exit(1);
   }
 });
+return server;
+}
+
+if (require.main === module) startNodeServer();
+
+// Both hosts use this same application, authorization and mutation services.
+module.exports = { app, changeFeed, runtimeLifecycle, db, startNodeServer };

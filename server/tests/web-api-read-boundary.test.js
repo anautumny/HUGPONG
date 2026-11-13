@@ -37,7 +37,7 @@ test('web API reads coalesce in-flight work and invalidate after authoritative m
   assert.match(source, /forcedRefreshQueued/);
   assert.match(source, /void refresh\(\{ force: true \}\)/);
   assert.match(source, /READ_CACHE_TTL_MS = 2 \* 60 \* 1000/);
-  assert.match(source, /DEFAULT_REFRESH_INTERVAL_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /DEFAULT_REFRESH_INTERVAL_MS = 0/);
   assert.match(source, /FOCUS_REFRESH_MIN_AGE_MS = 10 \* 60 \* 1000/);
   assert.match(source, /Date\.now\(\) - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS/);
   assert.match(source, /export function clearAuthenticatedReadState\(\)[\s\S]*authenticatedReadGeneration \+= 1;[\s\S]*readCache\.clear\(\);[\s\S]*inFlightReads\.clear\(\);/);
@@ -57,10 +57,10 @@ test('high-cost monitoring and mobile hydration use bounded refresh cadences', (
 
   assert.match(webTelemetry, /intervalMs: 10 \* 60 \* 1000/);
   assert.doesNotMatch(diagnosticsView, /setInterval/);
-  assert.match(maintenanceView, /5 \* 60 \* 1000/);
-  assert.match(mobileStore, /CLOUD_REFRESH_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(maintenanceView, /subscribeToResourceInvalidation/);
+  assert.match(mobileStore, /startRealtimeSync\(scheduleRefresh/);
   assert.match(mobileStore, /CLOUD_EXTENDED_REFRESH_INTERVAL_MS = 4 \* 60 \* 60 \* 1000/);
-  assert.match(mobileStore, /setInterval\(refresh, CLOUD_REFRESH_INTERVAL_MS\)/);
+  assert.doesNotMatch(mobileStore, /setInterval\(refresh/);
   assert.match(mobileMonitor, /setInterval\(refresh, 10 \* 60 \* 1000\)/);
 });
 

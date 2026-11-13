@@ -18,7 +18,9 @@ function comparableChange(row, previous, product) {
 
 function buildPriceAnalytics(records, asOf = new Date().toISOString().slice(0, 10)) {
   // Only server-validated records enter this projection. No interpolation or carry-forward quotes.
-  const sorted = [...records].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+  const latestByDate = new Map();
+  for (const record of orderPriceHistory(records)) if (!latestByDate.has(record.effectiveDate)) latestByDate.set(record.effectiveDate, record);
+  const sorted = [...latestByDate.values()].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
   const latest = sorted.at(-1) || null;
   const weekly = sorted.map((row, index) => ({
     date: row.effectiveDate, periodLabel: row.weekLabel, circularNumber: row.circularNumber,
@@ -82,13 +84,19 @@ function buildPriceAnalytics(records, asOf = new Date().toISOString().slice(0, 1
   };
 }
 
+function orderPriceHistory(records) {
+  return [...records].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)
+    || String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) || String(a.id || '').localeCompare(String(b.id || '')));
+}
+
 function decoratePriceHistory(records, asOf) {
   const analytics = buildPriceAnalytics(records, asOf);
-  return [...records].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)).map((row, index) => ({
-    ...row, sugarPriceChange: analytics.weekly.trendPoints.find(p => p.date === row.effectiveDate)?.sugarChange ?? null,
-    molassesPriceChange: analytics.weekly.trendPoints.find(p => p.date === row.effectiveDate)?.molassesChange ?? null,
+  const ordered = orderPriceHistory(records);
+  return ordered.map((row, index) => ({
+    ...row, sugarPriceChange: comparableChange(row, ordered.find(previous => previous.effectiveDate < row.effectiveDate), 'sugar'),
+    molassesPriceChange: comparableChange(row, ordered.find(previous => previous.effectiveDate < row.effectiveDate), 'molasses'),
     ...(index === 0 ? { priceAnalytics: analytics } : {})
   }));
 }
 
-module.exports = { buildPriceAnalytics, decoratePriceHistory, comparableChange, quoted };
+module.exports = { buildPriceAnalytics, decoratePriceHistory, comparableChange, quoted, orderPriceHistory };

@@ -89,6 +89,15 @@ service cloud.firestore {
     match /notification_states/{documentId} {
       allow read, write: if false;
     }
+    match /notification_events/{documentId} {
+      allow read, write: if false;
+    }
+    match /notification_deliveries/{documentId} {
+      allow read, write: if false;
+    }
+    match /mobile_push_devices/{documentId} {
+      allow read, write: if false;
+    }
 
     match /password_recovery_challenges/{documentId} {
       allow read, write: if false;
