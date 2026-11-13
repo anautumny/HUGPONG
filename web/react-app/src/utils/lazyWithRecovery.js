@@ -2,6 +2,15 @@ import { lazy } from 'react';
 
 const RETRY_PREFIX = 'hugpong:web-module-retry:';
 const RETRY_WINDOW_MS = 2 * 60 * 1000;
+const routePreloaders = new Map();
+
+// Warm only the page module the user is about to open, never its API data.
+export function preloadRouteModule(path) {
+  if (typeof navigator !== 'undefined' && (navigator.onLine === false
+    || navigator.connection?.saveData || /(^|-)2g$/.test(navigator.connection?.effectiveType || ''))) return;
+  const pathname = String(path || '').split(/[?#]/, 1)[0];
+  return routePreloaders.get(pathname)?.().catch(() => {});
+}
 
 export function isRecoverableModuleLoadError(error) {
   const message = String(error?.message || error || '').toLowerCase();
@@ -66,10 +75,21 @@ export function recoverLatestWebBundle(error, moduleName) {
   return true;
 }
 
-export function lazyWithRecovery(loader, moduleName) {
+export function lazyWithRecovery(loader, moduleName, routePaths = []) {
+  let modulePromise;
+  const load = () => {
+    if (!modulePromise) {
+      modulePromise = Promise.resolve().then(loader).catch(error => {
+        modulePromise = null;
+        throw error;
+      });
+    }
+    return modulePromise;
+  };
+  for (const path of routePaths) routePreloaders.set(path, load);
   return lazy(async () => {
     try {
-      const loadedModule = await loader();
+      const loadedModule = await load();
       clearRetry(`${RETRY_PREFIX}${String(moduleName || 'route')}`);
       return loadedModule;
     } catch (error) {

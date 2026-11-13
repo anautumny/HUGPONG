@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import RouteContent from './RouteContent';
 import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { RefreshCw, CheckCircle2, AlertCircle, DatabaseBackup, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -248,7 +249,7 @@ export default function AppShell() {
           className="flex-1 min-w-0 min-h-0 w-full overflow-y-auto p-4 sm:p-6 pb-20 lg:pb-6 focus:outline-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:block"
           tabIndex={-1}
         >
-          <Outlet />
+          <RouteContent><Outlet /></RouteContent>
         </main>
 
         {/* Responsive Mobile Bottom Navigation Bar (<= 1024px) */}

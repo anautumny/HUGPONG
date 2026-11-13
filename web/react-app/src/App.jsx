@@ -9,33 +9,26 @@ import UsersView from './views/users/UsersView';
 import { createClientReference, reportClientDiagnostic } from './services/clientDiagnostics';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import LandingView from './views/LandingView';
+import RouteLoadingState from './components/layout/RouteLoadingState';
 
 const LoginView = lazyWithRecovery(() => import('./views/LoginView'), 'login');
 const PrivacyPolicyView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.PrivacyPolicyView })), 'privacy-policy');
 const TermsView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.TermsView })), 'terms');
 const ComplianceView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.ComplianceView })), 'compliance');
 const CookiePolicyView = lazyWithRecovery(() => import('./views/LegalViews').then(module => ({ default: module.CookiePolicyView })), 'cookie-policy');
-const DashboardView = lazyWithRecovery(() => import('./views/dashboard/DashboardView'), 'dashboard');
-const FarmFieldRegistryView = lazyWithRecovery(() => import('./views/fields/FarmFieldRegistryView'), 'field-registry');
-const OperationsView = lazyWithRecovery(() => import('./views/operations/OperationsView'), 'operations');
-const TakeOverView = lazyWithRecovery(() => import('./views/operations/TakeOverView'), 'takeover');
-const AuditCenterView = lazyWithRecovery(() => import('./views/audit/AuditCenterView'), 'audit-center');
-const PricesView = lazyWithRecovery(() => import('./views/prices/PricesView'), 'prices');
-const AnalyticsView = lazyWithRecovery(() => import('./views/analytics/AnalyticsView'), 'analytics');
-const SyncView = lazyWithRecovery(() => import('./views/sync/SyncView'), 'sync');
-const TicketsView = lazyWithRecovery(() => import('./views/support/TicketsView'), 'support');
-const MaintenanceView = lazyWithRecovery(() => import('./views/maintenance/MaintenanceView'), 'maintenance');
-const DiagnosticsConsoleView = lazyWithRecovery(() => import('./views/diagnostics/DiagnosticsConsoleView'), 'diagnostics');
-const BackupManagementView = lazyWithRecovery(() => import('./views/backups/BackupManagementView'), 'backups');
-const SettingsView = lazyWithRecovery(() => import('./views/settings/SettingsView'), 'settings');
-
-function RouteLoadingState() {
-  return (
-    <div role="status" className="flex min-h-[40vh] items-center justify-center text-sm text-hug-muted">
-      Loading page…
-    </div>
-  );
-}
+const DashboardView = lazyWithRecovery(() => import('./views/dashboard/DashboardView'), 'dashboard', ['/dashboard']);
+const FarmFieldRegistryView = lazyWithRecovery(() => import('./views/fields/FarmFieldRegistryView'), 'field-registry', ['/fields', '/block-farms', '/registry']);
+const OperationsView = lazyWithRecovery(() => import('./views/operations/OperationsView'), 'operations', ['/operations']);
+const TakeOverView = lazyWithRecovery(() => import('./views/operations/TakeOverView'), 'takeover', ['/takeover']);
+const AuditCenterView = lazyWithRecovery(() => import('./views/audit/AuditCenterView'), 'audit-center', ['/audit']);
+const PricesView = lazyWithRecovery(() => import('./views/prices/PricesView'), 'prices', ['/prices']);
+const AnalyticsView = lazyWithRecovery(() => import('./views/analytics/AnalyticsView'), 'analytics', ['/analytics']);
+const SyncView = lazyWithRecovery(() => import('./views/sync/SyncView'), 'sync', ['/sync']);
+const TicketsView = lazyWithRecovery(() => import('./views/support/TicketsView'), 'support', ['/support']);
+const MaintenanceView = lazyWithRecovery(() => import('./views/maintenance/MaintenanceView'), 'maintenance', ['/maintenance']);
+const DiagnosticsConsoleView = lazyWithRecovery(() => import('./views/diagnostics/DiagnosticsConsoleView'), 'diagnostics', ['/diagnostics']);
+const BackupManagementView = lazyWithRecovery(() => import('./views/backups/BackupManagementView'), 'backups', ['/backups']);
+const SettingsView = lazyWithRecovery(() => import('./views/settings/SettingsView'), 'settings', ['/settings']);
 
 function RootRoute() {
   // The public website can render while the server checks a saved session.

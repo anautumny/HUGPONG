@@ -30,6 +30,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { roleLabelFromKey, ROLE_KEYS } from '../../utils/authRouting';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import { preloadRouteModule } from '../../utils/lazyWithRecovery';
 
 export default function Sidebar({
   isCollapsed = false,
@@ -311,6 +312,9 @@ export default function Sidebar({
       >
         <NavLink
           to="/dashboard"
+          onPointerEnter={() => preloadRouteModule('/dashboard')}
+          onFocus={() => preloadRouteModule('/dashboard')}
+          onPointerDown={() => preloadRouteModule('/dashboard')}
           onClick={handleNavClick}
           className={`flex items-center gap-3 ${collapsed ? 'justify-center w-full' : 'min-w-0'} hover:opacity-90 transition-opacity`}
           title="Go to Dashboard"
@@ -373,6 +377,9 @@ export default function Sidebar({
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onPointerEnter={() => preloadRouteModule(item.to)}
+                  onFocus={() => preloadRouteModule(item.to)}
+                  onPointerDown={() => preloadRouteModule(item.to)}
                   id={item.id}
                   onClick={handleNavClick}
                   title={collapsed ? item.label : undefined}

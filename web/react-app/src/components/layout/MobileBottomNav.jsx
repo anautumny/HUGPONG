@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_KEYS } from '../../utils/authRouting';
+import { preloadRouteModule } from '../../utils/lazyWithRecovery';
 
 /**
  * MobileBottomNav — Responsive bottom navigation bar for HUGPONG Web client on mobile viewports.
@@ -72,6 +73,9 @@ export default function MobileBottomNav({ onOpenMobileDrawer = () => {} }) {
             <NavLink
               key={item.to}
               to={item.to}
+              onPointerEnter={() => preloadRouteModule(item.to)}
+              onFocus={() => preloadRouteModule(item.to)}
+              onPointerDown={() => preloadRouteModule(item.to)}
               className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-150 min-h-[48px] ${
                 isActive
                   ? 'text-primary dark:text-[#8FB870] font-bold'
