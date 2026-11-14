@@ -1,6 +1,6 @@
 # HUGPONG 1.1.1 release
 
-The user lifted the deployment/build/publication hold on 14 November 2026 and requested the latest Web, API and Android version before final presentation testing. Rollout is in progress; live verification and APK publication details will be added after completion.
+The user lifted the deployment/build/publication hold on 14 November 2026 and requested the latest Web, API and Android version before final presentation testing. The Web/API recovery fixes have been deployed and checked live. The signed Android build has finished and passed artifact checks; public download rollout is being completed.
 
 ## Included changes
 
@@ -20,6 +20,20 @@ Web and API reuse the existing Cloudflare Worker and single named Durable Object
 
 ## Verification before rollout
 
-The full local release gate passed **812 server tests and 66 Web tests**, source/configuration/credential checks, Web compilation and Android JavaScript/Hermes export. The Cloudflare Worker dry run also passed. Evidence: `output/audit-fixes-release-gate-2026-11-14.txt` and `output/release-1.1.1-worker-dry-run.txt`.
+The full local release gate passed **812 server tests and 66 Web tests**, source/configuration/credential checks, Web compilation and Android JavaScript/Hermes export. It passed again after aligning final 1.1.1 package metadata and the APK download manifest. The Cloudflare Worker dry run also passed. Evidence: `output/audit-fixes-release-gate-2026-11-14.txt`, `output/release-1.1.1-final-verification.txt` and `output/release-1.1.1-worker-dry-run.txt`.
+
+## Android artifact
+
+- Version **1.1.1**, Android code **13**, package **com.hugpong.app**.
+- EAS build: [d397d80e-891a-4ffd-89bc-7ba552ed1fa8](https://expo.dev/accounts/anautumny/projects/hugpong/builds/d397d80e-891a-4ffd-89bc-7ba552ed1fa8).
+- APK source commit: `9e4950320dd96b331b11ddc20c7ee1d8f3784fca`, on `main`. Functional fixes are in parent commit `dbabedcd237995f0a4cd780b7fb2d0819bb265af`; the subsequent source change excludes Git metadata from Android archives.
+- Upload archive: 136 files / 2,950,400 uncompressed bytes, matching the new Mobile source, with zero excluded-file violations. Public Android Firebase configuration is present; server credentials and repository history are absent.
+- APK size: **112,694,343 bytes**. SHA-256: `c6bcb571afe1f3f3ccf4d498644f3d0642b241ee2ec8f06327ef806680cefb17`.
+- Passive manifest/bundle inspection confirms the correct version/package/domain, with no old Render API embedded. The certificate fingerprint matches the existing EAS signing identity. Independent cryptographic APK signature verification was not performed; no previously declined native verification tools were installed or run.
+- Expo remains on the **Free** plan and build credentials were frozen. Existing published APK assets are retained.
+
+## Initial production activation
+
+Worker version `5d461796-c169-4421-a825-06a7fddbbecf`, deployment `2e1f9b0e-189c-46ba-b30d-6b9beb94cffe`, activated the verified Web/API fixes. Homepage, Prices and Fields returned 200 and the same `/assets/index-BrqiJWME.js` entry, which matched the local build byte-for-byte. API readiness returned 200 in active mode. The final activation will also switch the public APK link to 1.1.1 and align Web/server version metadata.
 
 Root causes, modified application files, behavioral regressions and remaining audit risks are documented in [AUDIT_RECOVERY_FIXES_2026-11-14.md](AUDIT_RECOVERY_FIXES_2026-11-14.md). Physical phone testing, native push delivery, signed-in multi-role/device mutation/reconnect workflows and representative hosting load remain acceptance work; successful deployment does not establish those results.

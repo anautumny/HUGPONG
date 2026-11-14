@@ -1,6 +1,6 @@
 {
   "name": "hugpong-root",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "HUGPONG Farm Management System",
   "engines": {
     "node": ">=24.22.1 <25"
