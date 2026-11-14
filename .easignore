@@ -1,5 +1,5 @@
 # Exclude unrelated monorepo sources, reports and local control directories.
-/.git/
+/.git
 /.github/
 /.agents/
 /.codex/
