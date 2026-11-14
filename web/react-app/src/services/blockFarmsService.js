@@ -2,7 +2,8 @@ import { fromBlockFarm, fromUser } from './firestoreSchema';
 import {
   authenticatedRead,
   authenticatedRequest,
-  subscribeToAuthenticatedLoader
+  subscribeToAuthenticatedLoader,
+  settleResourceReads
 } from './apiClient';
 import { uniqueRecordsById } from '../utils/recordOrdering';
 
@@ -17,14 +18,15 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
     return () => {};
   }
 
-  return subscribeToAuthenticatedLoader(async ({ force }) => {
-    const [farmsResult, fieldsResult, usersResult] = await Promise.all([
-      authenticatedRead('/api/block-farms', { force }),
-      authenticatedRead('/api/fields', { force }),
-      isManager
+  const previous = new Map();
+  return subscribeToAuthenticatedLoader(async ({ force, retryOnly }) => {
+    const { values: [farmsResult, fieldsResult, usersResult], refreshError } = await settleResourceReads([
+      () => authenticatedRead('/api/block-farms', { force }),
+      () => authenticatedRead('/api/fields', { force }),
+      () => isManager
         ? Promise.resolve({ data: [] })
         : authenticatedRead('/api/users', { force })
-    ]);
+    ], previous, { retryOnly, groups: [[0, 1]] });
     const blockFarms = uniqueRecordsById((farmsResult.data || [])
       .map(farm => fromBlockFarm(farm.id, farm)))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
@@ -35,9 +37,9 @@ export function subscribeToBlockFarmsData({ user, onUpdate, onError }) {
       .map(account => fromUser(account.id || account.employeeId, account))
       .filter(account => account.canonicalRole === 'FARM_MANAGER' && String(account.status || '').toUpperCase() === 'ACTIVE')
       .sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || '')));
-    return { blockFarms, fields, farmManagers };
+    return { blockFarms, fields, farmManagers, refreshError };
   }, {
-    onData: data => onUpdate({ ...data, isLoading: false, error: null }),
+    onData: data => onUpdate({ ...data, isLoading: false, error: data.refreshError?.message || null }),
     onError: error => {
       if (onError) onError(error);
     },

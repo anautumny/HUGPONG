@@ -18,6 +18,7 @@ export function createChangeStream({ connect, onChange, onUnauthorized = () => {
     };
     touch();
     let reader;
+    let retryAfterMs = 0;
     try {
       const response = await connect(current.signal);
       if (stopped || current.signal.aborted) return;
@@ -25,6 +26,10 @@ export function createChangeStream({ connect, onChange, onUnauthorized = () => {
         stopped = true;
         onUnauthorized(response.status);
         return;
+      }
+      if (!response.ok) {
+        const value = response.headers?.get?.('retry-after');
+        retryAfterMs = /^\d+(?:\.\d+)?$/.test(String(value || '')) ? Number(value) * 1000 : Math.max(0, Date.parse(value) - Date.now()) || 0;
       }
       if (!response.ok || !response.body?.getReader) throw new Error('Change stream unavailable.');
       reader = response.body.getReader();
@@ -60,7 +65,7 @@ export function createChangeStream({ connect, onChange, onUnauthorized = () => {
       if (controller === current) controller = null;
       if (!stopped) {
         const delay = Math.min(30000, retryMs * 2 ** Math.min(attempt++, 5));
-        retryTimer = setTimeout(run, delay + Math.floor(Math.random() * delay * 0.2));
+        retryTimer = setTimeout(run, Math.max(retryAfterMs, delay + Math.floor(Math.random() * delay * 0.2)));
       }
     }
   }

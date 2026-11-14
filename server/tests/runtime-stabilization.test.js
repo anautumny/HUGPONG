@@ -102,7 +102,7 @@ test('durable outboxes are isolated by signed-in account and legacy shared entri
   assert.match(syncEngine, /former unscoped/);
   assert.match(dataStore, /initSyncEngine\(CURRENT_SESSION\.employeeId \|\| CURRENT_SESSION\.id\)/);
   assert.match(dataStore, /CURRENT_SESSION = \{ \.\.\.DEFAULT_GUEST_SESSION \};\s*await initSyncEngine\(''\)/);
-  assert.match(storageService, /key\.startsWith\('@hugpong_'\)/);
+  assert.match(storageService, /replaceable\.has\(key\)/);
 });
 
 test('the Planner stack can open the shared Sync Monitor screen', () => {
@@ -368,7 +368,7 @@ test('sync refreshes server authorization from Firebase without replaying a stal
 test('mobile cloud refresh starts only after the Firebase and server sessions agree', () => {
   assert.match(dataStore, /!auth\?\.currentUser \|\| auth\.currentUser\.uid !== sessionUserId/);
   assert.match(dataStore, /const token = await getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
-  assert.match(dataStore, /if \(!token \|\| !activeRole \|\| !sessionUserId \|\| !accountReady\) return false/);
+  assert.match(dataStore, /if \(!token \|\| !activeRole \|\| !sessionUserId \|\| !accountReady[\s\S]*?return false/);
   assert.match(dataStore, /await restartCloudSyncIfReady\(\)/);
   assert.match(dataStore, /stop\.initialRefresh = refresh\(\{ force: true, extended: true, session: true \}\)/);
   assert.match(dataStore, /activeRole === ROLES\.SRA_ADMIN/);
@@ -589,7 +589,7 @@ test('compiled operations expose audit-state indicators on Web and Mobile', () =
 test('SRA-only mutations bypass and clear the mobile offline outbox', () => {
   assert.match(dataStore, /sraOnlineOnlyMutations = new Set\(\['audit_qr_import', 'audit_certification', 'audit_return', 'price', 'user_approve'\]\)/);
   assert.match(dataStore, /activeRole === ROLES\.SRA_ADMIN \|\| sraOnlineOnlyMutations\.has\(type\)/);
-  assert.match(dataStore, /executeMutationViaApi\([^;]+includeMutation: false/);
+  assert.match(dataStore, /executeMutationViaApi\([^;]+includeMutation: Boolean\(options\.mutation\)/);
   assert.match(dataStore, /restoredRole === ROLES\.SRA_ADMIN && getOutboxCount\(\) > 0\) await clearOutbox\(\)/);
   assert.match(dataStore, /roleUpper === ROLES\.SRA_ADMIN && getOutboxCount\(\) > 0\) await clearOutbox\(\)/);
 });
@@ -609,10 +609,8 @@ test('dashboard connectivity reflects API health and reports the failing resourc
 
 test('clearing the mobile data cache preserves the authenticated session pair', () => {
   const resetFlow = dataStore.slice(dataStore.indexOf('export const resetLocalCache'), dataStore.indexOf('export const listenToCloudSync'));
-  assert.match(resetFlow, /getItem\(STORAGE_KEYS\.AUTH_TOKEN\)/);
-  assert.match(resetFlow, /\[STORAGE_KEYS\.SESSION, activeSession\]/);
-  assert.match(resetFlow, /\[STORAGE_KEYS\.AUTH_TOKEN, authToken\]/);
-  assert.match(resetFlow, /multiSave\(preservedAuth\)/);
+  assert.match(resetFlow, /clearHugpongStorage\(\)/);
+  assert.doesNotMatch(resetFlow, /clearOutbox|draftLogs\.length\s*=\s*0|multiSave|saveItem\(STORAGE_KEYS\.(AUTH_TOKEN|SESSION)/);
 });
 
 test('mobile API requests use one configured origin without runtime host discovery', () => {

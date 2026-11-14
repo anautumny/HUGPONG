@@ -118,6 +118,7 @@ function requireApiPermission(req, res, next) {
 }
 
 module.exports = {
+  canonicalRequestPath,
   API_PERMISSION_POLICIES,
   allowedRolesForRequest,
   requireAccountReady,

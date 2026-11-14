@@ -286,8 +286,10 @@ router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
   const header = String(req.headers.authorization || '');
   const firebaseIdToken = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!firebaseIdToken) return res.status(401).json({ success: false, error: 'Firebase authentication is required.' });
+  let firebaseTokenVerified = false;
   try {
     const decoded = await auth.verifyIdToken(firebaseIdToken, true);
+    firebaseTokenVerified = true;
     const snapshot = await db.collection(COLLECTIONS.USERS).doc(decoded.uid).get();
     if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
       return res.status(403).json({ success: false, error: 'The account is no longer authorized.' });
@@ -303,7 +305,17 @@ router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
     if (req.session) req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {
-    return res.status(401).json({ success: false, error: 'Firebase authentication could not be refreshed.' });
+    // Infrastructure failures must not masquerade as revocation: Mobile
+    // intentionally clears its saved session after a definitive 401/403.
+    const rejectedToken = !firebaseTokenVerified && new Set([
+      'auth/argument-error', 'auth/invalid-argument', 'auth/invalid-id-token',
+      'auth/id-token-expired', 'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found'
+    ]).has(String(error?.code || ''));
+    if (rejectedToken) return res.status(401).json({ success: false,
+      error: 'Firebase authentication could not be refreshed.', code: 'FIREBASE_SESSION_REJECTED' });
+    res.locals.diagnosticError = error;
+    return res.status(503).json({ success: false,
+      error: 'Account authorization is temporarily unavailable. Please retry.', code: 'AUTHORIZATION_UNAVAILABLE' });
   }
 });
 

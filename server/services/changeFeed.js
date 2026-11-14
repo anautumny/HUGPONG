@@ -2,6 +2,7 @@
 
 const { randomUUID, createHash } = require('node:crypto');
 const { COLLECTIONS } = require('../schema/firestoreSchema');
+const { canonicalRequestPath } = require('../middleware/requestPermissions');
 
 // Revision tokens contain no account IDs or record data. The existing scoped
 // API remains the only source of application records and authorization.
@@ -20,7 +21,7 @@ const RESOURCE_DEPENDENCIES = Object.freeze({
 
 function changedResources(req) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return [];
-  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  const path = canonicalRequestPath(req.originalUrl || req.url || '');
   if (path.startsWith('/auth/')) {
     // Token renewal, login, logout and verification checks must not create a
     // refresh -> token renewal -> refresh feedback loop on every device.

@@ -15,8 +15,9 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
   let stopped = false, timer = null, retry = 0, running = false, queued = false;
   let generation = 0, owner = '', identity = '', binding = '', seen = new Set(), loaded = false, baselineKnown = false;
   const scheduled = new Set();
+  let retryNotBefore = 0;
   const current = (id, version) => !stopped && owner === id && generation === version && userIdOf(getSession()) === id;
-  const schedule = (delay = 100) => { clearTimeout(timer); if (!stopped) timer = setTimeout(sync, delay); };
+  const schedule = (delay = 100) => { clearTimeout(timer); if (!stopped) timer = setTimeout(sync, Math.max(delay, retryNotBefore - Date.now())); };
   const persistSeen = id => saveItem(`@hugpong_system_alerts_${id}`, [...seen].slice(-500));
   async function hydrate(id, version) {
     const [cached, presented] = await Promise.all([getItem(`@hugpong_system_inbox_${id}`, []), getItem(`@hugpong_system_alerts_${id}`, null)]);
@@ -30,7 +31,7 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
     const session = getSession(), id = userIdOf(session);
     const next = `${id}:${session?.authVersion || ''}:${session?.phoneVerified}:${session?.requiresPasswordChange}`;
     if (next === identity) return;
-    identity = next; generation++; owner = id; inboxOwner = id;
+    identity = next; generation++; owner = id; inboxOwner = id; retryNotBefore = 0;
     inbox = []; seen = new Set(); loaded = false; scheduled.clear(); binding = '';
     if (id) void hydrate(id, generation).then(() => schedule());
   }
@@ -99,8 +100,11 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
         await persistSeen(id);
       }
       retry = 0;
-    } catch {
-      if (current(id, version)) schedule(Math.min(30000, 1000 * 2 ** Math.min(retry++, 5)));
+    } catch (error) {
+      if (current(id, version)) {
+        retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
+        schedule(Math.min(30000, 1000 * 2 ** Math.min(retry++, 5)));
+      }
     } finally {
       running = false;
       if (queued) { queued = false; schedule(); }

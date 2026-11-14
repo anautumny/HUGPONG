@@ -4,7 +4,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '../theme';
-import { activateSraOfflineSnapshot, getCurrentSession, subscribe } from '../data/dataStore';
+import { activateSraOfflineSnapshot, getCurrentSession, getCloudDataStatus, retryCloudDataLoad, logoutUser, subscribe } from '../data/dataStore';
+import { initialDataPresentation } from '../domain/initialDataPresentation';
+import InitialDataLoading, { DataRefreshNotice } from '../components/InitialDataLoading';
 import { useTranslation } from '../services/i18n';
 
 import SplashScreen from '../screens/auth/SplashScreen';
@@ -21,6 +23,7 @@ import {
   subscribeToReconnectStatus,
   getNetworkStatus,
   getConnectivityDetails,
+  checkConnectivity,
   CONNECTIVITY_STATUS
 } from '../services/networkService';
 
@@ -164,6 +167,9 @@ const modalStyles = StyleSheet.create({
 
 function MainTabs({ navigation }) {
   const { t } = useTranslation();
+  const [sessionUserId, setSessionUserId] = React.useState(() => getCurrentSession()?.employeeId || getCurrentSession()?.id || '');
+  const [dataStatus, setDataStatus] = React.useState(getCloudDataStatus());
+  const [retryingData, setRetryingData] = React.useState(false);
   const [role, setRole] = React.useState(getCurrentSession()?.role || 'Farm Member');
   const [isOnline, setIsOnline] = React.useState(getNetworkStatus());
   const [connectivityStatus, setConnectivityStatus] = React.useState(getConnectivityDetails().status);
@@ -176,6 +182,8 @@ function MainTabs({ navigation }) {
     let reconnectTimer = null;
     const unsubSession = subscribe(() => {
       setRole(getCurrentSession()?.role || 'Farm Member');
+      setSessionUserId(getCurrentSession()?.employeeId || getCurrentSession()?.id || '');
+      setDataStatus(getCloudDataStatus());
     });
     const unsubNet = subscribeToNetwork((online, details) => {
       setIsOnline(online);
@@ -243,13 +251,32 @@ function MainTabs({ navigation }) {
   };
 
   const reconnectPhase = reconnectNotice?.phase || 'IDLE';
+  React.useEffect(() => {
+    if (!sessionUserId) navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  }, [sessionUserId, navigation]);
+
   const reconnectResult = reconnectNotice?.result || {};
   const reconnectRemaining = Math.max(0, Number(reconnectResult.remainingCount || 0));
   const reconnectNeedsManualSync = reconnectPhase === 'MANUAL_REQUIRED' && reconnectRemaining > 0;
   const reconnectIncomplete = reconnectPhase === 'COMPLETE' && reconnectRemaining > 0;
 
+  if (!sessionUserId) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.background }}><ActivityIndicator color={COLORS.primary} /></View>;
+
+  const presentation = initialDataPresentation(getCurrentSession(), dataStatus, isOnline || connectivityStatus === CONNECTIVITY_STATUS.CHECKING);
+  const retryData = async () => {
+    if (retryingData) return;
+    setRetryingData(true);
+    try { if (await checkConnectivity()) await retryCloudDataLoad(); }
+    catch { /* The store retains the error state and saved data. */ }
+    finally { setRetryingData(false); }
+  };
+  const loadMode = presentation.mode === 'offline' && connectivityStatus === CONNECTIVITY_STATUS.SERVER_UNAVAILABLE ? 'error' : presentation.mode;
+  if (!presentation.showContent) return <InitialDataLoading mode={loadMode} retrying={retryingData} onRetry={retryData}
+    onSignOut={() => logoutUser().catch(() => {})} />;
+
   return (
     <>
+      <DataRefreshNotice notice={presentation.notice} />
       <Tab.Navigator
         initialRouteName={!isOnline ? 'Field Ops' : 'Home'}
         detachInactiveScreens

@@ -247,7 +247,7 @@ export default function ProfileScreen({ navigation }) {
     if (isClearingCache) return;
     Alert.alert(
       t('cache_clear_confirm_title', 'Clear Cache?'),
-      t('cache_clear_confirm_msg', 'This will remove all locally cached drafts and reset offline buffers. Unsynced local drafts will be wiped.\n\nAre you sure you want to proceed?'),
+      t('cache_clear_confirm_msg', 'Clear downloaded data? Saved drafts, pending submissions, and signed-in accounts will be kept.'),
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
         { 
@@ -257,7 +257,7 @@ export default function ProfileScreen({ navigation }) {
             setIsClearingCache(true);
             try {
               await resetLocalCache();
-              Alert.alert(t('cache_cleared', 'Cache Cleared'), t('cache_cleared_msg', 'Local offline buffer and cached drafts have been reset.'));
+              Alert.alert(t('cache_cleared', 'Cache Cleared'), t('cache_cleared_msg', 'Downloaded cache cleared. Saved drafts and pending submissions were kept.'));
             } catch (error) {
               Alert.alert(t('cache_clear_failed_title', 'Cache Clear Failed'), error.message || t('cache_clear_failed_msg', 'The local cache could not be cleared.'));
             } finally {

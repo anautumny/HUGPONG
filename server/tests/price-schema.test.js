@@ -213,7 +213,7 @@ test('active web price service posts the canonical payload to the authoritative 
     path.join(__dirname, '..', '..', 'web', 'react-app', 'src', 'services', 'pricesService.js'),
     'utf8'
   );
-  assert.match(service, /authenticatedRequest\('\/api\/prices',\s*\{\s*method: 'POST',\s*body: payload/);
+  assert.match(service, /authenticatedRequest\('\/api\/prices',\s*\{\s*method: 'POST',\s*body: \{ \.\.\.payload, _mutation: intent\.mutation \}/);
   assert.doesNotMatch(service, /addDoc|setDoc|updateDoc/);
 });
 

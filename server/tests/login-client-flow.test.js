@@ -117,6 +117,7 @@ test('Android auth service never signs into Firebase or stores a token when ackn
   const begin = source.indexOf('export async function loginWithServer');
   const end = source.indexOf('export async function refreshServerSession', begin);
   const login = vm.runInNewContext(`(${source.slice(begin, end).replace(/^export /, '').trim()})`, {
+    authenticationGeneration: 0,
     publicAuthRequest: async (endpoint, body) => {
       assert.equal(body.sessionAcknowledged, false);
       throw Object.assign(new Error('Acknowledgement required'), { code: 'SESSION_ACKNOWLEDGEMENT_REQUIRED' });

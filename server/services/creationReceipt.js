@@ -14,7 +14,7 @@ function creationReceipt(database, actorId, context, input, namespace = 'FIELD_E
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) return null;
       const record = snapshot.data();
-      if (record.inputHash !== inputHash) throw Object.assign(new Error('This enrollment request key was already used for different field details. Start a new enrollment.'), { status: 409 });
+      if (record.inputHash !== inputHash) throw Object.assign(new Error('This request key was already used for different details. Start a new request.'), { status: 409 });
       return record.result;
     },
     write(transaction, result, now) {

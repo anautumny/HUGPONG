@@ -1,7 +1,7 @@
 import { STORAGE_KEYS, saveItem, getItem, getCachedItem, removeItems, clearHugpongStorage, hydrateAllStorage, multiSave, ensureCurrentCacheSchema, localDraftStorageKey, lastScannedAuditStorageKey, sraOfflineSnapshotStorageKey } from '../services/storageService';
 import { initSyncEngine, enqueueOutboxItem, getOutboxCount, getOutboxQueue, getOutboxStorageState, clearOutbox, flushOutboxToApi, retryCorrectableOutboxItems, executeMutationViaApi, generateTicketId } from '../services/syncEngine';
 import { createClientRecordId } from '../services/secureId';
-import { fieldEnrollmentIntent } from '../services/enrollmentIntentService';
+import { fieldEnrollmentIntent, creationIntent } from '../services/enrollmentIntentService';
 import { fetchOperationPages } from '../services/operationPages';
 import { startRealtimeSync } from '../services/realtimeService';
 import { overlayPendingFieldChanges } from '../domain/pendingFieldReplica';
@@ -77,7 +77,7 @@ export const commitExplicitMutation = async (type, payload, options = {}) => {
     if (!getNetworkStatus()) {
       throw new Error('SRA Admin actions require a live HUGPONG connection. You remain signed in; reconnect to continue.');
     }
-    const response = await executeMutationViaApi({ type, payload, baseVersion: options.baseVersion, takeoverGrant: options.takeoverGrant }, { includeMutation: false });
+    const response = await executeMutationViaApi({ type, payload, ...options.mutation, baseVersion: options.baseVersion, takeoverGrant: options.takeoverGrant }, { includeMutation: Boolean(options.mutation) });
     return {
       item: null,
       result: { success: true, attemptedCount: 1, processedCount: 1, failedCount: 0, remainingCount: getOutboxCount(), responses: {} },
@@ -203,6 +203,7 @@ let auditEventsHasMore = false;
 export const pendingUsers = [];
 
 const clearCanonicalRuntimeData = () => {
+  resetCloudDataStatus();
   [
     priceHistory,
     blockFarms,
@@ -289,6 +290,7 @@ const applySraOfflineSnapshot = (snapshot, session) => {
     ownerUserId,
     districtId: snapshotDistrictId || currentDistrictId || null
   };
+  setCloudDataStatus(ownerUserId, { phase: 'READY', hasSnapshot: true });
   return true;
 };
 
@@ -908,11 +910,40 @@ export const verifyCurrentPassword = async (password, fieldId = null) => {
   }
 };
 
-export const restoreSessionFromToken = async () => {
+let sessionRestorePromise = null;
+export const restoreSessionFromToken = () => {
+  if (!sessionRestorePromise) {
+    const request = restoreStoredSession().finally(() => {
+      if (sessionRestorePromise === request) sessionRestorePromise = null;
+    });
+    sessionRestorePromise = request;
+  }
+  return sessionRestorePromise;
+};
+
+const restoreStoredSession = async () => {
   try {
-    const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
-    const session = await getItem(STORAGE_KEYS.SESSION);
+    await initializeOfflineStorage();
+    let token = await getItem(STORAGE_KEYS.AUTH_TOKEN, null, { strict: true });
+    let session = await getItem(STORAGE_KEYS.SESSION, null, { strict: true });
     if (auth?.authStateReady) await auth.authStateReady();
+    let recoveredFromServer = false;
+    const cachedOwnerId = String(session?.employeeId || session?.id || '').trim();
+    // Older affected installs may already contain the empty guest profile.
+    // Repair only through the existing server-verified Firebase session, and
+    // never reuse another account's cached identity or bypass offline auth.
+    if (auth?.currentUser && getNetworkStatus() && (!token || !cachedOwnerId)
+      && (!cachedOwnerId || cachedOwnerId === auth.currentUser.uid)) {
+      const recovered = await refreshMobileSessionFromFirebase();
+      if (String(recovered?.user?.employeeId || recovered?.user?.id || '') !== auth.currentUser.uid) {
+        throw new Error('The saved account could not be verified.');
+      }
+      session = recovered.user;
+      token = recovered.token || await getItem(STORAGE_KEYS.AUTH_TOKEN, null, { strict: true });
+      clearCanonicalRuntimeData();
+      if (!await saveItem(STORAGE_KEYS.SESSION, session)) throw Object.assign(new Error('Your account could not be saved on this device. Please retry.'), { code: 'LOCAL_SESSION_WRITE_FAILED' });
+      recoveredFromServer = true;
+    }
     if (!token || !session) {
       stopActiveCloudSync();
       await initSyncEngine('');
@@ -921,7 +952,7 @@ export const restoreSessionFromToken = async () => {
       await clearSharedAccountCache();
       return { success: false, reason: 'no_stored_session' };
     }
-    if (!auth?.currentUser || auth.currentUser.uid !== session.employeeId) {
+    if (!auth?.currentUser || auth.currentUser.uid !== String(session.employeeId || session.id || '')) {
       stopActiveCloudSync();
       await initSyncEngine('');
       if (auth?.currentUser) await logoutFromServer();
@@ -945,11 +976,16 @@ export const restoreSessionFromToken = async () => {
     }
     await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
     await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
+    const restoredDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), [], { strict: true });
+    draftLogs.length = 0;
+    draftLogs.push(...recoverAbandonedDraftClaims(restoredDrafts));
+    if (draftLogs.length || getOutboxCount()) setCloudDataStatus(CURRENT_SESSION.employeeId || CURRENT_SESSION.id, { hasSavedData: true });
     if (restoredRole === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
     notify();
-    if (getNetworkStatus()) {
+    if (getNetworkStatus() && !recoveredFromServer) {
       try {
         const refreshed = await refreshMobileSessionFromFirebase();
+        if (!(refreshed?.user?.employeeId || refreshed?.user?.id)) throw new Error('The saved account could not be verified.');
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
       } catch (error) {
@@ -980,14 +1016,25 @@ export const restoreSessionFromToken = async () => {
     await restartCloudSyncIfReady();
     reportMobileActivity('HEARTBEAT').catch(() => {});
     notify();
+    if (getNetworkStatus() && getOutboxCount() > 0) performMobileSync('APP_START').catch(() => {});
     return { success: true, user: CURRENT_SESSION, token: await getItem(STORAGE_KEYS.AUTH_TOKEN) };
   } catch (err) {
     console.warn('[dataStore] The local authentication session could not be restored.');
-    return { success: false, error: err.message };
+    if ([401, 403].includes(err.status)) {
+      stopActiveCloudSync();
+      CURRENT_SESSION = { ...DEFAULT_GUEST_SESSION };
+      await initSyncEngine('');
+      await clearAuthSessionStorage();
+      await clearSharedAccountCache();
+      if (auth?.currentUser) await logoutFromServer();
+      return { success: false, reason: 'server_session_rejected' };
+    }
+    return { success: false, error: err.message, reason: err.code || 'SESSION_RESTORE_FAILED' };
   }
 };
 
 export const logoutUser = async (options = {}) => {
+  await initializeOfflineStorage();
   const signingOutSession = CURRENT_SESSION;
   cancelMobileSyncContinuation();
   stopActiveCloudSync();
@@ -1012,6 +1059,7 @@ export const logoutUser = async (options = {}) => {
 // ── User Directory & Authentication ──────────────────────────
 export const authenticateUser = async (contactOrId, password, sessionAcknowledged = false) => {
   try {
+    await initializeOfflineStorage();
     const result = await loginWithServer(contactOrId, password, sessionAcknowledged);
     const roleUpper = String(result.user?.canonicalRole || result.user?.role || '').toUpperCase().replace(/ /g, '_');
     if (roleUpper === 'SUPER_ADMIN' || result.user?.role === 'Super Admin') {
@@ -1022,13 +1070,14 @@ export const authenticateUser = async (contactOrId, password, sessionAcknowledge
     resetMobileTelemetryState();
     clearCanonicalRuntimeData();
     CURRENT_SESSION = { ...normalizeSessionUser(result.user), lastActiveAt: Date.now() };
-    await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
+    if (!await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION)) throw Object.assign(new Error('Your account could not be saved on this device. Please retry.'), { code: 'LOCAL_SESSION_WRITE_FAILED' });
     await initSyncEngine(CURRENT_SESSION.employeeId || CURRENT_SESSION.id);
     if (roleUpper === ROLES.SRA_ADMIN && getOutboxCount() > 0) await clearOutbox();
     draftLogs.length = 0;
     const scopedDrafts = await getItem(localDraftStorageKey(CURRENT_SESSION.employeeId || CURRENT_SESSION.id), []);
     draftLogs.push(...recoverAbandonedDraftClaims(scopedDrafts));
     await persistCurrentUserDrafts();
+    if (draftLogs.length || getOutboxCount()) setCloudDataStatus(CURRENT_SESSION.employeeId || CURRENT_SESSION.id, { hasSavedData: true });
     await restartCloudSyncIfReady();
     reportMobileActivity('LOGIN').catch(() => {});
     notify();
@@ -1420,8 +1469,12 @@ export const subscribe = (listener) => {
 
 let persistTimeout = null;
 const persistAllToStorage = () => {
+  // Native network/push events may notify before secure storage hydration.
+  // Never persist the default guest or empty arrays over a saved account.
+  if (!offlineStorageHydrated || !(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id)) return;
   if (persistTimeout) clearTimeout(persistTimeout);
   persistTimeout = setTimeout(async () => {
+    if (!offlineStorageHydrated || !(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id)) return;
     try {
       await multiSave([
         [STORAGE_KEYS.SESSION, CURRENT_SESSION],
@@ -2190,9 +2243,7 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
     || !String(circularNumber || '').trim() || !String(source || '').trim()) {
     throw new Error('Effective date, reporting period, circular number, and source are required.');
   }
-  const pId = createClientRecordId('PRC');
   const publicationRequest = {
-    id: pId,
     effectiveDate,
     weekLabel: String(weekLabel).trim(),
     sugarPricePerLkg: sugar,
@@ -2202,11 +2253,14 @@ export const publishSraPrice = async ({ sugarPricePerLkg, molassesPricePerMetric
     circularNumber: String(circularNumber).trim(),
     source: String(source).trim()
   };
-  const outcome = await commitExplicitMutation('price', publicationRequest);
+  const intent = await creationIntent(publicationOwner, publicationRequest, 'prices');
+  if (publicationOwner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) throw new Error('The sign-in account changed.');
+  const outcome = await commitExplicitMutation('price', { ...publicationRequest, id: `PRC-${intent.mutation.mutationId}` }, { mutation: intent.mutation });
   if (!outcome.response?.data) {
     throw new Error('The server did not confirm the published price record.');
   }
   const confirmed = fromPriceDocument(outcome.response.data.id, outcome.response.data);
+  await removeItems([intent.storageKey]);
   if (publicationOwner !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) throw new Error('The sign-in account changed.');
   const existingIndex = priceHistory.findIndex(priceRecord => priceRecord.id === confirmed.id);
   if (existingIndex >= 0) priceHistory[existingIndex] = confirmed;
@@ -2632,16 +2686,8 @@ export const updateSecurityPreferences = (updates) => {
 };
 
 export const resetLocalCache = async () => {
-  const authToken = await getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const activeSession = CURRENT_SESSION?.employeeId ? { ...CURRENT_SESSION } : null;
-  draftLogs.length = 0;
-  IS_SYNCED = true;
-  await clearOutbox();
-  await clearHugpongStorage();
-  const preservedAuth = [];
-  if (activeSession) preservedAuth.push([STORAGE_KEYS.SESSION, activeSession]);
-  if (authToken) preservedAuth.push([STORAGE_KEYS.AUTH_TOKEN, authToken]);
-  if (preservedAuth.length) await multiSave(preservedAuth);
+  if (!await clearHugpongStorage()) throw new Error('The cache could not be cleared. Your saved work has been kept.');
+  IS_SYNCED = getPendingSyncCount(CURRENT_SESSION) === 0;
   notify();
   return true;
 };
@@ -2651,6 +2697,23 @@ export const resetLocalCache = async () => {
 // The durable outbox remains responsible for offline mutations; this refresh
 // only replaces canonical read replicas after a successful API response.
 const responseRecords = response => Array.isArray(response?.data) ? response.data : [];
+const INITIAL_CLOUD_DATA_STATUS = Object.freeze({ ownerUserId: '', phase: 'IDLE', hasSnapshot: false, hasSavedData: false });
+let cloudDataStatus = { ...INITIAL_CLOUD_DATA_STATUS };
+const resetCloudDataStatus = () => { cloudDataStatus = { ...INITIAL_CLOUD_DATA_STATUS }; };
+export const getCloudDataStatus = () => {
+  const ownerUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+  return cloudDataStatus.ownerUserId === ownerUserId
+    ? { ...cloudDataStatus } : { ...INITIAL_CLOUD_DATA_STATUS, ownerUserId };
+};
+const setCloudDataStatus = (ownerUserId, patch) => {
+  if (!ownerUserId || ownerUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return;
+  const next = { ...getCloudDataStatus(), ...patch, ownerUserId };
+  next.hasSavedData ||= next.hasSnapshot;
+  if (next.phase === cloudDataStatus.phase && next.hasSnapshot === cloudDataStatus.hasSnapshot
+    && next.hasSavedData === cloudDataStatus.hasSavedData && next.ownerUserId === cloudDataStatus.ownerUserId) return;
+  cloudDataStatus = next;
+  notify();
+};
 const cloudChangeListeners = new Set();
 export const subscribeToCloudChanges = listener => {
   cloudChangeListeners.add(listener);
@@ -2671,6 +2734,7 @@ export const listenToCloudSync = () => {
   let sessionRefreshQueued = false;
   let refreshRetryTimer = null;
   let refreshRetryAttempt = 0;
+  let refreshNotBefore = 0;
   const replicaResponses = new Map();
   const pendingResources = new Set();
   let fullRefreshQueued = false;
@@ -2701,6 +2765,13 @@ export const listenToCloudSync = () => {
 
   const refresh = async ({ force = false, extended = false, session = false, resources = null } = {}) => {
     if (!active || (appState && appState !== 'active') || !getNetworkStatus()) return;
+    if (Date.now() < refreshNotBefore) {
+      extendedRefreshQueued ||= extended;
+      sessionRefreshQueued ||= session;
+      if (!resources) fullRefreshQueued = true;
+      else resources.forEach(resource => pendingResources.add(resource));
+      return;
+    }
     if (requestInFlight) {
       if (force) forcedRefreshQueued = true;
       extendedRefreshQueued ||= extended;
@@ -2736,6 +2807,7 @@ export const listenToCloudSync = () => {
 
     requestInFlight = true;
     const requestGeneration = ++refreshGeneration;
+    setCloudDataStatus(startingUserId, { phase: 'LOADING' });
     clearTimeout(refreshRetryTimer);
     try {
       const needsResource = path => !resources || resources.includes(path.split('/')[2]?.split('?')[0]) || resources.includes('session');
@@ -2745,16 +2817,52 @@ export const listenToCloudSync = () => {
         if (active && requestGeneration === refreshGeneration) replicaResponses.set(path, response);
         return response;
       };
+      let sessionFailure = null;
       if (session) {
-        const result = await authenticatedRequest('/auth/session');
-        if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return false;
-        CURRENT_SESSION = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+        try {
+          const result = await authenticatedRequest('/auth/session');
+          if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return false;
+          CURRENT_SESSION = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+        } catch (error) {
+          if ([401, 403].includes(error?.status) || error?.code === 'AUTH_CONTEXT_CHANGED') throw error;
+          // Each following endpoint still checks the live account on the API.
+          // A temporary profile-refresh failure must not block those reads.
+          sessionFailure = error;
+        }
       }
       const includeExtended = extended
         || Date.now() - lastExtendedRefreshAt >= CLOUD_EXTENDED_REFRESH_INTERVAL_MS;
       const canReadUserDirectory = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
       const canReadAuditReports = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(activeRole);
       const canReadAuditEvents = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
+      const settled = await Promise.allSettled([
+        readReplica('/api/block-farms'),
+        readReplica('/api/fields'),
+        readReplica('/api/crop-cycles'),
+        !needsResource('/api/logs') && replicaResponses.has('/api/logs') ? replicaResponses.get('/api/logs')
+          : fetchOperationPages(authenticatedRequest, () => active && (getCurrentSession()?.employeeId || getCurrentSession()?.id) === sessionUserId && auth?.currentUser?.uid === sessionUserId)
+            .then(response => {
+              if (active && requestGeneration === refreshGeneration) replicaResponses.set('/api/logs', response);
+              return response;
+            }),
+        readReplica('/api/prices?limit=52'),
+        includeExtended ? readReplica('/api/tickets') : Promise.resolve(null),
+        includeExtended ? readReplica('/api/tickets?view=history&limit=20') : Promise.resolve(null),
+        includeExtended && canReadUserDirectory ? readReplica('/api/users?limit=50') : Promise.resolve(null),
+        canReadAuditReports ? readReplica('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
+        includeExtended && activeRole === ROLES.SRA_ADMIN ? readReplica('/api/audit-reports?view=history&limit=50') : Promise.resolve(null),
+        includeExtended && canReadAuditEvents ? readReplica('/api/audit-events?limit=50') : Promise.resolve(null)
+      ]);
+      const failures = [...(sessionFailure ? [sessionFailure] : []), ...settled.filter(result => result.status === 'rejected').map(result => result.reason)];
+      const authorityFailure = failures.find(error => [401, 403].includes(error?.status) || error?.code === 'AUTH_CONTEXT_CHANGED');
+      if (authorityFailure) throw authorityFailure;
+      const coreReady = settled.slice(0, 4).every(result => result.status === 'fulfilled');
+      const pricesReady = settled[4].status === 'fulfilled';
+      const ticketsReady = includeExtended && settled[5].status === 'fulfilled' && settled[6].status === 'fulfilled';
+      const usersReady = includeExtended && canReadUserDirectory && settled[7].status === 'fulfilled';
+      const reportsReady = canReadAuditReports && settled[8].status === 'fulfilled';
+      const certifiedReady = includeExtended && activeRole === ROLES.SRA_ADMIN && settled[9].status === 'fulfilled';
+      const historyReady = includeExtended && canReadAuditEvents && settled[10].status === 'fulfilled';
       const [
         blockFarmResponse,
         fieldsResponse,
@@ -2767,55 +2875,29 @@ export const listenToCloudSync = () => {
         reportsResponse,
         certifiedHistoryResponse,
         auditEventsResponse
-      ] = await Promise.all([
-        readReplica('/api/block-farms'),
-        readReplica('/api/fields'),
-        readReplica('/api/crop-cycles'),
-        !needsResource('/api/logs') && replicaResponses.has('/api/logs') ? replicaResponses.get('/api/logs')
-          : fetchOperationPages(authenticatedRequest, () => active && (getCurrentSession()?.employeeId || getCurrentSession()?.id) === sessionUserId && auth?.currentUser?.uid === sessionUserId)
-            .then(response => {
-              if (active && requestGeneration === refreshGeneration) replicaResponses.set('/api/logs', response);
-              return response;
-            }),
-        readReplica('/api/prices?limit=52').then(response => {
-          // An unrelated failing endpoint must not hold back an authorized price update.
-          if (active && requestGeneration === refreshGeneration && !forcedRefreshQueued
-            && startingUserId === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) {
-            const next = responseRecords(response).map(record => fromPriceDocument(record.id, record));
-            const ordered = sortNewestFirst(next, ['effectiveDate'], ['publishedAt']);
-            if (JSON.stringify(priceHistory) !== JSON.stringify(ordered)) {
-              priceHistory.splice(0, priceHistory.length, ...ordered);
-              notify();
-            }
-          }
-          return response;
-        }),
-        includeExtended ? readReplica('/api/tickets') : Promise.resolve(null),
-        includeExtended ? readReplica('/api/tickets?view=history&limit=20') : Promise.resolve(null),
-        includeExtended && canReadUserDirectory ? readReplica('/api/users?limit=50') : Promise.resolve(null),
-        canReadAuditReports ? readReplica('/api/audit-reports' + (activeRole === ROLES.SRA_ADMIN ? '?view=inbox&limit=20' : '?view=manager&limit=50')) : Promise.resolve({ data: [] }),
-        includeExtended && activeRole === ROLES.SRA_ADMIN ? readReplica('/api/audit-reports?view=history&limit=50') : Promise.resolve(null),
-        includeExtended && canReadAuditEvents ? readReplica('/api/audit-events?limit=50') : Promise.resolve(null)
-      ]);
+      ] = settled.map(result => result.status === 'fulfilled' ? result.value : null);
+
+      // Independent endpoint groups commit only after successful reads. The
+      // field/cycle/farm/log graph remains a coherent snapshot.
 
       if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')
         || auth?.currentUser?.uid !== startingUserId) return false;
       if (forcedRefreshQueued) return false;
 
-      const remoteBlockFarms = uniqueRecordsById(responseRecords(blockFarmResponse)
-        .map(record => fromBlockFarmDocument(record.id, record)));
-      const remoteCycles = responseRecords(cyclesResponse)
-        .map(record => fromCycleDocument(record.id, record));
+      const remoteBlockFarms = coreReady ? uniqueRecordsById(responseRecords(blockFarmResponse)
+        .map(record => fromBlockFarmDocument(record.id, record))) : [...blockFarms];
+      const remoteCycles = coreReady ? responseRecords(cyclesResponse)
+        .map(record => fromCycleDocument(record.id, record)) : [...cropCycles];
       const cycleById = new Map(remoteCycles.map(cycle => [cycle.id, cycle]));
-      const mappedFields = responseRecords(fieldsResponse)
-        .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId)));
+      const mappedFields = coreReady ? responseRecords(fieldsResponse)
+        .map(record => fromFieldDocument(record.id, record, cycleById.get(record.currentCycleId))) : [...fields, ...archivedFields];
       const remoteFields = overlayPendingFieldChanges(mappedFields.filter(field => field.status !== 'ARCHIVED'), getOutboxQueue(), sessionUserId);
       const remoteArchivedFields = mappedFields.filter(field => field.status === 'ARCHIVED');
       const authorizedFieldIds = new Set(mappedFields.map(field => String(field.id)));
 
-      const canonicalRemoteLogs = responseRecords(logsResponse)
+      const canonicalRemoteLogs = coreReady ? responseRecords(logsResponse)
         .filter(record => record.cycleId && (record.status === 'ACTIVE' || record.status === 'ARCHIVED'))
-        .map(record => fromOperationLogDocument(record.id, record));
+        .map(record => fromOperationLogDocument(record.id, record)) : [...operationLogs];
       const remoteLogIds = new Set(canonicalRemoteLogs.map(record => record.id));
       const pendingCreateOverlays = getOutboxQueue()
         .filter(item =>
@@ -2860,11 +2942,11 @@ export const listenToCloudSync = () => {
       const remoteUsers = includeExtended && canReadUserDirectory
         ? responseRecords(usersResponse).map(record => fromUserDocument(record.id || record.employeeId, record))
         : [];
-      if (includeExtended && canReadUserDirectory) {
+      if (usersReady) {
         userDirectoryNextCursor = usersResponse.page?.nextCursor || null;
         userDirectoryHasMore = Boolean(usersResponse.page?.hasMore && userDirectoryNextCursor);
       }
-      const directoryUsers = includeExtended ? remoteUsers : users;
+      const directoryUsers = usersReady ? remoteUsers : users;
       const remoteUserById = new Map(directoryUsers.flatMap(user => {
         const ids = [user.id, user.employeeId, user.userId].filter(Boolean).map(String);
         return ids.map(id => [id, user]);
@@ -2908,7 +2990,7 @@ export const listenToCloudSync = () => {
       const remoteHistory = includeExtended && canReadAuditEvents
         ? sortNewestFirst(responseRecords(auditEventsResponse), ['createdAt'])
         : [];
-      if (includeExtended && canReadAuditEvents) {
+      if (historyReady) {
         auditEventsNextCursor = auditEventsResponse.page?.nextCursor || null;
         auditEventsHasMore = Boolean(auditEventsResponse.page?.hasMore && auditEventsNextCursor);
       }
@@ -2923,30 +3005,32 @@ export const listenToCloudSync = () => {
       archivedFields.push(...remoteArchivedFields);
       operationLogs.length = 0;
       operationLogs.push(...reconciledLogs);
-      priceHistory.length = 0;
-      priceHistory.push(...orderedRemotePrices);
-      if (includeExtended) {
+      if (pricesReady) {
+        priceHistory.length = 0;
+        priceHistory.push(...orderedRemotePrices);
+      }
+      if (ticketsReady) {
         supportTickets.length = 0;
         supportTickets.push(...remoteTickets);
       }
-      if (includeExtended && canReadUserDirectory) {
+      if (usersReady) {
         users.length = 0;
         users.push(...remoteUsers);
         pendingUsers.length = 0;
         pendingUsers.push(...remoteUsers.filter(user => user.reviewQueueEligible === true));
       }
-      if (canReadAuditReports) {
+      if (reportsReady) {
         auditReports.length = 0;
         auditReports.push(...reconciledReports);
       }
-      if (includeExtended && canReadAuditEvents) {
+      if (historyReady) {
         systemHistory.length = 0;
         systemHistory.push(...remoteHistory);
       }
 
       const refreshCompletedAt = Date.now();
       const snapshotSyncedAt = new Date(refreshCompletedAt).toISOString();
-      if (includeExtended && activeRole === ROLES.SRA_ADMIN) {
+      if (certifiedReady) {
         sraCertifiedAuditHistory.length = 0;
         sraCertifiedAuditHistory.push(...remoteCertifiedHistory);
         sraOfflineSnapshotStatus = {
@@ -2963,7 +3047,7 @@ export const listenToCloudSync = () => {
       CURRENT_SESSION.pendingLogs = pendingCount;
       let replicaCacheSaved = false;
 
-      if (activeRole === ROLES.SRA_ADMIN) {
+      if (activeRole === ROLES.SRA_ADMIN && coreReady && pricesReady) {
         const sraSnapshot = JSON.parse(JSON.stringify({
           schemaVersion: SRA_OFFLINE_SNAPSHOT_SCHEMA_VERSION,
           ownerUserId: sessionUserId,
@@ -2996,7 +3080,7 @@ export const listenToCloudSync = () => {
             STORAGE_KEYS.SYSTEM_HISTORY
           ]);
         }
-      } else {
+      } else if (activeRole !== ROLES.SRA_ADMIN) {
         const cacheEntries = [
           [STORAGE_KEYS.BLOCK_FARMS, blockFarms],
           [STORAGE_KEYS.CROP_CYCLES, cropCycles],
@@ -3015,25 +3099,44 @@ export const listenToCloudSync = () => {
         if (includeExtended && canReadAuditEvents) cacheEntries.push([STORAGE_KEYS.SYSTEM_HISTORY, systemHistory]);
         replicaCacheSaved = await multiSave(cacheEntries);
       }
-      if (includeExtended && replicaCacheSaved) {
+      if (includeExtended && replicaCacheSaved && !failures.length) {
         await saveItem(STORAGE_KEYS.CLOUD_REFRESH_META, {
           ownerUserId: sessionUserId,
           refreshedAt: refreshCompletedAt
         });
       }
       if (active) notify();
+      if (failures.length) {
+        if (coreReady && pricesReady && active) setCloudDataStatus(startingUserId, { hasSnapshot: true });
+        throw Object.assign(new Error('Some server data could not be updated.'), {
+          retryAfterMs: Math.max(...failures.map(error => Number(error?.retryAfterMs) || 0)),
+          refreshResources: [...new Set([...(sessionFailure ? ['session'] : []), ...settled.flatMap((result, index) => result.status === 'rejected'
+            ? [['block-farms', 'fields', 'crop-cycles', 'logs', 'prices', 'tickets', 'tickets', 'users', 'audit-reports', 'audit-reports', 'audit-events'][index]] : [])])]
+        });
+      }
       refreshRetryAttempt = 0;
       lastSuccessfulRefreshAt = refreshCompletedAt;
       if (includeExtended) lastExtendedRefreshAt = lastSuccessfulRefreshAt;
+      if (active) setCloudDataStatus(startingUserId, { phase: 'READY', hasSnapshot: true });
       return true;
     } catch (error) {
+      if (active) setCloudDataStatus(startingUserId, { phase: 'ERROR' });
       if (error.status === 401) {
         stop();
         return false;
       }
       console.warn('[Mobile] Server data refresh was deferred.');
       if (active && ![401, 403].includes(error.status)) {
-        refreshRetryTimer = setTimeout(() => { void refresh({ force: true, extended, session, resources }); }, Math.min(30000, 1000 * 2 ** Math.min(refreshRetryAttempt++, 5)));
+        refreshNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
+        refreshRetryTimer = setTimeout(() => {
+          const retryResources = error.refreshResources || resources;
+          const next = { force: true, extended: extended || extendedRefreshQueued,
+            session: (error.refreshResources ? error.refreshResources.includes('session') : session) || sessionRefreshQueued,
+            resources: fullRefreshQueued || !retryResources ? null : [...new Set([...retryResources, ...pendingResources])] };
+          extendedRefreshQueued = sessionRefreshQueued = fullRefreshQueued = false;
+          pendingResources.clear();
+          void refresh(next);
+        }, Math.max(refreshNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(refreshRetryAttempt++, 5))));
       }
       return false;
     } finally {
@@ -3128,8 +3231,11 @@ export const restartCloudSyncIfReady = async () => {
     && CURRENT_SESSION?.requiresPasswordChange !== true
     && CURRENT_SESSION?.pendingFirstLoginVerification !== true;
 
-  if (!token || !activeRole || !sessionUserId || !accountReady) return false;
-  if (!auth?.currentUser || auth.currentUser.uid !== sessionUserId) return false;
+  if (!token || !activeRole || !sessionUserId || !accountReady
+    || !auth?.currentUser || auth.currentUser.uid !== sessionUserId) {
+    setCloudDataStatus(sessionUserId, { phase: 'ERROR' });
+    return false;
+  }
 
   activeCloudSyncStop = listenToCloudSync();
   if (activeRole === ROLES.SRA_ADMIN) {
@@ -3138,6 +3244,10 @@ export const restartCloudSyncIfReady = async () => {
   }
   return true;
 };
+
+export const retryCloudDataLoad = () => typeof activeCloudRefresh === 'function'
+  ? activeCloudRefresh({ force: true, extended: true, session: true })
+  : restartCloudSyncIfReady();
 
 let mobileSyncPromise = null;
 let mobileSyncContinuationTimer = null;
@@ -3401,7 +3511,11 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
     }
 
     try {
-      const refreshed = await refreshMobileSessionFromFirebase({ forceRefresh: true });
+      const syncOwner = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+      const generation = cloudSyncGeneration;
+      const isCurrent = () => syncOwner === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '') && generation === cloudSyncGeneration;
+      const refreshed = await refreshMobileSessionFromFirebase({ forceRefresh: true, isCurrent });
+      if (!isCurrent()) throw Object.assign(new Error('The signed-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
       if (refreshed?.user) {
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
@@ -3550,10 +3664,23 @@ setOnReconnectCallback(async trigger => {
   return { ...result, autoSyncEnabled: isAutomaticSyncEnabled() };
 });
 
-export const initializeOfflineStorage = async () => {
+let offlineStoragePromise = null;
+let offlineStorageHydrated = false;
+export const initializeOfflineStorage = () => {
+  if (!offlineStoragePromise) {
+    const request = hydrateOfflineStorage().catch(error => {
+      if (offlineStoragePromise === request) offlineStoragePromise = null;
+      throw error;
+    });
+    offlineStoragePromise = request;
+  }
+  return offlineStoragePromise;
+};
+
+const hydrateOfflineStorage = async () => {
   try {
     await ensureCurrentCacheSchema();
-    const stored = await hydrateAllStorage();
+    const stored = await hydrateAllStorage({ strict: true });
     if (stored[STORAGE_KEYS.AUTH_TOKEN] && stored[STORAGE_KEYS.SESSION]) {
       CURRENT_SESSION = normalizeSessionUser(stored[STORAGE_KEYS.SESSION]);
     } else if (stored[STORAGE_KEYS.SESSION]) {
@@ -3598,7 +3725,7 @@ export const initializeOfflineStorage = async () => {
     }
     draftLogs.length = 0;
     const draftKey = currentDraftKey();
-    const scopedDrafts = draftKey ? await getItem(draftKey, []) : [];
+    const scopedDrafts = draftKey ? await getItem(draftKey, [], { strict: true }) : [];
     draftLogs.push(...recoverAbandonedDraftClaims(scopedDrafts));
     await persistCurrentUserDrafts();
     // Preserve legacy drafts in their original key. Only safe, attributable
@@ -3721,6 +3848,18 @@ export const initializeOfflineStorage = async () => {
       if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
     }
 
+    const hydratedOwnerId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
+    const refreshMeta = stored[STORAGE_KEYS.CLOUD_REFRESH_META];
+    const cachedSnapshotReady = hydratedOwnerId && refreshMeta?.ownerUserId === hydratedOwnerId
+      && [STORAGE_KEYS.BLOCK_FARMS, STORAGE_KEYS.CROP_CYCLES, STORAGE_KEYS.FIELDS, STORAGE_KEYS.LOGS, STORAGE_KEYS.PRICES]
+        .every(key => Array.isArray(stored[key]));
+    if (cachedSnapshotReady) setCloudDataStatus(hydratedOwnerId, { phase: 'READY', hasSnapshot: true });
+    else if (hydratedOwnerId && (draftLogs.length > 0 || getOutboxCount() > 0
+      || fields.some(field => String(field.memberUserId || '') === hydratedOwnerId)
+      || blockFarms.some(farm => String(farm.managerUserId || '') === hydratedOwnerId))) {
+      setCloudDataStatus(hydratedOwnerId, { hasSavedData: true });
+    }
+    offlineStorageHydrated = true;
     notify();
 
     try {
@@ -3736,21 +3875,16 @@ export const initializeOfflineStorage = async () => {
       if (CURRENT_SESSION && CURRENT_SESSION.name && canReportAgriculturalSyncTelemetry()) {
         publishTerminalTelemetry(CURRENT_SESSION, pendingCount).catch(() => {});
       }
-      // If internet is connected, auto-sync immediately on launch
-      checkConnectivity().then(online => {
-        if (online) {
-          restoreSessionFromToken()
-            .then(result => { if (result.success) return performMobileSync('APP_START'); })
-            .catch(() => {});
-        }
-      });
+      // Splash owns restoration after this hydration barrier. Reconnect and
+      // foreground events reuse the same canonical store and outbox.
     } catch (cloudErr) {
       console.warn('[dataStore] Cloud synchronization listener was deferred.');
     }
   } catch (error) {
     console.warn('[dataStore] Startup data hydration was incomplete.');
+    throw error;
   }
 };
 
 // Auto-invoke hydration on bundle load
-initializeOfflineStorage();
+initializeOfflineStorage().catch(() => {});

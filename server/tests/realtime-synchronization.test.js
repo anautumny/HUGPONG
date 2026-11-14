@@ -153,6 +153,25 @@ function transport() {
   return context.createChangeStream;
 }
 
+test('equivalent trailing-slash mutation paths publish the same resource invalidations', () => {
+  for (const path of ['/api/prices', '/api/notifications/state', '/api/audit-reports/REPORT-1/qr/verify', '/auth/login']) {
+    assert.deepEqual(changedResources({ method: 'POST', originalUrl: `${path}/?source=local` }), changedResources({ method: 'POST', originalUrl: path }));
+  }
+  assert.ok(changedResources({ method: 'POST', originalUrl: '/api/prices/' }).includes('prices'));
+});
+
+test('both clients honor stream Retry-After seconds and HTTP dates instead of reconnecting every second', async () => {
+  for (const value of ['265', new Date(Date.now() + 265000).toUTCString()]) {
+    const timers = new Map();
+    const context = { AbortController, TextDecoder, Math, setTimeout: (fn, delay) => { const id = {}; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id) };
+    vm.createContext(context); vm.runInContext(read('web/react-app/src/services/changeStream.js').replace('export function', 'function'), context);
+    const stop = context.createChangeStream({ connect: async () => ({ ok: false, status: 429, headers: { get: () => value } }), onChange() {} });
+    await tick();
+    assert.equal(timers.size, 1); assert.ok([...timers.values()][0].delay >= 263000);
+    stop(); assert.equal(timers.size, 0);
+  }
+});
+
 test('actual HTTP streaming delivers Web/Web, Mobile/Mobile and both cross-platform directions, and resets on reconnect', async t => {
   const database = revisionDatabase();
   const feeds = [createChangeFeed({ database }), createChangeFeed({ database })];
@@ -172,7 +191,7 @@ test('actual HTTP streaming delivers Web/Web, Mobile/Mobile and both cross-platf
     return { platform, events };
   });
   await until(() => clients.every(client => client.events.some(event => event.reset)));
-  for (const resource of ['fields', 'users', 'logs', 'audit-reports']) {
+  for (const resource of ['fields', 'users', 'logs', 'audit-reports', 'prices', 'tickets', 'crop-cycles', 'block-farms', 'crop-year-compilations']) {
     await feeds[0].publish([resource]);
     await until(() => clients.every(client => client.events.some(event => event.resources?.includes(resource))));
   }
@@ -280,6 +299,22 @@ test('empty notification inboxes do not request account state', async () => {
   assert.equal(context.calls, 0);
 });
 
+test('an open Web price subscription receives a newly published price without navigation or manual refresh', async t => {
+  let latest = { id: 'PRICE-OLD', sugarPricePerLkg: 2500 };
+  const runtime = webRuntime(async () => ({ ok: true, json: async () => ({ success: true, data: [latest] }) }));
+  runtime.fromPrice = (id, row) => ({ ...row, id });
+  runtime.sortNewestFirst = value => value;
+  vm.runInContext(read('web/react-app/src/services/pricesService.js').replace(/^import .*;\r?\n/gm, '').replace(/export /g, ''), runtime);
+  const updates = [];
+  const stop = runtime.subscribeToPrices({ onUpdate: value => updates.push(value) });
+  t.after(stop);
+  await until(() => updates.length === 1);
+  latest = { id: 'PRICE-NEW', sugarPricePerLkg: 2600 };
+  runtime.invalidateAuthenticatedResources(['prices']);
+  await until(() => updates.at(-1)?.currentPrice.id === 'PRICE-NEW');
+  assert.equal(updates.at(-1).currentPrice.sugarPricePerLkg, 2600);
+});
+
 test('Web shared reads deduplicate; remote changes during loads supersede stale responses and empty results remove rows', async t => {
   let resolveOld;
   let calls = 0;
@@ -307,6 +342,7 @@ test('Web shared reads deduplicate; remote changes during loads supersede stale 
 test('Android notification queries do not trigger refresh; business mutations still do', async () => {
   const calls = [], mutations = [];
   const context = {
+    authenticationGeneration: 0,
     auth: { currentUser: { uid: '01000001' } }, STORAGE_KEYS: { AUTH_TOKEN: 'token' },
     getItem: async () => 'existing-token', getMobileClientInstanceId: async () => 'existing-device',
     mobileHeaders: () => ({}), parseResponse: async value => value,
@@ -420,6 +456,146 @@ function mobileRuntime(role = ROLES.MEMBER_FARMER, requestOverride) {
     network(value) { online = value; networkChange(value); }, app(value) { appChange(value); } };
 }
 
+test('Android secondary failures retain old lists while new fields and prices render and recover automatically', async t => {
+  let failing = false;
+  const failed = new Set(['/api/tickets', '/api/users?limit=50', '/api/audit-events?limit=50']);
+  const device = mobileRuntime(ROLES.FARM_MANAGER, url => failing && failed.has(url) ? Promise.reject(Object.assign(new Error('Temporary secondary outage'), { status: 503 })) : null);
+  t.after(device.stop); await device.stop.initialRefresh;
+  device.context.supportTickets.push({ id: 'TICKET-CACHED', status: 'OPEN' });
+  device.context.users.push({ id: 'USER-CACHED' }); device.context.systemHistory.push({ id: 'EVENT-CACHED' });
+  failing = true;
+  device.data['/api/fields'][0].updatedAt = 'SERVER-V2';
+  device.data['/api/prices?limit=52'] = [{ id: 'PRICE-V2', sugarPricePerLkg: 2600 }];
+  device.change({ reset: true });
+  await until(() => device.context.fields[0]?.updatedAt === 'SERVER-V2' && device.context.priceHistory[0]?.id === 'PRICE-V2' && device.context.getCloudDataStatus().phase === 'ERROR');
+  assert.equal(device.context.supportTickets[0].id, 'TICKET-CACHED');
+  assert.equal(device.context.users[0].id, 'USER-CACHED'); assert.equal(device.context.systemHistory[0].id, 'EVENT-CACHED');
+  device.data['/api/tickets'] = [{ id: 'TICKET-V2', status: 'OPEN' }]; failing = false;
+  await until(() => device.context.supportTickets[0]?.id === 'TICKET-V2' && device.context.getCloudDataStatus().phase === 'READY');
+});
+
+test('Android a failed field graph retains its coherent snapshot without holding back prices or tickets', async t => {
+  let failing = false;
+  const device = mobileRuntime(ROLES.MEMBER_FARMER, url => failing && url === '/api/fields' ? Promise.reject(new Error('Fields unavailable')) : null);
+  t.after(device.stop); await device.stop.initialRefresh;
+  failing = true;
+  device.data['/api/crop-cycles'] = [{ id: 'CYCLE-NEW', fieldId: 'FIELD-1' }];
+  device.data['/api/prices?limit=52'] = [{ id: 'PRICE-NEW' }]; device.data['/api/tickets'] = [{ id: 'TICKET-NEW', status: 'OPEN' }];
+  device.change({ reset: true });
+  await until(() => device.context.priceHistory[0]?.id === 'PRICE-NEW' && device.context.supportTickets[0]?.id === 'TICKET-NEW');
+  assert.equal(device.context.fields[0].updatedAt, 'SERVER-V1'); assert.equal(device.context.cropCycles[0].id, 'CYCLE-1');
+});
+
+test('a temporary Android profile refresh outage cannot block authorized fields or prices', async t => {
+  let failing = false;
+  const device = mobileRuntime(ROLES.MEMBER_FARMER, url => failing && url === '/auth/session'
+    ? Promise.reject(Object.assign(new Error('Profile temporarily unavailable'), { status: 503 })) : null);
+  t.after(device.stop); await device.stop.initialRefresh;
+  failing = true;
+  device.data['/api/fields'][0].updatedAt = 'SERVER-V2'; device.data['/api/prices?limit=52'] = [{ id: 'PRICE-V2' }];
+  device.change({ reset: true });
+  await until(() => device.context.fields[0]?.updatedAt === 'SERVER-V2' && device.context.priceHistory[0]?.id === 'PRICE-V2');
+  assert.equal(device.context.CURRENT_SESSION.employeeId, 'MEMBER-1'); assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
+});
+
+test('Web fields keep successful updates during a directory outage and the same subscription retries the failed read', async t => {
+  let failed = false, version = 'V1'; const updates = [], errors = [];
+  const runtime = webRuntime(async url => ({ ok: !(failed && url === '/api/users'), status: failed && url === '/api/users' ? 503 : 200,
+    json: async () => failed && url === '/api/users' ? { success: false, error: 'Directory unavailable' } : { success: true, data:
+      url === '/api/fields' ? [{ id: 'FIELD-1', updatedAt: version }] : url === '/api/users' ? [{ id: 'MEMBER-1', canonicalRole: 'MEMBER_FARMER' }] : [] } }), {
+    fromField: (id, row) => ({ ...row, id }), fromBlockFarm: (id, row) => ({ ...row, id }), fromUser: (id, row) => ({ ...row, id }),
+    sortCropYearsNewestFirst: rows => rows, uniqueRecordsById: rows => rows
+  });
+  const service = read('web/react-app/src/services/fieldsService.js').replace(/^import[\s\S]*?;\r?$/gm, '').replace(/export /g, '');
+  vm.runInContext(service, runtime);
+  const stop = runtime.subscribeToFieldsData({ user: { employeeId: 'FM-1', canonicalRole: 'FARM_MANAGER' }, onUpdate: value => updates.push(value), onError: error => errors.push(error) });
+  t.after(stop); await until(() => updates.length === 1);
+  failed = true; version = 'V2';
+  runtime.window.dispatchEvent(new runtime.CustomEvent('hugpong:server-mutation', { detail: { resources: ['fields', 'users'] } }));
+  await until(() => updates.some(update => update.fields[0]?.updatedAt === 'V2'));
+  assert.equal(updates.at(-1).memberUsers[0].id, 'MEMBER-1'); assert.ok(updates.at(-1).error); assert.ok(errors.length);
+  failed = false;
+  await until(() => updates.at(-1).error === null);
+});
+
+test('Web retries failed resources only, and retains invalidations received during a retry cooldown', async () => {
+  for (const newInvalidation of [false, true]) {
+    let clock = 1000, failing = true, price = 'V1'; const timers = new Map(), requests = [], updates = [];
+    class Clock extends Date { static now() { return clock; } }
+    const runtime = webRuntime(async () => { throw new Error('No direct HTTP required'); }, {
+      Date: Clock, setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id)
+    });
+    const previous = new Map();
+    const stop = runtime.subscribeToAuthenticatedLoader(async ({ retryOnly }) => {
+      const batch = await runtime.settleResourceReads([
+        () => { requests.push('prices'); return { data: price }; },
+        () => { requests.push('users'); if (failing) throw Object.assign(new Error('Cooldown'), { retryAfterMs: 265000 }); return { data: 'USERS-V2' }; }
+      ], previous, { retryOnly });
+      return { price: batch.values[0].data, users: batch.values[1].data, refreshError: batch.refreshError };
+    }, { resources: ['users', 'prices'], onData: value => updates.push(value) });
+    try {
+      await tick(); assert.equal(updates[0].price, 'V1');
+      failing = false; price = 'V2';
+      if (newInvalidation) runtime.window.dispatchEvent(new runtime.CustomEvent('hugpong:server-mutation', { detail: { resources: ['prices'] } }));
+      await tick(); assert.deepEqual(requests, ['prices', 'users']);
+      clock += 265000;
+      const timer = [...timers.values()][0]; timers.clear(); timer.callback(); await tick();
+      assert.equal(updates.at(-1).users, 'USERS-V2');
+      assert.equal(updates.at(-1).price, newInvalidation ? 'V2' : 'V1');
+      assert.equal(requests.filter(path => path === 'prices').length, newInvalidation ? 2 : 1);
+    } finally { stop(); }
+  }
+});
+
+test('Web role dashboards render independent updates while keeping a failed field graph or ticket list intact', async t => {
+  for (const roleKey of ['manager', 'admin', 'superadmin']) {
+    let failing = false, version = 'V1'; const updates = [];
+    const runtime = webRuntime(async url => {
+      const failure = failing && url === (roleKey === 'superadmin' ? '/api/tickets' : '/api/fields');
+      const data = url === '/api/prices?limit=2' ? [{ id: `PRICE-${version}` }]
+        : url === '/api/fields' ? [{ id: `FIELD-${version}` }]
+        : url === '/api/crop-cycles' ? [{ id: `CYCLE-${version}` }]
+        : url === '/api/tickets' ? [{ id: `TICKET-${version}` }]
+        : url === '/api/terminal-diagnostics' ? { subjects: [{ id: `DEVICE-${version}` }] }
+        : url === '/api/system-diagnostics' ? { version } : [];
+      return { ok: !failure, status: failure ? 503 : 200, json: async () => failure ? { success: false, error: 'Temporary endpoint outage' } : { success: true, data } };
+    }, { ROLE_KEYS: { SUPER_ADMIN: 'superadmin', SRA_ADMIN: 'admin', FARM_MANAGER: 'manager' },
+      sortNewestFirst: rows => rows, sortOperationsNewestFirst: rows => rows, sortCropYearsNewestFirst: rows => rows, uniqueRecordsById: rows => rows });
+    for (const entity of ['Price', 'Field', 'BlockFarm', 'Operation', 'Report', 'Ticket']) runtime[`from${entity}`] = (id, row) => ({ ...row, id });
+    vm.runInContext(read('web/react-app/src/services/dashboardService.js').replace(/^import[\s\S]*?;\r?$/gm, '').replace(/export /g, ''), runtime);
+    const stop = runtime.subscribeToDashboardData({ roleKey, user: { employeeId: 'LOCAL-USER' }, onUpdate: value => updates.push(value) });
+    t.after(stop); await until(() => updates.length === 1);
+    failing = true; version = 'V2';
+    runtime.window.dispatchEvent(new runtime.CustomEvent('hugpong:server-mutation', { detail: { resources: ['prices', 'terminal-diagnostics'] } }));
+    await until(() => updates.length === 2);
+    if (roleKey === 'superadmin') {
+      assert.equal(updates[1].terminalDiagnostics[0].id, 'DEVICE-V2'); assert.equal(updates[1].supportTickets[0].id, 'TICKET-V1');
+    } else {
+      assert.equal(updates[1].currentPrice.id, 'PRICE-V2'); assert.equal(updates[1].fields[0].id, 'FIELD-V1');
+      assert.equal(updates[1].cropCycles[0].id, 'CYCLE-V1', 'a partial field graph cannot mix revisions');
+    }
+    assert.ok(updates[1].error); stop();
+  }
+});
+
+test('Android retains price changes received while a failed ticket read is in Retry-After cooldown', async t => {
+  let failing = false, clock = 1000; const timers = new Map();
+  class Clock extends Date { static now() { return clock; } }
+  const device = mobileRuntime(ROLES.MEMBER_FARMER, url => failing && url === '/api/tickets'
+    ? Promise.reject(Object.assign(new Error('Cooldown'), { retryAfterMs: 265000 })) : null);
+  t.after(device.stop); await device.stop.initialRefresh;
+  Object.assign(device.context, { Date: Clock, setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, at: clock + delay }); return id; }, clearTimeout: id => timers.delete(id) });
+  const next = async () => { const [id, timer] = [...timers].sort((a, b) => a[1].at - b[1].at)[0]; timers.delete(id); clock = timer.at; timer.callback(); await tick(); };
+  failing = true; device.change({ resources: ['tickets'] }); await next();
+  assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
+  const before = device.requests.length;
+  device.data['/api/prices?limit=52'] = [{ id: 'PRICE-DURING-COOLDOWN' }]; device.change({ resources: ['prices'] }); await next();
+  assert.equal(device.requests.length, before, 'no request bypasses the server cooldown');
+  failing = false; await next();
+  assert.equal(device.context.priceHistory[0]?.id, 'PRICE-DURING-COOLDOWN');
+  assert.equal(device.context.getCloudDataStatus().phase, 'READY');
+});
+
 for (const role of [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]) {
   test(`Android canonical store refreshes assignments, secondary lists and deletions for ${role}`, async t => {
     const device = mobileRuntime(role);
@@ -432,6 +608,17 @@ for (const role of [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN]) {
     await until(() => device.context.fields.length === 0 && device.context.supportTickets.length === 1);
     assert.equal(device.context.CURRENT_SESSION.fieldId, '');
     assert.equal(device.queue.length, 0);
+  });
+  test(`an online Android ${role} receives new prices and notifies existing screens without restart`, async t => {
+    const device = mobileRuntime(role);
+    t.after(() => device.stop());
+    await device.stop.initialRefresh;
+    const notifications = device.context.notifications;
+    device.data['/api/prices?limit=52'] = [{ id: 'PRICE-NEW', sugarPricePerLkg: 2600 }];
+    device.change({ resources: ['prices'] });
+    await until(() => device.context.priceHistory[0]?.id === 'PRICE-NEW');
+    assert.equal(device.context.priceHistory[0].sugarPricePerLkg, 2600);
+    assert.ok(device.context.notifications > notifications);
   });
 }
 
@@ -488,11 +675,46 @@ test('Android discards a delayed response after account switching or listener di
     ? new Promise(resolve => { resolveFields = resolve; }) : null);
   t.after(() => device.stop());
   await until(() => resolveFields);
+  const notificationsBeforeSwitch = device.context.notifications;
   device.context.CURRENT_SESSION = { employeeId: 'OTHER-ACCOUNT', role: ROLES.MEMBER_FARMER, phoneVerified: true };
   resolveFields({ success: true, data: [{ id: 'PRIVATE-OLD-ACCOUNT' }] });
   await device.stop.initialRefresh;
   assert.equal(device.context.fields.length, 0);
-  assert.equal(device.context.notifications, 0);
+  assert.equal(device.context.notifications, notificationsBeforeSwitch);
+});
+
+test('Android initial loading ends only after a confirmed snapshot, including a legitimate empty result', async t => {
+  let finish;
+  const device = mobileRuntime(ROLES.MEMBER_FARMER, url => url === '/api/fields' ? new Promise(resolve => { finish = resolve; }) : null);
+  t.after(device.stop);
+  await until(() => finish);
+  assert.equal(device.context.getCloudDataStatus().phase, 'LOADING');
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, false);
+  finish({ success: true, data: [] });
+  await device.stop.initialRefresh;
+  assert.equal(device.context.getCloudDataStatus().phase, 'READY');
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, true);
+  assert.equal(device.context.fields.length, 0);
+});
+
+test('Android initial errors offer recovery while background errors keep the existing snapshot usable', async t => {
+  let fail = true;
+  const device = mobileRuntime(ROLES.FARM_MANAGER, url => url === '/api/fields' && fail
+    ? Promise.reject(Object.assign(new Error('Temporary outage'), { status: 503 })) : null);
+  t.after(device.stop);
+  await device.stop.initialRefresh;
+  assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, false);
+  fail = false;
+  await device.context.activeCloudRefresh({ force: true });
+  assert.equal(device.context.getCloudDataStatus().phase, 'READY');
+  fail = true;
+  await device.context.activeCloudRefresh({ force: true });
+  assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, true);
+  assert.equal(device.context.fields[0].id, 'FIELD-1');
+  device.context.CURRENT_SESSION = { employeeId: 'OTHER-ACCOUNT' };
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, false, 'loading metadata never belongs to the next account');
 });
 
 test('Android preserves pending intent privately when assignment removal revokes its canonical field and audit scope', async t => {

@@ -114,8 +114,8 @@ test('mobile uses tiered quota-aware refreshes without clearing skipped secondar
   assert.match(mobile, /saveItem\(STORAGE_KEYS\.CLOUD_REFRESH_META/);
   assert.match(mobile, /includeExtended \? readReplica\('\/api\/tickets'\) : Promise\.resolve\(null\)/);
   assert.match(mobile, /includeExtended && canReadUserDirectory \? readReplica\('\/api\/users\?limit=50'\)/);
-  assert.match(mobile, /if \(includeExtended\) \{[\s\S]{0,100}supportTickets\.length = 0/);
-  assert.match(mobile, /if \(includeExtended && canReadAuditEvents\) \{[\s\S]{0,100}systemHistory\.length = 0/);
+  assert.match(mobile, /if \(ticketsReady\) \{[\s\S]{0,100}supportTickets\.length = 0/);
+  assert.match(mobile, /if \(historyReady\) \{[\s\S]{0,100}systemHistory\.length = 0/);
   assert.match(mobile, /readReplica\('\/api\/prices\?limit=52'\)/);
 });
 

@@ -6,8 +6,9 @@
  */
 
 import { fromPrice } from './firestoreSchema';
-import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiClient';
+import { authenticatedRequest, subscribeToAuthenticatedResource, captureAuthenticatedContext } from './apiClient';
 import { sortNewestFirst } from '../utils/recordOrdering';
+import { creationIntent } from './enrollmentIntentService';
 
 /**
  * Calculate human-readable SRA week label from calendar date
@@ -61,9 +62,14 @@ export async function fetchPrices({ cursor, limit = 100 } = {}) {
 /**
  * SRA Admin: Publish new official weekly SRA price circular
  */
-export async function publishPrice(payload) {
-  return authenticatedRequest('/api/prices', {
+export async function publishPrice(payload, { ownerId } = {}) {
+  const isCurrent = captureAuthenticatedContext();
+  const intent = await creationIntent(ownerId, payload, 'prices');
+  if (!isCurrent()) throw Object.assign(new Error('The signed-in account changed. Please try again.'), { code: 'AUTH_CONTEXT_CHANGED' });
+  const result = await authenticatedRequest('/api/prices', {
     method: 'POST',
-    body: payload
+    body: { ...payload, _mutation: intent.mutation }
   });
+  localStorage.removeItem(intent.storageKey);
+  return result;
 }

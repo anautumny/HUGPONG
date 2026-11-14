@@ -8,7 +8,8 @@ import {
 } from './firestoreSchema';
 import {
   authenticatedRead,
-  subscribeToAuthenticatedLoader
+  subscribeToAuthenticatedLoader,
+  settleResourceReads
 } from './apiClient';
 import { ROLE_KEYS } from '../utils/authRouting';
 import {
@@ -58,6 +59,7 @@ async function dashboardRead(label, path, force) {
     wrapped.status = error.status;
     wrapped.code = error.code;
     wrapped.isMissingIndex = missingIndex;
+    wrapped.retryAfterMs = error.retryAfterMs;
     throw wrapped;
   }
 }
@@ -73,47 +75,43 @@ async function readRecentOperations(force) {
 }
 
 export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
-  return subscribeToAuthenticatedLoader(async ({ force }) => {
+  const previous = new Map();
+  return subscribeToAuthenticatedLoader(async ({ force, retryOnly }) => {
     if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-      const [ticketsResult, diagnosticsState, telemetryState] = await Promise.all([
-        dashboardRead('Support tickets', '/api/tickets', force),
-        dashboardRead('System diagnostics', '/api/system-diagnostics', force)
-          .then(result => ({ result, error: null }))
-          .catch(error => ({ result: { data: {} }, error: error.message })),
-        dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
-          .then(result => ({ result, error: null }))
-          .catch(error => ({ result: { data: { subjects: [] } }, error: error.message }))
-      ]);
+      const { values: [ticketsResult, diagnosticsState, telemetryState], refreshError, errors } = await settleResourceReads([
+        () => dashboardRead('Support tickets', '/api/tickets', force),
+        () => dashboardRead('System diagnostics', '/api/system-diagnostics', force),
+        () => dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
+      ], previous, { retryOnly });
       return {
         ...emptyDashboard(),
+        refreshError,
         supportTickets: sortNewestFirst(
           (ticketsResult.data || []).map(ticket => fromTicket(ticket.id, ticket)),
           ['createdAt']
         ),
-        terminalDiagnostics: telemetryState.result.data?.subjects || [],
-        systemDiagnostics: diagnosticsState.result.data || {},
-        activityMonitoringError: telemetryState.error,
-        systemDiagnosticsError: diagnosticsState.error
+        terminalDiagnostics: telemetryState.data?.subjects || [],
+        systemDiagnostics: Array.isArray(diagnosticsState.data) ? {} : diagnosticsState.data || {},
+        activityMonitoringError: errors[2]?.message || null,
+        systemDiagnosticsError: errors[1]?.message || null
       };
     }
 
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
     const includeActivityMonitoring = roleKey === ROLE_KEYS.FARM_MANAGER;
-    const [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult] = await Promise.all([
-      dashboardRead('Published prices', '/api/prices?limit=2', force),
-      dashboardRead('Fields', '/api/fields', force),
-      dashboardRead('Block farms', '/api/block-farms', force),
-      dashboardRead('Crop Year Cycles', '/api/crop-cycles', force),
-      readRecentOperations(force),
-      includeAudits
+    const { values: [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult], refreshError, errors } = await settleResourceReads([
+      () => dashboardRead('Published prices', '/api/prices?limit=2', force),
+      () => dashboardRead('Fields', '/api/fields', force),
+      () => dashboardRead('Block farms', '/api/block-farms', force),
+      () => dashboardRead('Crop Year Cycles', '/api/crop-cycles', force),
+      () => readRecentOperations(force),
+      () => includeAudits
         ? dashboardRead('Audit reports', '/api/audit-reports', force)
         : Promise.resolve({ data: [] }),
-      includeActivityMonitoring
+      () => includeActivityMonitoring
         ? dashboardRead('Member activity', '/api/terminal-diagnostics', force)
-          .then(result => ({ result, error: null }))
-          .catch(error => ({ result: { data: { subjects: [] } }, error: error.message }))
-        : Promise.resolve({ result: { data: { subjects: [] } }, error: null })
-    ]);
+        : Promise.resolve({ data: { subjects: [] } })
+    ], previous, { retryOnly, groups: [[1, 2, 3, 4]] });
 
     const prices = sortNewestFirst(
       (pricesResult.data || []).map(price => fromPrice(price.id, price)),
@@ -139,6 +137,7 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
     return {
       ...emptyDashboard(),
       prices,
+      refreshError,
       currentPrice: prices[0] || null,
       previousPrice: prices[1] || null,
       fields,
@@ -149,11 +148,11 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       operations,
       recentOperations: operations.slice(0, 5),
       auditReports,
-      terminalDiagnostics: activityResult.result.data?.subjects || [],
-      activityMonitoringError: activityResult.error
+      terminalDiagnostics: activityResult.data?.subjects || [],
+      activityMonitoringError: errors[6]?.message || null
     };
   }, {
-    onData: data => onUpdate({ ...data, isLoading: false, error: null }),
+    onData: data => onUpdate({ ...data, isLoading: false, error: data.refreshError?.message || null }),
     onError: error => {
       if (onError) onError(error);
     },

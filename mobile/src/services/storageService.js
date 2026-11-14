@@ -267,20 +267,22 @@ export async function multiSave(keyValuePairs) {
 }
 
 /**
- * Clear all HUGPONG-scoped keys from storage
+ * Clear replaceable read projections only. Credentials and every account's
+ * drafts/outbox/uncertain intents survive, including keys added in the future.
  */
 export async function clearHugpongStorage() {
   try {
-    memoryCache.clear();
-    serializedCache.clear();
+    const replaceable = new Set([
+      STORAGE_KEYS.USERS, STORAGE_KEYS.BLOCK_FARMS, STORAGE_KEYS.CROP_CYCLES,
+      STORAGE_KEYS.FIELDS, STORAGE_KEYS.ARCHIVED_FIELDS, STORAGE_KEYS.PRICES,
+      STORAGE_KEYS.AUDIT_REPORTS, STORAGE_KEYS.SYSTEM_HISTORY, STORAGE_KEYS.CLOUD_REFRESH_META
+    ]);
     const allStoredKeys = await AsyncStorage.getAllKeys();
     const hugpongKeys = allStoredKeys.filter(key =>
-      key.startsWith('@hugpong_')
-      && key !== STORAGE_KEYS.CACHE_SCHEMA_VERSION
-      && !PRESERVED_INSTALLATION_KEYS.has(key)
+      replaceable.has(key)
     );
     if (hugpongKeys.length) await AsyncStorage.multiRemove(hugpongKeys);
-    await Promise.all(Array.from(SECURE_KEYS).map(key => SecureStore.deleteItemAsync(secureStorageKey(key), SECURE_OPTIONS)));
+    hugpongKeys.forEach(key => { memoryCache.delete(key); serializedCache.delete(key); });
     return true;
   } catch (error) {
     console.warn('[storageService] Local storage could not be cleared completely.');
@@ -291,7 +293,7 @@ export async function clearHugpongStorage() {
 /**
  * Hydrate all keys on app startup
  */
-export async function hydrateAllStorage() {
+export async function hydrateAllStorage({ strict = false } = {}) {
   try {
     const keys = Object.values(STORAGE_KEYS).filter(key => !isSecureKey(key));
     const results = await AsyncStorage.multiGet(keys);
@@ -309,7 +311,7 @@ export async function hydrateAllStorage() {
       }
     });
     const secureEntries = await Promise.all(
-      Array.from(SECURE_KEYS).map(async key => [key, await getItem(key, null)])
+      Array.from(SECURE_KEYS).map(async key => [key, await getItem(key, null, { strict })])
     );
     secureEntries.forEach(([key, value]) => {
       if (value !== null) hydrated[key] = value;
@@ -317,6 +319,9 @@ export async function hydrateAllStorage() {
     return hydrated;
   } catch (error) {
     console.warn('[storageService] Local storage hydration was incomplete.');
+    if (strict) throw Object.assign(new Error('Saved device data could not be loaded. Retry without clearing local storage.'), {
+      code: 'LOCAL_STORAGE_HYDRATION_FAILED', cause: error
+    });
     return {};
   }
 }

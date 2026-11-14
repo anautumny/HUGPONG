@@ -6,6 +6,7 @@ import Input from '../ui/Input';
 import Button from '../ui/Button';
 import { calculateSRAWeekLabel, publishPrice } from '../../services/pricesService';
 import { PRICE_STATUSES, priceStatusLabel } from '../../utils/pricePresentation';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PublishPriceModal({
   isOpen = false,
@@ -13,6 +14,7 @@ export default function PublishPriceModal({
   latestPrice = null,
   onPublished
 }) {
+  const { user } = useAuth();
   const today = new Date().toISOString().split('T')[0];
 
   const [effectiveDate, setEffectiveDate] = useState(today);
@@ -45,7 +47,7 @@ export default function PublishPriceModal({
       setSuccessMessage(null);
       setIsSubmitting(false);
     }
-  }, [isOpen, latestPrice]);
+  }, [isOpen]);
 
   // When effectiveDate changes, auto-update week label if not manually customized
   const handleDateChange = (e) => {
@@ -111,7 +113,7 @@ export default function PublishPriceModal({
         source: source.trim()
       };
 
-      const result = await publishPrice(payload);
+      const result = await publishPrice(payload, { ownerId: user?.employeeId || user?.id || user?.userId });
       if (result.success) {
         setSuccessMessage('Price reference published successfully.');
         if (typeof onPublished === 'function') {

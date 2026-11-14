@@ -53,13 +53,15 @@ router.get('/', requireAuth, requireRole([ROLES.MEMBER_FARMER, ROLES.FARM_MANAGE
 router.post('/', requireAuth, requireRole([ROLES.SRA_ADMIN]), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
-    readMutationContext(req);
+    const mutation = readMutationContext(req);
+    if (!mutation && !req.body.id) return res.status(400).json({ success: false, error: 'A stable publication request key is required. Update the app and try again.' });
     const publication = await publishSraPrice(db, req.body, {
-      publishedByUserId: req.session.user.employeeId || req.session.user.userId
+      publishedByUserId: req.session.user.employeeId || req.session.user.userId,
+      mutation
     });
     return res.status(publication.created ? 201 : 200).json({ success: true, ...publication });
   } catch (error) {
-    const status = error.statusCode || (/already exists/i.test(error.message) ? 409 : 400);
+    const status = error.statusCode || error.status || (/already exists/i.test(error.message) ? 409 : 400);
     return res.status(status).json({ success: false, error: error.message });
   }
 });

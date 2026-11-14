@@ -435,9 +435,12 @@ export function subscribeToAuthenticatedLoader(load, {
   let errorRetryTimer = null;
   let retryAttempt = 0;
   let retryNotBefore = 0;
+  let cooldownInvalidated = false;
 
-  const refresh = async ({ force = false } = {}) => {
-    if (!active || Date.now() < retryNotBefore) return;
+  const refresh = async ({ force = false, retryOnly = false } = {}) => {
+    if (!active) return;
+    if (Date.now() < retryNotBefore) { cooldownInvalidated ||= !retryOnly; return; }
+    if (cooldownInvalidated) { retryOnly = false; cooldownInvalidated = false; }
     if (inFlight) {
       if (force) forcedRefreshQueued = true;
       return;
@@ -446,7 +449,9 @@ export function subscribeToAuthenticatedLoader(load, {
     clearTimeout(errorRetryTimer);
     const generation = authenticatedReadGeneration;
     try {
-      const value = await load({ force });
+      const value = await load({ force, retryOnly });
+      if (active && generation === authenticatedReadGeneration && !forcedRefreshQueued && typeof onData === 'function' && value?.refreshError) onData(value);
+      if (value?.refreshError) throw value.refreshError;
       lastSuccessfulRefreshAt = Date.now();
       retryAttempt = 0;
       if (active && generation === authenticatedReadGeneration && !forcedRefreshQueued && typeof onData === 'function') onData(value);
@@ -455,7 +460,7 @@ export function subscribeToAuthenticatedLoader(load, {
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
       if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
         const delay = Math.max(retryNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
-        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, delay);
+        errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true, retryOnly: true }); }, delay);
       }
     } finally {
       inFlight = false;
@@ -495,6 +500,33 @@ export function subscribeToAuthenticatedLoader(load, {
       window.removeEventListener('hugpong:connection-restored', handleConnectionRestored);
     }
   };
+}
+
+// Each existing subscription retains its last successful endpoint responses.
+export function captureAuthenticatedContext() {
+  const generation = authenticatedReadGeneration;
+  return () => generation === authenticatedReadGeneration;
+}
+
+export async function settleResourceReads(requests, previous, { retryOnly = false, groups = [] } = {}) {
+  const outcomes = await Promise.allSettled(requests.map((request, index) => {
+    if (retryOnly && previous.has(index) && !previous.failed?.has(index)) return previous.get(index);
+    return typeof request === 'function' ? Promise.resolve().then(request) : request;
+  }));
+  const failures = outcomes.filter(result => result.status === 'rejected').map(result => result.reason);
+  const authorityFailure = failures.find(error => [401, 403].includes(error?.status) || error?.code === 'AUTH_CONTEXT_CHANGED');
+  if (authorityFailure) throw authorityFailure;
+  const failed = new Set(outcomes.flatMap((result, index) => result.status === 'rejected' ? [index] : []));
+  for (const group of groups) if (group.some(index => failed.has(index))) group.forEach(index => failed.add(index));
+  previous.failed = failed;
+  const values = outcomes.map((result, index) => {
+    if (!failed.has(index)) { previous.set(index, result.value); return result.value; }
+    return previous.get(index) || { data: [] };
+  });
+  const refreshError = failures.length ? Object.assign(new Error('Some data could not be updated. Saved data is shown; retrying automatically.'), {
+    retryAfterMs: Math.max(...failures.map(error => Number(error?.retryAfterMs) || 0)), causes: failures
+  }) : null;
+  return { values, refreshError, errors: outcomes.map(result => result.status === 'rejected' ? result.reason : null) };
 }
 
 export default {

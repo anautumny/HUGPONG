@@ -710,11 +710,13 @@ export default function LoginScreen({ navigation, route }) {
                 lockoutSeconds > 0 && { backgroundColor: '#9CA3AF' }
               ]}
               onPress={handleLogin}
+              accessibilityRole="button"
+              accessibilityState={{ busy: loading, disabled: loading || lockoutSeconds > 0 }}
               disabled={loading || lockoutSeconds > 0}
               activeOpacity={0.8}
             >
               {loading ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <><ActivityIndicator size="small" color="#fff" /><Text style={s.btnText}>{t('data_signing_in')}</Text></>
               ) : (
                 <>
                   <Text style={s.btnText}>

@@ -17,6 +17,38 @@ const MOBILE_APP_VERSION = String(Constants.expoConfig?.version || '1.0.0');
 const MOBILE_OS = `${Platform.OS} ${Platform.Version}`.slice(0, 80);
 const MOBILE_DEVICE_MODEL = String(Platform.constants?.Model || Platform.constants?.model || 'unknown').slice(0, 80);
 let serverReadRevision = '';
+let authenticationGeneration = 0;
+let credentialWrites = Promise.resolve();
+let firebaseTransitions = Promise.resolve();
+function authContextChanged() {
+  return Object.assign(new Error('The signed-in account changed. Please try again.'), { code: 'AUTH_CONTEXT_CHANGED' });
+}
+function currentAuthContext(extra = () => true) {
+  const generation = authenticationGeneration;
+  const owner = auth?.currentUser?.uid || '';
+  return () => generation === authenticationGeneration && owner === (auth?.currentUser?.uid || '') && extra();
+}
+async function writeAuthToken(token, isCurrent) {
+  const request = credentialWrites.catch(() => {}).then(async () => {
+    if (!isCurrent()) throw authContextChanged();
+    if (!await saveItem(STORAGE_KEYS.AUTH_TOKEN, token)) throw Object.assign(new Error('Your sign-in could not be saved on this device. Please retry.'), { code: 'LOCAL_SESSION_WRITE_FAILED' });
+    if (!isCurrent()) throw authContextChanged();
+  });
+  credentialWrites = request;
+  return request;
+}
+async function clearCredentials(isCurrent) {
+  const transition = firebaseTransitions.catch(() => {}).then(async () => {
+    if (isCurrent() && auth) await signOut(auth).catch(() => {});
+  });
+  firebaseTransitions = transition;
+  await transition;
+  const removal = credentialWrites.catch(() => {}).then(async () => {
+    if (isCurrent()) await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
+  });
+  credentialWrites = removal;
+  await removal;
+}
 export function setServerReadRevision(revision = '') {
   serverReadRevision = /^[a-f0-9]{64}$/.test(revision) ? revision : '';
 }
@@ -136,9 +168,15 @@ async function parseResponse(response) {
   return data;
 }
 
-export async function signInToFirebase(customToken) {
+export async function signInToFirebase(customToken, { isCurrent = () => true } = {}) {
   if (!auth || !customToken) throw new Error('Firebase authentication token was not issued.');
-  await signInWithCustomToken(auth, customToken);
+  const request = firebaseTransitions.catch(() => {}).then(async () => {
+    if (!isCurrent()) throw authContextChanged();
+    await signInWithCustomToken(auth, customToken);
+    if (!isCurrent()) throw authContextChanged();
+  });
+  firebaseTransitions = request;
+  return request;
 }
 
 export async function publicAuthRequest(path, body) {
@@ -164,10 +202,12 @@ export async function publicAuthGet(path) {
 }
 
 export async function authenticatedRequest(path, options = {}) {
+  const requestGeneration = authenticationGeneration;
   const requestUserId = auth?.currentUser?.uid || '';
   const token = options.token || await getItem(STORAGE_KEYS.AUTH_TOKEN);
   const clientInstanceId = await getMobileClientInstanceId();
   if (!token) throw new Error('No authenticated server session is available.');
+  if (requestGeneration !== authenticationGeneration || requestUserId !== (auth?.currentUser?.uid || '')) throw authContextChanged();
   const hasRequestBody = options.body !== undefined;
   const response = await fetchFromApi(path, {
     method: options.method || 'GET',
@@ -181,6 +221,7 @@ export async function authenticatedRequest(path, options = {}) {
   });
   try {
     const result = await parseResponse(response);
+    if (requestGeneration !== authenticationGeneration || requestUserId !== (auth?.currentUser?.uid || '')) throw authContextChanged();
     if (path.startsWith('/api/') && !['GET', 'HEAD'].includes(String(options.method || 'GET').toUpperCase())
       && !path.startsWith('/api/notifications/') && !path.startsWith('/api/terminal-diagnostics/')
       && !path.startsWith('/api/diagnostics/') && !path.endsWith('/qr/verify')) {
@@ -190,28 +231,33 @@ export async function authenticatedRequest(path, options = {}) {
     }
     return result;
   } catch (error) {
-    if (error.status === 401 && requestUserId === (auth?.currentUser?.uid || '')
+    if (error.status === 401 && requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '')
       && token === await getItem(STORAGE_KEYS.AUTH_TOKEN)) {
-      await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
-      if (auth) await signOut(auth).catch(() => {});
+      if (requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '')) {
+        const generation = ++authenticationGeneration;
+        await clearCredentials(() => generation === authenticationGeneration);
+      }
     }
     throw error;
   }
 }
 
 export async function loginWithServer(identifier, password, sessionAcknowledged = false) {
+  const generation = ++authenticationGeneration;
+  const isCurrent = () => generation === authenticationGeneration;
   const result = await publicAuthRequest('/auth/login', { contactNumber: identifier, password, sessionAcknowledged, clientPlatform: 'mobile' });
-  await signInToFirebase(result.firebaseCustomToken);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  if (!isCurrent()) throw authContextChanged();
+  await signInToFirebase(result.firebaseCustomToken, { isCurrent });
+  await writeAuthToken(result.token, isCurrent);
   return result;
 }
 
 export async function refreshServerSession(token, { isCurrent = () => true } = {}) {
+  const current = currentAuthContext(isCurrent);
   const result = await authenticatedRequest('/auth/session', { token, headers: { 'Cache-Control': 'no-cache' } });
-  if (!isCurrent()) throw Object.assign(new Error('The sign-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
-  await signInToFirebase(result.firebaseCustomToken);
-  if (!isCurrent()) throw Object.assign(new Error('The sign-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  if (!current()) throw authContextChanged();
+  await signInToFirebase(result.firebaseCustomToken, { isCurrent: current });
+  await writeAuthToken(result.token, current);
   return result;
 }
 
@@ -222,8 +268,9 @@ export async function verifyPasswordWithServer(password, authorization = {}) {
   });
 }
 
-export async function refreshMobileSessionFromFirebase({ forceRefresh = false } = {}) {
+export async function refreshMobileSessionFromFirebase({ forceRefresh = false, isCurrent = () => true } = {}) {
   if (!auth?.currentUser) throw new Error('Firebase authentication must be restored before synchronization.');
+  const current = currentAuthContext(isCurrent);
   // Normal app restoration can reuse Firebase's locally cached, unexpired ID
   // token. Explicit synchronization still forces a fresh token and revocation
   // check before it is allowed to write.
@@ -231,6 +278,7 @@ export async function refreshMobileSessionFromFirebase({ forceRefresh = false } 
     ? await auth.currentUser.getIdToken(true)
     : await auth.currentUser.getIdToken();
   const clientInstanceId = await getMobileClientInstanceId();
+  if (!current()) throw authContextChanged();
   const response = await fetchFromApi('/auth/mobile-session', {
     method: 'POST',
     headers: {
@@ -241,21 +289,24 @@ export async function refreshMobileSessionFromFirebase({ forceRefresh = false } 
     body: JSON.stringify({})
   });
   const result = await parseResponse(response);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  if (!current()) throw authContextChanged();
+  await writeAuthToken(result.token, current);
   return result;
 }
 
 export async function changePasswordWithServer(currentPassword, newPassword, sessionAction = 'KEEP_CURRENT') {
+  const current = currentAuthContext();
   const result = await authenticatedRequest('/auth/change-password', {
     method: 'POST',
     body: { currentPassword, newPassword, sessionAction }
   });
   if (result.signOutRequired) {
-    if (auth) await signOut(auth).catch(() => {});
-    await removeItems([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.SESSION]);
+    if (!current()) throw authContextChanged();
+    const generation = ++authenticationGeneration;
+    await clearCredentials(() => generation === authenticationGeneration);
   } else {
-    await signInToFirebase(result.firebaseCustomToken);
-    await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+    await signInToFirebase(result.firebaseCustomToken, { isCurrent: current });
+    await writeAuthToken(result.token, current);
   }
   return result;
 }
@@ -268,12 +319,13 @@ export async function changePhoneWithServer(phone, currentPassword) {
 }
 
 export async function verifyPhoneChangeWithServer(phone, code) {
+  const current = currentAuthContext();
   const result = await authenticatedRequest('/auth/change-phone/verify', {
     method: 'POST',
     body: { phone, code }
   });
-  await signInToFirebase(result.firebaseCustomToken);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  await signInToFirebase(result.firebaseCustomToken, { isCurrent: current });
+  await writeAuthToken(result.token, current);
   return result;
 }
 
@@ -286,9 +338,10 @@ export async function requestPhoneVerificationReviewWithServer() {
 }
 
 export async function verifyPhoneWithServer(code) {
+  const current = currentAuthContext();
   const result = await authenticatedRequest('/auth/verify-phone', { method: 'POST', body: { code } });
-  await signInToFirebase(result.firebaseCustomToken);
-  await saveItem(STORAGE_KEYS.AUTH_TOKEN, result.token);
+  await signInToFirebase(result.firebaseCustomToken, { isCurrent: current });
+  await writeAuthToken(result.token, current);
   return result;
 }
 
@@ -348,16 +401,17 @@ export async function decidePasswordRecoveryReview(reviewId, approve) {
 }
 
 export async function logoutFromServer(options = {}) {
+  const generation = ++authenticationGeneration;
+  const isCurrent = () => generation === authenticationGeneration;
   if (options.skipRemote !== true) {
     try {
-      await authenticatedRequest('/auth/push-device/unregister', { method: 'POST', body: {} });
+      if (isCurrent()) await authenticatedRequest('/auth/push-device/unregister', { method: 'POST', body: {} });
     } catch { /* Offline logout still completes locally. */ }
     try {
-      await authenticatedRequest('/auth/logout', { method: 'POST', body: {} });
+      if (isCurrent()) await authenticatedRequest('/auth/logout', { method: 'POST', body: {} });
     } catch (error) {
       // Local sign-out must still complete when the server is offline.
     }
   }
-  if (auth) await signOut(auth).catch(() => {});
-  await removeItem(STORAGE_KEYS.AUTH_TOKEN);
+  await clearCredentials(isCurrent);
 }

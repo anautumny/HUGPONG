@@ -4,6 +4,7 @@ const { COLLECTIONS, buildSraPrice, nowIso, requiredString } = require('../schem
 const { createPriceId } = require('../domain/systemIds');
 const { queueAuditEvent } = require('./auditWriter');
 const { comparableChange } = require('./priceAnalyticsService');
+const { creationReceipt } = require('./creationReceipt');
 
 async function publishSraPrice(database, input, context = {}) {
   if (!database) throw new Error('Database is unavailable.');
@@ -27,13 +28,21 @@ async function publishSraPrice(database, input, context = {}) {
     publishedAt: context.publishedAt || nowIso()
   });
   const ref = database.collection(COLLECTIONS.SRA_PRICES).doc(priceId);
+  const fingerprint = Object.fromEntries(Object.entries(basePayload).filter(([key]) => !['publishedAt', 'sugarPriceChange', 'molassesPriceChange'].includes(key)));
+  const receipt = context.mutation ? creationReceipt(database, context.publishedByUserId, context.mutation, fingerprint, 'PRICE_PUBLICATION') : null;
   return database.runTransaction(async transaction => {
+    const replay = receipt ? await receipt.read(transaction) : null;
+    if (replay) return { ...replay, created: false, replayed: true };
     const existing = await transaction.get(ref);
     if (existing.exists) {
       const current = buildSraPrice(existing.data());
       const isReplay = Object.keys(basePayload).filter(key => !['publishedAt', 'sugarPriceChange', 'molassesPriceChange'].includes(key))
         .every(key => JSON.stringify(current[key]) === JSON.stringify(basePayload[key]));
-      if (isReplay) return { created: false, replayed: true, data: { id: priceId, ...current } };
+      if (isReplay) {
+        const result = { created: false, replayed: true, data: { id: priceId, ...current } };
+        receipt?.write(transaction, result, basePayload.publishedAt);
+        return result;
+      }
       const conflict = new Error('Price ID already belongs to another publication.');
       conflict.statusCode = 409;
       throw conflict;
@@ -60,7 +69,9 @@ async function publishSraPrice(database, input, context = {}) {
       details: `Published price reference ${payload.circularNumber}, effective ${payload.effectiveDate}.`,
       createdAt: payload.publishedAt
     });
-    return { created: true, replayed: false, data: { id: priceId, ...payload } };
+    const result = { created: true, replayed: false, data: { id: priceId, ...payload } };
+    receipt?.write(transaction, result, payload.publishedAt);
+    return result;
   });
 }
 

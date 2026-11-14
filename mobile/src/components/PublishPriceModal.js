@@ -75,7 +75,7 @@ export default function PublishPriceModal({
       setShowCalendar(false);
       setCalDate(new Date());
     }
-  }, [visible, prevSugar, prevMolasses]);
+  }, [visible]);
 
   const handleDateSelect = (selectedIso) => {
     setEffectiveDate(selectedIso);

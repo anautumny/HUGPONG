@@ -46,6 +46,7 @@ async function canReceiveNotification(database, event, actor) {
   if (event.type === 'price') return [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(role);
   if (event.type === 'verification-result') return userId === event.entityId;
   if (event.type !== 'verification-request') return false;
+  if (![ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(role)) return false;
   const target = await database.collection(COLLECTIONS.USERS).doc(event.entityId).get();
   if (!target.exists || target.data().phoneVerifiedAt || !['ACTIVE', 'PENDING'].includes(target.data().status)) return false;
   const data = target.data();
@@ -92,10 +93,32 @@ async function notificationInbox(database, actor, { cursor, limit = 50, now = Da
   // Bounded scan and an explicit continuation, including pages with no authorized rows.
   const snapshot = await query.limit(limit + 1).get();
   const scanned = snapshot.docs.slice(0, limit);
+  const role = canonicalRole(actor?.role || actor?.canonicalRole);
+  const reviewEvents = userIdOf(actor) && actor?.status === 'ACTIVE' && [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(role)
+    ? scanned.map(doc => doc.data()).filter(event => event.type === 'verification-request' && event.expiresAtMs > now) : [];
+  const lookup = new Map();
+  const preload = async (collection, ids) => {
+    const refs = [...new Set(ids.filter(Boolean))].map(id => database.collection(collection).doc(id));
+    if (!refs.length) return [];
+    const rows = typeof database.getAll === 'function' ? await database.getAll(...refs) : await Promise.all(refs.map(ref => ref.get()));
+    rows.forEach((row, index) => lookup.set(`${collection}/${refs[index].id}`, row));
+    return rows;
+  };
+  const targets = await preload(COLLECTIONS.USERS, reviewEvents.map(event => event.entityId));
+  if (role === ROLES.FARM_MANAGER) await preload(COLLECTIONS.BLOCK_FARMS, targets.filter(row => row.exists).map(row => {
+    const target = row.data();
+    return String(target.requestedBlockFarmId || target.affiliatedBlockFarmId || '').trim().toUpperCase();
+  }));
+  // Request-scoped reads feed the existing authority policy; no authorization is cached across requests.
+  const scopedDatabase = { collection: name => ({ doc: id => ({ get: async () => {
+    const key = `${name}/${id}`;
+    if (!lookup.has(key)) lookup.set(key, await database.collection(name).doc(id).get());
+    return lookup.get(key);
+  } }) }) };
   const data = [];
   for (const doc of scanned) {
     const event = { id: doc.id, ...doc.data() };
-    if (event.expiresAtMs > now && await canReceiveNotification(database, event, actor)) data.push(publicNotification(event));
+    if (event.expiresAtMs > now && await canReceiveNotification(scopedDatabase, event, actor)) data.push(publicNotification(event));
   }
   const last = scanned.at(-1);
   return { data, page: { hasMore: snapshot.docs.length > limit,

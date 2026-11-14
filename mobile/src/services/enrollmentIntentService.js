@@ -3,15 +3,15 @@ import { createClientRecordId } from './secureId';
 
 const pendingIntents = new Map();
 
-export function fieldEnrollmentIntent(ownerId, payload) {
+export function creationIntent(ownerId, payload, resource = 'fields') {
   if (!ownerId) return Promise.reject(new Error('Sign in before enrolling a field.'));
-  const storageKey = `@hugpong_enrollment_${ownerId}_${encodeURIComponent(JSON.stringify(payload))}`;
+  const storageKey = `@hugpong_enrollment_${resource === 'fields' ? '' : `${resource}_`}${ownerId}_${encodeURIComponent(JSON.stringify(payload))}`;
   if (pendingIntents.has(storageKey)) return pendingIntents.get(storageKey);
   const pending = (async () => {
     let mutation = await getItem(storageKey);
     if (!mutation) {
       const mutationId = createClientRecordId('MUT');
-      mutation = { mutationId, idempotencyKey: mutationId, entityKey: 'fields/new', baseVersion: null };
+      mutation = { mutationId, idempotencyKey: mutationId, entityKey: `${resource}/new`, baseVersion: null };
       if (!(await saveItem(storageKey, mutation))) {
         await removeItem(storageKey);
         throw new Error('The enrollment request could not be saved. Try again before continuing.');
@@ -22,3 +22,4 @@ export function fieldEnrollmentIntent(ownerId, payload) {
   pendingIntents.set(storageKey, pending);
   return pending;
 }
+export function fieldEnrollmentIntent(ownerId, payload) { return creationIntent(ownerId, payload); }

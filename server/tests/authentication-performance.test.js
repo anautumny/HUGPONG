@@ -77,5 +77,5 @@ test('mobile startup reuses a valid token while explicit synchronization forces 
 
   assert.match(authService, /forceRefresh\s*\?\s*await auth\.currentUser\.getIdToken\(true\)/);
   assert.match(authService, /:\s*await auth\.currentUser\.getIdToken\(\)/);
-  assert.match(dataStore, /refreshMobileSessionFromFirebase\(\{ forceRefresh: true \}\)/);
+  assert.match(dataStore, /refreshMobileSessionFromFirebase\(\{ forceRefresh: true, isCurrent \}\)/);
 });

@@ -10,16 +10,15 @@ export default function QRCodeView({
   errorCorrectionLevel = 'M',
   className = ''
 }) {
-  const [svgContent, setSvgContent] = useState('');
-  const [error, setError] = useState(null);
+  const payload = typeof value === 'object' ? JSON.stringify(value) : String(value || '');
+  const selection = JSON.stringify([payload, size, color, bgColor, errorCorrectionLevel]);
+  const [result, setResult] = useState(null);
+  const svgContent = result?.selection === selection ? result.svg : '';
+  const error = result?.selection === selection ? result.error : null;
 
   useEffect(() => {
-    if (!value) {
-      setSvgContent('');
-      return;
-    }
-
-    const payload = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    let active = true;
+    if (!payload) return () => { active = false; };
 
     QRCode.toString(payload, {
       type: 'svg',
@@ -32,12 +31,12 @@ export default function QRCodeView({
       errorCorrectionLevel
     })
       .then(svg => {
-        setSvgContent(svg);
-        setError(null);
+        if (active) setResult({ selection, svg, error: null });
       })
       .catch(err => {
+        if (!active) return;
         const referenceId = createClientReference('QR');
-        setError(referenceId);
+        setResult({ selection, svg: '', error: referenceId });
         void reportClientDiagnostic({
           referenceId,
           module: 'QR',
@@ -45,7 +44,8 @@ export default function QRCodeView({
           errorCode: 'WEB_QR_GENERATION_FAILURE'
         });
       });
-  }, [value, size, color, bgColor, errorCorrectionLevel]);
+    return () => { active = false; };
+  }, [selection]);
 
   if (!value) {
     return (
@@ -68,6 +68,9 @@ export default function QRCodeView({
       </div>
     );
   }
+
+  if (!svgContent) return <div role="status" aria-live="polite" style={{ width: size, height: size }}
+    className={`flex items-center justify-center rounded-xl border border-border bg-surface text-xs text-hug-muted ${className}`}>Loading QR…</div>;
 
   return (
     <div

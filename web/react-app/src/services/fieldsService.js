@@ -2,7 +2,8 @@ import { fromField, fromBlockFarm, fromUser } from './firestoreSchema';
 import {
   authenticatedRead,
   authenticatedRequest,
-  subscribeToAuthenticatedLoader
+  subscribeToAuthenticatedLoader,
+  settleResourceReads
 } from './apiClient';
 import { sortCropYearsNewestFirst, uniqueRecordsById } from '../utils/recordOrdering';
 
@@ -20,16 +21,17 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
   }
 
   const canListUsers = ['FARM_MANAGER', 'MANAGER', 'SRA_ADMIN', 'ADMIN'].includes(role);
-  return subscribeToAuthenticatedLoader(async ({ force }) => {
+  const previous = new Map();
+  return subscribeToAuthenticatedLoader(async ({ force, retryOnly }) => {
     const requests = [
-      authenticatedRead('/api/fields', { force }),
-      authenticatedRead('/api/crop-cycles', { force }),
-      authenticatedRead('/api/block-farms', { force }),
-      canListUsers
+      () => authenticatedRead('/api/fields', { force }),
+      () => authenticatedRead('/api/crop-cycles', { force }),
+      () => authenticatedRead('/api/block-farms', { force }),
+      () => canListUsers
         ? authenticatedRead('/api/users', { force })
         : Promise.resolve({ data: [] })
     ];
-    const [fieldsResult, cyclesResult, farmsResult, usersResult] = await Promise.all(requests);
+    const { values: [fieldsResult, cyclesResult, farmsResult, usersResult], refreshError } = await settleResourceReads(requests, previous, { retryOnly, groups: [[0, 1, 2]] });
     const cropCycles = sortCropYearsNewestFirst(cyclesResult.data || []);
     const blockFarms = uniqueRecordsById((farmsResult.data || [])
       .map(farm => fromBlockFarm(farm.id, farm)))
@@ -64,9 +66,9 @@ export function subscribeToFieldsData({ user, onUpdate, onError }) {
         blockFarmName: farm?.name || field.blockFarmId || 'Unknown Farm'
       };
     }).sort((left, right) => String(left.id).localeCompare(String(right.id)));
-    return { fields, cropCycles, blockFarms, memberUsers };
+    return { fields, cropCycles, blockFarms, memberUsers, refreshError };
   }, {
-    onData: data => onUpdate({ ...data, isLoading: false, error: null }),
+    onData: data => onUpdate({ ...data, isLoading: false, error: data.refreshError?.message || null }),
     onError: error => {
       if (onError) onError(error);
     },

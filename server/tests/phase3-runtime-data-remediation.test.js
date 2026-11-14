@@ -39,7 +39,7 @@ test('price source is explicit on both clients and price deltas are server-deriv
   assert.doesNotMatch(web, /sugarPriceChange:\s*sugarChange|molassesPriceChange:\s*molassesChange/);
   assert.doesNotMatch(mobile, /sugarPriceChange:\s*sugarChange|molassesPriceChange:\s*molassesChange/);
   assert.doesNotMatch(mobileStore, /priceHistory\.unshift\(localRecord\)/);
-  assert.match(mobileStore, /commitExplicitMutation\('price', publicationRequest\)[\s\S]*fromPriceDocument\(outcome\.response\.data\.id/);
+  assert.match(mobileStore, /commitExplicitMutation\('price',[\s\S]*mutation: intent\.mutation[\s\S]*fromPriceDocument\(outcome\.response\.data\.id/);
   assert.match(server, /sugarPriceChange:\s*comparableChange/);
   assert.match(server, /molassesPriceChange:\s*comparableChange/);
 });
