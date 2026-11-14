@@ -1,6 +1,6 @@
 # HUGPONG system audit — 14 November 2026
 
-**Release status: HOLD.** The user stopped deployment, native APK builds and publication while this review proceeds. No new deployment, APK build, Git push, production test-account creation or production business-data mutation was performed after that instruction. `main` remains at `69d51cab`; the changes described below remain in the local working tree. The installed/published APK remains 1.1.0. Mobile metadata is locally prepared as 1.1.1, but no 1.1.1 APK exists.
+**Historical audit status: HOLD.** The user initially stopped deployment, native APK builds and publication during this review. The initial audit below was performed against `69d51cab` plus local corrections, without production test accounts or business-data mutations. The user subsequently authorized rollout: the verified fixes are now deployed and APK 1.1.1 is published. Current source, artifact and deployment evidence is recorded in [RELEASE_1.1.1_2026-11-14.md](RELEASE_1.1.1_2026-11-14.md). Physical-device acceptance and the separate audit risks below remain outstanding.
 
 The online acceptance requirement is: a successful authorized change must reach all relevant signed-in screens without restart, browser refresh, logout/login or navigation. The reproduced A01–A10 code defects are now corrected locally with behavioral regression coverage. Physical-device and hosted acceptance remain pending; this is not a system-wide production certification.
 

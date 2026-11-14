@@ -1,6 +1,6 @@
 # HUGPONG 1.1.1 release
 
-The user lifted the deployment/build/publication hold on 14 November 2026 and requested the latest Web, API and Android version before final presentation testing. The Web/API recovery fixes have been deployed and checked live. The signed Android build has finished and passed artifact checks; public download rollout is being completed.
+The user lifted the deployment/build/publication hold on 14 November 2026 and requested the latest Web, API and Android version before final presentation testing. **Web/API deployment and stable Android APK publication are complete.** The live site, API protection and public attachment download were checked. Signed-in physical-device/presentation acceptance remains the user's next testing stage.
 
 ## Included changes
 
@@ -34,6 +34,19 @@ The full local release gate passed **812 server tests and 66 Web tests**, source
 
 ## Initial production activation
 
-Worker version `5d461796-c169-4421-a825-06a7fddbbecf`, deployment `2e1f9b0e-189c-46ba-b30d-6b9beb94cffe`, activated the verified Web/API fixes. Homepage, Prices and Fields returned 200 and the same `/assets/index-BrqiJWME.js` entry, which matched the local build byte-for-byte. API readiness returned 200 in active mode. The final activation will also switch the public APK link to 1.1.1 and align Web/server version metadata.
+Worker version `5d461796-c169-4421-a825-06a7fddbbecf`, deployment `2e1f9b0e-189c-46ba-b30d-6b9beb94cffe`, first activated the verified Web/API fixes. Homepage, Prices and Fields returned 200 and the same `/assets/index-BrqiJWME.js` entry, which matched the local build byte-for-byte. API readiness returned 200 in active mode.
+
+## Final rollout and live verification
+
+- Final Worker version: **`8b017b2c-82da-4c0d-a574-a79f0ed8cfb7`**; deployment **`aa955b54-87ee-4761-acf9-2c458701b2ab`**, active at 100%.
+- Website/API: [hugpong.org](https://hugpong.org). Homepage, Prices and Fields returned 200 with `/assets/index-D9R2QjSz.js`, matching the final local Web build byte-for-byte.
+- Liveness/readiness returned 200 in active mode. Unauthenticated session/fields/prices requests returned 401. `www.hugpong.org` redirected to the canonical domain with 308.
+- Stable public [v1.1.1 release](https://github.com/anautumny/HUGPONG/releases/tag/v1.1.1), with the APK and checksum. GitHub's APK digest and size match the inspected local artifact.
+- [Same-origin APK download](https://hugpong.org/downloads/android/1.1.1): HEAD 200, attachment filename `HUGPONG-1.1.1.apk`, expected 112,694,343-byte size; a four-byte request returned 206 with the APK ZIP header. The landing page's button selects this version.
+- Release source/tag: **`a6a82bbb0a94c92a966b1b2ba5a88a09302755e8`**, on `main`. It adds final version/download metadata to the APK's verified functional source. [GitHub verification run 43596964197](https://github.com/anautumny/HUGPONG/actions/runs/43596964197) completed successfully for this release; APK-source and functional-fix commits also passed verification.
+- No business-record migration/deletion, secret rotation, paid-plan activation or Render restart was performed. Existing bindings, signing identity and canonical API authority remain in use.
+- Evidence: `output/release-1.1.1-live-verification.json`, `output/release-1.1.1-cloudflare-current.json`, `output/release-1.1.1-publication.json`, `output/release-1.1.1-publication-check.json`, `output/release-1.1.1-apk-code-checks.json` and the final local verification log.
+
+Before final testing, reload an already-open browser once to load the new application code and install 1.1.1 over the existing Android app. Keep app data; do not uninstall or clear storage. This one-time software update is separate from the automatic data refresh behavior being tested. Physical push, account-switch/offline conflicts, multi-role/device updates and presentation workflows remain unverified until exercised on the actual devices.
 
 Root causes, modified application files, behavioral regressions and remaining audit risks are documented in [AUDIT_RECOVERY_FIXES_2026-11-14.md](AUDIT_RECOVERY_FIXES_2026-11-14.md). Physical phone testing, native push delivery, signed-in multi-role/device mutation/reconnect workflows and representative hosting load remain acceptance work; successful deployment does not establish those results.
