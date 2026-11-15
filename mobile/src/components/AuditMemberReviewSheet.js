@@ -31,6 +31,12 @@ export default function AuditMemberReviewSheet({ data: incomingData, onClose, on
         ListHeaderComponent={<View style={{ gap: 6 }}>
           <Text style={styles.note}>Call members to check whether they had no monthly work or still need to synchronize. Account inactivity is shown separately. You can compile the available operations.</Text>
           {data?.activityAvailable === false && <Text style={styles.note}>Account activity is unavailable. Monthly operation records were checked.</Text>}
+          {data?.missingQuantityCount > 0 && <View style={styles.card} accessibilityRole="alert">
+            <Text style={styles.warning}>{data.missingQuantityCount} operations need quantity or unit details</Text>
+            <Text style={styles.note}>Correct these source operations before compiling. Existing certified reports require the correction workflow.</Text>
+            {(data.missingQuantityOperations || []).slice(0, 10).map((operation, index) => <Text key={`${operation.operationLogId || operation.fieldId}-${index}`} style={styles.note}>{operation.operationName} · {operation.fieldId}</Text>)}
+            {data.missingQuantityCount > 10 && <Text style={styles.note}>Showing the first 10. Correct them and review again to see the remaining operations.</Text>}
+          </View>}
           <Pagination {...page} label="members to review" position="top" />
         </View>}
         ListEmptyComponent={<Text style={styles.note}>No members need follow-up for this month.</Text>}
@@ -61,7 +67,7 @@ export default function AuditMemberReviewSheet({ data: incomingData, onClose, on
         }}
       />
       <View style={styles.footer}>
-        {!data?.canCompile && <Text style={styles.note}>No eligible operations are available. You can contact members, but an empty report cannot be compiled.</Text>}
+        {!data?.canCompile && !data?.missingQuantityCount && <Text style={styles.note}>No eligible operations are available. You can contact members, but an empty report cannot be compiled.</Text>}
         <TouchableOpacity accessibilityRole="button" disabled={!data?.canCompile} onPress={onContinue} style={[styles.continue, !data?.canCompile && { opacity: 0.45 }]}>
           <Text style={styles.buttonText}>Compile Available Operations</Text>
         </TouchableOpacity>

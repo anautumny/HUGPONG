@@ -131,6 +131,40 @@ test('same sources replay one immutable saved compilation and one audit event', 
   assert.equal(db.records.get(`crop_year_compilations/${first.id}`).totalCost, 100);
 });
 
+test('selected dates compile only inclusive certified operations without completing a crop cycle', async () => {
+  const row = report('AUD-RANGE', { operations: [
+    { operationLogId: 'BEFORE', cropYearCycle: '2026-2027', performedOn: '2026-09-09', totalCost: 10 },
+    { operationLogId: 'FIRST', cropYearCycle: '2026-2027', performedOn: '2026-09-10', totalCost: 20 },
+    { operationLogId: 'LAST', cropYearCycle: '2026-2027', performedOn: '2026-09-20', totalCost: 30 },
+    { operationLogId: 'AFTER', cropYearCycle: '2026-2027', performedOn: '2026-09-21', totalCost: 40 },
+    { operationLogId: 'OTHER-CROP', cropYearCycle: '2027-2028', performedOn: '2026-09-15', totalCost: 1000 }
+  ] });
+  const pending = report('AUD-UNCERTIFIED', { status: 'PENDING_REVIEW', operations: [{ operationLogId: 'PENDING', cropYearCycle: '2026-2027', performedOn: '2026-09-15', totalCost: 500 }] });
+  const range = { ...scope, coverageMode: 'DATE_RANGE', startDate: '2026-09-10', endDate: '2026-09-20' };
+  const db = database([row, pending]); const before = structuredClone(row);
+  const result = await compileCropYear(db, sra, range);
+  assert.equal(result.coverage, 'CERTIFIED_DATE_RANGE'); assert.equal(result.operationCount, 2); assert.equal(result.totalCost, 50);
+  assert.equal(result.sourceReports[0].operationCount, 2); assert.equal(result.fieldCount, 1);
+  assert.equal(result.startDate, range.startDate); assert.equal(result.endDate, range.endDate);
+  assert.equal((await compileCropYear(db, sra, range)).id, result.id);
+  assert.notEqual((await compileCropYear(db, sra, scope)).id, result.id);
+  assert.deepEqual(db.records.get(`audit_reports/${row.id}`), before);
+  assert.ok([...db.records.keys()].every(key => !key.startsWith('crop_cycles/')), 'compilation does not mutate cycle state');
+  assert.match(compilationHtml(result), /2026-09-10 through 2026-09-20/);
+});
+
+test('date range validation fails closed and keeps source certification checks', () => {
+  for (const input of [
+    { coverageMode: 'DATE_RANGE' }, { startDate: '2026-09-10' },
+    { startDate: '2026-02-30', endDate: '2026-03-01' },
+    { startDate: '2026-09-20', endDate: '2026-09-10' }, { coverageMode: 'ANYTHING' }
+  ]) assert.throws(() => selection({ ...scope, ...input }), { status: 400 });
+  const input = { ...scope, startDate: '2026-09-01', endDate: '2026-09-30' };
+  assert.throws(() => buildCompilation([report()], input), /valid activity date/);
+  const row = report('AUD-DATED', { operations: [{ operationLogId: 'DATE', cropYearCycle: '2026-2027', performedOn: '2026-09-15', totalCost: 1 }] });
+  assert.throws(() => buildCompilation([{ ...row, integrityHash: 'BAD' }], input), /integrity/);
+});
+
 test('content identity is stable across source and property ordering', () => {
   const row = report();
   const reordered = Object.fromEntries(Object.entries(row).reverse());

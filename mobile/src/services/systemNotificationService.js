@@ -37,6 +37,7 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
   }
   async function sync() {
     if (stopped || !owner || !getNetworkStatus() || AppState.currentState !== 'active') return;
+    if (Date.now() < retryNotBefore) { schedule(retryNotBefore - Date.now()); return; }
     if (running) { queued = true; return; }
     running = true;
     const id = owner, version = generation;
@@ -46,7 +47,9 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
       if (Notifications) try {
         if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('system-updates', {
           name: 'Prices and account verification', importance: Notifications.AndroidImportance.HIGH,
-          description: 'Official prices and authorized account-verification updates.', sound: 'default'
+          // Omit sound to keep Android's default. This SDK validates any
+          // channel sound string as a bundled custom audio filename.
+          description: 'Official prices and authorized account-verification updates.'
         });
         await requestApplicationNotificationPermission();
         const token = await getRecoveryPushToken();
@@ -100,10 +103,12 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
         await persistSeen(id);
       }
       retry = 0;
+      retryNotBefore = 0;
     } catch (error) {
       if (current(id, version)) {
-        retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
-        schedule(Math.min(30000, 1000 * 2 ** Math.min(retry++, 5)));
+        const delay = Math.max(Number(error?.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(retry++, 5)));
+        retryNotBefore = Date.now() + delay;
+        if (![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') schedule(delay);
       }
     } finally {
       running = false;

@@ -92,3 +92,38 @@ test('a field owner records without takeover, while role changes and manager rea
   assert.equal(own.statusCode, 201);
   assert.equal(own.body.data.submissionSource, 'FIELD_OWNER');
 });
+
+test('new labor-only submissions require a selected quantity/unit without dropping already-committed legacy receipts', async () => {
+  const { db, request, payload } = fixture();
+  const incomplete = { ...payload, quantity: null, baseCost: 0, totalCost: 1000, peopleCount: 2,
+    laborEntries: [{ laborEntryId: 'LAB-1', workerCount: 2, days: 1, rate: 500, subtotal: 1000 }] };
+  const before = structuredClone([...db.records]);
+  const failed = await request({ body: incomplete, userId: 'MEM-1', role: 'MEMBER_FARMER' });
+  assert.equal(failed.statusCode, 400);
+  assert.equal(failed.body.code || failed.body.data?.code, 'OPERATION_QUANTITY_REQUIRED');
+  assert.deepEqual([...db.records], before);
+  const selected = { ...incomplete, quantity: { value: 2, unit: 'bag', inputName: 'Labor-only covered quantity' } };
+  const accepted = await request({ body: selected, userId: 'MEM-1', role: 'MEMBER_FARMER' });
+  assert.equal(accepted.statusCode, 201, accepted.body.error);
+  assert.deepEqual(accepted.body.data.quantity, selected.quantity);
+  assert.equal(accepted.body.data.totalCost, 1000);
+  assert.equal(accepted.body.data.baseCost, 0, 'quantity metadata does not add another labor charge');
+  db.records.get('operation_logs/LOG-1').quantity = null;
+  const legacy = structuredClone(db.records.get('operation_logs/LOG-1'));
+  const replay = await request({ body: incomplete, userId: 'MEM-1', role: 'MEMBER_FARMER' });
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(db.records.get('operation_logs/LOG-1'), legacy, 'replayed legacy requests do not duplicate or rewrite records');
+});
+
+test('an operation amendment cannot remove the quantity/unit needed by future audits', async () => {
+  const { db, request, payload, grant } = fixture();
+  const created = await request({ body: payload, userId: 'MEM-1', role: 'MEMBER_FARMER' });
+  const original = structuredClone(db.records.get('operation_logs/LOG-1'));
+  const response = await request({ endpoint: '/:id', method: 'patch', grant, body: {
+    changes: { quantity: null }, amendment: { amendmentId: 'AMD-REMOVE-QTY', reason: 'Attempt to remove quantity' },
+    _mutation: { mutationId: 'MUT-REMOVE-QTY', idempotencyKey: 'MUT-REMOVE-QTY', entityKey: 'logs/LOG-1', baseVersion: created.body.data.updatedAt }
+  } });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.code || response.body.data?.code, 'OPERATION_QUANTITY_REQUIRED');
+  assert.deepEqual(db.records.get('operation_logs/LOG-1'), original);
+});

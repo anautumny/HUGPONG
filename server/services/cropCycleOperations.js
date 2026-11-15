@@ -21,6 +21,7 @@ const { getOperationDefinition } = require('../domain/operationCatalogue');
 const { canonicalSugarcaneVariety } = require('../domain/sugarcaneVarieties');
 const { operationAuthorization } = require('../domain/operationAuthorization');
 const { completeMatchingScheduleEntry } = require('../domain/operationSchedule');
+const { auditQuantityReadiness } = require('../domain/auditReportLayout');
 const { assertBaseVersion } = require('./mutationContext');
 const { createSystemId } = require('../domain/systemIds');
 const { queueAuditEvent } = require('./auditWriter');
@@ -237,6 +238,9 @@ async function createOperationRecord(database, input, user, timestamp = nowIso()
       submissionSource: access.authorization.submissionSource,
       photoEvidence: null
     }, { submittedByUserId: access.actorId, now: timestamp });
+    const quantityReadiness = auditQuantityReadiness([payload]);
+    if (!quantityReadiness.quantityReady) throw serviceError('Quantity and unit are required before submitting this operation. For labor-only work, use Direct Input with the operation quantity and unit; enter 0 for the direct rate when all costs are recorded in labor.', 400,
+      { code: 'OPERATION_QUANTITY_REQUIRED', ...quantityReadiness });
     assertOperationFitsField(payload.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
 
     // Read the cycle's operations before any writes. Updating the common cycle
@@ -406,6 +410,9 @@ async function amendOperationRecord(database, logId, changes, amendment, user, t
       amendments: existing.amendments || []
     };
     const canonicalUpdate = buildOperationLog(merged, { submittedByUserId: existing.submittedByUserId, now: timestamp, previousRecord: existing });
+    const quantityReadiness = auditQuantityReadiness([canonicalUpdate]);
+    if (!quantityReadiness.quantityReady) throw serviceError('Enter the operation quantity and select its unit before saving this amendment. Existing work is unchanged until the amendment succeeds.', 400,
+      { code: 'OPERATION_QUANTITY_REQUIRED', ...quantityReadiness });
     assertOperationFitsField(canonicalUpdate.areaHa, access.field.areaHa ?? access.field.ha, access.fieldId);
     const amendableFields = [
       'operationName', 'childOperationName', 'variety', 'performedOn', 'areaHa',
@@ -539,6 +546,20 @@ async function updateCycleStage(database, cycleId, input, user, timestamp = nowI
       max: CROP_STAGE_MAX
     });
     const requestedElapsed = finiteNumber(input.elapsedMonths == null ? cycle.elapsedMonths : input.elapsedMonths, 'elapsedMonths', { min: 0, max: 36 });
+    let expectedStage = null;
+    if (input.expectedStage != null) {
+      const value = input.expectedStage;
+      if (!value || typeof value !== 'object' || Array.isArray(value)
+        || !Object.prototype.hasOwnProperty.call(value, 'completedAt')
+        || (value.completedAt !== null && (typeof value.completedAt !== 'string' || !Number.isFinite(Date.parse(value.completedAt))))) {
+        throw serviceError('expectedStage must contain the previously observed stage, elapsed months and completion time.', 400);
+      }
+      expectedStage = {
+        currentStageNumber: integer(value.currentStageNumber, 'expectedStage.currentStageNumber', { min: CROP_STAGE_MIN, max: CROP_STAGE_MAX }),
+        elapsedMonths: finiteNumber(value.elapsedMonths, 'expectedStage.elapsedMonths', { min: 0, max: 36 }),
+        completedAt: value.completedAt
+      };
+    }
     const hasCompletionIntent = Object.prototype.hasOwnProperty.call(input, 'isCompleted');
     const requestedComplete = hasCompletionIntent
       ? input.isCompleted === true
@@ -560,7 +581,17 @@ async function updateCycleStage(database, cycleId, input, user, timestamp = nowI
     ) {
       return { id: cycleSnapshot.id, ...cycle, replayed: true };
     }
-    assertBaseVersion(cycle.updatedAt, mutationContext, cycleSnapshot.id, { id: cycleSnapshot.id, ...cycle });
+    try {
+      assertBaseVersion(cycle.updatedAt, mutationContext, cycleSnapshot.id, { id: cycleSnapshot.id, ...cycle });
+    } catch (error) {
+      // Recording a variety can change the cycle revision without changing
+      // stage progress. Compare the exact stage state observed by the caller
+      // in this transaction before accepting that non-overlapping update.
+      if (error.status !== 409 || !expectedStage
+        || expectedStage.currentStageNumber !== Number(cycle.currentStageNumber)
+        || expectedStage.elapsedMonths !== Number(cycle.elapsedMonths)
+        || expectedStage.completedAt !== (cycle.completedAt || null)) throw error;
+    }
     const update = {
       currentStageNumber: requestedStage,
       elapsedMonths: requestedElapsed,

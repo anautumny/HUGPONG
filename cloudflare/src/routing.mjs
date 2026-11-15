@@ -32,3 +32,21 @@ export function trustedProxyRequest(request) {
   headers.delete('forwarded');
   return new Request(request, { headers });
 }
+
+export function preserveDownloadLength(request, response, context, FixedStream = globalThis.FixedLengthStream) {
+  if (request.method !== 'GET' || !/^\/downloads\/android\/\d+\.\d+\.\d+$/.test(new URL(request.url).pathname)
+    || ![200, 206].includes(response.status) || !response.body || !FixedStream) return response;
+  const declared = response.headers.get('x-hugpong-download-length') || response.headers.get('content-length');
+  if (!/^\d+$/.test(declared || '')) return response;
+  const length = Number(declared);
+  if (!Number.isSafeInteger(length) || length <= 0) return response;
+  const fixed = new FixedStream(length);
+  const transfer = response.body.pipeTo(fixed.writable);
+  const completion = transfer.catch(() => {});
+  context?.waitUntil?.(completion);
+  const headers = new Headers(response.headers);
+  headers.delete('transfer-encoding'); headers.delete('x-hugpong-download-length');
+  headers.set('Content-Length', String(length));
+  headers.set('Cache-Control', 'public, max-age=300, no-transform');
+  return new Response(fixed.readable, { status: response.status, statusText: response.statusText, headers });
+}

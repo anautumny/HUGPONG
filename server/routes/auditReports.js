@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { auditSnapshotBatch } = require('../domain/auditSnapshotBatch');
-const { auditReportLayout, reportingMonthLabel } = require('../domain/auditReportLayout');
+const { auditReportLayout, reportingMonthLabel, auditQuantityReadiness } = require('../domain/auditReportLayout');
 const { scanScopedDocumentIds } = require('../services/scopedQueryFallback');
 const { cleanText } = require('../services/diagnosticService');
 const router = express.Router();
@@ -27,6 +27,13 @@ const {
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 let missingIndexFallbackLogged = false;
+
+function batchQuantityReadiness(logDocuments, reports) {
+  const batch = selectAuditCompilationBatch(logDocuments, reports);
+  const operations = batch.replay?.operationSnapshots || batch.operations.map(document => buildOperationSnapshot(document.id, document.data()));
+  const readiness = auditQuantityReadiness(operations);
+  return { ...readiness, canCompile: operations.length > 0 && readiness.quantityReady };
+}
 
 async function scanAuditLogs(query) {
   const documents = [];
@@ -354,6 +361,7 @@ router.get('/next-period', requireAuth, requireRole([ROLES.FARM_MANAGER]), async
       currentPeriod,
       isCarryover: periodKey < currentPeriod,
       ...readiness,
+      ...batchQuantityReadiness(readinessLogDocuments, reports.filter(report => report.periodKey === periodKey)),
       ...followUps,
       ...summarizeSnapshots(snapshots, readinessFields)
     } });
@@ -378,6 +386,7 @@ router.get('/readiness', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (
         blockFarmName: farm.name || farm.code || farm.id,
         periodKey,
         ...monthlyAuditReadiness(operationSnapshots, activeFields),
+        ...batchQuantityReadiness(eligibleLogDocuments, await reportsForFarmPeriod(farm.id, periodKey)),
         ...followUps,
         ...summarizeSnapshots(operationSnapshots, activeFields)
       }
@@ -425,6 +434,13 @@ router.post('/', requireAuth, requireRole([ROLES.FARM_MANAGER]), async (req, res
     const reportId = versionedAuditReportId(farm.id, period, version);
     if (req.body.id && String(req.body.id) !== reportId) return res.status(409).json({ success: false, error: `The canonical report identity for this audit is ${reportId}.` });
     const { operationSnapshots, fieldSnapshots, sourceLogIds, remainingOperationCount } = auditSnapshotBatch(batch.operations, activeFields);
+    const quantityReadiness = auditQuantityReadiness(operationSnapshots);
+    if (!quantityReadiness.quantityReady) {
+      const error = new Error(`${quantityReadiness.missingQuantityCount} operation(s) have missing quantities or units. Correct the source operations before compiling a new audit.`);
+      error.status = 422;
+      error.data = { code: 'AUDIT_QUANTITY_INCOMPLETE', ...quantityReadiness };
+      throw error;
+    }
     const cropYearCycles = auditCropYearCycles({}, operationSnapshots, fieldSnapshots);
     if (!cropYearCycles.length) throw new Error('Eligible operation records are missing their Crop Year Cycle. Correct the source records before compiling this audit.');
     if (cropYearCycles.some(year => Number(year.slice(0, 4)) > Number(period.slice(0, 4)))) {

@@ -23,7 +23,7 @@ test('Mobile takeover resolves the field farm by canonical ID without legacy or 
   assert.equal(resolve(field), 'Updated NACAYAO name', 'later server replica updates remain visible');
 
   const screen = fs.readFileSync(path.resolve(__dirname, '../../mobile/src/screens/FieldOpsScreen.js'), 'utf8');
-  const summary = screen.slice(screen.indexOf('{/* Target Field Summary Card */}'), screen.indexOf('{/* Security Notice */}', screen.indexOf('{/* Target Field Summary Card */}')));
+  const summary = screen.slice(screen.indexOf('<TakeoverAuthorizationModal'), screen.indexOf('{editAuthorizationModal}', screen.indexOf('<TakeoverAuthorizationModal')));
   assert.match(summary, /resolveFieldBlockFarm\(safeField\)/);
   assert.doesNotMatch(summary, /session\?\.(farm|blockFarm)|No block farm assigned/);
 });

@@ -113,7 +113,8 @@ export default function AccountRecoveryModal({ isOpen, onClose }) {
           setStep(3);
           if (typeof window.Notification === 'function' && window.Notification.permission === 'granted') {
             new window.Notification('Password recovery approved', {
-              body: 'Return to HUGPONG now to create your new password.'
+              body: 'Return to HUGPONG now to create your new password.',
+              icon: '/icon-foreground.png'
             });
           }
         } else if (['REJECTED', 'EXPIRED', 'REPLACED', 'USED'].includes(result.status)) {

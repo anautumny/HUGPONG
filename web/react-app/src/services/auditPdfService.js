@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import QRCode from 'qrcode';
-import { auditReportLayout, operationMonth, reportingMonthLabel } from '../utils/auditReportLayout.js';
+import { auditReportLayout, operationMonth, reportingMonthLabel, auditOperationGroups } from '../utils/auditReportLayout.js';
 import { auditCropYearCycles } from '../domain/auditWorkflow.js';
 
 const number = value => Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -73,12 +73,7 @@ export function createAuditReportPdf(report, { blockFarms = [], currentUser = nu
   doc.setFont('courier', 'normal'); doc.setFontSize(5.5);
   doc.text(doc.splitTextToSize(hash, 29), width - margin - 29, qrY + 27);
   y = Math.max(y, qrY + 36) + 2;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
-  doc.text('Coverage: recorded operations only. Plots without records are not counted as audited.', margin, y); y += 4;
-  const noteLines = doc.splitTextToSize(layout.timelineNote, width - margin * 2);
-  doc.text(noteLines, margin, y); y += noteLines.length * 3 + 2;
-
-  const fixed = [6, 46, 12, 10, 14, 18, 22];
+  const fixed = [6, 46, 12, 16, 14, 18, 22];
   const available = width - margin * 2 - fixed.reduce((sum, value) => sum + value, 0);
   const monthWidth = layout.columns.length ? Math.min(10, available / layout.columns.length) : 0;
   const operationWidth = fixed[1] + Math.max(0, available - monthWidth * layout.columns.length);
@@ -87,56 +82,60 @@ export function createAuditReportPdf(report, { blockFarms = [], currentUser = nu
   fixed.slice(2).forEach((value, index) => { columnStyles[index + layout.columns.length + 2] = { cellWidth: value, halign: index === 1 || index === 2 ? 'center' : 'right' }; });
   const head = [[{ content: 'NO', rowSpan: 2 }, { content: 'OPERATION', rowSpan: 2 },
     ...layout.groups.map(group => ({ content: group.label.toUpperCase(), colSpan: group.columns.length })),
-    ...['TOTAL', 'QTY', 'UNIT', 'UNIT COST', 'COST PER HECTARE'].map(content => ({ content, rowSpan: 2 }))],
+    ...['TOTAL', 'QTY', 'UNIT', 'UNIT COST', 'OPERATION COST'].map(content => ({ content, rowSpan: 2 }))],
   layout.columns.map(column => ({ content: String(layout.columnLabels[column]) }))];
   const rows = [];
   let operationNumber = 0;
   const totalRow = (label, amount) => [
-    { content: label, colSpan: layout.columnCount - 1, styles: { fontStyle: 'bold', lineWidth: 0.3 } },
-    { content: number(auditedArea > 0 ? amount / auditedArea : amount), styles: { fontStyle: 'bold', halign: 'right', lineWidth: 0.3 } }
+    '', { content: label, styles: { fontStyle: 'bold', lineWidth: 0.3 } },
+    ...Array(layout.columnCount - 3).fill(''),
+    { content: number(amount), styles: { fontStyle: 'bold', halign: 'right', lineWidth: 0.3 } }
   ];
   const addOperation = operation => {
     operationNumber++;
     const area = Number(operation.areaHa || auditedArea);
     const placement = operationMonth(operation, layout.period);
-    const months = layout.columns.map(column => column === placement ? number(area) : '');
+    const months = layout.columns.map(column => operation.monthlyAreas
+      ? (operation.monthlyAreas[column] != null ? number(operation.monthlyAreas[column]) : '')
+      : (column === placement ? number(area) : ''));
     const name = `${operation.operationName || operation.name || `Operation ${operationNumber}`}${operation.childOperationName ? `\nChild operation: ${operation.childOperationName}` : ''}`;
-    const cost = Number(operation.totalCost || operation.cost || 0);
+    const cost = Number(operation.totalCost ?? operation.cost ?? 0);
     const items = operation.lineItems || [];
     if (items.length) {
       rows.push([{ content: String(operationNumber), styles: { fontStyle: 'bold' } },
-        { content: name, colSpan: layout.columnCount - 1, styles: { fontStyle: 'bold', fillColor: [247, 247, 247] } }]);
+        { content: name, styles: { fontStyle: 'bold', fillColor: [247, 247, 247] } }, ...Array(layout.columnCount - 2).fill('')]);
       for (const item of items) {
         const quantity = Number(item.quantity ?? 1);
         const rate = Number(item.unitCost ?? 0);
         const subtotal = Number(item.subtotal ?? quantity * rate);
-        rows.push(['', item.description || item.name || 'Expense', ...months, number(area), String(quantity), item.unit || 'bag', number(rate), number(area > 0 ? subtotal / area : subtotal)]);
+        const childArea = Number(item.areaHa ?? area);
+        const childMonths = item.monthlyAreas ? layout.columns.map(column => item.monthlyAreas[column] != null ? number(item.monthlyAreas[column]) : '') : months;
+        rows.push(['', item.description || item.name || 'Expense', ...childMonths, number(childArea), item.priceCells?.quantityLabel ?? String(quantity), item.priceCells?.unitLabel ?? item.unit ?? 'bag', item.priceCells?.unitCostLabel ?? number(rate), number(subtotal)]);
       }
     } else {
       const quantity = Number(operation.quantity?.value ?? 1);
-      const unitCost = Number(operation.unitCost || cost / Math.max(quantity || 1, 0.1));
-      rows.push([String(operationNumber), name, ...months, number(area), String(quantity), operation.quantity?.unit || operation.unit || (milling(operation) ? 'ton' : 'HA'), number(unitCost), number(area > 0 ? cost / area : cost)]);
+      const unitCost = Number(operation.unitCost ?? cost / Math.max(quantity || 1, 0.1));
+      rows.push([String(operationNumber), name, ...months, number(area), operation.priceCells?.quantityLabel ?? String(quantity), operation.priceCells?.unitLabel ?? operation.quantity?.unit ?? operation.unit ?? (milling(operation) ? 'ton' : 'HA'), operation.priceCells?.unitCostLabel ?? number(unitCost), number(cost)]);
     }
   };
-  const direct = operations.filter(operation => !milling(operation));
-  const harvest = operations.filter(milling);
-  const directCost = direct.reduce((sum, operation) => sum + Number(operation.totalCost || operation.cost || 0), 0);
-  const harvestCost = harvest.reduce((sum, operation) => sum + Number(operation.totalCost || operation.cost || 0), 0);
-  direct.forEach(addOperation); rows.push(totalRow('TOTAL DIRECT COST', directCost));
+  const groupedOperations = auditOperationGroups(report, operations);
+  const direct = groupedOperations.filter(operation => !milling(operation));
+  const harvest = groupedOperations.filter(milling);
+  const directCost = direct.reduce((sum, operation) => sum + Number(operation.totalCost ?? operation.cost ?? 0), 0);
+  const harvestCost = harvest.reduce((sum, operation) => sum + Number(operation.totalCost ?? operation.cost ?? 0), 0);
+  direct.forEach(addOperation); rows.push(totalRow('TOTAL DIRECT COST (PHP)', directCost));
   if (harvest.length) {
-    rows.push([{ content: 'MILLING EXPENSES', colSpan: layout.columnCount, styles: { fontStyle: 'bold' } }]);
-    harvest.forEach(addOperation); rows.push(totalRow('TOTAL MILLING EXPENSES', harvestCost));
+    rows.push(['', { content: 'MILLING EXPENSES', styles: { fontStyle: 'bold' } }, ...Array(layout.columnCount - 2).fill('')]);
+    harvest.forEach(addOperation); rows.push(totalRow('TOTAL MILLING EXPENSES (PHP)', harvestCost));
   }
-  rows.push(totalRow('TOTAL COST OF PRODUCTION', directCost + harvestCost));
+  rows.push(totalRow('TOTAL COST OF PRODUCTION (PHP)', directCost + harvestCost));
   autoTable(doc, { startY: y, margin: { left: margin, right: margin, top: 10, bottom: 12 }, head, body: rows,
-    theme: 'grid', styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.1, lineWidth: 0.16, lineColor: [0, 0, 0], textColor: [0, 0, 0], overflow: 'linebreak' },
+    theme: 'grid', styles: { font: 'helvetica', fontSize: 7, cellPadding: 0.25, lineWidth: 0.16, lineColor: [0, 0, 0], textColor: [0, 0, 0], overflow: 'linebreak' },
     headStyles: { fillColor: [237, 212, 70], textColor: [0, 0, 0], halign: 'center', valign: 'middle', fontStyle: 'bold' },
     columnStyles, rowPageBreak: 'avoid', showHead: 'everyPage' });
   y = doc.lastAutoTable.finalY + 5;
-  const footnote = `Total recorded expenditure for ${auditedArea.toFixed(4)} HA included in this report: PHP ${number(directCost + harvestCost)}.`;
-  const footnoteLines = doc.splitTextToSize(footnote, width - margin * 2);
-  if (y + footnoteLines.length * 3 + 32 > height - 12) { doc.addPage(); y = 14; }
-  doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.text(footnoteLines, margin, y); y += footnoteLines.length * 3 + 14;
+  if (y + 28 > height - 12) { doc.addPage(); y = 14; }
+  y += 8;
   const manager = actorName(report.compiledByName, report.compiledByUserId, currentUser, 'Farm Manager');
   const inspector = report.status === 'CERTIFIED' ? actorName(report.certifiedByName || report.verifiedBy, report.certifiedByUserId, currentUser, 'SRA Inspector') : 'Awaiting Review';
   const signatures = [[manager, 'Farm Manager / President', farmName], [inspector, 'SRA Agricultural Inspector', 'Field Operations Audit Division'], [accountName(currentUser) || 'Authorized HUGPONG User', `Exported by ${String(currentUser?.role || currentUser?.canonicalRole || '').replace(/_/g, ' ')}`, '']];
@@ -164,13 +163,13 @@ export function downloadAuditReportPdf(report, options) {
   return { filename };
 }
 
-export function downloadCropYearCompilationPdf(report) {
+export function createCropYearCompilationPdf(report) {
   if (!report?.id) throw new Error('Save or select a compilation before downloading its PDF.');
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('HUGPONG Crop Year Compilation', 14, 18);
   doc.setFontSize(12); doc.text(`${report.cropYearCycle} / ${report.blockFarmId || 'All Block Farms'}`, 14, 26);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text('Certified monthly reports to date. This does not declare that the crop year is complete.', 14, 34);
+  doc.text(doc.splitTextToSize(report.startDate ? `Certified operations: ${report.startDate} through ${report.endDate} (inclusive). Crop cycle remains open.` : 'Certified monthly reports to date. This does not declare that the crop year is complete.', 182), 14, 34);
   doc.text(`${report.sourceReportCount} certified reports / ${report.monthCount} reporting months / ${report.operationCount} operations`, 14, 41);
   doc.text(`Audited area: ${report.hectaresAudited} HA / Total cost: PHP ${number(report.totalCost)}`, 14, 47);
   let y = 54;
@@ -187,6 +186,11 @@ export function downloadCropYearCompilationPdf(report) {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
   doc.text(doc.splitTextToSize(`Compilation: ${report.id}\nCompiled by ${report.compiledByName || 'Authorized SRA Admin'} at ${report.compiledAt || ''}\nArea counts each field once using its latest included monthly snapshot.`, 182), 14, y);
   const filename = `HUGPONG_${filePart(report.id)}_Crop_Year_Compilation.pdf`;
+  return { doc, filename };
+}
+
+export function downloadCropYearCompilationPdf(report) {
+  const { doc, filename } = createCropYearCompilationPdf(report);
   doc.save(filename);
   return { filename };
 }

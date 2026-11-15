@@ -68,14 +68,70 @@ test('delayed Mobile session refresh and 401 responses cannot sign out a new acc
   }
 });
 
-test('same-account refresh still saves a valid token; a current 401 still revokes credentials', async () => {
+test('a verified stored API session re-establishes a missing Firebase identity and rejects an account mismatch', async () => {
+  const { context, requests, respond, token } = authRuntime(); context.auth.currentUser = null;
+  const repair = context.refreshServerSession('token-A', { expectedUserId: 'A' }); await tick();
+  respond(requests[0], { success: true, user: { employeeId: 'A' }, token: 'repaired-A', firebaseCustomToken: 'firebase-A' }); await repair;
+  assert.equal(context.auth.currentUser.uid, 'A'); assert.equal(token.get('AUTH_TOKEN'), 'repaired-A');
+  context.auth.currentUser = null;
+  const mismatch = context.refreshServerSession('token-A', { expectedUserId: 'A' });
+  const rejected = assert.rejects(mismatch, { code: 'AUTH_IDENTITY_MISMATCH' }); await tick();
+  respond(requests[1], { success: true, user: { employeeId: 'B' }, token: 'B', firebaseCustomToken: 'firebase-B' }); await rejected;
+  assert.equal(context.auth.currentUser, null); assert.equal(token.get('AUTH_TOKEN'), 'repaired-A');
+  const incomplete = context.refreshServerSession('token-A', { expectedUserId: 'A' });
+  const invalid = assert.rejects(incomplete, { status: 503, code: 'AUTH_SESSION_RESPONSE_INVALID' }); await tick();
+  respond(requests[2], { success: true, token: 'incomplete', firebaseCustomToken: 'firebase-A' }); await invalid;
+  assert.equal(context.auth.currentUser, null); assert.equal(token.get('AUTH_TOKEN'), 'repaired-A');
+});
+
+test('same-account refresh saves a valid token; definitive Firebase rejection after a 401 revokes credentials', async () => {
   const runtime = authRuntime(), { context, requests, respond } = runtime;
   const refresh = context.refreshServerSession('token-A'); await tick();
   respond(requests[0], { success: true, token: 'fresh-A', firebaseCustomToken: 'firebase-A' }); await refresh;
   assert.equal(runtime.token.get('AUTH_TOKEN'), 'fresh-A');
   const expired = context.authenticatedRequest('/api/fields'); const rejected = assert.rejects(expired, { status: 401 }); await tick();
-  respond(requests[1], { success: false, error: 'Revoked' }, 401); await rejected;
+  respond(requests[1], { success: false, error: 'Revoked' }, 401); await tick();
+  respond(requests[2], { success: false, error: 'Revoked Firebase session' }, 401); await rejected;
   assert.equal(runtime.token.has('AUTH_TOKEN'), false); assert.equal(context.auth.currentUser, null);
+});
+
+test('sync authorization uses the live API session without forcing a Firebase exchange', async () => {
+  const { context, requests, token, respond } = authRuntime();
+  let googleCalls = 0;
+  context.auth.currentUser.getIdToken = async () => { googleCalls++; throw new Error('Google unavailable'); };
+  const pending = context.refreshMobileSessionForSync(); await tick();
+  assert.ok(requests[0].url.endsWith('/auth/session'));
+  respond(requests[0], { success: true, token: 'renewed-API-A', user: { employeeId: 'A' } });
+  await pending;
+  assert.equal(googleCalls, 0); assert.equal(token.get('AUTH_TOKEN'), 'renewed-API-A');
+});
+
+test('simultaneous expired Mobile requests share recovery and replay the original mutation once', async () => {
+  const { context, requests, token, respond } = authRuntime();
+  const command = { id: 'LOG-TEST', _mutation: { idempotencyKey: 'MUT-SAME-INTENT' } };
+  const read = context.authenticatedRequest('/api/fields');
+  const write = context.authenticatedRequest('/api/logs', { method: 'POST', body: command });
+  await tick();
+  respond(requests[0], { success: false, error: 'Expired' }, 401);
+  respond(requests[1], { success: false, error: 'Expired' }, 401); await tick();
+  assert.equal(requests.length, 3); assert.ok(requests[2].url.endsWith('/auth/mobile-session'));
+  assert.equal(token.get('AUTH_TOKEN'), 'token-A', 'recovery retains the saved credentials');
+  respond(requests[2], { success: true, token: 'fresh-A', user: { employeeId: 'A' } }); await tick();
+  assert.equal(requests.length, 5);
+  assert.ok(requests.slice(3).every(request => request.options.headers.Authorization === 'Bearer fresh-A'));
+  const retryWrite = requests.slice(3).find(request => request.url.endsWith('/api/logs'));
+  assert.deepEqual(JSON.parse(retryWrite.options.body), command, 'the same idempotency key survives recovery');
+  for (const request of requests.slice(3)) respond(request, { success: true, data: [] });
+  await Promise.all([read, write]); assert.equal(token.get('AUTH_TOKEN'), 'fresh-A');
+});
+
+test('temporary recovery failures preserve Mobile credentials and do not pretend the account is revoked', async () => {
+  const { context, requests, token, respond } = authRuntime();
+  const request = context.authenticatedRequest('/api/fields'); const rejected = assert.rejects(request, { status: 503 });
+  await tick(); respond(requests[0], { success: false, error: 'Expired' }, 401);
+  await tick(); respond(requests[1], { success: false, error: 'Temporary outage' }, 503);
+  await rejected;
+  assert.equal(token.get('AUTH_TOKEN'), 'token-A'); assert.equal(context.auth.currentUser.uid, 'A');
 });
 
 test('clearing Mobile cache preserves both accounts drafts, outboxes, uncertain intents and secure credentials', async () => {

@@ -23,6 +23,7 @@ function createAndroidDownloadHandler({ release, fetchArtifact = fetch } = {}) {
     const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000);
     try {
       const upstream = await fetchArtifact(artifact.href, {
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
         headers: { ...(range ? { Range: range } : {}), 'Accept-Encoding': 'identity' },
         redirect: 'follow', signal: controller.signal
       });
@@ -32,19 +33,30 @@ function createAndroidDownloadHandler({ release, fetchArtifact = fetch } = {}) {
         await upstream.body?.cancel();
         return res.status(416).end();
       }
-      if (![200, 206].includes(upstream.status) || !upstream.body) {
+      if (![200, 206].includes(upstream.status) || (!upstream.body && req.method !== 'HEAD')) {
         await upstream.body?.cancel();
         return res.status(503).json({ success: false, error: 'The Android download is temporarily unavailable. Please try again.' });
       }
       res.status(upstream.status);
       res.set('Content-Type', 'application/vnd.android.package-archive');
       res.set('Content-Disposition', `attachment; filename="HUGPONG-${release.version}.apk"`);
-      res.set('Cache-Control', 'public, max-age=300');
+      res.set('Cache-Control', 'public, max-age=300, no-transform');
       for (const header of ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
         const value = upstream.headers.get(header);
         if (value) res.set(header, value);
       }
-      if (req.method === 'HEAD') { await upstream.body.cancel(); return res.end(); }
+      const declared = upstream.headers.get('content-length');
+      const partial = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(upstream.headers.get('content-range') || '');
+      const length = declared && /^\d+$/.test(declared) ? Number(declared)
+        : upstream.status === 206 && partial ? Number(partial[2]) - Number(partial[1]) + 1
+          : upstream.status === 200 ? Number(release.sizeBytes) : NaN;
+      if (Number.isSafeInteger(length) && length > 0) {
+        res.set('Content-Length', String(length));
+        // The Workers Node HTTP bridge may serialize the body as an unknown-
+        // length stream. Preserve trusted length metadata for the final edge.
+        res.set('X-Hugpong-Download-Length', String(length));
+      }
+      if (req.method === 'HEAD') { await upstream.body?.cancel(); return res.end(); }
       await pipeline(Readable.fromWeb(upstream.body), res);
     } catch {
       if (res.destroyed) return;

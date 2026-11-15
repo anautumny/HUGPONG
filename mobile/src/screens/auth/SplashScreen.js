@@ -1,15 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Animated, Dimensions, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Animated, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { COLORS, FONT_FAMILY } from '../../theme';
 import { getItem } from '../../services/storageService';
 import { restoreSessionFromToken } from '../../data/dataStore';
 import { AppText as Text } from '../../components/Typography';
 import { useTranslation } from '../../services/i18n';
+import { getNetworkStatus, subscribeToNetwork } from '../../services/networkService';
 
 const LOGO = require('../../../assets/icon-foreground.png');
 const AnimatedText = Animated.createAnimatedComponent(Text);
-
-const { width, height } = Dimensions.get('window');
 
 export default function SplashScreen({ navigation }) {
   const { t } = useTranslation();
@@ -29,6 +28,7 @@ export default function SplashScreen({ navigation }) {
     ]).start();
 
     let active = true;
+    let waitingForNetwork = false;
     const restore = async () => {
       setRestoreError('');
       try {
@@ -52,7 +52,11 @@ export default function SplashScreen({ navigation }) {
         if (authRes.success && (authRes.user?.employeeId || authRes.user?.id)) {
           navigation.replace('MainTabs');
         } else if (authRes.error) {
-          setRestoreError('Your saved account could not be loaded. Tap Retry to try again.');
+          waitingForNetwork = authRes.reason === 'SESSION_RESTORE_DEFERRED';
+          setRestoreError(waitingForNetwork ? authRes.error : 'Your saved account could not be loaded. Tap Retry to try again.');
+          // Connectivity may return while the stored-session check is still
+          // resolving, before the deferred result enables the subscriber.
+          if (waitingForNetwork && getNetworkStatus()) { waitingForNetwork = false; void restore(); }
         } else {
           navigation.replace('Login');
         }
@@ -60,8 +64,11 @@ export default function SplashScreen({ navigation }) {
         if (active) setRestoreError('Your saved account could not be loaded. Tap Retry to try again.');
       }
     };
+    const stopNetwork = subscribeToNetwork(online => {
+      if (active && online && waitingForNetwork) { waitingForNetwork = false; void restore(); }
+    });
     restore();
-    return () => { active = false; };
+    return () => { active = false; stopNetwork(); };
   }, [restoreAttempt]);
 
   return (
@@ -75,8 +82,7 @@ export default function SplashScreen({ navigation }) {
           Agricultural Operations Platform
         </AnimatedText>
         {!restoreError && <View style={s.restoreNotice} accessibilityLiveRegion="polite">
-          <ActivityIndicator color={COLORS.primary} accessibilityLabel={t('data_restoring_account')} />
-          <Text style={s.restoreMessage}>{t('data_restoring_account')}</Text>
+          <ActivityIndicator size="large" color={COLORS.primary} accessibilityLabel={t('data_loading_title')} />
         </View>}
         {!!restoreError && <View style={s.restoreNotice}>
           <Text accessibilityRole="alert" style={s.restoreMessage}>{restoreError}</Text>

@@ -9,7 +9,12 @@ export async function updateCropStage({ user, field, currentStageNumber, isCompl
     method: 'PATCH',
     headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {},
     body: { currentStageNumber: Number(currentStageNumber), isCompleted: isCompleted === true,
-      elapsedMonths: Number(field?.cropCycle?.elapsedMonths || 0) },
+      elapsedMonths: Number(field?.cropCycle?.elapsedMonths || 0),
+      ...(field?.cropCycle ? { expectedStage: {
+        currentStageNumber: Number(field.cropCycle.currentStageNumber),
+        elapsedMonths: Number(field.cropCycle.elapsedMonths || 0),
+        completedAt: field.cropCycle.completedAt || null
+      } } : {}) },
     baseVersion: field?.cropCycle?.updatedAt || null
   });
 }

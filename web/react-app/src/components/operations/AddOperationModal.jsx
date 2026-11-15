@@ -362,8 +362,8 @@ export default function AddOperationModal({
     }
 
     if (inputMode === 'group') {
-      if (submittedLineItems.length === 0 && submittedLaborEntries.length === 0) {
-        errors.subItems = 'Add at least one line item.';
+      if (submittedLineItems.length === 0) {
+        errors.subItems = 'Add a material or expense with its quantity and unit. For labor-only work, choose Direct Input and enter the operation quantity and unit; use direct rate 0 when the crew cost is entered separately.';
       } else if (submittedLineItems.some(item => (
         !item.description.trim()
         || !String(item.unit || '').trim()
@@ -473,7 +473,11 @@ export default function AddOperationModal({
           const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
-            body: { currentStageNumber: nextStage },
+            body: { currentStageNumber: nextStage, ...(field?.cropCycle ? { expectedStage: {
+              currentStageNumber: Number(field.cropCycle.currentStageNumber),
+              elapsedMonths: Number(field.cropCycle.elapsedMonths || 0),
+              completedAt: field.cropCycle.completedAt || null
+            } } : {}) },
             baseVersion: submissionResult?.cycleVersion || field?.cropCycle?.updatedAt,
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
@@ -816,10 +820,10 @@ export default function AddOperationModal({
         </div>
 
         <div className="space-y-2 rounded-xl border border-border p-3">
-          <div className="flex items-center justify-between">
+          {Number(workersCount || 0) > 0 && Number(newWorker.days || 0) > 0 && String(newWorker.rate ?? '').trim() !== '' && <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-hug-text">Crew costs</span>
             <span className="text-xs font-semibold text-primary">{formatCurrency(laborCost)}</span>
-          </div>
+          </div>}
           {laborEntries.map((worker, index) => (
             <div key={worker.laborEntryId} className="flex items-center justify-between gap-3 rounded-lg bg-bg px-3 py-2 text-xs">
               <span className="font-semibold text-hug-text">{worker.workerCount} workers · {worker.days} day × {formatCurrency(worker.rate)}</span>
@@ -874,6 +878,7 @@ export default function AddOperationModal({
         </div>
 
         {/* Group Mode child items */}
+        <p className="text-xs text-hug-muted">For labor-only work, use Direct Input and enter the quantity and unit. Use direct rate 0 when all costs are entered in the crew details.</p>
         {inputMode === 'group' ? (
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">

@@ -1,4 +1,4 @@
-import { priceText, movementText, priceStatusLabel } from '../../utils/pricePresentation';
+import { priceText, priceStatusLabel } from '../../utils/pricePresentation';
 import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, ArrowUpDown, ArrowUpRight, ArrowDownRight, Minus, FileText, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import Input from '../ui/Input';
@@ -93,7 +93,7 @@ export default function PriceHistoryTable({
             </span>
           </h3>
           <p className="text-sm text-hug-text2 mt-0.5">
-            Weekly price history. Missing quotes retain their reported status.
+            Changes compare with the previous dated publication. Week-ending reports require consecutive weeks; missing quotes retain their reported status.
           </p>
         </div>
 
@@ -154,7 +154,7 @@ export default function PriceHistoryTable({
               </th>
 
               <th scope="col" className="px-4 py-3.5 select-none">
-                Weekly Variance
+                Price Change
               </th>
 
               <th scope="col" className="px-4 py-3.5 text-right select-none">

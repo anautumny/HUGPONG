@@ -96,7 +96,11 @@ const loginAccountRateLimit = createRateLimit({
   rejectionMessage: LOGIN_LOCKOUT_MESSAGE,
   rejectionData: loginRateLimitData
 });
-const mobileSessionRateLimit = createRateLimit({ name: 'auth-mobile-session', max: 60, windowMs: 15 * 60 * 1000, key: clientAddress });
+// Successful Firebase-backed renewals are not password/code attempts. Keep
+// the persistent allowance for invalid tokens; early network flood guards
+// still apply before verification, including on this background endpoint.
+const mobileSessionRateLimit = createRateLimit({ name: 'auth-mobile-session', max: 60, windowMs: 15 * 60 * 1000, key: clientAddress,
+  rejectionCode: 'MOBILE_SESSION_RATE_LIMITED', rejectionMessage: 'Too many unsuccessful session checks. Please wait before retrying.' });
 const otpRequestRateLimit = createRateLimit({
   name: OTP_REQUEST_LIMITER,
   max: VERIFICATION_CODE_SEND_LIMIT,
@@ -118,7 +122,8 @@ const registrationReviewRequestRateLimit = createRateLimit({
   windowMs: 60 * 60 * 1000,
   key: req => `${clientAddress(req)}:${normalizeContact(req.body?.phone) || 'missing'}`
 });
-const passwordRateLimit = createRateLimit({ name: 'auth-password-check', max: 10, windowMs: 15 * 60 * 1000, key: req => `${clientAddress(req)}:${identifier(req)}` });
+const passwordRateLimit = createRateLimit({ name: 'auth-password-check', max: 10, windowMs: 15 * 60 * 1000, key: req => `${clientAddress(req)}:${req.authUser?.employeeId || req.session?.user?.employeeId || 'unknown'}`,
+  rejectionCode: 'PASSWORD_CHECK_RATE_LIMITED', rejectionMessage: 'Too many incorrect password attempts. Please wait before trying again.' });
 const passwordRecoveryIpRateLimit = createRateLimit({
   name: 'auth-password-recovery-ip',
   max: 20,
@@ -278,14 +283,14 @@ async function verifyCurrentPassword(userId, password) {
   return credential.exists && verifyPassword(password, credential.data().passwordHash);
 }
 
-router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
+router.post('/mobile-session', async (req, res) => {
   if (!db || !auth) return res.status(503).json({ success: false, error: 'Authentication services are unavailable.' });
   if (String(req.headers['x-client-platform'] || '').toLowerCase() !== 'mobile') {
     return res.status(403).json({ success: false, error: 'This session refresh endpoint is restricted to the mobile client.' });
   }
   const header = String(req.headers.authorization || '');
   const firebaseIdToken = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!firebaseIdToken) return res.status(401).json({ success: false, error: 'Firebase authentication is required.' });
+  if (!firebaseIdToken) return mobileSessionRateLimit(req, res, () => res.status(401).json({ success: false, error: 'Firebase authentication is required.' }));
   let firebaseTokenVerified = false;
   try {
     const decoded = await auth.verifyIdToken(firebaseIdToken, true);
@@ -311,8 +316,8 @@ router.post('/mobile-session', mobileSessionRateLimit, async (req, res) => {
       'auth/argument-error', 'auth/invalid-argument', 'auth/invalid-id-token',
       'auth/id-token-expired', 'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found'
     ]).has(String(error?.code || ''));
-    if (rejectedToken) return res.status(401).json({ success: false,
-      error: 'Firebase authentication could not be refreshed.', code: 'FIREBASE_SESSION_REJECTED' });
+    if (rejectedToken) return mobileSessionRateLimit(req, res, () => res.status(401).json({ success: false,
+      error: 'Firebase authentication could not be refreshed.', code: 'FIREBASE_SESSION_REJECTED' }));
     res.locals.diagnosticError = error;
     return res.status(503).json({ success: false,
       error: 'Account authorization is temporarily unavailable. Please retry.', code: 'AUTHORIZATION_UNAVAILABLE' });
@@ -966,8 +971,10 @@ router.post('/verify-phone', requireAuth, otpVerifyRateLimit, async (req, res) =
 });
 
 router.post('/verify-password', requireAuth, passwordRateLimit, async (req, res) => {
+  try {
   const valid = await verifyCurrentPassword(req.session.user.employeeId, req.body?.password);
   if (!valid) return res.status(403).json({ success: false, error: 'Password verification failed.', code: 'INVALID_CURRENT_PASSWORD' });
+  await passwordRateLimit.reset(req);
   if (req.body?.purpose !== TAKEOVER_GRANT_PURPOSE) {
     return res.json({ success: true, verified: true });
   }
@@ -987,6 +994,10 @@ router.post('/verify-password', requireAuth, passwordRateLimit, async (req, res)
     takeoverGrant: issueTakeoverGrant({ actorId: req.session.user.employeeId, fieldId: assignment.fieldId }, issuedAt),
     takeoverGrantExpiresAt: issuedAt + TAKEOVER_GRANT_TTL_MS
   });
+  } catch (error) {
+    res.locals.diagnosticError = error;
+    return res.status(503).json({ success: false, error: 'Password authorization is temporarily unavailable. Please try again.', code: 'AUTHORIZATION_UNAVAILABLE' });
+  }
 });
 
 router.post('/change-password', requireAuth, passwordRateLimit, async (req, res) => {

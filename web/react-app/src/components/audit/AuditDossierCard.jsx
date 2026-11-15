@@ -404,25 +404,26 @@ export default function AuditDossierCard({
       </div>
 
       {/* Footer & Actions */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-t border-border pt-5">
-        <div className="flex items-center gap-2 text-xs text-hug-muted">
-          <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
-          <span>
-            {isCertified
-              ? `Officially certified by SRA Admin on ${formatDate(report.certifiedAt)}.`
-              : isPendingReview ? 'Integrity-protected snapshot awaiting authorized SRA review.' : 'Compiled snapshot saved and ready for Farm Manager submission.'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* SRA Admin Digital Seal Action */}
-          {isSraAdmin && (
-            isCertified ? (
-              <div className="flex items-center gap-1.5 bg-primary-bg text-primary dark:text-primary-light border border-primary/30 px-3.5 py-2 rounded-xl text-xs font-bold shadow-2xs">
+      <div className="flex flex-col gap-4 border-t border-border pt-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-2 text-xs leading-relaxed text-hug-muted">
+            <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
+            <span>
+              {isCertified
+                ? `Officially certified by SRA Admin on ${formatDate(report.certifiedAt)}.`
+                : isPendingReview ? 'Integrity-protected snapshot awaiting authorized SRA review.' : 'Compiled snapshot saved and ready for Farm Manager submission.'}
+            </span>
+          </div>
+          {isCertified && (
+              <div className="inline-flex shrink-0 items-center gap-1.5 self-start bg-primary-bg text-primary dark:text-primary-light border border-primary/30 px-3.5 py-2 rounded-xl text-xs font-bold shadow-2xs">
                 <CheckCircle2 className="w-4 h-4 text-primary dark:text-primary-light" />
                 <span>SRA Digital Seal Applied</span>
               </div>
-            ) : isPendingReview ? (
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:justify-end" role="group" aria-label="Audit document actions">
+          {isSraAdmin && !isCertified && isPendingReview && (
               <Button
                 variant="primary"
                 size="md"
@@ -433,7 +434,6 @@ export default function AuditDossierCard({
               >
                 Issue SRA Digital Seal
               </Button>
-            ) : null
           )}
 
           {!isSraAdmin && isCompiled && (
@@ -443,7 +443,6 @@ export default function AuditDossierCard({
           )}
 
           {isCertified && <Button variant="secondary" size="md" icon={Download} onClick={handleDownloadPdf} isLoading={isDownloadingPdf} loadingText="Preparing PDF...">Download PDF</Button>}
-          {pdfError && <p role="alert" className="text-sm text-danger">{pdfError}</p>}
           {/* Printable Report View Button */}
           {isCertified && <Button
             variant="secondary"
@@ -454,6 +453,7 @@ export default function AuditDossierCard({
             Print Audit Document
           </Button>}
         </div>
+        {pdfError && <p role="alert" className="text-sm text-danger sm:text-right">{pdfError}</p>}
       </div>
 
       {status === AUDIT_STATUS.RETURNED && report.returnReason && (

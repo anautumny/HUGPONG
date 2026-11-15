@@ -15,14 +15,17 @@ async function until(condition) {
   assert.fail('Expected asynchronous notification transition did not complete.');
 }
 
-function runtime({ baseline = true, permission = true, override = null, nativeFailure = false } = {}) {
+function runtime({ baseline = true, permission = true, override = null, nativeFailure = false, timers = {} } = {}) {
   let session = { employeeId: 'MEMBER-1', phoneVerified: true, requiresPasswordChange: false, authVersion: 1 };
   let online = true, dataCallback, cloudCallback, networkCallback, appCallback, handler;
   const records = new Map(baseline ? [['@hugpong_system_alerts_MEMBER-1', []]] : []);
-  const scheduled = [], refreshes = [], requests = [], callbacks = [];
+  const scheduled = [], channels = [], refreshes = [], requests = [], callbacks = [];
   let events = [{ id: 'PRICE-NEW', type: 'price', title: 'SRA price updated', body: 'Test-only message', resources: ['prices'], createdAt: new Date().toISOString() }];
   const native = {
-    AndroidImportance: { HIGH: 4 }, setNotificationChannelAsync: async () => { if (nativeFailure) throw new Error('Native push unavailable'); },
+    AndroidImportance: { HIGH: 4 }, setNotificationChannelAsync: async (id, options) => {
+      channels.push({ id, options });
+      if (nativeFailure) throw new Error('Native push unavailable');
+    },
     getPresentedNotificationsAsync: async () => [], getPermissionsAsync: async () => ({ status: permission ? 'granted' : 'denied' }),
     scheduleNotificationAsync: async value => scheduled.push(value), getLastNotificationResponseAsync: async () => null,
     addNotificationReceivedListener: callback => { callbacks[0] = callback; return { remove() {} }; },
@@ -45,7 +48,7 @@ function runtime({ baseline = true, permission = true, override = null, nativeFa
       if (url === '/api/notifications/state/query') return { success: true, data: [] };
       return { success: true };
     },
-    setTimeout, clearTimeout, console
+    setTimeout, clearTimeout, console, ...timers
   };
   vm.createContext(context);
   const source = fs.readFileSync(path.join(root, 'mobile/src/services/systemNotificationService.js'), 'utf8')
@@ -56,7 +59,7 @@ function runtime({ baseline = true, permission = true, override = null, nativeFa
     subscribe: callback => { dataCallback = callback; return () => {}; },
     subscribeToCloudChanges: callback => { cloudCallback = callback; return () => {}; },
     refreshResources: async value => refreshes.push([...value]), onChange() {}, onOpen() {} });
-  return { records, scheduled, refreshes, requests, stop,
+  return { records, scheduled, channels, refreshes, requests, stop,
     inbox: () => context.getSystemNotifications(session),
     cloud: event => cloudCallback(event), setEvents: value => { events = value; },
     switchAccount(id) { session = { ...session, employeeId: id }; dataCallback(); },
@@ -70,6 +73,9 @@ test('Android catches missed events on reconnect and presents each unseen event 
   await until(() => client.scheduled.length === 1);
   assert.equal(client.inbox()[0].id, 'PRICE-NEW');
   assert.equal(client.scheduled[0].trigger.channelId, 'system-updates');
+  assert.equal(client.channels[0].id, 'system-updates');
+  assert.equal(Object.hasOwn(client.channels[0].options, 'sound'), false, 'Android channel must not resolve default as a custom sound file');
+  assert.equal(client.scheduled[0].content.sound, 'default', 'notification content retains its valid default-sound option');
   client.network(false);
   client.setEvents([{ id: 'PRICE-LATER', title: 'New price', body: 'Test', resources: ['prices'] }, ...client.inbox()]);
   client.network(true);
@@ -96,6 +102,25 @@ test('disabled OS permissions or missing native configuration do not block the i
     await until(() => client.inbox().length === 1);
     if (!options.permission) assert.equal(client.requests.includes('/auth/push-device'), false);
   }
+});
+
+test('Android inbox failures retain a retry deadline despite repeated change events', async t => {
+  let clock = 10000;
+  const timers = new Map();
+  class Clock extends Date { static now() { return clock; } }
+  const client = runtime({ override: url => url.startsWith('/api/notifications/inbox')
+    ? Promise.reject(Object.assign(new Error('Temporary outage'), { status: 503 })) : null,
+    timers: { Date: Clock, setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) } });
+  t.after(client.stop); await new Promise(resolve => setImmediate(resolve));
+  let [id, timer] = [...timers.entries()][0]; timers.delete(id); clock += timer.delay; await timer.callback();
+  assert.equal(client.requests.filter(url => url.includes('/inbox')).length, 1);
+  for (let index = 0; index < 25; index++) client.cloud({ resources: ['notifications'] });
+  [id, timer] = [...timers.entries()][0];
+  assert.ok(timer.delay >= 1000, 'change events preserve the retry deadline');
+  timers.delete(id); clock += 100; await timer.callback();
+  assert.equal(client.requests.filter(url => url.includes('/inbox')).length, 1, 'even an early timer cannot bypass backoff');
+  [id, timer] = [...timers.entries()][0]; timers.delete(id); clock += timer.delay; await timer.callback();
+  assert.equal(client.requests.filter(url => url.includes('/inbox')).length, 2);
 });
 
 test('a fresh installation establishes a baseline without replaying old notification sounds', async t => {

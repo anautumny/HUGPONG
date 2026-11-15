@@ -67,6 +67,58 @@ test('notification read/dismiss state survives new sessions, stays account-owned
 
 const createClient = () => load('mobile/src/services/notificationStateService.js', { './authService': {}, './storageService': {} }).createNotificationStateClient;
 
+test('Web bulk clear includes unloaded and empty filtered pages in bounded batches and Mobile reads the same states', async () => {
+  const { request, db } = apiFixture();
+  const ids = Array.from({ length: 125 }, (_, index) => `NOTICE-${index}`);
+  const pages = [ids.slice(0, 100), [], ids.slice(100)];
+  const batches = [];
+  const service = load('web/react-app/src/services/notificationService.js', { './apiClient': {
+    captureAuthenticatedContext: () => () => true,
+    authenticatedRequest: async (url, options) => {
+      if (url.startsWith('/api/notifications/inbox')) {
+        const page = Number(new URL(url, 'https://test.invalid').searchParams.get('cursor') || 0);
+        return { success: true, data: pages[page].map(id => ({ id })), page: { hasMore: page < 2, nextCursor: page < 2 ? String(page + 1) : null } };
+      }
+      batches.push(options.body.ids.length);
+      return (await request('A', '/state', options.body)).body;
+    }
+  } });
+  const result = await service.updateAllNotificationState('A', 'dismiss');
+  assert.equal(result.data.length, 125); assert.deepEqual(batches, [100, 25]);
+  assert.equal(db.records.size, 125);
+  let phone;
+  const client = createClient()({ userId: 'A', isCurrent: () => true, readCache: async () => null, writeCache: async () => true,
+    onChange: state => { phone = state; }, request: async (_url, body) => (await request('A', '/state/query', body)).body });
+  await client.refresh(ids, { force: true });
+  assert.deepEqual(new Set(phone.dismissed), new Set(ids));
+  assert.deepEqual(new Set(phone.read), new Set(ids));
+});
+
+test('Web bulk actions stop when the account changes and reject broken pagination or acknowledgements', async () => {
+  let same = true, writes = 0;
+  const service = load('web/react-app/src/services/notificationService.js', { './apiClient': {
+    captureAuthenticatedContext: () => () => same,
+    authenticatedRequest: async (_url, options) => {
+      if (options) { writes++; return { success: true, data: [] }; }
+      same = false; return { data: [{ id: 'PRIVATE-A' }], page: {} };
+    }
+  } });
+  await assert.rejects(service.updateAllNotificationState('A', 'read'), { code: 'AUTH_CONTEXT_CHANGED' });
+  assert.equal(writes, 0);
+  const broken = load('web/react-app/src/services/notificationService.js', { './apiClient': {
+    captureAuthenticatedContext: () => () => true,
+    authenticatedRequest: async (_url, options) => options ? { success: true, data: [] } : { data: [{ id: 'NOTICE' }], page: {} }
+  } });
+  await assert.rejects(broken.updateAllNotificationState('A', 'read'), /not confirmed/);
+  let scans = 0;
+  const repeating = load('web/react-app/src/services/notificationService.js', { './apiClient': {
+    captureAuthenticatedContext: () => () => true,
+    authenticatedRequest: async () => { scans++; return { data: [], page: { hasMore: true, nextCursor: 'SAME' } }; }
+  } });
+  await assert.rejects(repeating.updateAllNotificationState('A', 'read'), /could not be continued/);
+  assert.equal(scans, 2, 'broken cursors cannot create an infinite request loop');
+});
+
 test('offline read/delete are immediate and survive logout, then synchronize before hydration on another login', async () => {
   const { request } = apiFixture();
   const storage = new Map();

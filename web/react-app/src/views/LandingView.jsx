@@ -114,7 +114,7 @@ export default function LandingView() {
                 className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface hover:bg-surface-subtle text-hug-text border border-border text-sm font-semibold shadow-2xs hover:border-primary/40 transition-all cursor-pointer"
               >
                 <Download className="w-4 h-4 text-hug-muted" />
-                <span>Download Android v{androidRelease.version}</span>
+                <span>Download Android v{androidRelease.version}{Number.isSafeInteger(androidRelease.sizeBytes) ? ` (${(androidRelease.sizeBytes / 1000000).toFixed(1)} MB)` : ''}</span>
               </a>
             ) : (
               <button

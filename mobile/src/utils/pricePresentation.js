@@ -1,4 +1,5 @@
 export const PRICE_STATUSES = ['REPORTED', 'NO_BIDDING', 'MILLING_ENDED', 'NOT_REPORTED'];
+export const comparisonSuffix = row => row?.periodType === 'WEEK_ENDING' ? ' vs prior week' : ' vs previous dated publication';
 export const priceStatusLabel = status => ({ REPORTED: 'Reported', NO_BIDDING: 'No bidding', MILLING_ENDED: 'Milling ended', NOT_REPORTED: 'Not reported' }[status] || 'Not reported');
 export const priceText = (value, status = 'REPORTED', unit = '') => status === 'REPORTED' && value != null && Number.isFinite(Number(value))
   ? `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${unit ? ` / ${unit}` : ''}`

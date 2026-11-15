@@ -129,10 +129,44 @@ test('known routes avoid the scanner budget while unknown paths are grouped safe
   assert.equal(endpointGroup(requestDouble({ originalUrl: '/wp-admin.php' })), '/unknown');
 });
 
-test('notification POST queries use read budgets on Web and Android without exempting writes', () => {
+test('browsing and session reads share Wi-Fi without consuming account or sign-in attempt allowances', () => {
+  let clock = 1000, accepted = 0;
+  const early = createEarlyAbuseProtection({ now: () => clock });
+  const authenticated = createAuthenticatedApiRateLimit({ now: () => clock });
+  const paths = ['/api/fields', '/api/prices', '/api/logs', '/auth/session', '/api/notifications/inbox'];
+  for (let index = 0; index < 1200; index++) {
+    clock += 50;
+    const req = requestDouble({ originalUrl: paths[index % paths.length], authUser: { employeeId: `USER-${index % 8}` } });
+    const response = responseDouble();
+    early(req, response, () => authenticated(req, response, () => accepted++));
+    assert.equal(response.statusCode, 200);
+  }
+  assert.equal(accepted, 1200);
+  assert.equal(earlyPolicies(requestDouble({ originalUrl: '/auth/session' }), {}).some(item => item.key.startsWith('early:auth:')), false);
+  assert.equal(earlyPolicies(requestDouble({ method: 'POST', originalUrl: '/auth/verify-password' }), {}).some(item => item.key.startsWith('early:auth:')), true);
+});
+
+test('default authenticated browsing has no per-account quota while flood and submission guards still reject excess', () => {
+  const authenticated = createAuthenticatedApiRateLimit({ now: () => 1000 });
+  let reads = 0;
+  for (let index = 0; index < 2500; index++) authenticated(requestDouble({ originalUrl: '/api/fields', authUser: { employeeId: 'USER' } }), responseDouble(), () => reads++);
+  assert.equal(reads, 2500);
+  const early = createEarlyAbuseProtection({ now: () => 1000 }); let network = 0, rejected;
+  for (let index = 0; index < 601; index++) {
+    rejected = responseDouble(); early(requestDouble(), rejected, () => network++);
+  }
+  assert.equal(network, 600); assert.equal(rejected.statusCode, 429);
+  const write = requestDouble({ method: 'POST', originalUrl: '/api/logs', authUser: { employeeId: 'USER' } });
+  let writes = 0;
+  for (let index = 0; index < 46; index++) { rejected = responseDouble(); authenticated(write, rejected, () => writes++); }
+  assert.equal(writes, 45); assert.equal(rejected.statusCode, 429);
+});
+
+test('notification queries and bookkeeping use independent budgets without exempting business writes', () => {
   const limits = {
     readUser: { max: 3, windowMs: 1000 }, readUserAndIp: { max: 3, windowMs: 1000 },
-    mutationUser: { max: 1, windowMs: 1000 }, mutationUserAndIp: { max: 1, windowMs: 1000 }
+    mutationUser: { max: 1, windowMs: 1000 }, mutationUserAndIp: { max: 1, windowMs: 1000 },
+    backgroundUser: { max: 1, windowMs: 1000 }, backgroundUserAndIp: { max: 1, windowMs: 1000 }
   };
   const middleware = createAuthenticatedApiRateLimit({ limits, now: () => 500 });
   const query = requestDouble({ method: 'POST', originalUrl: '/api/notifications/state/query', authUser: { employeeId: '01000001' } });
@@ -147,9 +181,15 @@ test('notification POST queries use read budgets on Web and Android without exem
   assert.equal(accepted, 4, 'reads leave the submission budget available');
   const writeBlocked = responseDouble();
   middleware(write, writeBlocked, () => accepted++);
-  assert.equal(writeBlocked.statusCode, 429, 'real writes retain their limit');
+  assert.equal(writeBlocked.statusCode, 429, 'bookkeeping remains bounded independently');
+  const business = { ...query, originalUrl: '/api/logs' };
+  middleware(business, responseDouble(), () => accepted++);
+  assert.equal(accepted, 5, 'bookkeeping leaves the business submission allowance available');
+  const businessBlocked = responseDouble(); middleware(business, businessBlocked, () => accepted++);
+  assert.equal(businessBlocked.statusCode, 429, 'real submissions retain their limit');
   assert.equal(earlyPolicies(query, {}).some(item => item.key.startsWith('early:mutation:')), false);
-  assert.equal(earlyPolicies(write, {}).some(item => item.key.startsWith('early:mutation:')), true);
+  assert.equal(earlyPolicies(write, {}).some(item => item.key.startsWith('early:mutation:')), false);
+  assert.equal(earlyPolicies(business, {}).some(item => item.key.startsWith('early:mutation:')), true);
   assert.equal(isMutationRequest({ ...query, originalUrl: '/api/notifications/state/query/?limit=1' }), false);
   assert.equal(isMutationRequest({ ...query, originalUrl: '/api/notifications/state/query/other' }), true);
   assert.equal(isMutationRequest({ ...query, method: 'DELETE' }), true);

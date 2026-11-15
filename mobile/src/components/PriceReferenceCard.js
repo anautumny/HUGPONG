@@ -2,7 +2,7 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { AppText as Text } from './Typography';
 import { COLORS } from '../theme';
-import { priceText, movementText } from '../utils/pricePresentation';
+import { priceText, movementText, comparisonSuffix } from '../utils/pricePresentation';
 import { useTranslation } from '../services/i18n';
 
 export default function PriceReferenceCard({ priceRecord, canPost, onPostPricePress }) {
@@ -24,7 +24,7 @@ export default function PriceReferenceCard({ priceRecord, canPost, onPostPricePr
         return <View key={product.key} style={styles.product}>
           <Text style={styles.label}>{product.label}</Text>
           <Text style={styles.value}>{priceText(priceRecord[product.field], status, status === 'REPORTED' ? product.unit : '')}</Text>
-          <Text style={styles.note}>{status === 'REPORTED' ? `${movementText(priceRecord[`${product.key}PriceChange`])}${priceRecord[`${product.key}PriceChange`] != null ? ' vs prior week' : ''}` : status === 'MILLING_ENDED' ? 'Milling ended; no price quoted for this week.' : 'No price quoted for this reporting week.'}</Text>
+          <Text style={styles.note}>{status === 'REPORTED' ? `${movementText(priceRecord[`${product.key}PriceChange`])}${priceRecord[`${product.key}PriceChange`] != null ? comparisonSuffix(priceRecord) : ''}` : status === 'MILLING_ENDED' ? 'Milling ended; no price quoted for this week.' : 'No price quoted for this reporting week.'}</Text>
           {last && last.date !== priceRecord.effectiveDate && <Text style={styles.note}>Last reported: {priceText(last.value, 'REPORTED', product.unit)} · {last.date}</Text>}
         </View>;
       })}

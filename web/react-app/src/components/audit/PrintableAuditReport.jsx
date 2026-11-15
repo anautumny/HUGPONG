@@ -2,7 +2,7 @@ import React from 'react';
 import { Download, Printer, X } from 'lucide-react';
 import Button from '../ui/Button';
 import QRCodeView from './QRCodeView';
-import { auditReportLayout, operationMonth, reportingMonthLabel } from '../../utils/auditReportLayout';
+import { auditReportLayout, reportingMonthLabel, auditOperationGroups } from '../../utils/auditReportLayout';
 import { formatCropYearDisplay } from '../../utils/formatters';
 import { auditCropYearCycles } from '../../domain/auditWorkflow';
 
@@ -108,7 +108,7 @@ export default function PrintableAuditReport({
   const directOps = [];
   const millingOps = [];
 
-  operationLogs.forEach(log => {
+  auditOperationGroups(report, operationLogs).forEach(log => {
     if (isMillingOperation(log)) {
       millingOps.push(log);
     } else {
@@ -117,14 +117,11 @@ export default function PrintableAuditReport({
   });
 
   // Calculate Subtotals & Totals from real system data
-  const totalDirectCost = directOps.reduce((sum, log) => sum + Number(log.totalCost || 0), 0);
-  const directCostPerHa = totalAuditedHa > 0 ? totalDirectCost / totalAuditedHa : totalDirectCost;
+  const totalDirectCost = directOps.reduce((sum, log) => sum + Number(log.totalCost ?? log.cost ?? 0), 0);
 
-  const totalMillingCost = millingOps.reduce((sum, log) => sum + Number(log.totalCost || 0), 0);
-  const millingCostPerHa = totalAuditedHa > 0 ? totalMillingCost / totalAuditedHa : totalMillingCost;
+  const totalMillingCost = millingOps.reduce((sum, log) => sum + Number(log.totalCost ?? log.cost ?? 0), 0);
 
   const grandTotalCost = totalDirectCost + totalMillingCost;
-  const grandTotalCostPerHa = totalAuditedHa > 0 ? grandTotalCost / totalAuditedHa : grandTotalCost;
 
   const hash = String(report.qrHash || report.qrSignature || report.integrityHash || '').trim();
   const isCertified = report.status === 'CERTIFIED';
@@ -150,6 +147,65 @@ export default function PrintableAuditReport({
       downloadAuditReportPdf(report, { blockFarms, currentUser });
     } catch (error) { setDownloadError(error.message || 'The PDF could not be downloaded.'); }
     finally { setIsDownloading(false); }
+  };
+
+  const renderOperation = (log, idx, offset = 0) => {
+    const opNum = offset + idx + 1;
+    const opName = log.operationName || log.name || `Operation ${opNum}`;
+    const operationLabel = <>
+            <span>{opName}</span>
+            {log.childOperationName && <span className="block text-[8px] font-semibold">Child operation: {log.childOperationName}</span>}
+          </>;
+    const logArea = Number(log.areaHa || totalAuditedHa).toFixed(2);
+    const logCost = Number(log.totalCost || 0);
+    const logQty = log.quantity?.value != null ? log.quantity.value : log.quantity != null ? log.quantity : 1;
+    const logUnit = log.quantity?.unit || log.unit || 'ha';
+    const logUnitCost = Number(log.unitCost ?? logCost / Math.max(parseFloat(logQty) || 1, 0.1));
+    const hasChildren = Array.isArray(log.lineItems) && log.lineItems.length > 0;
+    if (hasChildren) {
+      return <React.Fragment key={log.operationLogId || log.id || idx}>
+              {/* Group Header Row */}
+              <tr className="border-t border-black bg-gray-50">
+                <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
+                <td className="border border-black p-0.5 text-left font-bold">
+                  {operationLabel}
+                </td>
+                {Array.from({
+            length: layout.columnCount - 2
+          }, (_, index) => <td key={index} className="border border-black" />)}
+              </tr>
+              {/* Child Sub-items */}
+              {log.lineItems.map((si, cIdx) => {
+          const childQty = si.quantity != null ? si.quantity : 1;
+          const childUnit = si.unit || 'bag';
+          const childUnitCost = Number(si.unitCost ?? Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1));
+          const childSubtotal = Number(si.subtotal != null ? si.subtotal : Number(childQty) * childUnitCost);
+          const childArea = Number(si.areaHa ?? log.areaHa ?? totalAuditedHa);
+          return <tr key={`${idx}-${cIdx}`} className="border-t border-gray-300">
+      <td className="border border-black p-0.5 text-center"></td>
+      <td className="border border-black p-0.5 text-left pl-3">{si.description || si.name || `Item ${cIdx + 1}`}</td>
+      {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{si.monthlyAreas?.[month] != null ? formatNumber(si.monthlyAreas[month]) : ''}</td>)}
+      <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(childArea)}</td>
+      <td className="border border-black p-0.5 text-center font-mono whitespace-pre-line">{si.priceCells?.quantityLabel ?? childQty}</td>
+      <td className="border border-black p-0.5 text-center whitespace-pre-line">{si.priceCells?.unitLabel ?? childUnit}</td>
+      <td className="border border-black p-0.5 text-right font-mono whitespace-pre-line">{si.priceCells?.unitCostLabel ?? formatNumber(childUnitCost)}</td>
+      <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(childSubtotal)}</td>
+                  </tr>;
+        })}
+            </React.Fragment>;
+    }
+
+    // Single operation row
+    return <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
+            <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
+            <td className="border border-black p-0.5 text-left font-bold">{operationLabel}</td>
+            {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{log.monthlyAreas?.[month] != null ? formatNumber(log.monthlyAreas[month]) : ''}</td>)}
+            <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
+            <td className="border border-black p-0.5 text-center font-mono whitespace-pre-line">{log.priceCells?.quantityLabel ?? logQty}</td>
+            <td className="border border-black p-0.5 text-center whitespace-pre-line">{log.priceCells?.unitLabel ?? logUnit}</td>
+            <td className="border border-black p-0.5 text-right font-mono whitespace-pre-line">{log.priceCells?.unitCostLabel ?? formatNumber(logUnitCost)}</td>
+            <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(logCost)}</td>
+          </tr>;
   };
 
   const documentSheet = (
@@ -198,8 +254,6 @@ export default function PrintableAuditReport({
           </div>
         )}
       </div>
-      <p className="mb-2 text-[8px] normal-case">Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
-      <p className="mb-2 text-[8px] normal-case">{layout.timelineNote}</p>
 
       {/* ── Master SRA Compilation Grid Table ───────────────────────────── */}
       <div className="w-full overflow-x-auto print:overflow-visible">
@@ -214,7 +268,7 @@ export default function PrintableAuditReport({
               <th rowSpan={2} className="border border-black p-1 w-8">QTY</th>
               <th rowSpan={2} className="border border-black p-1 w-8">UNIT</th>
               <th rowSpan={2} className="border border-black p-1 w-14">UNIT COST</th>
-              <th rowSpan={2} className="border border-black p-1 w-16">COST PER HECTARE</th>
+              <th rowSpan={2} className="border border-black p-1 w-16">OPERATION COST</th>
             </tr>
             {/* Numeric calendar months follow the first and last included records. */}
             <tr className="bg-[#edd446] text-black font-bold text-center border-b border-black text-[8px]">
@@ -231,82 +285,17 @@ export default function PrintableAuditReport({
             ) : (
               <>
                 {/* ── SECTION 1: DIRECT CROP OPERATIONS (FROM SYSTEM) ──── */}
-                {directOps.map((log, idx) => {
-                  const opNum = idx + 1;
-                  const opName = log.operationName || log.name || `Operation ${opNum}`;
-                  const operationLabel = (
-                    <>
-                      <span>{opName}</span>
-                      {log.childOperationName && <span className="block text-[8px] font-semibold">Child operation: {log.childOperationName}</span>}
-                    </>
-                  );
-                  const logArea = Number(log.areaHa || totalAuditedHa).toFixed(2);
-                  const logCost = Number(log.totalCost || 0);
-                  const logQty = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
-                  const logUnit = log.quantity?.unit || log.unit || 'ha';
-                  const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
-                  const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
-
-                  const colPlacement = operationMonth(log, periodStr);
-                  const hasChildren = Array.isArray(log.lineItems) && log.lineItems.length > 0;
-
-                  if (hasChildren) {
-                    return (
-                      <React.Fragment key={log.operationLogId || log.id || idx}>
-                        {/* Group Header Row */}
-                        <tr className="border-t border-black bg-gray-50">
-                          <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
-                          <td className="border border-black p-0.5 text-left font-bold" colSpan={layout.columnCount - 1}>
-                            {operationLabel}
-                          </td>
-                        </tr>
-                        {/* Child Sub-items */}
-                        {log.lineItems.map((si, cIdx) => {
-                          const childQty = si.quantity != null ? si.quantity : 1;
-                          const childUnit = si.unit || 'bag';
-                          const childUnitCost = Number(si.unitCost || (Number(si.subtotal || 0) / Math.max(parseFloat(childQty) || 1, 0.1)));
-                          const childSubtotal = Number(si.subtotal != null ? si.subtotal : (Number(childQty) * childUnitCost));
-                          const childCostPerHa = Number(log.areaHa) > 0 ? (childSubtotal / Number(log.areaHa)) : childSubtotal;
-
-                          return (
-                            <tr key={`${idx}-${cIdx}`} className="border-t border-gray-300">
-                              <td className="border border-black p-0.5 text-center"></td>
-                              <td className="border border-black p-0.5 text-left pl-3">{si.description || si.name || `Item ${cIdx + 1}`}</td>
-                              {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
-                              <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
-                              <td className="border border-black p-0.5 text-center font-mono">{childQty}</td>
-                              <td className="border border-black p-0.5 text-center">{childUnit}</td>
-                              <td className="border border-black p-0.5 text-right font-mono">{formatNumber(childUnitCost)}</td>
-                              <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(childCostPerHa)}</td>
-                            </tr>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  }
-
-                  // Single Direct Operation Row
-                  return (
-                    <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
-                      <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
-                      <td className="border border-black p-0.5 text-left font-bold">{operationLabel}</td>
-                      {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
-                      <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
-                      <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
-                      <td className="border border-black p-0.5 text-center">{logUnit}</td>
-                      <td className="border border-black p-0.5 text-right font-mono">{formatNumber(logUnitCost)}</td>
-                      <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(logCostPerHa)}</td>
-                    </tr>
-                  );
-                })}
+                {directOps.map((log, idx) => renderOperation(log, idx))}
 
                 {/* TOTAL DIRECT COST ROW */}
                 <tr className="border-t-2 border-black font-extrabold bg-white text-[9px]">
-                  <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wide">
-                    TOTAL DIRECT COST
+                  <td className="border border-black" />
+                  <td className="border border-black p-1 text-left uppercase tracking-wide">
+                    TOTAL DIRECT COST (PHP)
                   </td>
+                  {Array.from({ length: layout.columnCount - 3 }, (_, index) => <td key={index} className="border border-black" />)}
                   <td className="border border-black p-1 text-right font-mono font-black text-black">
-                    {formatNumber(directCostPerHa)}
+                    {formatNumber(totalDirectCost)}
                   </td>
                 </tr>
 
@@ -314,43 +303,23 @@ export default function PrintableAuditReport({
                 {millingOps.length > 0 && (
                   <>
                     <tr className="border-t border-black bg-white">
-                      <td colSpan={layout.columnCount} className="border border-black p-0.5 text-left font-bold pl-2">
+                      <td className="border border-black" />
+                      <td className="border border-black p-0.5 text-left font-bold pl-2">
                         Milling Expenses
                       </td>
+                      {Array.from({ length: layout.columnCount - 2 }, (_, index) => <td key={index} className="border border-black" />)}
                     </tr>
-                    {millingOps.map((log, idx) => {
-                      const opNum = directOps.length + idx + 1;
-                      const opName = log.operationName || log.name || `Milling Operation ${idx + 1}`;
-                      const logArea = Number(log.areaHa || totalAuditedHa).toFixed(2);
-                      const logCost = Number(log.totalCost || 0);
-                      const logQty = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
-                      const logUnit = log.quantity?.unit || log.unit || 'ton';
-                      const logUnitCost = Number(log.unitCost || (logCost / Math.max(parseFloat(logQty) || 1, 0.1)));
-                      const logCostPerHa = Number(log.areaHa) > 0 ? (logCost / Number(log.areaHa)) : logCost;
-
-                      const colPlacement = operationMonth(log, periodStr);
-
-                      return (
-                        <tr key={log.operationLogId || log.id || idx} className="border-t border-black">
-                          <td className="border border-black p-0.5 text-center font-bold">{opNum}</td>
-                          <td className="border border-black p-0.5 text-left font-bold">{opName}</td>
-                          {layout.columns.map(month => <td key={month} className="border border-black p-0.5 text-right font-mono">{colPlacement === month ? logArea : ''}</td>)}
-                          <td className="border border-black p-0.5 text-right font-mono font-bold">{logArea}</td>
-                          <td className="border border-black p-0.5 text-center font-mono">{logQty}</td>
-                          <td className="border border-black p-0.5 text-center">{logUnit}</td>
-                          <td className="border border-black p-0.5 text-right font-mono">{formatNumber(logUnitCost)}</td>
-                          <td className="border border-black p-0.5 text-right font-mono font-bold">{formatNumber(logCostPerHa)}</td>
-                        </tr>
-                      );
-                    })}
+                    {millingOps.map((log, idx) => renderOperation(log, idx, directOps.length))}
 
                     {/* TOTAL MILLING EXPENSES ROW */}
                     <tr className="border-t border-black font-extrabold bg-white text-[9px]">
-                      <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wide">
-                        TOTAL MILLING EXPENSES
+                      <td className="border border-black" />
+                      <td className="border border-black p-1 text-left uppercase tracking-wide">
+                        TOTAL MILLING EXPENSES (PHP)
                       </td>
+                      {Array.from({ length: layout.columnCount - 3 }, (_, index) => <td key={index} className="border border-black" />)}
                       <td className="border border-black p-1 text-right font-mono font-black text-black">
-                        {formatNumber(millingCostPerHa)}
+                        {formatNumber(totalMillingCost)}
                       </td>
                     </tr>
                   </>
@@ -358,22 +327,19 @@ export default function PrintableAuditReport({
 
                 {/* ── GRAND TOTAL: TOTAL COST OF PRODUCTION ───────────── */}
                 <tr className="border-t-2 border-black font-black bg-white text-[9.5px]">
-                  <td colSpan={layout.columnCount - 1} className="border border-black p-1 text-left uppercase tracking-wider">
-                    TOTAL COST OF PRODUCTION
+                  <td className="border border-black" />
+                  <td className="border border-black p-1 text-left uppercase tracking-wider">
+                    TOTAL COST OF PRODUCTION (PHP)
                   </td>
+                  {Array.from({ length: layout.columnCount - 3 }, (_, index) => <td key={index} className="border border-black" />)}
                   <td className="border border-black p-1 text-right font-mono font-black text-black">
-                    {formatNumber(grandTotalCostPerHa)}
+                    {formatNumber(grandTotalCost)}
                   </td>
                 </tr>
               </>
             )}
           </tbody>
         </table>
-      </div>
-
-      {/* ── Statutory Cumulative Footnote (Real System Data) ─────────────── */}
-      <div className="mt-2 text-[8px] text-gray-700 italic">
-        * Total recorded expenditure for {auditedAreaStr} Ha included in this report: <strong>₱{formatNumber(grandTotalCost)}</strong> (Philippine Pesos).
       </div>
 
       {/* ── Tripartite Signature Block & Digital Audit Seal ─────────────── */}

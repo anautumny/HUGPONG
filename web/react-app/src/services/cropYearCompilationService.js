@@ -1,6 +1,6 @@
 import { authenticatedRequest } from './apiClient';
 
-const query = ({ cropYearCycle, blockFarmId = '', cursor = '' }) => new URLSearchParams({ cropYearCycle, blockFarmId, ...(cursor ? { cursor } : {}) });
+const query = ({ cropYearCycle, blockFarmId = '', cursor = '', startDate = '', endDate = '', coverageMode = '' }) => new URLSearchParams({ cropYearCycle, blockFarmId, ...(cursor ? { cursor } : {}), ...(coverageMode ? { coverageMode } : {}), ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) });
 export const fetchCropYearOptions = () => authenticatedRequest('/api/crop-year-compilations/options');
 export const previewCropYear = scope => authenticatedRequest(`/api/crop-year-compilations/preview?${query(scope)}`);
 export const fetchCropYearCompilations = scope => authenticatedRequest(`/api/crop-year-compilations?${query(scope)}`);

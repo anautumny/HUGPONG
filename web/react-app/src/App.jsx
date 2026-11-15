@@ -5,7 +5,6 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { SyncProvider } from './context/SyncContext';
 import AppShell from './components/layout/AppShell';
 import { ROLE_KEYS } from './utils/authRouting';
-import UsersView from './views/users/UsersView';
 import { createClientReference, reportClientDiagnostic } from './services/clientDiagnostics';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import LandingView from './views/LandingView';
@@ -29,6 +28,7 @@ const MaintenanceView = lazyWithRecovery(() => import('./views/maintenance/Maint
 const DiagnosticsConsoleView = lazyWithRecovery(() => import('./views/diagnostics/DiagnosticsConsoleView'), 'diagnostics', ['/diagnostics']);
 const BackupManagementView = lazyWithRecovery(() => import('./views/backups/BackupManagementView'), 'backups', ['/backups']);
 const SettingsView = lazyWithRecovery(() => import('./views/settings/SettingsView'), 'settings', ['/settings']);
+const UsersView = lazyWithRecovery(() => import('./views/users/UsersView'), 'users', ['/users']);
 
 function RootRoute() {
   // The public website can render while the server checks a saved session.

@@ -11,7 +11,11 @@ const quoted = (row, product) => {
 function comparableChange(row, previous, product) {
   const current = quoted(row, product), before = quoted(previous, product);
   const days = previous ? (Date.parse(row.effectiveDate) - Date.parse(previous.effectiveDate)) / 86400000 : 0;
-  if (current == null || before == null || days !== 7
+  // Effective-date publications can arrive several times in one week. Their
+  // movement is against the preceding dated publication, not a fixed weekday.
+  // Week-ending series still require adjacent weeks; never bridge missing weeks.
+  const weekly = row?.periodType === 'WEEK_ENDING' || previous?.periodType === 'WEEK_ENDING';
+  if (current == null || before == null || !Number.isFinite(days) || days <= 0 || (weekly && days !== 7)
     || (product === 'molasses' && (row.molassesMarket || '') !== (previous.molassesMarket || ''))) return null;
   return round(current - before);
 }

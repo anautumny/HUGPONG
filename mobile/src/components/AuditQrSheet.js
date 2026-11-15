@@ -22,7 +22,7 @@ export default function AuditQrSheet({ visible, onClose, data, qrRef, saving, on
     } catch { Alert.alert(t('sheet_copy_failed', "Unable to copy"), t('sheet_copy_retry', "Try copying the report ID from Report details.")); }
   };
   return (
-    <AnimatedBottomSheet visible={visible} onClose={onClose} dismissible expandable sheetStyle={s.sheet}>
+    <AnimatedBottomSheet visible={visible} onClose={onClose} dismissible={!saving} expandable={!saving} sheetStyle={s.sheet}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>{t('sheet_share_qr', "Share audit QR")}</Text>
         <Text style={s.hint}>{t('sheet_scan_hint', "Show this QR to the SRA scanner.")}</Text>
@@ -47,11 +47,11 @@ export default function AuditQrSheet({ visible, onClose, data, qrRef, saving, on
           <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: saving }} disabled={saving} onPress={onSave} style={[s.button, s.primary, saving && s.disabled]}>
             {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="download-outline" size={18} color="#fff" />}<Text style={s.primaryText}>{saving ? t('sheet_saving', 'Saving...') : t('sheet_save_qr', 'Save QR')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" disabled={!data?.reportId} onPress={copyId} style={s.button}>
+          <TouchableOpacity accessibilityRole="button" disabled={saving || !data?.reportId} onPress={copyId} style={s.button}>
             <Ionicons name="copy-outline" size={18} color={COLORS.primary} /><Text style={s.link}>{t('sheet_copy_id', "Copy ID")}</Text>
           </TouchableOpacity>
         </View>
-        {canSendCloud && <TouchableOpacity accessibilityRole="button" disabled={Boolean(submitting)} onPress={onSendCloud} style={s.cloud}>
+        {canSendCloud && <TouchableOpacity accessibilityRole="button" disabled={saving || Boolean(submitting)} onPress={onSendCloud} style={s.cloud}>
           {submitting ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={s.link}>{t('sheet_cloud', "Send through Cloud instead")}</Text>}
         </TouchableOpacity>}
       </ScrollView>

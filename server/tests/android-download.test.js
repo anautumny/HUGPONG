@@ -24,6 +24,8 @@ test('APK button endpoint streams an attachment without a browser redirect or UR
   assert.equal(response.redirected, false);
   assert.match(response.headers.get('content-disposition'), /attachment; filename="HUGPONG-1\.0\.2\.apk"/);
   assert.equal(response.headers.get('content-type'), 'application/vnd.android.package-archive');
+  assert.equal(response.headers.get('content-length'), String(bytes.length));
+  assert.equal(response.headers.get('x-hugpong-download-length'), String(bytes.length));
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
   assert.equal(requested.url, release.downloadUrl);
   assert.equal((await fetch(base + '0.0.0')).status, 410);
@@ -50,4 +52,17 @@ test('APK failures do not redirect to a release page or expose upstream errors',
 test('APK handler refuses unapproved manifest destinations without calling the network', async t => {
   const base = await serve(t, createAndroidDownloadHandler({ release: { ...release, downloadUrl: 'http://127.0.0.1/internal.apk' }, fetchArtifact: () => { throw Error('must not fetch'); } }));
   assert.equal((await fetch(base + '1.0.2')).status, 503);
+});
+
+test('APK responses preserve metadata when upstream omits the length, including HEAD and partial requests', async t => {
+  const artifact = Buffer.from('PK-test-android-file');
+  const base = await serve(t, createAndroidDownloadHandler({ release: { ...release, sizeBytes: artifact.length }, fetchArtifact: async (_url, options) => {
+    if (options.method === 'HEAD') return new Response(null);
+    return options.headers.Range ? new Response('PK00', { status: 206, headers: { 'Content-Range': `bytes 0-3/${artifact.length}` } }) : new Response(artifact);
+  } }));
+  const head = await fetch(base + '1.0.2', { method: 'HEAD' });
+  assert.equal(head.status, 200); assert.equal(head.headers.get('content-length'), String(artifact.length));
+  const full = await fetch(base + '1.0.2'); assert.equal(full.headers.get('content-length'), String(artifact.length)); await full.arrayBuffer();
+  const partial = await fetch(base + '1.0.2', { headers: { Range: 'bytes=0-3' } });
+  assert.equal(partial.headers.get('content-length'), '4'); assert.equal(partial.headers.get('x-hugpong-download-length'), '4'); await partial.arrayBuffer();
 });

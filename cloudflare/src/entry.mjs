@@ -15,7 +15,7 @@ import '../../server/node_modules/firebase-admin/lib/firestore/index.js';
 import taskService from '../../server/services/durableRuntimeTasks.js';
 import security from '../../server/services/httpSecurityHeaders.js';
 import background from '../../server/services/backgroundTasks.js';
-import { isGatewayPath, trustedProxyRequest, preflightRejection } from './routing.mjs';
+import { isGatewayPath, trustedProxyRequest, preflightRejection, preserveDownloadLength } from './routing.mjs';
 
 // protobufjs generates its SDK-owned serialization functions lazily. Workers
 // permits this during startup only. Precompile descriptors, never record data.
@@ -68,7 +68,7 @@ export class HugpongGateway extends DurableObject {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === 'www.hugpong.org') {
       url.hostname = 'hugpong.org';
@@ -82,6 +82,7 @@ export default {
     }
     // One named object is the ONLY API authority. Never shard by user/device;
     // all authorized Web/Android streams must observe the same commit feed.
-    return env.GATEWAY.getByName('hugpong-canonical-api-v1').fetch(trustedProxyRequest(request));
+    const response = await env.GATEWAY.getByName('hugpong-canonical-api-v1').fetch(trustedProxyRequest(request));
+    return preserveDownloadLength(request, response, ctx);
   }
 };

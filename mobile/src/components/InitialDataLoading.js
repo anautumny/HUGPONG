@@ -25,15 +25,6 @@ export default function InitialDataLoading({ mode = 'loading', retrying = false,
   </ScrollView>;
 }
 
-export function DataRefreshNotice({ notice }) {
-  const { t } = useTranslation();
-  if (!notice) return null;
-  return <View style={styles.notice} accessibilityLiveRegion="polite">
-    {notice === 'updating' && <ActivityIndicator size="small" color={COLORS.primary} />}
-    <Text style={styles.noticeLabel}>{t(notice === 'updating' ? 'data_updating' : notice === 'offline' ? 'data_showing_saved' : 'data_update_failed')}</Text>
-  </View>;
-}
-
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: COLORS.background },
   screen: { flexGrow: 1, justifyContent: 'center', padding: 28 },
@@ -46,6 +37,4 @@ const styles = StyleSheet.create({
   buttonLabel: { color: '#FFF', fontWeight: '700', fontSize: 15 },
   secondary: { minHeight: 44, justifyContent: 'center', padding: 10 },
   secondaryLabel: { color: COLORS.primary, fontWeight: '600' },
-  notice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 16, backgroundColor: COLORS.surface },
-  noticeLabel: { flexShrink: 1, color: COLORS.textSecondary, fontSize: 13, textAlign: 'center' }
 });

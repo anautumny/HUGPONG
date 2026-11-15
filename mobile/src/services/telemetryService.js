@@ -7,11 +7,15 @@ const UNCHANGED_SYNC_REPORT_MS = 60 * 60 * 1000;
 let lastActivityReportAt = 0;
 let lastSyncReportAt = 0;
 let lastSyncSignature = '';
+let telemetryRetryNotBefore = 0;
+let telemetryGeneration = 0;
 
 export function resetMobileTelemetryState() {
+  telemetryGeneration++;
   lastActivityReportAt = 0;
   lastSyncReportAt = 0;
   lastSyncSignature = '';
+  telemetryRetryNotBefore = 0;
 }
 
 function deviceMetadata() {
@@ -34,7 +38,9 @@ async function telemetryRequest(path, body) {
 }
 
 export async function reportMobileActivity(event = 'HEARTBEAT') {
+  const generation = telemetryGeneration;
   const now = Date.now();
+  if (now < telemetryRetryNotBefore) return { throttled: true };
   if (String(event).toUpperCase() !== 'LOGIN' && now - lastActivityReportAt < ACTIVITY_HEARTBEAT_MS) {
     return { throttled: true };
   }
@@ -42,6 +48,8 @@ export async function reportMobileActivity(event = 'HEARTBEAT') {
   try {
     return await telemetryRequest('/api/terminal-diagnostics/activity', { event });
   } catch (error) {
+    if (generation !== telemetryGeneration) return null;
+    telemetryRetryNotBefore = Date.now() + Math.max(30000, Number(error?.retryAfterMs) || 0);
     lastActivityReportAt = 0;
     console.warn('[Telemetry] Activity report was deferred.');
     return null;
@@ -55,9 +63,12 @@ export async function reportMobileSync({
   connectionState = 'ONLINE',
   syncSucceeded = false
 } = {}) {
+  const generation = telemetryGeneration;
+  if (Date.now() < telemetryRetryNotBefore) return { throttled: true };
   let signature = '';
   try {
     const session = await getItem(STORAGE_KEYS.SESSION);
+    if (generation !== telemetryGeneration) return null;
     const roleUpper = String(session?.canonicalRole || session?.role || session?.roleKey || '').trim().toUpperCase().replace(/[ -]+/g, '_');
     if (roleUpper && roleUpper !== 'MEMBER_FARMER' && roleUpper !== 'FARM_MANAGER') {
       return null;
@@ -82,6 +93,8 @@ export async function reportMobileSync({
       syncSucceeded
     });
   } catch (error) {
+    if (generation !== telemetryGeneration) return null;
+    telemetryRetryNotBefore = Date.now() + Math.max(30000, Number(error?.retryAfterMs) || 0);
     if (signature && lastSyncSignature === signature) {
       lastSyncSignature = '';
       lastSyncReportAt = 0;

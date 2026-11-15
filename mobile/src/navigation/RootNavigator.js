@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '../theme';
 import { activateSraOfflineSnapshot, getCurrentSession, getCloudDataStatus, retryCloudDataLoad, logoutUser, subscribe } from '../data/dataStore';
 import { initialDataPresentation } from '../domain/initialDataPresentation';
-import InitialDataLoading, { DataRefreshNotice } from '../components/InitialDataLoading';
+import InitialDataLoading from '../components/InitialDataLoading';
 import { useTranslation } from '../services/i18n';
 
 import SplashScreen from '../screens/auth/SplashScreen';
@@ -45,7 +45,7 @@ const getSyncMonitorScreen = () => require('../screens/SyncMonitorScreen').defau
 
 function HomeNavigator() {
   return (
-    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+    <HomeStack.Navigator initialRouteName="HomeMain" screenOptions={{ headerShown: false }}>
       <HomeStack.Screen name="HomeMain" getComponent={getHomeScreen} />
       <HomeStack.Screen name="FieldOps" getComponent={getFieldOpsScreen} options={{ animation: 'slide_from_right' }} />
       <HomeStack.Screen name="Analytics" getComponent={getAnalyticsScreen} options={{ animation: 'slide_from_right' }} />
@@ -246,7 +246,7 @@ function MainTabs({ navigation }) {
     setReconnectNotice(null);
     navigation.navigate('MainTabs', {
       screen: 'Home',
-      params: { screen: 'SyncMonitor' }
+      params: { screen: 'SyncMonitor', initial: false }
     });
   };
 
@@ -276,7 +276,6 @@ function MainTabs({ navigation }) {
 
   return (
     <>
-      <DataRefreshNotice notice={presentation.notice} />
       <Tab.Navigator
         initialRouteName={!isOnline ? 'Field Ops' : 'Home'}
         detachInactiveScreens

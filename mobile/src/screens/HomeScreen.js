@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../theme';
 import { currentPrice, currentMarketObservation, priceAnalytics, subscribe, getIsSynced, getCurrentSession, fields, cropCycles, blockFarms, performMobileSync, getSortedPrices, operationLogs, draftLogs, publishSraPrice, calculateSRAWeekLabel, getPendingSyncCount } from '../data/dataStore';
+import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
 import AppHeader from '../components/AppHeader';
 import Pagination, { usePagination } from '../components/ui/Pagination';
@@ -406,7 +407,10 @@ export default function HomeScreen({ navigation, route }) {
       if (result.remainingCount === 0) {
         Alert.alert('Sync Successful', `${result.processedCount || 0} queued record(s) synchronized. No records remain.`);
       } else {
-        Alert.alert('Sync Incomplete', `${result.processedCount || 0} synchronized, ${result.failedCount || 0} failed, and ${result.remainingCount} remain queued.`);
+        Alert.alert('Sync Incomplete', syncResultMessage(result), [
+          { text: 'View Sync Details', onPress: () => navigation.navigate('SyncMonitor') },
+          { text: 'Close', style: 'cancel' }
+        ]);
       }
     } catch (e) {
       console.warn('[HomeScreen] Synchronization was not completed.');

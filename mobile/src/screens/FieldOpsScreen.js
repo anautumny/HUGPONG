@@ -4,13 +4,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
+import { exportQrImageFile } from '../services/pdfFileService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { SearchableSelect, ScreenHeader } from '../components/ui';
 import { subscribe, getCurrentSession, setSynced, setSession, updateSessionFieldId, updateFieldStageAndCycle, requestFieldCropCycleRollover, approveFieldCropCycleRollover, rejectFieldCropCycleRollover, getIsSynced, getFieldSyncState, getOperationSyncState, getRelevantAuditSyncState, fetchAuditHistoryPage, getSraCertifiedAuditHistory, getSraOfflineSnapshotStatus, fields, cropCycles, operationLogs, draftLogs as draftLogsStore, notifyDataUpdate, updateFieldCustomStages, performMobileSync, commitExplicitMutation, getFieldCustomOperations, saveFieldCustomOperations, auditLogs, auditReports, blockFarms, users, resolveFieldBlockFarm, resolveFieldMember, findUserByIdOrContact, updateOperationLogWithSecurity, isLogLocked, getLogAuditTrail, pendingUsers, approvePendingRegistration, saveFieldPlot, deleteDraftLogs, clearAllDraftsForField, saveDraftLogs, saveLocalOperationDraft, validateLocalDraftForSubmission, validateLocalDraftContentForSubmission, claimLocalDraftSubmission, releaseLocalDraftSubmission, logSystemEvent, verifyCurrentPassword } from '../data/dataStore';
-import { getOperationCapabilities } from '../domain/operationAuthorization';
+import { getOperationCapabilities, fieldTakeoverSession, rememberFieldTakeover, forgetFieldTakeover, pruneFieldTakeovers } from '../domain/operationAuthorization';
 import { getItem, saveItem, STORAGE_KEYS, lastScannedAuditStorageKey, pendingAuditReferenceStorageKey } from '../services/storageService';
 import { generateLogId, generateDraftId, generateSubItemId, generateCustomOpId } from '../services/syncEngine';
 import { getNetworkStatus, subscribeToNetwork } from '../services/networkService';
@@ -25,6 +24,7 @@ import ArchiveFilters from '../components/ArchiveFilters';
 import LiveQRScanner from '../components/LiveQRScanner';
 import ProvisionUserModal from '../components/ProvisionUserModal';
 import RecoveryReviewQueue from '../components/RecoveryReviewQueue';
+import TakeoverAuthorizationModal from '../components/TakeoverAuthorizationModal';
 import AnimatedBottomSheet from '../components/AnimatedBottomSheet';
 import AuditMemberReviewSheet from '../components/AuditMemberReviewSheet';
 import Pagination, { usePagination } from '../components/ui/Pagination';
@@ -846,13 +846,14 @@ const CompactLogItem = React.memo(function CompactLogItem({
 
 export default function FieldOpsScreen({ navigation, route }) {
   const { t, formatSyncTime, formatOperationName, formatStageName, formatPhaseMonth } = useTranslation();
-  const canonicalBlockFarms = uniqueRecordsById(blockFarms);
   const [synced, setSyncedState] = useState(getIsSynced());
   const [session, setSessionLocal] = useState(() => getCurrentSession() || {});
   const [activeRole, setActiveRole] = useState(getCurrentSession().role);
   const [deviceOnline, setDeviceOnline] = useState(getNetworkStatus());
   const [dataRevision, setDataRevision] = useState(0);
-  const pendingAuditPage = usePagination(auditReports.filter(report => canonicalAuditStatus(report.status) === AUDIT_STATUS.PENDING_REVIEW), {
+  const canonicalBlockFarms = React.useMemo(() => uniqueRecordsById(blockFarms), [dataRevision]);
+  const pendingAuditReports = React.useMemo(() => auditReports.filter(report => canonicalAuditStatus(report.status) === AUDIT_STATUS.PENDING_REVIEW), [dataRevision]);
+  const pendingAuditPage = usePagination(pendingAuditReports, {
     resetKey: session?.employeeId || session?.id,
   });
   const [managerFieldFilter, setManagerFieldFilter] = useState('all');
@@ -867,9 +868,9 @@ export default function FieldOpsScreen({ navigation, route }) {
     };
   }, []);
 
-  const managedFarmIds = managedBlockFarmIds(canonicalBlockFarms, sessionUserId);
+  const managedFarmIds = React.useMemo(() => managedBlockFarmIds(canonicalBlockFarms, sessionUserId), [canonicalBlockFarms, sessionUserId]);
 
-  const accessibleFields = (fields || []).filter(field => {
+  const accessibleFields = React.useMemo(() => (fields || []).filter(field => {
     if (activeRole === 'Farm Member') {
       return (
         field.memberUserId === sessionUserId ||
@@ -890,10 +891,10 @@ export default function FieldOpsScreen({ navigation, route }) {
       );
     }
     return true;
-  });
-  const personalFields = accessibleFields.filter(field => (
+  }), [dataRevision, activeRole, sessionUserId, session?.fieldId, deviceOnline, managedFarmIds]);
+  const personalFields = React.useMemo(() => accessibleFields.filter(field => (
     field.memberUserId === sessionUserId || (session?.fieldId && field.id === session.fieldId)
-  ));
+  )), [accessibleFields, sessionUserId, session?.fieldId]);
   const scopedFields = activeRole === 'Farm Manager' && deviceOnline && managerFieldFilter === 'my'
     ? personalFields
     : accessibleFields;
@@ -1041,13 +1042,11 @@ export default function FieldOpsScreen({ navigation, route }) {
         setSelectedField(targetF);
         updateSessionFieldId(targetF.id);
         if (route?.params?.requestTakeOver || route?.params?.isTakeOver || route?.params?.takeOverFieldId) {
-          // Strictly require manager password verification — no unauthenticated bypass!
-          setIsTakeOver(false);
-          setTakeoverGrant(null);
+          // Reuse only a still-valid server grant for this exact field;
+          // other fields still require manager password verification.
           setTakeOverAuthPassword('');
           setTakeOverAuthError('');
-          setShowTakeOverPassword(false);
-          setShowTakeOverAuthModal(true);
+          setShowTakeOverAuthModal(!fieldTakeoverSession(takeoverSessions, session, targetF.id));
         }
         navigation.setParams({ fieldId: undefined, initialFieldId: undefined, takeOverFieldId: undefined, isTakeOver: undefined, requestTakeOver: undefined });
         return;
@@ -1075,25 +1074,6 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
   }, [route?.params, dataRevision, managerFieldFilter, deviceOnline]);
 
-  // Real-time bidirectional synchronization listener with Cloud Firestore & Web
-  useEffect(() => {
-    const unsubscribe = subscribe(() => {
-      setDataRevision(value => value + 1);
-      setSyncedState(getIsSynced());
-      setSessionLocal(getCurrentSession() || {});
-      setLogs([...operationLogs]);
-      setPendingUsersList([...pendingUsers]);
-      if (selectedField?.id && selectedField.id !== 'Unassigned') {
-        const updatedField = (fields || []).find(f => f && f.id === safeField?.id);
-        if (updatedField) {
-          setSelectedField({ ...updatedField });
-        }
-      } else if (getCurrentSession()?.role !== 'Farm Member' && scopedFields.length > 0) {
-        setSelectedField(scopedFields[0]);
-      }
-    });
-    return unsubscribe;
-  }, [selectedField?.id]);
   const [showLog, setShowLog] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [showAuditReceiveOptions, setShowAuditReceiveOptions] = useState(false);
@@ -1103,6 +1083,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [isResolvingTransferCode, setIsResolvingTransferCode] = useState(false);
   const [activeQRData, setActiveQRData] = useState(null);
   const [isSavingQrImage, setIsSavingQrImage] = useState(false);
+  const qrSaveInFlightRef = useRef(false);
   const [isCompilingAudit, setIsCompilingAudit] = useState(false);
   const [isCheckingAuditReadiness, setIsCheckingAuditReadiness] = useState(false);
   const [incompleteAuditFields, setIncompleteAuditFields] = useState([]);
@@ -1358,62 +1339,56 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [pendingVerificationDecisions, setPendingVerificationDecisions] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date());
-  const [isTakeOver, setIsTakeOver] = useState(false);
-  const [takeoverGrant, setTakeoverGrant] = useState(null);
-  const [takeoverExpiresAt, setTakeoverExpiresAt] = useState(0);
-  const takeoverActorRef = React.useRef(sessionUserId);
-  const takeoverSession = isTakeOver ? {
-    managerId: sessionUserId,
-    fieldId: selectedField?.id || safeField.id,
-    grant: takeoverGrant,
-    expiresAt: takeoverExpiresAt
-  } : null;
+  const [takeoverSessions, setTakeoverSessions] = useState({});
+  const takeoverActorKey = JSON.stringify([sessionUserId, activeRole, session?.authVersion ?? '']);
+  const takeoverActorRef = React.useRef(takeoverActorKey);
+  const takeoverRequestRef = React.useRef({ busy: false, version: 0, scope: '' });
+  const takeoverModalActorRef = React.useRef(takeoverActorKey);
+  const takeoverScopeKey = JSON.stringify([takeoverActorKey, selectedField?.id || safeField.id]);
+  takeoverRequestRef.current.scope = takeoverScopeKey;
+  const takeoverSession = deviceOnline ? fieldTakeoverSession(takeoverSessions, session, safeField.id) : null;
   const operationCapabilities = getOperationCapabilities(session, safeField, takeoverSession);
+  const isTakeOver = operationCapabilities.takeover;
+  const takeoverGrant = isTakeOver ? takeoverSession.grant : null;
+  const releaseFieldTakeover = () => setTakeoverSessions(previous => forgetFieldTakeover(previous, safeField.id));
   useEffect(() => {
-    if (takeoverActorRef.current !== sessionUserId) {
-      setIsTakeOver(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-      takeoverActorRef.current = sessionUserId;
+    if (takeoverActorRef.current !== takeoverActorKey) {
+      setTakeoverSessions({});
+      takeoverActorRef.current = takeoverActorKey;
     }
-  }, [sessionUserId]);
-  const prevFieldIdRef = React.useRef(selectedField?.id);
+  }, [takeoverActorKey]);
   useEffect(() => {
-    if (prevFieldIdRef.current && prevFieldIdRef.current !== selectedField?.id) {
-      setIsTakeOver(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-    }
-    prevFieldIdRef.current = selectedField?.id;
-  }, [selectedField?.id]);
-  useEffect(() => {
-    if (!isTakeOver || !takeoverExpiresAt) return undefined;
-    const remaining = takeoverExpiresAt - Date.now();
-    if (remaining <= 0) {
-      setIsTakeOver(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-      return undefined;
-    }
-    const timer = setTimeout(() => {
-      setIsTakeOver(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-    }, remaining);
+    const deadlines = Object.values(takeoverSessions).map(item => item.expiresAt);
+    if (!deadlines.length) return undefined;
+    const timer = setTimeout(() => setTakeoverSessions(previous => pruneFieldTakeovers(previous, session)),
+      Math.max(0, Math.min(...deadlines) - Date.now()));
     return () => clearTimeout(timer);
-  }, [isTakeOver, takeoverExpiresAt]);
+  }, [takeoverSessions, takeoverActorKey]);
   const [showTakeOverAuthModal, setShowTakeOverAuthModal] = useState(false);
   const [takeOverAuthPassword, setTakeOverAuthPassword] = useState('');
   const [takeOverAuthError, setTakeOverAuthError] = useState('');
-  const [showTakeOverPassword, setShowTakeOverPassword] = useState(false);
+  const [authorizingTakeOver, setAuthorizingTakeOver] = useState(false);
   const [pendingTakeOverAction, setPendingTakeOverAction] = useState(null);
+  useEffect(() => {
+    const request = takeoverRequestRef.current;
+    request.version++;
+    request.busy = false;
+    setAuthorizingTakeOver(false);
+    if (takeoverModalActorRef.current !== takeoverActorKey) setShowTakeOverAuthModal(false);
+    takeoverModalActorRef.current = takeoverActorKey;
+    setPendingTakeOverAction(null);
+    setTakeOverAuthPassword('');
+    setTakeOverAuthError('');
+    return () => { request.version++; request.busy = false; };
+  }, [takeoverScopeKey]);
 
   const closeTakeOverAuthorization = () => {
+    if (takeoverRequestRef.current.busy) return;
+    takeoverRequestRef.current.version++;
     setShowTakeOverAuthModal(false);
     setPendingTakeOverAction(null);
     setTakeOverAuthPassword('');
     setTakeOverAuthError('');
-    setShowTakeOverPassword(false);
     if (operationEditorReturnTarget) {
       restoreLedgerTarget(operationEditorReturnTarget);
       setOperationEditorReturnTarget(null);
@@ -1421,6 +1396,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const handleInitiateTakeOver = (onAuthorizedAction = null) => {
+    if (takeoverRequestRef.current.busy) return;
     if (!deviceOnline && !getNetworkStatus()) {
       Alert.alert(
         'Manager Takeover Unavailable Offline',
@@ -1429,10 +1405,19 @@ export default function FieldOpsScreen({ navigation, route }) {
       return;
     }
     if (isTakeOver) {
-      setIsTakeOver(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-      setPendingTakeOverAction(null);
+      const exitScope = takeoverScopeKey;
+      Alert.alert(
+        'Exit Manager Takeover?',
+        `End your takeover authorization for ${safeField.id}? Saved operations will remain. You will need to authorize this field again to make further changes.`,
+        [
+          { text: 'Stay Here', style: 'cancel' },
+          { text: 'Exit Takeover', style: 'destructive', onPress: () => {
+            if (takeoverRequestRef.current.scope !== exitScope) return;
+            releaseFieldTakeover();
+            setPendingTakeOverAction(null);
+          } }
+        ]
+      );
       return;
     }
     if (typeof onAuthorizedAction === 'function') {
@@ -1442,32 +1427,40 @@ export default function FieldOpsScreen({ navigation, route }) {
     }
     setTakeOverAuthPassword('');
     setTakeOverAuthError('');
-    setShowTakeOverPassword(false);
     if (showHistoryModal) setShowHistoryModal(false);
     setShowTakeOverAuthModal(true);
   };
 
   const handleConfirmTakeOverAuth = async () => {
-    const cleanPass = String(takeOverAuthPassword || '').trim();
-    const authorization = cleanPass ? await verifyCurrentPassword(cleanPass, selectedField?.id || safeField.id) : false;
-
-    if (!cleanPass || !authorization?.takeoverGrant) {
-      setTakeOverAuthError('Incorrect password. Enter your manager account password to authorize Manager Takeover.');
-      return;
-    }
-
+    const request = takeoverRequestRef.current;
+    if (request.busy) return;
+    if (!getNetworkStatus()) { setTakeOverAuthError('Connect to HUGPONG before authorizing Manager Takeover.'); return; }
+    const password = String(takeOverAuthPassword || '');
+    if (!password.trim()) { setTakeOverAuthError('Enter your Farm Manager password.'); return; }
+    const version = ++request.version;
+    const scope = takeoverScopeKey;
+    const isCurrent = () => request.version === version && request.scope === scope;
+    request.busy = true;
+    setAuthorizingTakeOver(true);
     setTakeOverAuthError('');
-    setShowTakeOverAuthModal(false);
-    setIsTakeOver(true);
-    setTakeoverGrant(authorization.takeoverGrant);
-    setTakeoverExpiresAt(Number(authorization.takeoverGrantExpiresAt || 0));
-
-    if (typeof pendingTakeOverAction === 'function') {
-      const pendingCallback = pendingTakeOverAction;
-      setPendingTakeOverAction(null);
-      setTimeout(() => {
-        pendingCallback();
-      }, 150);
+    try {
+      const authorization = await verifyCurrentPassword(password, selectedField?.id || safeField.id, { throwOnError: true });
+      if (!isCurrent()) return;
+      if (!authorization?.takeoverGrant) throw new Error('Manager Takeover could not be authorized. Please try again.');
+      const authorized = rememberFieldTakeover({}, session, selectedField?.id || safeField.id,
+        authorization.takeoverGrant, authorization.takeoverGrantExpiresAt);
+      setTakeoverSessions(previous => ({ ...pruneFieldTakeovers(previous, session), ...authorized }));
+      setShowTakeOverAuthModal(false);
+      setTakeOverAuthPassword('');
+      if (typeof pendingTakeOverAction === 'function') {
+        const pendingCallback = pendingTakeOverAction;
+        setPendingTakeOverAction(null);
+        setTimeout(() => { if (isCurrent()) pendingCallback(); }, 150);
+      }
+    } catch (error) {
+      if (isCurrent()) setTakeOverAuthError(error.message || 'Authorization could not be completed. Please try again.');
+    } finally {
+      if (isCurrent()) { request.busy = false; setAuthorizingTakeOver(false); }
     }
   };
 
@@ -1681,6 +1674,7 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const closeAuditQr = () => {
+    if (qrSaveInFlightRef.current) return;
     setShowQR(false);
     setActiveQRData(null);
     if (qrReturnTarget) {
@@ -1690,54 +1684,16 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   const saveCurrentQrImage = async () => {
-    if (!qrSvgRef.current?.toDataURL || !activeQRData?.qrPayload) return;
+    if (qrSaveInFlightRef.current || !activeQRData?.qrPayload) return;
+    qrSaveInFlightRef.current = true;
     setIsSavingQrImage(true);
     try {
-      const base64 = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('The QR image could not be prepared.')), 10000);
-        qrSvgRef.current.toDataURL(data => {
-          clearTimeout(timeout);
-          if (data) resolve(data);
-          else reject(new Error('The QR image could not be prepared.'));
-        }, { width: 1200, height: 1200 });
-      });
       const safeReportId = String(activeQRData.reportId || 'audit').replace(/[^A-Za-z0-9_-]/g, '-');
-
-      if (Platform.OS === 'android') {
-        const downloadsUri = FileSystem.StorageAccessFramework.getUriForDirectoryInRoot('Download');
-        const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(downloadsUri);
-        if (!permission.granted) {
-          Alert.alert('Save Cancelled', 'Choose a folder when you are ready to save the QR image.');
-          return;
-        }
-        const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
-          permission.directoryUri,
-          `${safeReportId}-QR`,
-          'image/png'
-        );
-        await FileSystem.StorageAccessFramework.writeAsStringAsync(fileUri, base64, {
-          encoding: FileSystem.EncodingType.Base64
-        });
-        Alert.alert('QR Image Saved', 'The audit report QR was saved in the selected folder.');
-        return;
-      }
-
-      if (!FileSystem.cacheDirectory) throw new Error('Temporary storage is unavailable.');
-      const fileUri = `${FileSystem.cacheDirectory}${safeReportId}-QR.png`;
-      try {
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-        if (!(await Sharing.isAvailableAsync())) throw new Error('The system save sheet is unavailable.');
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'image/png',
-          dialogTitle: 'Save or share audit QR',
-          UTI: 'public.png'
-        });
-      } finally {
-        await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
-      }
+      await exportQrImageFile(qrSvgRef.current, `${safeReportId}-QR.png`);
     } catch (error) {
       Alert.alert('Unable to Save QR', error.message || 'The QR image could not be saved.');
     } finally {
+      qrSaveInFlightRef.current = false;
       setIsSavingQrImage(false);
     }
   };
@@ -3165,47 +3121,43 @@ export default function FieldOpsScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    // Initial sync
+    // One projection subscription for local edits and authoritative refreshes.
     const initialSession = getCurrentSession();
     const initialUserId = initialSession?.employeeId || initialSession?.id || '';
     const isNet = getNetworkStatus();
-    const initialFarmIds = new Set(canonicalBlockFarms.filter(farm => farm.managerUserId === initialUserId).map(farm => farm.id));
+    const initialFarmIds = managedBlockFarmIds(uniqueRecordsById(blockFarms), initialUserId);
     const initialFields = fields.filter(field => {
       if (initialSession?.role === 'Farm Member' || !isNet) {
         return (
-          field.memberUserId === initialUserId ||
-          field.memberId === initialUserId ||
-          field.member === initialSession?.name ||
-          field.memberName === initialSession?.name ||
+          (initialUserId && (field.memberUserId === initialUserId || field.memberId === initialUserId)) ||
           (initialSession?.fieldId && field.id === initialSession?.fieldId)
         );
       }
       if (initialSession?.role === 'Farm Manager') {
-        return initialFarmIds.has(field.blockFarmId);
+        return initialFarmIds.has(field.blockFarmId) || (initialUserId && field.memberUserId === initialUserId);
       }
       return true;
     });
     setSelectedField(initialFields.find(field => field.id === initialSession?.fieldId) || initialFields[0] || null);
     const unsubscribe = subscribe(() => {
       const session = getCurrentSession();
+      setDataRevision(value => value + 1);
+      setSessionLocal(session || {});
       setActiveRole(session?.role || 'Farm Member');
       // Keep selectedField reactive and aligned with authoritative fields array!
       setSelectedField(prev => {
         const userId = session?.employeeId || session?.id || '';
         const isOnlineNow = getNetworkStatus();
-        const farmIds = new Set(canonicalBlockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
+        const farmIds = managedBlockFarmIds(uniqueRecordsById(blockFarms), userId);
         const permitted = fields.filter(field => {
           if (session?.role === 'Farm Member' || !isOnlineNow) {
             return (
-              field.memberUserId === userId ||
-              field.memberId === userId ||
-              field.member === session?.name ||
-              field.memberName === session?.name ||
+              (userId && (field.memberUserId === userId || field.memberId === userId)) ||
               (session?.fieldId && field.id === session?.fieldId)
             );
           }
           if (session?.role === 'Farm Manager') {
-            return farmIds.has(field.blockFarmId);
+            return farmIds.has(field.blockFarmId) || (userId && field.memberUserId === userId);
           }
           return true;
         });
@@ -3535,7 +3487,7 @@ export default function FieldOpsScreen({ navigation, route }) {
 
     if (asSubmit && logForm.isGroup) {
       if (submittedSubItems.length === 0) {
-        Alert.alert('Item Required', 'Add at least one complete material or expense item before submitting this operation.');
+        Alert.alert('Quantity and Unit Required', 'Add a material or expense with quantity and unit. For labor-only work, choose Direct Input, enter the operation quantity and unit, and use direct rate 0 when the crew cost is entered separately.');
         return;
       }
       const incompleteItem = submittedSubItems.find(item => (
@@ -4791,10 +4743,12 @@ export default function FieldOpsScreen({ navigation, route }) {
   ), [activeRole, selectedField?.id, safeField.id, draftLogs]);
 
   const pastLogs = archiveState.records;
-  const accessibleArchiveFieldIds = new Set(accessibleFields.map(field => field.id));
-  const authorizedArchiveCycles = cropCycles.filter(cycle => accessibleArchiveFieldIds.has(cycle.fieldId) && cycle.archivedReason !== 'CROP_YEAR_RESET');
-  const archiveCropYears = uniqueCropYears(authorizedArchiveCycles);
-  const invalidArchiveCycles = authorizedArchiveCycles.filter(cycle => !canonicalStoredCropYear(cycle.cropYear));
+  const { archiveCropYears, invalidArchiveCycles } = React.useMemo(() => {
+    const accessibleArchiveFieldIds = new Set(accessibleFields.map(field => field.id));
+    const authorizedArchiveCycles = cropCycles.filter(cycle => accessibleArchiveFieldIds.has(cycle.fieldId) && cycle.archivedReason !== 'CROP_YEAR_RESET');
+    return { archiveCropYears: uniqueCropYears(authorizedArchiveCycles),
+      invalidArchiveCycles: authorizedArchiveCycles.filter(cycle => !canonicalStoredCropYear(cycle.cropYear)) };
+  }, [accessibleFields, dataRevision]);
   const orderedArchiveFields = React.useMemo(
     () => [...accessibleFields].sort((left, right) => String(left.id).localeCompare(String(right.id))),
     [accessibleFields]
@@ -4918,12 +4872,9 @@ export default function FieldOpsScreen({ navigation, route }) {
     return fieldLogs;
   }, [managerLedgerScope, allFarmSubmittedLogs, fieldLogs]);
 
-  const auditCoverageSignature = auditReports
-    .map(report => `${report.reportId || report.id}:${report.status}:${report.updatedAt || report.compiledAt || ''}`)
-    .join('|');
   const auditCoverageByOperationId = React.useMemo(
     () => operationAuditCoverage(auditReports),
-    [auditCoverageSignature]
+    [dataRevision]
   );
 
   const unsynced = React.useMemo(() => {
@@ -6734,7 +6685,9 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <TextInput accessibilityLabel={t('log_rate_per_day')} style={s.formInput} value={workerDraft.rate} onChangeText={rate => setWorkerDraft(previous => ({ ...previous, rate }))} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={COLORS.textMuted} />
                   </View>
                 </View>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{t('log_labor_cost')}: â‚±{displayedLaborCost.toLocaleString()}</Text>
+                {Number(logForm.people || 0) > 0 && Number(workerDraft.days || 0) > 0 && String(workerDraft.rate ?? '').trim() !== '' && (
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.primary }}>{t('log_labor_cost')}: ₱{displayedLaborCost.toLocaleString()}</Text>
+                )}
               </View>
             </View>
 
@@ -6769,17 +6722,14 @@ export default function FieldOpsScreen({ navigation, route }) {
                   ]}
                   onPress={() => {
                     if (logForm.isGroup) {
-                      const totalFromSub = (logForm.subItems || []).reduce((sum, item) => sum + (item.subTotal || 0), 0);
-                      const haVal = parseFloat(logForm.hectares) || 1.0;
-                      const directRate = Math.round(totalFromSub / haVal) || 1000;
                       setLogForm(p => ({
                         ...p,
                         isGroup: false,
                         inputType: 'direct',
-                        inputQty: String(haVal),
-                        inputUnit: 'HA',
-                        directRate: String(directRate),
-                        cost: String(totalFromSub || Math.round(haVal * directRate))
+                        inputQty: String(p.inputQty ?? ''),
+                        inputUnit: p.inputUnit || 'HA',
+                        directRate: String(p.directRate ?? ''),
+                        cost: String(Number(p.inputQty || 0) * Number(p.directRate || 0))
                       }));
                     }
                   }}
@@ -6791,6 +6741,7 @@ export default function FieldOpsScreen({ navigation, route }) {
               </View>
 
               {/* Group Mode vs Direct Mode View */}
+              <Text style={{ fontSize: 12, color: COLORS.textSecondary }}>Labor-only work needs an operation quantity and unit. Use Direct Input with rate 0 when all costs are entered in the crew details.</Text>
               {logForm.isGroup ? (
                 /* Group Mode: Compact Editable Rows */
                 <View style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.md, gap: 10 }}>
@@ -8551,11 +8502,11 @@ export default function FieldOpsScreen({ navigation, route }) {
 
                   <Text style={s.sectionLabel}>{t('field_plot', 'Selected Field')}</Text>
                   <View style={{ backgroundColor: '#fff', borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, marginBottom: SPACING.md }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField?.id || 'No Field'}</Text></View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View style={{ alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                      <View style={[s.fieldIdBadge, { maxWidth: '100%' }]}><Text selectable style={s.fieldIdText}>{safeField?.id || 'No Field'}</Text></View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' }}>
                         <Ionicons name={fieldSyncState(safeField).isSynced ? 'cloud-done-outline' : 'cloud-offline-outline'} size={13} color={fieldSyncState(safeField).isSynced ? COLORS.success : COLORS.warning} />
-                        <Text style={{ fontSize: 12, color: fieldSyncState(safeField).isSynced ? COLORS.success : COLORS.warning, fontWeight: '500' }}>
+                        <Text style={{ flexShrink: 1, fontSize: 12, color: fieldSyncState(safeField).isSynced ? COLORS.success : COLORS.warning, fontWeight: '500' }}>
                           {fieldSyncLabel(safeField)}
                         </Text>
                       </View>
@@ -8968,8 +8919,8 @@ export default function FieldOpsScreen({ navigation, route }) {
             {scopedFields.length > 0 && safeField?.id && safeField.id !== 'Unassigned' ? (
               <View style={s.fieldCard}>
                 <View style={s.fieldCardTop}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap', marginRight: 6 }}>
-                    <View style={s.fieldIdBadge}><Text style={s.fieldIdText}>{safeField.id}</Text></View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <View style={[s.fieldIdBadge, { width: '100%' }]}><Text selectable style={s.fieldIdText}>{safeField.id}</Text></View>
                     <Text style={s.fieldHa}>{safeField.ha} Ha</Text>
                     {isTakeOver && (
                       <View style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.xs, borderWidth: 1, borderColor: '#FCA5A5' }}>
@@ -8993,6 +8944,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                             alignItems: 'center',
                             gap: 7,
                             minHeight: 46,
+                            maxWidth: '100%',
+                            alignSelf: 'stretch',
                             ...SHADOW.card
                           }}
                           activeOpacity={0.8}
@@ -9002,7 +8955,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                             size={18}
                             color="#DC2626"
                           />
-                          <Text style={{ fontSize: 14, fontWeight: '900', color: '#DC2626' }}>
+                          <Text style={{ fontSize: 14, fontWeight: '900', color: '#DC2626', flexShrink: 1 }}>
                             Exit Manager Takeover
                           </Text>
                         </TouchableOpacity>
@@ -9967,113 +9920,14 @@ export default function FieldOpsScreen({ navigation, route }) {
       {/* ── Audit History & Monthly Breakdown Modal ── */}
       
 
-      {/* Manager Takeover security authorization modal */}
-      <Modal visible={showTakeOverAuthModal} transparent animationType="fade" onRequestClose={closeTakeOverAuthorization}>
-        <View style={s.qrOverlay}>
-          <View style={{ width: width > 500 ? 460 : '92%', maxHeight: '90%', backgroundColor: '#FFFFFF', borderRadius: RADIUS.xl, padding: 18, alignItems: 'stretch', ...SHADOW.lg }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FEF0D0', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="shield" size={20} color="#C97A00" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.text }}>Authorize Manager Takeover</Text>
-                <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Administrative supervision gate</Text>
-              </View>
-            </View>
-            <TouchableOpacity onPress={closeTakeOverAuthorization} style={{ padding: 4 }}>
-              <Ionicons name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: 16 }} keyboardShouldPersistTaps="handled">
-            {/* Target Field Summary Card */}
-            {selectedField && (
-              <View style={{ backgroundColor: '#F9FAF7', borderRadius: RADIUS.md, padding: 14, borderWidth: 1, borderColor: COLORS.border, gap: 4 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
-                  <Text selectable style={{ fontSize: 14, fontWeight: '700', color: COLORS.text, flexGrow: 1, flexBasis: 180, minWidth: 0 }}>
-                    {selectedField.id || safeField.id}
-                  </Text>
-                  <View style={{ backgroundColor: '#FEF0D0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full, alignSelf: 'flex-start' }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#A85E00' }}>Supervisor Action</Text>
-                  </View>
-                </View>
-                <Text style={{ fontSize: 12, color: COLORS.text, fontWeight: '600' }}>
-                  {t('member_label', 'Farm Member')}: {safeField.member || 'Assigned Farm Member'} · {Number(safeField.ha) > 0 ? `${safeField.ha} Ha` : 'Area not recorded'}
-                </Text>
-                <Text style={{ fontSize: 11, color: COLORS.textSecondary }}>
-                  {resolveFieldBlockFarm(safeField)} · Current Stage: {getFieldStageLabel(safeField)}
-                </Text>
-              </View>
-            )}
-
-            {/* Security Notice */}
-            <View style={{ backgroundColor: '#FFFBF0', borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FEF0D0', flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              <Ionicons name="shield-outline" size={18} color="#C97A00" />
-              <Text style={{ fontSize: 12, color: '#8F5700', flex: 1 }}>
-                Manager Takeover actions are permanently logged to the audit ledger.
-              </Text>
-            </View>
-
-            {/* Manager Password Input */}
-            <View style={{ gap: 6 }}>
-              <Text style={s.formLabel}>Farm Manager Password <Text style={{ color: COLORS.required }}>*</Text></Text>
-              <View style={{ position: 'relative', justifyContent: 'center' }}>
-                <TextInput
-                  secureTextEntry={!showTakeOverPassword}
-                  placeholder="Enter your manager password"
-                  placeholderTextColor={COLORS.textMuted}
-                  style={[s.formInput, { paddingRight: 52, minHeight: 56 }]}
-                  value={takeOverAuthPassword}
-                  onChangeText={(val) => {
-                    setTakeOverAuthPassword(val);
-                    setTakeOverAuthError('');
-                  }}
-                />
-                <TouchableOpacity
-                  style={{ position: 'absolute', right: 10, top: 0, bottom: 0, padding: 8, justifyContent: 'center' }}
-                  onPress={() => setShowTakeOverPassword(prev => !prev)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={showTakeOverPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color={COLORS.textMuted}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Error Message */}
-            {Boolean(takeOverAuthError) && (
-              <View style={{ backgroundColor: '#FFF5F5', padding: 10, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: '#FFD4D4', flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                <Ionicons name="alert-circle" size={16} color="#D9534F" />
-                <Text style={{ fontSize: 12, color: '#D9534F', fontWeight: '600', flex: 1 }}>
-                  {takeOverAuthError}
-                </Text>
-              </View>
-            )}
-
-            {/* Action Buttons */}
-            <View style={s.responsiveActionRow}>
-              <TouchableOpacity
-                style={s.cancelBtn}
-                onPress={closeTakeOverAuthorization}
-              >
-                <Text style={s.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.submitBtn, { backgroundColor: '#C97A00' }]}
-                onPress={handleConfirmTakeOverAuth}
-              >
-                <Ionicons name="shield-outline" size={18} color="#fff" />
-                <Text style={s.submitBtnText}>Authorize Manager Takeover</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <TakeoverAuthorizationModal
+        visible={showTakeOverAuthModal} fieldId={selectedField?.id || safeField.id}
+        memberName={resolveFieldMember(safeField)} area={Number(safeField.ha) > 0 ? String(safeField.ha) + ' Ha' : 'Area not recorded'}
+        farmName={resolveFieldBlockFarm(safeField)} stageName={getFieldStageLabel(safeField)}
+        password={takeOverAuthPassword} error={takeOverAuthError} busy={authorizingTakeOver}
+        onPasswordChange={value => { setTakeOverAuthPassword(value); setTakeOverAuthError(''); }}
+        onAuthorize={handleConfirmTakeOverAuth} onClose={closeTakeOverAuthorization}
+      />
 
       {editAuthorizationModal}
 
@@ -10118,7 +9972,7 @@ const s = StyleSheet.create({
 
   // Field Card
   fieldCard: { backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: 18, gap: 8, ...SHADOW.card, borderWidth: 1, borderColor: COLORS.border },
-  fieldCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  fieldCardTop: { flexDirection: 'column', alignItems: 'stretch', gap: 12 },
   fieldIdBadge: { backgroundColor: COLORS.primaryBg, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   fieldIdText: { fontSize: 15, fontWeight: '900', color: COLORS.primary },
   fieldHa: { fontSize: 14, fontWeight: '800', color: COLORS.textSecondary },

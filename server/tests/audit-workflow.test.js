@@ -108,7 +108,7 @@ function availableActivityFixture() {
     fieldId, blockFarmId: 'BF-1', cycleId: `CYC-${fieldId}`, cropYearCycle: '2026-2027',
     operationDefinitionId: 'OP-1', operationName: 'Weeding', category: 'MAINTENANCE',
     stageNumberAtRecord: 4, stageNumber: 4, performedOn: '2026-09-10', areaHa: 1.25,
-    peopleCount: 1, totalCost: 100, status: 'ACTIVE', ...overrides,
+    peopleCount: 1, quantity: { value: 1, unit: 'HA', inputName: 'Weeding' }, totalCost: 100, status: 'ACTIVE', ...overrides,
   });
   const db = memoryFirestore({
     'block_farms/BF-1': { name: 'Assigned farm', managerUserId: 'MGR-1', status: 'ACTIVE' },
@@ -175,6 +175,50 @@ test('API compiles available monthly activity, excludes idle plots from totals, 
   assert.equal(later.payload.data.hectaresAudited, 2.5);
   assert.equal(later.payload.data.totalCost, 50);
   assert.deepEqual(db.records.get(`audit_reports/${report.id}`), certifiedSnapshot);
+});
+
+test('new audit compilation rejects missing selected quantities before any writes, then preserves corrected selections in the signed snapshot', async () => {
+  const { db, request } = availableActivityFixture();
+  const source = db.records.get('operation_logs/LOG-1');
+  source.quantity = null;
+  source.baseCost = 0;
+  source.laborEntries = [{ laborEntryId: 'LAB-1', workerCount: 1, days: 1, rate: 100, subtotal: 100 }];
+  const before = structuredClone([...db.records]);
+  const readiness = responseCapture();
+  await loadAuditListHandler(db, 'get', '/readiness')(request({}, { periodKey: '2026-09' }), readiness);
+  assert.equal(readiness.payload.data.canCompile, false);
+  assert.equal(readiness.payload.data.missingQuantityCount, 1);
+  assert.equal(readiness.payload.data.missingQuantityOperations[0].operationLogId, 'LOG-1');
+  const failed = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ periodKey: '2026-09' }), failed);
+  assert.equal(failed.statusCode, 422);
+  assert.equal(failed.payload.code, 'AUDIT_QUANTITY_INCOMPLETE');
+  assert.deepEqual([...db.records], before, 'failed compilation does not create reports or lock operations');
+  source.quantity = { value: 2, unit: 'bag', inputName: 'Recorded quantity after source correction' };
+  const compiled = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ periodKey: '2026-09' }), compiled);
+  assert.equal(compiled.statusCode, 201, compiled.payload.error);
+  assert.deepEqual(compiled.payload.data.operationSnapshots.find(operation => operation.operationLogId === 'LOG-1').quantity, source.quantity);
+});
+
+test('new compilation checks only newly included operations and preserves historical reports with missing data', async () => {
+  const { db, request, operation } = availableActivityFixture();
+  const compiled = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ periodKey: '2026-09' }), compiled);
+  const old = db.records.get(`audit_reports/${compiled.payload.data.id}`);
+  old.status = 'CERTIFIED';
+  old.operationSnapshots[0].quantity = null;
+  old.integrityHash = old.qrHash = require('../schema/firestoreSchema').createAuditHash(compiled.payload.data.id, old.blockFarmId, old.periodKey, old.operationSnapshots);
+  const before = structuredClone(old);
+  db.records.set('operation_logs/LOG-NEW', operation('FLD-2', { quantity: { value: 3, unit: 'liter' } }));
+  const readiness = responseCapture();
+  await loadAuditListHandler(db, 'get', '/readiness')(request({}, { periodKey: '2026-09' }), readiness);
+  assert.equal(readiness.payload.data.canCompile, true);
+  const next = responseCapture();
+  await loadAuditListHandler(db, 'post')(request({ periodKey: '2026-09' }), next);
+  assert.equal(next.statusCode, 201, next.payload.error);
+  assert.deepEqual(next.payload.data.sourceLogIds, ['LOG-NEW']);
+  assert.deepEqual(db.records.get(`audit_reports/${old.id || compiled.payload.data.id}`), before);
 });
 
 test('available-activity compilation still rejects an empty month and another manager\'s farm without writes', async () => {

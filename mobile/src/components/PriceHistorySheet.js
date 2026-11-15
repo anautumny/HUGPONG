@@ -6,7 +6,7 @@ import { AppText as Text } from './Typography';
 import Pagination, { usePagination } from './ui/Pagination';
 import { authenticatedRequest } from '../services/authService';
 import { getCurrentSession } from '../data/dataStore';
-import { priceText } from '../utils/pricePresentation';
+import { priceText, movementText, comparisonSuffix } from '../utils/pricePresentation';
 import { COLORS } from '../theme';
 
 // The recent chart remains a server-calculated window. This browser follows the
@@ -65,6 +65,8 @@ export default function PriceHistorySheet({ visible, onClose, ownerId }) {
             <Text style={styles.muted}>{row.effectiveDate}{row.circularNumber ? ` · ${row.circularNumber}` : ''}</Text>
             <Text style={styles.text}>Raw sugar: {priceText(row.sugarPricePerLkg, row.sugarPriceStatus, 'Lkg')}</Text>
             <Text style={styles.text}>Molasses: {priceText(row.molassesPricePerMetricTon, row.molassesPriceStatus, 'MT')}</Text>
+            <Text style={styles.muted}>Sugar change: {movementText(row.sugarPriceChange)}{row.sugarPriceChange != null ? comparisonSuffix(row) : ''}</Text>
+            <Text style={styles.muted}>Molasses change: {movementText(row.molassesPriceChange)}{row.molassesPriceChange != null ? comparisonSuffix(row) : ''}</Text>
           </View>
         ))}
         {!records.length && !loading && !error && <Text style={styles.muted}>No published price records.</Text>}

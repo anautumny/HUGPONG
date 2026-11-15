@@ -7,7 +7,7 @@ import { auditStatusLabel, canonicalAuditStatus } from '../../domain/auditWorkfl
 export default function AuditQueue({ reports = [], selectedReportId = null, onSelectReport, isLoading = false, error = null, onRetry, blockFarms = [], className = '', title = 'Audit Inbox' }) {
   const farmName = report => report.blockFarmName || blockFarms.find(farm => farm.id === report.blockFarmId)?.name || report.blockFarmId || 'Block Farm';
   return (
-    <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs flex flex-col gap-4 ${className}`}>
+    <div className={`bg-white dark:bg-surface rounded-2xl border border-border p-5 sm:p-6 shadow-xs flex flex-col justify-start gap-4 ${className}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Inbox className="w-4 h-4 text-primary" />

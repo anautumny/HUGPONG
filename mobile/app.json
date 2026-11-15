@@ -2,7 +2,7 @@
   "expo": {
     "name": "HUGPONG",
     "slug": "hugpong",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/icon-foreground.png",
     "userInterfaceStyle": "light",
@@ -44,7 +44,14 @@
       ],
       "expo-sharing",
       "expo-secure-store",
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "largeIcon": "./assets/icon-foreground.png",
+          "color": "#2D5016"
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/icon-foreground.png"

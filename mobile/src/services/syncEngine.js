@@ -337,7 +337,8 @@ export function getOutboxDiagnostics() {
     lastAttempt: item.lastAttempt || null,
     lastError: item.lastError || null,
     conflict: item.conflict || null,
-    proposedChanges: item.type === 'operation_amendment' ? item.payload?.changes : null,
+    proposedChanges: item.type === 'operation_amendment' ? item.payload?.changes
+      : item.type === 'stage_update' ? { ...item.payload } : null,
     dependsOnMutationId: item.dependsOnMutationId || null
   }));
 }
@@ -483,6 +484,41 @@ export async function resolveOperationConflict(mutationId, { separate = false, r
         await persistOutboxQueue(outboxQueue, owner);
       }
       throw new Error('The reviewed queue could not be saved.');
+    }
+    notifySyncEngine();
+  }, { joinExisting: false });
+}
+
+export async function retryReviewedStageConflict(mutationId) {
+  return runOutboxSingleFlight(async () => {
+    assertOutboxReady();
+    const item = outboxQueue.find(queued => queued.mutationId === mutationId);
+    const current = item?.conflict?.current;
+    if (!activeOutboxOwnerId || item?.type !== 'stage_update' || item.status !== 'conflict'
+      || item.ownerUserId !== activeOutboxOwnerId || !current?.updatedAt
+      || current.id !== item.payload.cycleId || current.status !== 'ACTIVE') {
+      throw new Error('This stage change must be synchronized again before it can be reviewed.');
+    }
+    const requested = Number(item.payload.currentStageNumber), stage = Number(current.currentStageNumber);
+    if (!Number.isInteger(stage) || requested < stage || requested > stage + 1
+      || Number(item.payload.elapsedMonths) < Number(current.elapsedMonths)
+      || (current.completedAt && item.payload.isCompleted !== true)) {
+      throw new Error('The saved change would replace newer stage progress. Keep it for review with your Farm Manager.');
+    }
+    const previous = outboxQueue, owner = activeOutboxOwnerId;
+    const next = previous.map(queued => queued === item ? {
+      ...queued, baseVersion: current.updatedAt,
+      payload: { ...queued.payload, expectedStage: { currentStageNumber: stage, elapsedMonths: Number(current.elapsedMonths), completedAt: current.completedAt || null } },
+      status: 'queued', conflict: null, lastError: null, nextAttemptAt: null
+    } : queued);
+    outboxQueue = next;
+    if (!await persistOutboxQueue(next, owner)) {
+      if (activeOutboxOwnerId === owner) {
+        const ids = new Set(previous.map(queued => queued.mutationId));
+        outboxQueue = [...previous, ...outboxQueue.filter(queued => !ids.has(queued.mutationId))];
+        await persistOutboxQueue(outboxQueue, owner);
+      }
+      throw new Error('The reviewed stage change could not be saved.');
     }
     notifySyncEngine();
   }, { joinExisting: false });

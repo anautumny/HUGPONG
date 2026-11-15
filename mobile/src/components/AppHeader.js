@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, TouchableOpacity, Animated, Easing, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY } from '../theme';
-import { subscribe, getIsSynced, getCurrentSession, performMobileSync, getPendingSyncCount, restartCloudSyncIfReady } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, getCloudDataStatus, performMobileSync, getPendingSyncCount, restartCloudSyncIfReady } from '../data/dataStore';
 import {
   subscribeToNetwork,
   getNetworkStatus,
@@ -29,18 +29,23 @@ function AppHeader({ right, onPressBrand }) {
   const compact = width < 380 || fontScale > 1.2;
   const navigation = useNavigation();
   const [session, setSessionState] = useState(getCurrentSession());
+  const [dataStatus, setDataStatus] = useState(getCloudDataStatus());
   const [synced, setSyncedState] = useState(getIsSynced());
   const [isOnline, setIsOnline] = useState(getNetworkStatus());
   const [pendingCount, setPendingCount] = useState(getPendingSyncCount(getCurrentSession()));
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusText, setSyncStatusText] = useState('');
   const spinValue = useRef(new Animated.Value(0)).current;
-  const loopAnimRef = useRef(null);
+  const sessionOwner = String(session?.employeeId || session?.id || '');
+  const cloudPhase = sessionOwner && dataStatus?.ownerUserId === sessionOwner ? dataStatus.phase : 'IDLE';
+  const refreshFailed = cloudPhase === 'ERROR';
+  const showSyncing = isSyncing || (isOnline && cloudPhase === 'LOADING');
 
   useEffect(() => {
     const unsubscribeSession = subscribe(() => {
       const cur = getCurrentSession();
       setSessionState(cur);
+      setDataStatus(getCloudDataStatus());
       setSyncedState(getIsSynced());
       setPendingCount(getPendingSyncCount(cur));
     });
@@ -50,13 +55,13 @@ function AppHeader({ right, onPressBrand }) {
     return () => {
       unsubscribeSession();
       unsubscribeNetwork();
-      if (loopAnimRef.current) loopAnimRef.current.stop();
     };
   }, []);
 
-  const startSpinAnimation = () => {
+  useEffect(() => {
     spinValue.setValue(0);
-    loopAnimRef.current = Animated.loop(
+    if (!showSyncing) return;
+    const animation = Animated.loop(
       Animated.timing(spinValue, {
         toValue: 1,
         duration: 900,
@@ -64,22 +69,14 @@ function AppHeader({ right, onPressBrand }) {
         useNativeDriver: true,
       })
     );
-    loopAnimRef.current.start();
-  };
-
-  const stopSpinAnimation = () => {
-    if (loopAnimRef.current) {
-      loopAnimRef.current.stop();
-      loopAnimRef.current = null;
-    }
-    spinValue.setValue(0);
-  };
+    animation.start();
+    return () => { animation.stop(); spinValue.setValue(0); };
+  }, [showSyncing, spinValue]);
 
   const handleCheckConnection = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     setSyncStatusText(t('checking_network', 'Checking...'));
-    startSpinAnimation();
 
     try {
       const online = await checkConnectivity({ force: true });
@@ -96,6 +93,7 @@ function AppHeader({ right, onPressBrand }) {
         }
         setSyncStatusText(t('syncing_progress', 'Syncing...'));
         const result = await performMobileSync('MANUAL_SYNC');
+        if (refreshFailed) await restartCloudSyncIfReady();
         const remaining = Number(result.remainingCount || 0);
         setSyncedState(remaining === 0);
         setPendingCount(remaining);
@@ -129,7 +127,6 @@ function AppHeader({ right, onPressBrand }) {
           : t('connection_check_err', 'Unable to reach the network. Field operations continue to work offline seamlessly.')
       );
     } finally {
-      stopSpinAnimation();
       setIsSyncing(false);
       setSyncStatusText('');
     }
@@ -167,7 +164,6 @@ function AppHeader({ right, onPressBrand }) {
 
     setIsSyncing(true);
     setSyncStatusText(t('syncing_progress', 'Syncing...'));
-    startSpinAnimation();
 
     try {
       const result = await performMobileSync('MANUAL_SYNC');
@@ -186,7 +182,6 @@ function AppHeader({ right, onPressBrand }) {
     } catch (err) {
       safeAlert('Sync Notice', 'Failed to synchronize all records. Will retry when connection stabilizes.');
     } finally {
-      stopSpinAnimation();
       setIsSyncing(false);
       setSyncStatusText('');
     }
@@ -201,7 +196,7 @@ function AppHeader({ right, onPressBrand }) {
   const isSraAdmin = session?.role === 'SRA Admin';
   const liveCount = getPendingSyncCount(session);
   const safeCount = Math.max(0, Number(pendingCount !== undefined ? pendingCount : liveCount));
-  const isFullySynced = isOnline && safeCount === 0;
+  const isFullySynced = isOnline && synced && safeCount === 0 && !showSyncing && !refreshFailed;
 
   const handleGoHome = () => {
     if (typeof onPressBrand === 'function') {
@@ -250,32 +245,35 @@ function AppHeader({ right, onPressBrand }) {
             style={[
               s.syncPill,
               isFullySynced ? s.syncPillGreen : s.syncPillYellow,
-              isSyncing && s.syncPillSyncing
+              showSyncing && s.syncPillSyncing
             ]}
-            onPress={isSraAdmin ? handleCheckConnection : handleSync}
-            disabled={isSyncing}
+            onPress={isSraAdmin || refreshFailed ? handleCheckConnection : handleSync}
+            disabled={showSyncing}
             activeOpacity={0.75}
             accessibilityRole="button"
-            accessibilityLabel={isSyncing ? (syncStatusText || 'Syncing') : isFullySynced ? 'Online and synchronized' : `${isOnline ? 'Pending sync' : 'Offline'}, ${safeCount} pending operations`}
+            accessibilityLabel={showSyncing ? (syncStatusText || 'Syncing') : !isOnline ? `Offline, ${safeCount} pending operations` : refreshFailed ? 'Latest data could not be loaded. Retry synchronization.' : isFullySynced ? 'Online and synchronized' : `Pending sync, ${safeCount} pending operations`}
+            accessibilityState={{ busy: showSyncing, disabled: showSyncing }}
             accessibilityHint="Open connection and sync details"
           >
-            <Animated.View style={isSyncing ? { transform: [{ rotate: spin }] } : {}}>
+            {showSyncing ? <Animated.View key="syncing-icon" style={{ transform: [{ rotate: spin }] }}>
+              <Ionicons name="sync-outline" size={16} color="#1A6B9A" />
+            </Animated.View> : <View key="status-icon">
               <Ionicons
-                name={isSyncing ? "sync-outline" : (isFullySynced ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline"))}
+                name={isFullySynced ? "cloud-done" : (isOnline ? "cloud-upload" : "cloud-offline")}
                 size={16}
-                color={isSyncing ? '#1A6B9A' : (isFullySynced ? '#267326' : '#C97A00')}
+                color={isFullySynced ? '#267326' : '#C97A00'}
               />
-            </Animated.View>
-            {!compact && <Text
-              style={[s.syncText, isSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}
+            </View>}
+            {(!compact || showSyncing) && <Text
+              style={[s.syncText, showSyncing ? s.syncTextSyncing : (isFullySynced ? s.syncTextGreen : s.syncTextYellow)]}
             >
-              {isSyncing
+              {showSyncing
                 ? (syncStatusText || t('syncing_progress', 'Syncing...'))
                 : (isFullySynced
                   ? (isSraAdmin ? t('status_online', 'Online') : t('synced', 'Synced'))
                   : (!isOnline
                     ? (safeCount > 0 ? `${t('status_offline', 'Offline')} (${safeCount})` : t('status_offline', 'Offline'))
-                    : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}
+                    : refreshFailed ? t('btn_try_again', 'Try Again') : `${t('btn_sync_now', 'Sync')} (${safeCount})`))}
             </Text>}
           </TouchableOpacity>
         )}

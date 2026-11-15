@@ -409,7 +409,7 @@ export default function AuditCenterView() {
               }}
               blockFarms={blockFarms}
               title={isSraAdmin ? 'Audit Inbox' : 'Active Audit Reports'}
-              className="flex-1 flex flex-col justify-between"
+              className="flex-1"
             />
           </div>
 

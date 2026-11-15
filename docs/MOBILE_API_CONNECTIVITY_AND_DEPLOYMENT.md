@@ -10,7 +10,7 @@ The installed Mobile app does not discover a Metro host and does not probe emula
 
 `EXPO_PUBLIC_API_BASE_URL` is required and contains only an origin, with no path, credentials, query, or fragment.
 
-- Development: copy `mobile/.env.development.example` to the uncommitted `mobile/.env`, then replace its placeholder with the one intentionally reachable development origin. HTTP is accepted only in development builds.
+- Development: use the uncommitted `mobile/.env.development.local` for a development-only override. Android Emulator testing on this computer uses `EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:3000` with the local API running. HTTP is accepted only in development builds. Physical phones need the intentional LAN origin or the existing USB reverse workflow instead.
 - Production: use `mobile/.env.production.example` as the build-service contract and configure `EXPO_PUBLIC_API_BASE_URL=https://api.your-hugpong-domain.example` in the Expo/EAS production environment before building. Production rejects HTTP.
 - The value is public application configuration, not a secret. Firebase Admin credentials, session secrets, SMS provider keys, and all privileged material stay on the server.
 
@@ -18,7 +18,7 @@ After changing the environment, restart Metro for development or create a new in
 
 The Web download button uses `/downloads/android/:version` on the HUGPONG origin. The API streams the published artifact chosen by `web/react-app/src/config/androidRelease.json` as an APK attachment; the browser stays on HUGPONG. Update the manifest only after publishing the signed APK asset. The endpoint supports single byte ranges, cancels upstream work on disconnection, and never accepts a client-provided destination URL. Keep previous release artifacts available. EAS preview builds increment the remote Android version code so Android can install the new APK over the earlier beta signed with the same key. An old `VITE_ANDROID_APK_URL` setting on the host is no longer used.
 
-The current beta preview and production profiles in `mobile/eas.json` use `https://hugpong-beta.onrender.com`. Release configuration is checked by `mobile/app.config.js` and the full release gate: HTTP/local/missing origins and missing Firebase client values fail the build. The EAS environment must still supply the matching Firebase client variables. Development `.env` values remain separate. The API and client build tools require a patched Node.js 24 release, at least 24.22.1; `.node-version`, CI, and EAS profiles select 24.22.1 LTS.
+The preview and production profiles in `mobile/eas.json` use `https://hugpong.org`. Release configuration is checked by `mobile/app.config.js` and the full release gate: HTTP/local/missing origins and missing Firebase client values fail the build. The EAS environment must still supply the matching Firebase client variables. The emulator's `.env.development.local` is excluded from production-mode environment resolution. The API and client build tools require a patched Node.js 24 release, at least 24.22.1; `.node-version`, CI, and EAS profiles select 24.22.1 LTS.
 
 ## Express deployment contract
 

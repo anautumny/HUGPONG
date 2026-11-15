@@ -94,6 +94,10 @@ function clientContext(req) {
 function safeUserCopy(status, code, rawMessage) {
   const normalizedCode = String(code || '').trim().toUpperCase();
   const coded = {
+    USER_RATE_LIMITED: ['Requests are arriving too quickly.', 'Please wait briefly before retrying.'],
+    GLOBAL_RATE_LIMITED: ['HUGPONG is receiving too many requests.', 'Please wait briefly before retrying.'],
+    PASSWORD_CHECK_RATE_LIMITED: ['Too many incorrect password attempts.', 'Wait before trying your password again.'],
+      MOBILE_SESSION_RATE_LIMITED: ['Session verification is temporarily limited.', 'Please wait before retrying.'],
     UNAUTHENTICATED: ['Your session has expired or is no longer valid.', 'Sign in again, then retry the action.'],
     INVALID_CREDENTIALS: ['The sign-in details did not match an active account.', 'Check your User ID or mobile number and password, then try again.'],
     SESSION_REVOKED: ['Your session has ended.', 'Sign in again, then retry the action.'],
@@ -104,7 +108,7 @@ function safeUserCopy(status, code, rawMessage) {
     ACCOUNT_SETUP_REQUIRED: ['Your account setup is not complete.', 'Finish verification and password setup, then try again.'],
     API_PERMISSION_POLICY_MISSING: ['This action is not available.', 'Contact support with the reference ID.'],
     LOGIN_RATE_LIMITED: ['Too many sign-in attempts.', 'Try again later.'],
-    RATE_LIMITED: ['Too many attempts.', 'Try again later.'],
+    RATE_LIMITED: ['Requests are arriving too quickly.', 'Please wait briefly before retrying.'],
     MALFORMED_JSON: ['We could not read the submitted information.', 'Check the information and try again.'],
     INVALID_REQUEST: ['We could not process the submitted information.', 'Check the information and try again.'],
     CONFLICT: ['This information changed before your request was completed.', 'Refresh the latest data and try again.'],
@@ -122,7 +126,7 @@ function safeUserCopy(status, code, rawMessage) {
   if (status === 404) return { message: 'The requested information could not be found.', nextAction: 'Refresh the page or go back and try again.' };
   if (status === 409) return { message: 'This information changed before your request was completed.', nextAction: 'Refresh the latest data and try again.' };
   if (status === 413) return { message: 'The submitted information is too large.', nextAction: 'Use a smaller attachment or shorten the entry, then try again.' };
-  if (status === 429) return { message: 'Too many attempts.', nextAction: 'Try again later.' };
+  if (status === 429) return { message: 'Requests are arriving too quickly.', nextAction: 'Please wait briefly before retrying.' };
   if (status >= 500) return { message: 'HUGPONG could not complete this request.', nextAction: 'Try again. If the problem continues, contact support with the reference ID.' };
   const candidate = cleanText(rawMessage, 240);
   if (candidate && !TECHNICAL_TEXT.test(candidate)) {

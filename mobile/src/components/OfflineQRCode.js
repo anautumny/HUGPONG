@@ -11,6 +11,21 @@ import QRCode from 'qrcode';
 import { createMobileReference, reportMobileDiagnostic } from '../services/clientDiagnostics';
 import { AppText as Text } from './Typography';
 
+// Bound native bitmap allocations and always supply integer dimensions to SVG.
+export function qrExportDimensions(requestedWidth, ratio) {
+  let width = Number(requestedWidth);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(ratio) || ratio <= 0) {
+    throw new Error('The QR image dimensions are unavailable. Open the QR and try again.');
+  }
+  width = Math.max(1, Math.min(1200, Math.round(width)));
+  let height = Math.max(1, Math.round(width * ratio));
+  if (height > 2048) {
+    width = Math.max(1, Math.floor(width * 2048 / height));
+    height = Math.min(2048, Math.max(1, Math.round(width * ratio)));
+  }
+  return { width, height };
+}
+
 /**
  * OfflineQRCode renders a vector SVG QR code completely locally.
  *
@@ -72,11 +87,12 @@ const OfflineQRCode = forwardRef(function OfflineQRCode({
   const imageRatio = (totalGrid + footerHeight) / totalGrid;
   useImperativeHandle(ref, () => ({
     toDataURL(callback, options = {}) {
-      svgRef.current?.toDataURL(callback, footerHeight
-        ? { ...options, height: Math.round((options.width || size) * imageRatio) }
-        : options);
+      if (!pathData || !moduleCount || typeof svgRef.current?.toDataURL !== 'function') {
+        throw new Error('The QR image is not ready. Open the QR and try again.');
+      }
+      svgRef.current.toDataURL(callback, qrExportDimensions(options.width ?? size, imageRatio));
     },
-  }), [footerHeight, imageRatio, size]);
+  }), [pathData, moduleCount, imageRatio, size]);
 
   useEffect(() => {
     if (!diagnostic) return;

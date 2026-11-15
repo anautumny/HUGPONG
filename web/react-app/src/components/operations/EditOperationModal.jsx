@@ -267,7 +267,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
               <FormField label="Work Days"><Input type="number" min="0.1" step="0.1" value={form.workDays} onChange={event => setForm({ ...form, workDays: event.target.value })} disabled={controlsDisabled || Number(form.workersCount || 0) === 0} /></FormField>
               <FormField label="Rate / Day"><Input type="number" min="0" step="0.01" prefix="₱" value={form.workerRate} onChange={event => setForm({ ...form, workerRate: event.target.value })} disabled={controlsDisabled || Number(form.workersCount || 0) === 0} /></FormField>
             </div>
-            <p className="mt-2 text-sm font-black text-primary">Labor cost: {formatCurrency(costs.labor)}</p>
+            {Number(form.workersCount || 0) > 0 && Number(form.workDays || 0) > 0 && String(form.workerRate ?? '').trim() !== '' && <p className="mt-2 text-sm font-black text-primary">Labor cost: {formatCurrency(costs.labor)}</p>}
           </div>
         </section>
 
@@ -278,6 +278,7 @@ export default function EditOperationModal({ operation, field = null, isOpen, on
             <button type="button" onClick={() => selectInputMode('direct')} disabled={controlsDisabled} className={`rounded-lg px-3 py-2.5 text-sm font-bold transition ${form.inputMode === 'direct' ? 'bg-white dark:bg-surface text-primary shadow-sm' : 'text-hug-muted'}`}>Direct Input</button>
           </div>
 
+          <p className="text-xs text-hug-muted">For labor-only work, use Direct Input and enter the quantity and unit. Use direct rate 0 when all costs are entered in the crew details.</p>
           {form.inputMode === 'group' ? (
             <div className="space-y-3 rounded-2xl border border-border p-3">
               <div className="flex items-center justify-between gap-3"><span className="text-sm font-black text-hug-text">Materials / Expenses</span><span className="text-xs text-hug-muted">{form.lineItems.length} {form.lineItems.length === 1 ? 'item' : 'items'}</span></div>

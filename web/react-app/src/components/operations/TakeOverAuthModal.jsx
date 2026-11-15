@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, FormField, PasswordInput, Button } from '../ui';
 import { ShieldAlert, Lock } from 'lucide-react';
 import { verifySupervisorAuth } from '../../services/operationsService';
@@ -13,41 +13,55 @@ export default function TakeOverAuthModal({
   const [password, setPassword] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState(null);
+  const request = useRef({ busy: false, version: 0, scope: '' });
+  const scope = JSON.stringify([isOpen, field?.id, user?.employeeId || user?.id]);
+  request.current.scope = scope;
+  useEffect(() => {
+    request.current.version++; request.current.busy = false;
+    setPassword(''); setError(null); setIsVerifying(false);
+    return () => { request.current.version++; request.current.busy = false; };
+  }, [scope]);
 
   if (!field) return null;
 
   const handleVerify = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
+    if (request.current.busy) return;
     if (!password.trim()) {
       setError('Account password is required to authorize Manager Takeover.');
       return;
     }
 
+    const current = request.current;
+    const version = ++current.version;
+    const isCurrent = () => current.version === version && current.scope === scope;
+    current.busy = true;
     setIsVerifying(true);
     setError(null);
 
     try {
       // Authenticate with manager credentials
       const authorization = await verifySupervisorAuth({
-        password: password.trim(),
+        password,
         fieldId: field.id
       });
 
-      setIsVerifying(false);
+      if (!isCurrent()) return;
       setPassword('');
       onAuthorized(field, authorization.takeoverGrant, authorization.takeoverGrantExpiresAt);
     } catch (err) {
       console.warn('[TakeOverAuth] Authorization was not completed.');
       // If offline or password check fails
-      setError(err.message || 'Invalid password or unauthorized supervisor credentials.');
-      setIsVerifying(false);
+      if (isCurrent()) setError(err.message || 'Invalid password or unauthorized supervisor credentials.');
+    } finally {
+      if (isCurrent()) { current.busy = false; setIsVerifying(false); }
     }
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => { if (!request.current.busy) onClose(); }}
       size="sm"
       title="Authorize Manager Takeover"
       subtitle="Enter manager password to supervise this field"
@@ -73,15 +87,15 @@ export default function TakeOverAuthModal({
     >
       <form onSubmit={handleVerify} className="space-y-4">
         {/* Field Summary Card */}
-        <div className="bg-surface dark:bg-surface-subtle p-3.5 rounded-xl border border-border flex items-center justify-between gap-3">
+        <div className="bg-surface dark:bg-surface-subtle p-3.5 rounded-xl border border-border flex flex-col items-start sm:flex-row sm:justify-between gap-3">
           <div className="min-w-0 flex-1">
             <span className="text-[10px] uppercase font-bold text-hug-muted block tracking-wider">
               Target Plot
             </span>
-            <span className="text-sm font-mono font-black text-primary dark:text-primary-light select-all">
+            <span className="text-sm font-mono font-black text-primary dark:text-primary-light select-all break-all">
               {field.id}
             </span>
-            <p className="text-xs text-hug-muted mt-0.5 truncate">
+            <p className="text-xs text-hug-muted mt-0.5 break-words">
               Assigned to: <strong className="text-hug-text dark:text-foreground font-semibold">{field.memberName || 'Unassigned'}</strong>
             </p>
           </div>
@@ -115,6 +129,10 @@ export default function TakeOverAuthModal({
             }}
             placeholder="Enter your password"
             disabled={isVerifying}
+            autoComplete="current-password"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             autoFocus
           />
         </FormField>

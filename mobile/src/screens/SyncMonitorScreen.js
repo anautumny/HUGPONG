@@ -1,10 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { getCurrentSession, getNetworkStatus, performMobileSync, subscribe, subscribeToCloudChanges } from '../data/dataStore';
-import { getOutboxDiagnostics, getOutboxPressure, getOutboxStorageState, resolveOperationConflict } from '../services/syncEngine';
+import { getOutboxDiagnostics, getOutboxPressure, getOutboxStorageState, resolveOperationConflict, retryReviewedStageConflict } from '../services/syncEngine';
 import { fetchAgriculturalSyncMonitor } from '../services/telemetryService';
 import { syncResultMessage } from '../domain/syncPresentation';
 import { useTranslation } from '../services/i18n';
@@ -92,6 +92,22 @@ function StatusRow({ label, value }) {
 }
 
 export default function SyncMonitorScreen({ navigation }) {
+  const syncBusy = React.useRef(false);
+  const handleBack = React.useCallback(() => {
+    const state = navigation.getState?.();
+    if (state ? state.index > 0 : navigation.canGoBack?.()) { navigation.goBack(); return; }
+    const root = state?.routeNames?.find(name => ['HomeMain', 'CalcMain', 'SchedMain', 'ProfileMain'].includes(name));
+    if (root) navigation.navigate(root);
+    else navigation.getParent?.()?.navigate('Home', { screen: 'HomeMain' });
+  }, [navigation]);
+  React.useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const state = navigation.getState?.();
+      if (navigation.isFocused?.() === false || (state ? state.index > 0 : navigation.canGoBack?.())) return false;
+      handleBack(); return true;
+    });
+    return () => subscription.remove();
+  }, [navigation, handleBack]);
   const { t, language } = useTranslation();
   const [session, setSession] = React.useState(getCurrentSession());
   const [monitor, setMonitor] = React.useState(null);
@@ -183,13 +199,17 @@ export default function SyncMonitorScreen({ navigation }) {
   };
 
   const handleSync = async () => {
-    if (isSyncing) return;
+    if (syncBusy.current) return;
+    syncBusy.current = true;
     setIsSyncing(true);
     try {
       const result = await performMobileSync('MANUAL_SYNC');
       await refresh();
-      Alert.alert(result.success ? t('sync_complete') : t('sync_incomplete'), syncResultMessage(result));
+      if (navigation.isFocused?.() !== false) Alert.alert(result.success ? t('sync_complete') : t('sync_incomplete'), syncResultMessage(result));
+    } catch (syncError) {
+      setError(syncError.message || 'Synchronization is temporarily unavailable. Your saved work is still on this device.');
     } finally {
+      syncBusy.current = false;
       setIsSyncing(false);
     }
   };
@@ -198,7 +218,7 @@ export default function SyncMonitorScreen({ navigation }) {
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={22} color={COLORS.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }} onPress={handleBack}><Ionicons name="arrow-back" size={22} color={COLORS.text} /></TouchableOpacity>
           <Text style={s.headerTitle}>{t('sync_monitor_title')}</Text><View style={{ width: 22 }} />
         </View>
         <View style={s.center}><Text style={s.emptyTitle}>{t('sync_role_unavailable')}</Text></View>
@@ -209,7 +229,7 @@ export default function SyncMonitorScreen({ navigation }) {
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={22} color={COLORS.text} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }} onPress={handleBack}><Ionicons name="arrow-back" size={22} color={COLORS.text} /></TouchableOpacity>
         <View style={s.headerCopy}>
           <Text style={s.headerTitle}>{role === 'Farm Manager' ? t('sync_monitor_title') : t('sync_my_status')}</Text>
           <Text style={s.headerSub}>{monitor?.scope?.blockFarms?.map(farm => farm.name).join(', ') || t('sync_personal_device')}</Text>
@@ -271,6 +291,20 @@ export default function SyncMonitorScreen({ navigation }) {
                       <Text style={s.queueStatus}>{mutationStatusLabel(item.status, t)}</Text>
                     </View>
                     {item.lastError ? <Text style={s.queueError}>{item.lastError}</Text> : null}
+                    {item.type === 'stage_update' && item.status === 'conflict' && item.conflict?.current && <View style={{ gap: 8 }}>
+                      <Text style={s.note}>Server stage: {item.conflict.current.currentStageNumber}. Saved stage: {item.proposedChanges?.currentStageNumber}. Review both before retrying.</Text>
+                      <TouchableOpacity disabled={reviewBusy || !getNetworkStatus()} style={s.syncButton} onPress={() => Alert.alert(
+                        'Retry this stage change?', 'The server will recheck this saved change against the displayed stage. Newer stage progress will stay protected.', [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Retry reviewed change', onPress: async () => {
+                            setReviewBusy(true);
+                            try { await retryReviewedStageConflict(item.mutationId); await handleSync(); }
+                            catch (reviewError) { setError(reviewError.message); }
+                            finally { setReviewBusy(false); }
+                          } }
+                        ]
+                      )}><Text style={s.syncButtonText}>Review and retry stage change</Text></TouchableOpacity>
+                    </View>}
                     {item.conflict?.code === 'OPERATION_RECONCILIATION_REQUIRED' && <View style={{ gap: 8 }}>
                       <Text style={s.note}>{t('queue_compare')}</Text>
                       {item.conflict.records.map(record => <Text key={record.id} selectable style={s.queueMeta}>{record.id} · {record.performedOn} · PHP {Number(record.totalCost).toLocaleString()} · {record.submittedByUserId}</Text>)}

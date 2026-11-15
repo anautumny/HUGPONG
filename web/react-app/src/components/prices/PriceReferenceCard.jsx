@@ -1,5 +1,5 @@
 import React from 'react';
-import { priceText, movementText } from '../../utils/pricePresentation';
+import { priceText, movementText, comparisonSuffix } from '../../utils/pricePresentation';
 import Button from '../ui/Button';
 
 export default function PriceReferenceCard({ price, isLoading, onPublishClick, canPublish, className = '', footerAction = null }) {
@@ -24,7 +24,7 @@ export default function PriceReferenceCard({ price, isLoading, onPublishClick, c
             return <div key={product.key} className="rounded-xl border border-border bg-bg p-4 min-w-0">
               <h4 className="text-sm font-bold text-hug-text2">{product.label}</h4>
               <p className="text-xl sm:text-2xl font-extrabold text-hug-text mt-2 break-words">{priceText(price[product.field], status, status === 'REPORTED' ? product.unit : '')}</p>
-              <p className="text-sm text-hug-text2 leading-relaxed mt-2">{status === 'REPORTED' ? `${movementText(price[`${product.key}PriceChange`])}${price[`${product.key}PriceChange`] != null ? ' vs prior week' : ''}` : status === 'MILLING_ENDED' ? 'Milling ended; no price quoted for this week.' : 'No price quoted for this reporting week.'}</p>
+              <p className="text-sm text-hug-text2 leading-relaxed mt-2">{status === 'REPORTED' ? `${movementText(price[`${product.key}PriceChange`])}${price[`${product.key}PriceChange`] != null ? comparisonSuffix(price) : ''}` : status === 'MILLING_ENDED' ? 'Milling ended; no price quoted for this week.' : 'No price quoted for this reporting week.'}</p>
               {last && last.date !== price.effectiveDate && <p className="text-sm text-hug-text mt-3">Last reported: {priceText(last.value, 'REPORTED', product.unit)} · {last.date}</p>}
             </div>;
           })}

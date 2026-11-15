@@ -71,11 +71,13 @@ test('session restoration reuses middleware authorization and web avoids unused 
   assert.doesNotMatch(webApi, /firebaseClient|signInWithCustomToken/);
 });
 
-test('mobile startup reuses a valid token while explicit synchronization forces refresh', () => {
+test('mobile synchronization validates the live API session before falling back to Firebase renewal', () => {
   const authService = read('mobile/src/services/authService.js');
   const dataStore = read('mobile/src/data/dataStore.js');
 
   assert.match(authService, /forceRefresh\s*\?\s*await auth\.currentUser\.getIdToken\(true\)/);
   assert.match(authService, /:\s*await auth\.currentUser\.getIdToken\(\)/);
-  assert.match(dataStore, /refreshMobileSessionFromFirebase\(\{ forceRefresh: true, isCurrent \}\)/);
+  assert.match(dataStore, /refreshMobileSessionForSync\(\{ isCurrent \}\)/);
+  assert.match(authService, /preserveCredentialsOn401: true/);
+  assert.match(authService, /return refreshMobileSessionFromFirebase\(\{ forceRefresh: true, isCurrent: current \}\)/);
 });

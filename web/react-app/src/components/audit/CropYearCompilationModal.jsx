@@ -13,6 +13,11 @@ export default function CropYearCompilationModal({ onClose }) {
   const [options, setOptions] = useState(null);
   const [cropYearCycle, setYear] = useState('');
   const [blockFarmId, setFarm] = useState('');
+  const [coverageMode, setCoverageMode] = useState('TO_DATE');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const rangeValid = coverageMode !== 'DATE_RANGE' || (/^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && startDate <= endDate);
+  const scope = { cropYearCycle, blockFarmId, coverageMode, ...(coverageMode === 'DATE_RANGE' ? { startDate, endDate } : {}) };
   const [preview, setPreview] = useState(null);
   const [history, setHistory] = useState([]);
   const [current, setCurrent] = useState(null);
@@ -23,7 +28,7 @@ export default function CropYearCompilationModal({ onClose }) {
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   useEffect(() => subscribeToResourceInvalidation(['crop-year-compilations', 'audit-reports', 'fields'], () => setReload(value => value + 1)), []);
-  useEffect(() => { setCurrent(null); }, [cropYearCycle, blockFarmId]);
+  useEffect(() => { setCurrent(null); }, [cropYearCycle, blockFarmId, coverageMode, startDate, endDate]);
 
   useEffect(() => {
     let active = true;
@@ -38,22 +43,22 @@ export default function CropYearCompilationModal({ onClose }) {
   }, [reload]);
 
   useEffect(() => {
-    if (!cropYearCycle) return undefined;
+    if (!cropYearCycle || !rangeValid) { setPreview(null); setBusy(false); return undefined; }
     let active = true;
     setBusy(true); setError(''); setPreview(null); setHistory([]); setCursor(null);
-    Promise.all([previewCropYear({ cropYearCycle, blockFarmId }), fetchCropYearCompilations({ cropYearCycle, blockFarmId })])
+    Promise.all([previewCropYear(scope), fetchCropYearCompilations({ cropYearCycle, blockFarmId })])
       .then(([nextPreview, saved]) => {
         if (!active) return;
         setPreview(nextPreview.data); setHistory(saved.data); setCursor(saved.nextCursor);
       }).catch(reason => { if (active) setError(reason.message); })
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
-  }, [cropYearCycle, blockFarmId, reload]);
+  }, [cropYearCycle, blockFarmId, coverageMode, startDate, endDate, reload]);
 
   const save = async () => {
     setSaving(true); setError('');
     try {
-      const response = await compileCropYear({ cropYearCycle, blockFarmId });
+      const response = await compileCropYear(scope);
       setCurrent(response.data); setPreview(response.data);
       setHistory(rows => [response.data, ...rows.filter(row => row.id !== response.data.id)]);
     } catch (reason) { setError(reason.message); }
@@ -89,12 +94,20 @@ export default function CropYearCompilationModal({ onClose }) {
       <p className="text-sm text-hug-muted">Monthly certification continues as usual. Only certified operations from the selected crop year are included. Each operation and field is counted once.</p>
       {error && <div role="alert" className="rounded-xl border border-danger/30 bg-danger-bg p-3 text-sm text-danger">{error}<button className="ml-3 underline" onClick={() => setReload(value => value + 1)} disabled={saving || loading}>Retry</button></div>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="text-xs font-bold text-hug-text sm:col-span-2">Compilation coverage<Select value={coverageMode} onChange={event => setCoverageMode(event.target.value)} disabled={loading || saving} options={[{ value: 'TO_DATE', label: 'All certified operations to date' }, { value: 'DATE_RANGE', label: 'Selected date range (mid-cycle)' }]} /></label>
         <label className="text-xs font-bold text-hug-text">Crop Year Cycle<Select value={cropYearCycle} onChange={event => setYear(event.target.value)} disabled={loading || saving} placeholder="Select crop year" options={(options?.cropYearCycles || []).map(year => ({ value: year, label: year }))} /></label>
         <label className="text-xs font-bold text-hug-text">Block Farm<Select value={blockFarmId} onChange={event => setFarm(event.target.value)} disabled={loading || saving} options={[{ value: '', label: 'All Block Farms' }, ...(options?.blockFarms || []).map(farm => ({ value: farm.id, label: farm.name }))]} /></label>
       </div>
+      {coverageMode === 'DATE_RANGE' && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="text-xs font-bold text-hug-text">Start date<input type="date" value={startDate} max={endDate || undefined} onChange={event => setStartDate(event.target.value)} disabled={saving} className="mt-2 block w-full rounded-xl border border-border bg-bg p-3" /></label>
+        <label className="text-xs font-bold text-hug-text">End date<input type="date" value={endDate} min={startDate || undefined} onChange={event => setEndDate(event.target.value)} disabled={saving} className="mt-2 block w-full rounded-xl border border-border bg-bg p-3" /></label>
+        <p className="text-xs text-hug-muted sm:col-span-2">Both dates are included. Only certified operations in this crop year are compiled; the crop cycle stays open.</p>
+        {!rangeValid && <p className="text-xs text-hug-muted sm:col-span-2">Choose a start date and an end date on or after it.</p>}
+      </div>}
       {loading ? <p role="status" className="text-sm text-hug-muted">Loading certified reports…</p> : !cropYearCycle && options ? <p className="rounded-xl bg-surface-subtle p-5 text-sm text-hug-muted">No certified monthly reports with Crop Year data are available yet.</p> : report && <>
         <div className="rounded-xl border border-border bg-surface-subtle p-4">
           <p className="text-xs font-bold uppercase text-primary">{current ? 'Saved compilation' : 'Current preview'} · {report.cropYearCycle}</p>
+          <p className="mt-2 text-xs font-semibold text-hug-text">{report.startDate ? `${report.startDate} through ${report.endDate} (inclusive)` : 'All certified operations to date'}</p>
           <p className="mt-2 text-sm font-bold text-hug-text">{report.sourceReportCount} certified reports · {report.monthCount} reporting months · {report.blockFarmCount} Block Farms</p>
           <p className="mt-1 text-sm text-hug-text">{report.operationCount} operations · {report.fieldCount} fields · {report.memberCount} members · {report.hectaresAudited} ha</p>
           <p className="mt-2 text-xl font-black text-hug-text">{money(report.totalCost)}</p>
@@ -102,7 +115,7 @@ export default function CropYearCompilationModal({ onClose }) {
           {current && <p className="mt-2 break-all text-xs text-hug-muted">{current.id} · Compiled {new Date(current.compiledAt).toLocaleString()} by {current.compiledByName}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={save} disabled={saving || loading || !preview?.operationCount}>{saving ? 'Please wait…' : 'Compile Crop Year'}</Button>
+          <Button onClick={save} disabled={saving || loading || !rangeValid || !preview?.operationCount}>{saving ? 'Please wait…' : coverageMode === 'DATE_RANGE' ? 'Compile Selected Dates' : 'Compile Crop Year'}</Button>
           <Button variant="secondary" onClick={() => setReload(value => value + 1)} disabled={saving || loading}>Refresh certified reports</Button>
           {current && <Button variant="secondary" onClick={downloadPdf} disabled={saving} icon={Download}>Download PDF</Button>}
           {current && <Button variant="secondary" onClick={print} disabled={saving} icon={Printer}>Print</Button>}
@@ -112,7 +125,7 @@ export default function CropYearCompilationModal({ onClose }) {
         {!!report.farmSummaries.length && <div className="space-y-2"><h3 className="font-bold text-hug-text">Block Farm totals</h3>{report.farmSummaries.map(farm => <div key={farm.blockFarmId} className="flex flex-wrap justify-between gap-2 rounded-xl border border-border p-3 text-sm"><span>{farm.blockFarmName} · {farm.fieldCount} fields · {farm.hectaresAudited} ha</span><strong>{money(farm.totalCost)}</strong></div>)}</div>}
         {current && <details className="rounded-xl border border-border p-3 text-xs"><summary className="cursor-pointer font-bold">Certified source reports ({current.sourceReportCount})</summary>{current.sourceReports.map(source => <p key={source.reportId} className="mt-2 break-all">{source.reportId} · {formatPeriodDisplay(source.periodKey)} · Certified by {source.certifiedByUserId}</p>)}</details>}
       </>}
-      {!!history.length && <div className="space-y-2 border-t border-border pt-4"><h3 className="font-bold text-hug-text">Saved compilations</h3><p className="text-xs text-hug-muted">Saving the same certified sources reopens the existing compilation. Later certifications create a new snapshot.</p>{history.map(item => <button key={item.id} disabled={saving || loading} onClick={() => setCurrent(item)} className={`block w-full rounded-xl border p-3 text-left text-sm ${current?.id === item.id ? 'border-primary bg-primary-bg' : 'border-border'}`}><strong>{item.cropYearCycle} · {money(item.totalCost)}</strong><span className="mt-1 block text-xs text-hug-muted">{item.sourceReportCount} reports · {new Date(item.compiledAt).toLocaleString()}</span></button>)}{cursor && <Button variant="secondary" onClick={more} disabled={saving || loading}>Load more compilations</Button>}</div>}
+      {!!history.length && <div className="space-y-2 border-t border-border pt-4"><h3 className="font-bold text-hug-text">Saved compilations</h3><p className="text-xs text-hug-muted">Saving the same certified sources reopens the existing compilation. Later certifications create a new snapshot.</p>{history.map(item => <button key={item.id} disabled={saving || loading} onClick={() => setCurrent(item)} className={`block w-full rounded-xl border p-3 text-left text-sm ${current?.id === item.id ? 'border-primary bg-primary-bg' : 'border-border'}`}><strong>{item.cropYearCycle} · {money(item.totalCost)}</strong><span className="mt-1 block text-xs text-hug-muted">{item.startDate ? `${item.startDate} - ${item.endDate} / ` : 'To date / '}{item.sourceReportCount} reports · {new Date(item.compiledAt).toLocaleString()}</span></button>)}{cursor && <Button variant="secondary" onClick={more} disabled={saving || loading}>Load more compilations</Button>}</div>}
     </div>
   </Modal>;
 }

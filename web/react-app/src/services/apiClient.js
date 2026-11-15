@@ -18,6 +18,7 @@ const FOCUS_REFRESH_MIN_AGE_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const readCache = new Map();
 const inFlightReads = new Map();
+const resourceReadRevisions = new Map();
 let authenticatedReadGeneration = 0;
 let readRevision = 0;
 let serverReadRevision = '';
@@ -113,14 +114,19 @@ export function affectedResources(path) {
 }
 
 function clearReadCache(resources = []) {
-  readRevision += 1;
-  // Detach obsolete requests so a forced read cannot join a pre-change GET.
-  // Existing callers are protected by their subscription's queued refresh.
-  inFlightReads.clear();
   const affected = new Set(resources);
-  if (!affected.size) {
+  if (!affected.size || affected.has('session')) {
+    readRevision += 1;
+    resourceReadRevisions.clear();
+    inFlightReads.clear();
     readCache.clear();
     return;
+  }
+  for (const resource of affected) resourceReadRevisions.set(resource, (resourceReadRevisions.get(resource) || 0) + 1);
+  // Detach pre-change requests only for affected resources. Unrelated pending
+  // reads remain shared, and can still populate their navigation cache.
+  for (const path of inFlightReads.keys()) {
+    if (affected.has(resourceName(path))) inFlightReads.delete(path);
   }
   for (const path of readCache.keys()) {
     if (affected.has(resourceName(path))) readCache.delete(path);
@@ -163,6 +169,7 @@ export function clearAuthenticatedReadState() {
   serverReadRevision = '';
   readCache.clear();
   inFlightReads.clear();
+  resourceReadRevisions.clear();
 }
 
 function announceServerMutation(path) {
@@ -215,7 +222,11 @@ export async function authenticatedRequest(path, options = {}) {
   const requestPath = String(path).split(/[?#]/, 1)[0].replace(/\/{2,}/g, '/').replace(/\/$/, '');
   const readOnlyQuery = method === 'POST' && requestPath === '/api/notifications/state/query';
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !readOnlyQuery;
-  const cooldownSeconds = isMutation ? getMutationCooldownRemainingSeconds() : 0;
+  const backgroundActivity = method === 'POST' && [
+    '/api/terminal-diagnostics/activity', '/api/terminal-diagnostics/sync',
+    '/api/notifications/state', '/auth/push-device', '/auth/push-device/unregister', '/auth/mobile-session'
+  ].includes(requestPath);
+  const cooldownSeconds = isMutation && !backgroundActivity ? getMutationCooldownRemainingSeconds() : 0;
   if (cooldownSeconds > 0) throw localMutationCooldownError(cooldownSeconds);
   let requestBody = options.body;
 
@@ -284,7 +295,7 @@ export async function authenticatedRequest(path, options = {}) {
       error.retryAfterMs = waitSeconds * 1000;
       if (response.status === 429) error.message = `${error.message} Try again in ${waitSeconds} second${waitSeconds === 1 ? '' : 's'}.`;
     }
-    if (response.status === 429 && isMutation) {
+    if (response.status === 429 && isMutation && !backgroundActivity) {
       const safeWaitSeconds = Math.max(1, waitSeconds || 60);
       mutationCooldownUntil = Math.max(mutationCooldownUntil, Date.now() + (safeWaitSeconds * 1000));
       if (typeof window !== 'undefined') {
@@ -320,6 +331,8 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
 
   const requestGeneration = authenticatedReadGeneration;
   const requestRevision = readRevision;
+  const resource = resourceName(path);
+  const resourceRevision = resourceReadRevisions.get(resource) || 0;
   const isFullOperationsRead = /^\/api\/logs(?:\?|$)/.test(path) && !/[?&](limit|cursor)=/.test(path);
   const request = (isFullOperationsRead
     ? fetchOperationPages(authenticatedRequest, () => requestGeneration === authenticatedReadGeneration, path)
@@ -330,7 +343,9 @@ export function authenticatedRead(path, { force = false, maxAgeMs = READ_CACHE_T
         error.code = 'AUTH_CONTEXT_CHANGED';
         throw error;
       }
-      if (requestRevision === readRevision) readCache.set(path, { value, createdAt: Date.now() });
+      if (requestRevision === readRevision && resourceRevision === (resourceReadRevisions.get(resource) || 0)) {
+        readCache.set(path, { value, createdAt: Date.now() });
+      }
       return value;
     })
     .finally(() => {
@@ -373,12 +388,13 @@ export function subscribeToAuthenticatedResource(path, {
       const result = await authenticatedRead(path, { force });
       lastSuccessfulRefreshAt = Date.now();
       retryAttempt = 0;
+      retryNotBefore = 0;
       if (active && !forcedRefreshQueued && typeof onData === 'function') onData(result);
     } catch (error) {
-      retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
+      const delay = Math.max(Number(error?.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+      retryNotBefore = Date.now() + delay;
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
       if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
-        const delay = Math.max(retryNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
         errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true }); }, delay);
       }
     } finally {
@@ -399,7 +415,7 @@ export function subscribeToAuthenticatedResource(path, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground() && Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS) refresh();
+    if (canRefreshInBackground() && (retryAttempt > 0 || Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS)) refresh({ force: retryAttempt > 0 });
   };
   const handleMutation = event => {
     if (mutationAffects(event, resources)) refresh({ force: true });
@@ -454,12 +470,13 @@ export function subscribeToAuthenticatedLoader(load, {
       if (value?.refreshError) throw value.refreshError;
       lastSuccessfulRefreshAt = Date.now();
       retryAttempt = 0;
+      retryNotBefore = 0;
       if (active && generation === authenticatedReadGeneration && !forcedRefreshQueued && typeof onData === 'function') onData(value);
     } catch (error) {
-      retryNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
+      const delay = Math.max(Number(error?.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
+      retryNotBefore = Date.now() + delay;
       if (active && error?.code !== 'AUTH_CONTEXT_CHANGED' && typeof onError === 'function') onError(error);
       if (active && ![401, 403].includes(error?.status) && error?.code !== 'AUTH_CONTEXT_CHANGED') {
-        const delay = Math.max(retryNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(retryAttempt++, 5)));
         errorRetryTimer = setTimeout(() => { if (canRefreshInBackground()) void refresh({ force: true, retryOnly: true }); }, delay);
       }
     } finally {
@@ -478,7 +495,7 @@ export function subscribeToAuthenticatedLoader(load, {
     }, intervalMs)
     : null;
   const handleFocus = () => {
-    if (canRefreshInBackground() && Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS) refresh();
+    if (canRefreshInBackground() && (retryAttempt > 0 || Date.now() - lastSuccessfulRefreshAt >= FOCUS_REFRESH_MIN_AGE_MS)) refresh({ force: retryAttempt > 0 });
   };
   const handleMutation = event => {
     if (!resources.length || mutationAffects(event, resources)) refresh({ force: true });

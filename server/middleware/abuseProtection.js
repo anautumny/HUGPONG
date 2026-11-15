@@ -4,22 +4,33 @@ const { clientAddress } = require('./rateLimit');
 
 const MAX_TRACKED_WINDOWS = 20000;
 const EARLY_LIMITS = Object.freeze({
-  burst: Object.freeze({ max: 100, windowMs: 10 * 1000 }),
-  sustained: Object.freeze({ max: 300, windowMs: 60 * 1000 }),
+  // Shared Wi-Fi can carry many clients' initial snapshots simultaneously.
+  // These are broad network flood guards, not a per-user browsing allowance.
+  burst: Object.freeze({ max: 600, windowMs: 10 * 1000 }),
+  sustained: Object.freeze({ max: 1800, windowMs: 60 * 1000 }),
   mutation: Object.freeze({ max: 60, windowMs: 60 * 1000 }),
   authentication: Object.freeze({ max: 60, windowMs: 60 * 1000 }),
+  background: Object.freeze({ max: 300, windowMs: 60 * 1000 }),
   backupUpload: Object.freeze({ max: 12, windowMs: 60 * 1000 }),
   unknownPath: Object.freeze({ max: 30, windowMs: 60 * 1000 })
 });
 const AUTHENTICATED_LIMITS = Object.freeze({
-  readUser: Object.freeze({ max: 300, windowMs: 5 * 60 * 1000 }),
-  readUserAndIp: Object.freeze({ max: 240, windowMs: 5 * 60 * 1000 }),
+  // Normal browsing has no account attempt quota. Network flood protection
+  // remains active before routing, independently of authentication/RBAC.
+  readUser: null,
+  readUserAndIp: null,
+  backgroundUser: Object.freeze({ max: 120, windowMs: 60 * 1000 }),
+  backgroundUserAndIp: Object.freeze({ max: 120, windowMs: 60 * 1000 }),
   mutationUser: Object.freeze({ max: 60, windowMs: 5 * 60 * 1000 }),
   mutationUserAndIp: Object.freeze({ max: 45, windowMs: 5 * 60 * 1000 })
 });
 const JSON_LIMIT_BYTES = 1024 * 1024;
 const BACKUP_JSON_LIMIT_BYTES = 12 * 1024 * 1024;
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const BACKGROUND_POST_PATHS = new Set([
+  '/api/terminal-diagnostics/activity', '/api/terminal-diagnostics/sync',
+  '/api/notifications/state', '/auth/push-device', '/auth/push-device/unregister', '/auth/mobile-session'
+]);
 const KNOWN_WEB_PATHS = new Set([
   '/', '/login', '/privacy', '/terms', '/compliance', '/cookies', '/dashboard',
   '/fields', '/block-farms', '/registry', '/operations', '/takeover', '/prices',
@@ -39,6 +50,11 @@ function isMutationRequest(req) {
   const readOnlyQuery = method === 'POST'
     && normalizedPath(req).replace(/\/$/, '') === '/api/notifications/state/query';
   return MUTATION_METHODS.has(method) && !readOnlyQuery;
+}
+
+function isBackgroundRequest(req) {
+  if (String(req.method || 'GET').toUpperCase() !== 'POST') return false;
+  return BACKGROUND_POST_PATHS.has(normalizedPath(req).replace(/\/$/, ''));
 }
 
 function isKnownPath(path) {
@@ -124,8 +140,10 @@ function earlyPolicies(req, limits) {
     { key: `early:burst:${ip}`, policy: limits.burst },
     { key: `early:sustained:${ip}`, policy: limits.sustained }
   ];
-  if (isMutationRequest(req)) policies.push({ key: `early:mutation:${ip}`, policy: limits.mutation });
-  if (path === '/auth' || path.startsWith('/auth/')) policies.push({ key: `early:auth:${ip}`, policy: limits.authentication });
+  const background = isBackgroundRequest(req);
+  if (isMutationRequest(req) && !background) policies.push({ key: `early:mutation:${ip}`, policy: limits.mutation });
+  if (background && limits.background) policies.push({ key: `early:background:${ip}`, policy: limits.background });
+  if ((path === '/auth' || path.startsWith('/auth/')) && MUTATION_METHODS.has(method) && !background) policies.push({ key: `early:auth:${ip}`, policy: limits.authentication });
   if (MUTATION_METHODS.has(method) && (path === '/api/backups' || path.startsWith('/api/backups/'))) {
     policies.push({ key: `early:backup:${ip}`, policy: limits.backupUpload });
   }
@@ -168,14 +186,17 @@ function createAuthenticatedApiRateLimit({
     const userId = String(req.authUser?.employeeId || req.session?.user?.employeeId || '').trim();
     if (!userId) return next();
     const ip = normalizeNetworkKey(req);
-    const mutation = isMutationRequest(req);
-    const userPolicy = mutation ? limits.mutationUser : limits.readUser;
-    const pairPolicy = mutation ? limits.mutationUserAndIp : limits.readUserAndIp;
-    const category = mutation ? 'mutation' : 'read';
-    const state = applyPolicies(store, [
+    const background = isBackgroundRequest(req);
+    const mutation = isMutationRequest(req) && !background;
+    const userPolicy = background ? limits.backgroundUser : mutation ? limits.mutationUser : limits.readUser;
+    const pairPolicy = background ? limits.backgroundUserAndIp : mutation ? limits.mutationUserAndIp : limits.readUserAndIp;
+    const category = background ? 'background' : mutation ? 'mutation' : 'read';
+    const policies = [
       { key: `authenticated:${category}:user:${userId}`, policy: userPolicy },
       { key: `authenticated:${category}:pair:${userId}:${ip}`, policy: pairPolicy }
-    ], now());
+    ].filter(item => item.policy);
+    if (!policies.length) return next();
+    const state = applyPolicies(store, policies, now());
     if (!state.accepted) return rejectRateLimited(res, state, 'USER_RATE_LIMITED');
     return next();
   };
@@ -186,5 +207,5 @@ module.exports = {
   AUTHENTICATED_LIMITS,
   createEarlyAbuseProtection,
   createAuthenticatedApiRateLimit,
-  _test: { BoundedWindowStore, applyPolicies, earlyPolicies, isKnownPath, normalizedPath, isMutationRequest }
+  _test: { BoundedWindowStore, applyPolicies, earlyPolicies, isKnownPath, normalizedPath, isMutationRequest, isBackgroundRequest }
 };

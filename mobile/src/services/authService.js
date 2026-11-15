@@ -20,6 +20,7 @@ let serverReadRevision = '';
 let authenticationGeneration = 0;
 let credentialWrites = Promise.resolve();
 let firebaseTransitions = Promise.resolve();
+let apiSessionRecovery = null;
 function authContextChanged() {
   return Object.assign(new Error('The signed-in account changed. Please try again.'), { code: 'AUTH_CONTEXT_CHANGED' });
 }
@@ -231,9 +232,30 @@ export async function authenticatedRequest(path, options = {}) {
     }
     return result;
   } catch (error) {
-    if (error.status === 401 && requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '')
-      && token === await getItem(STORAGE_KEYS.AUTH_TOKEN)) {
-      if (requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '')) {
+    if (error.status === 401 && options.preserveCredentialsOn401 !== true && requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '')
+      ) {
+      const current = () => requestGeneration === authenticationGeneration && requestUserId === (auth?.currentUser?.uid || '');
+      if (!options.sessionRecoveryAttempted && auth?.currentUser) {
+        try {
+          if (token === await getItem(STORAGE_KEYS.AUTH_TOKEN)) {
+            if (!apiSessionRecovery || apiSessionRecovery.generation !== requestGeneration || apiSessionRecovery.owner !== requestUserId) {
+              const recovery = { generation: requestGeneration, owner: requestUserId };
+              recovery.promise = refreshMobileSessionFromFirebase({ forceRefresh: true, isCurrent: current })
+                .finally(() => { if (apiSessionRecovery === recovery) apiSessionRecovery = null; });
+              apiSessionRecovery = recovery;
+            }
+            await apiSessionRecovery.promise;
+          }
+          if (!current()) throw authContextChanged();
+          return await authenticatedRequest(path, { ...options, token: await getItem(STORAGE_KEYS.AUTH_TOKEN), sessionRecoveryAttempted: true });
+        } catch (recoveryError) {
+          const definitive = [401, 403].includes(recoveryError.status)
+            || ['auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-disabled'].includes(recoveryError.code);
+          if (!definitive) throw recoveryError;
+          error = recoveryError;
+        }
+      }
+      if (current() && (token === await getItem(STORAGE_KEYS.AUTH_TOKEN) || options.sessionRecoveryAttempted)) {
         const generation = ++authenticationGeneration;
         await clearCredentials(() => generation === authenticationGeneration);
       }
@@ -252,10 +274,21 @@ export async function loginWithServer(identifier, password, sessionAcknowledged 
   return result;
 }
 
-export async function refreshServerSession(token, { isCurrent = () => true } = {}) {
-  const current = currentAuthContext(isCurrent);
+export async function refreshServerSession(token, { isCurrent = () => true, expectedUserId = '' } = {}) {
+  const generation = authenticationGeneration;
+  const originalOwner = auth?.currentUser?.uid || '';
+  let restoredOwner = '';
+  const current = () => generation === authenticationGeneration && isCurrent()
+    && ((auth?.currentUser?.uid || '') === originalOwner || (!originalOwner && restoredOwner && auth?.currentUser?.uid === restoredOwner));
   const result = await authenticatedRequest('/auth/session', { token, headers: { 'Cache-Control': 'no-cache' } });
   if (!current()) throw authContextChanged();
+  restoredOwner = String(result.user?.employeeId || result.user?.id || originalOwner);
+    if (expectedUserId && !restoredOwner) {
+      throw Object.assign(new Error('The saved account could not be verified. Please try again.'), { status: 503, code: 'AUTH_SESSION_RESPONSE_INVALID' });
+    }
+  if ((expectedUserId && restoredOwner !== String(expectedUserId)) || (originalOwner && restoredOwner !== originalOwner)) {
+    throw Object.assign(new Error('The saved account does not match the verified server session.'), { status: 401, code: 'AUTH_IDENTITY_MISMATCH' });
+  }
   await signInToFirebase(result.firebaseCustomToken, { isCurrent: current });
   await writeAuthToken(result.token, current);
   return result;
@@ -292,6 +325,29 @@ export async function refreshMobileSessionFromFirebase({ forceRefresh = false, i
   if (!current()) throw authContextChanged();
   await writeAuthToken(result.token, current);
   return result;
+}
+
+export async function refreshMobileSessionForSync({ isCurrent = () => true } = {}) {
+  const current = currentAuthContext(isCurrent);
+  const token = await getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!current()) throw authContextChanged();
+  if (token) {
+    try {
+      // The API rechecks the live account, assignments and revocation version.
+      // A valid API session does not need another Google token exchange before
+      // every upload. Keep Firebase credentials available if this token expired.
+      const result = await authenticatedRequest('/auth/session', {
+        token, preserveCredentialsOn401: true, headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!current()) throw authContextChanged();
+      await writeAuthToken(result.token, current);
+      return result;
+    } catch (error) {
+      if (!current()) throw authContextChanged();
+      if (error.status !== 401) throw error;
+    }
+  }
+  return refreshMobileSessionFromFirebase({ forceRefresh: true, isCurrent: current });
 }
 
 export async function changePasswordWithServer(currentPassword, newPassword, sessionAction = 'KEEP_CURRENT') {
@@ -389,8 +445,18 @@ export async function completePasswordRecoveryReview(reviewId, claimToken, newPa
   return publicAuthRequest('/auth/password-recovery-review/complete', { reviewId, claimToken, newPassword });
 }
 
-export async function fetchPasswordRecoveryReviews({ cursor = null } = {}) {
-  return authenticatedRequest(`/api/recovery-reviews${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+const pendingRecoveryReads = new Map();
+let recoveryReadGeneration = -1;
+export function fetchPasswordRecoveryReviews({ cursor = null } = {}) {
+  if (recoveryReadGeneration !== authenticationGeneration) {
+    pendingRecoveryReads.clear(); recoveryReadGeneration = authenticationGeneration;
+  }
+  const key = `${auth?.currentUser?.uid || ''}:${cursor || ''}`;
+  if (pendingRecoveryReads.has(key)) return pendingRecoveryReads.get(key);
+  const request = authenticatedRequest(`/api/recovery-reviews${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)
+    .finally(() => { if (pendingRecoveryReads.get(key) === request) pendingRecoveryReads.delete(key); });
+  pendingRecoveryReads.set(key, request);
+  return request;
 }
 
 export async function decidePasswordRecoveryReview(reviewId, approve) {

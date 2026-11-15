@@ -5,12 +5,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.resolve(__dirname, '../routes/auth.js'), 'utf8');
-const prefix = "router.post('/mobile-session', mobileSessionRateLimit, ";
+const prefix = "router.post('/mobile-session', ";
 const at = source.indexOf(prefix) + prefix.length;
 assert.ok(at >= prefix.length);
 const body = '(' + source.slice(at, source.indexOf('\n});', at)) + '})';
-async function request({ tokenError, databaseError, signingError, status = 'ACTIVE' } = {}) {
+async function request({ tokenError, databaseError, signingError, status = 'ACTIVE', limited = false, missingToken = false } = {}) {
+  let rateLimitCalls = 0;
   const handler = vm.runInNewContext(body, {
+    mobileSessionRateLimit: async (req, res, next) => {
+      rateLimitCalls++;
+      return limited ? res.status(429).json({ success: false, code: 'MOBILE_SESSION_RATE_LIMITED' }) : next();
+    },
     COLLECTIONS: { USERS: 'users' },
     db: { collection: () => ({ doc: () => ({ get: async () => {
       if (databaseError) throw databaseError;
@@ -23,7 +28,8 @@ async function request({ tokenError, databaseError, signingError, status = 'ACTI
     issueCredentials: async () => { if (signingError) throw signingError; return { token: 'local-test-token' }; }
   });
   const response = { locals: {}, statusCode: 200, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; } };
-  await handler({ headers: { 'x-client-platform': 'mobile', authorization: 'Bearer local-test-token' } }, response);
+  await handler({ headers: { 'x-client-platform': 'mobile', ...(missingToken ? {} : { authorization: 'Bearer local-test-token' }) } }, response);
+  response.rateLimitCalls = rateLimitCalls;
   return response;
 }
 
@@ -49,4 +55,17 @@ test('expired, revoked and invalid Firebase tokens still receive 401; inactive a
   }
   assert.equal((await request({ status: 'DISABLED' })).statusCode, 403);
   assert.equal((await request()).statusCode, 200);
+});
+
+test('valid mobile renewals do not consume or get blocked by the failed-token allowance', async () => {
+  for (let index = 0; index < 65; index++) {
+    const result = await request({ limited: true });
+    assert.equal(result.statusCode, 200); assert.equal(result.rateLimitCalls, 0);
+  }
+  for (const options of [{ missingToken: true }, { tokenError: Object.assign(new Error('Invalid'), { code: 'auth/invalid-id-token' }) }]) {
+    const rejected = await request({ ...options, limited: true });
+    assert.equal(rejected.statusCode, 429); assert.equal(rejected.body.code, 'MOBILE_SESSION_RATE_LIMITED'); assert.equal(rejected.rateLimitCalls, 1);
+  }
+  assert.match(source, /rejectionCode: 'MOBILE_SESSION_RATE_LIMITED'/);
+  assert.doesNotMatch(source, /router\.post\('\/mobile-session', mobileSessionRateLimit/);
 });

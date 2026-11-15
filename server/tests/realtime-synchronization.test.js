@@ -227,6 +227,56 @@ function webRuntime(fetchImpl, overrides = {}) {
   return context;
 }
 
+test('Web price invalidation keeps unrelated field requests shared and caches their completed result', async () => {
+  const requests = [];
+  const runtime = webRuntime((url) => new Promise(resolve => { requests.push({ url, resolve }); }));
+  const field = runtime.authenticatedRead('/api/fields');
+  const price = runtime.authenticatedRead('/api/prices?limit=2');
+  runtime.invalidateAuthenticatedResources(['prices', 'notifications']);
+  const joinedField = runtime.authenticatedRead('/api/fields');
+  assert.equal(field, joinedField, 'a price change must not duplicate a pending field read');
+  assert.equal(requests.length, 2);
+  requests[0].resolve({ ok: true, json: async () => ({ success: true, data: [{ id: 'FIELD-CURRENT' }] }) });
+  requests[1].resolve({ ok: true, json: async () => ({ success: true, data: [{ id: 'PRICE-OLD' }] }) });
+  await Promise.all([field, price, joinedField]);
+  assert.equal((await runtime.authenticatedRead('/api/fields')).data[0].id, 'FIELD-CURRENT');
+  assert.equal(requests.length, 2, 'the unaffected response remains reusable for navigation');
+  assert.equal(runtime.peekAuthenticatedRead('/api/prices?limit=2'), null, 'the pre-change price never enters the cache');
+});
+
+test('Web resource revisions prevent an older response from replacing a newer post-change cache', async () => {
+  const requests = [];
+  const runtime = webRuntime(url => new Promise(resolve => { requests.push({ url, resolve }); }));
+  const old = runtime.authenticatedRead('/api/fields');
+  runtime.invalidateAuthenticatedResources(['fields']);
+  const fresh = runtime.authenticatedRead('/api/fields');
+  assert.notEqual(old, fresh);
+  requests[1].resolve({ ok: true, json: async () => ({ success: true, data: [{ id: 'NEW' }] }) }); await fresh;
+  runtime.invalidateAuthenticatedResources(['prices']);
+  requests[0].resolve({ ok: true, json: async () => ({ success: true, data: [{ id: 'OLD' }] }) }); await old;
+  assert.equal((await runtime.authenticatedRead('/api/fields')).data[0].id, 'NEW');
+  assert.equal(requests.length, 2);
+});
+
+test('Web global reset, session invalidation and account switching still invalidate every pending read', async () => {
+  for (const boundary of ['reset', 'session', 'account']) {
+    const requests = [];
+    const runtime = webRuntime(url => new Promise(resolve => { requests.push({ url, resolve }); }));
+    const old = runtime.authenticatedRead('/api/fields');
+    const rejection = boundary === 'account' ? assert.rejects(old, { code: 'AUTH_CONTEXT_CHANGED' }) : null;
+    if (boundary === 'account') runtime.clearAuthenticatedReadState();
+    else runtime.invalidateAuthenticatedResources(boundary === 'session' ? ['session'] : []);
+    const fresh = runtime.authenticatedRead('/api/fields');
+    assert.notEqual(old, fresh);
+    requests[0].resolve({ ok: true, json: async () => ({ success: true, data: [{ id: 'OLD' }] }) });
+    if (rejection) await rejection; else await old;
+    assert.equal(runtime.peekAuthenticatedRead('/api/fields'), null);
+    requests[1].resolve({ ok: true, json: async () => ({ success: true, data: [] }) });
+    await fresh;
+    assert.equal(runtime.peekAuthenticatedRead('/api/fields').data.length, 0, 'empty authoritative results remain valid');
+  }
+});
+
 test('reading notification state does not recursively refresh the inbox; actual changes still refresh it', async t => {
   const calls = [];
   const runtime = webRuntime(async (url, options) => {
@@ -250,7 +300,7 @@ test('reading notification state does not recursively refresh the inbox; actual 
   assert.ok(JSON.parse(calls.find(call => call.url === '/api/notifications/state').options.body)._mutation);
 });
 
-test('notification read throttling cannot pause submissions; real write throttling still does', async () => {
+test('notification and background bookkeeping throttling cannot pause business submissions', async () => {
   const runtime = webRuntime(async () => ({ ok: false, status: 429,
     headers: { get: () => '265' }, json: async () => ({ success: false, error: 'Too many requests.' }) }));
   let pauseEvents = 0;
@@ -259,6 +309,10 @@ test('notification read throttling cannot pause submissions; real write throttli
   assert.equal(pauseEvents, 0);
   assert.equal(runtime.getMutationCooldownRemainingSeconds(), 0);
   await assert.rejects(runtime.authenticatedRequest('/api/notifications/state', { method: 'POST', body: { ids: ['N'], action: 'read' } }), { status: 429 });
+  await assert.rejects(runtime.authenticatedRequest('/api/terminal-diagnostics/activity', { method: 'POST', body: { event: 'HEARTBEAT' } }), { status: 429 });
+  await assert.rejects(runtime.authenticatedRequest('/api/terminal-diagnostics/sync', { method: 'POST', body: {} }), { status: 429 });
+  assert.equal(pauseEvents, 0); assert.equal(runtime.getMutationCooldownRemainingSeconds(), 0);
+  await assert.rejects(runtime.authenticatedRequest('/api/logs', { method: 'POST', body: { id: 'L' } }), { status: 429 });
   assert.equal(pauseEvents, 1);
   assert.ok(runtime.getMutationCooldownRemainingSeconds() > 0);
 });
@@ -297,6 +351,55 @@ test('empty notification inboxes do not request account state', async () => {
   assert.equal(result.success, true);
   assert.equal(result.data.length, 0);
   assert.equal(context.calls, 0);
+});
+
+test('change events during failed Web reads cannot bypass backoff and fresh data renders after the delay', async t => {
+  for (const loader of [false, true]) {
+    let clock = 10000, calls = 0, release;
+    const timers = new Map(), values = [];
+    class Clock extends Date { static now() { return clock; } }
+    const runtime = webRuntime(async () => {
+      calls++;
+      if (calls === 1) return new Promise(resolve => { release = resolve; });
+      return { ok: true, json: async () => ({ success: true, data: [{ id: 'FRESH' }] }) };
+    }, { Date: Clock, setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) });
+    const options = { resources: ['fields'], onData: response => values.push(response.data) };
+    const stop = loader ? runtime.subscribeToAuthenticatedLoader(({ force }) => runtime.authenticatedRead('/api/fields', { force }), options)
+      : runtime.subscribeToAuthenticatedResource('/api/fields', options);
+    t.after(stop); await tick();
+    runtime.invalidateAuthenticatedResources(['fields']);
+    release({ ok: false, status: 503, json: async () => ({ success: false, error: 'Temporary outage' }) }); await tick();
+    for (let index = 0; index < 25; index++) runtime.invalidateAuthenticatedResources(['fields']);
+    await tick(); assert.equal(calls, 1);
+    const [id, timer] = [...timers.entries()].find(([, item]) => item.delay === 1000);
+    clock += 1000; timers.delete(id); timer.callback(); await tick();
+    assert.equal(calls, 2); assert.equal(values.at(-1)[0].id, 'FRESH'); stop();
+  }
+});
+
+test('returning to a Web tab resumes a failed refresh even when its saved data is recent', async t => {
+  for (const loader of [false, true]) {
+    let clock = 10000, calls = 0;
+    const timers = new Map(), seen = [];
+    class Clock extends Date { static now() { return clock; } }
+    const runtime = webRuntime(async () => {
+      calls++;
+      return calls === 2 ? { ok: false, status: 503, json: async () => ({ success: false }) }
+        : { ok: true, json: async () => ({ success: true, data: [{ id: calls === 1 ? 'SAVED' : 'FRESH' }] }) };
+    }, { Date: Clock, setTimeout: (callback, delay) => { const id = {}; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) });
+    const options = { resources: ['fields'], onData: response => seen.push(response.data) };
+    const stop = loader ? runtime.subscribeToAuthenticatedLoader(({ force }) => runtime.authenticatedRead('/api/fields', { force }), options)
+      : runtime.subscribeToAuthenticatedResource('/api/fields', options);
+    t.after(stop); await tick();
+    runtime.invalidateAuthenticatedResources(['fields']); await tick(); assert.equal(calls, 2);
+    runtime.document.visibilityState = 'hidden';
+    const [id, timer] = [...timers.entries()].find(([, item]) => item.delay === 1000);
+    clock += 1000; timers.delete(id); timer.callback(); await tick(); assert.equal(calls, 2);
+    runtime.document.visibilityState = 'visible'; runtime.window.dispatchEvent(new Event('focus'));
+    await tick(); assert.equal(calls, 3); assert.equal(seen.at(-1)[0].id, 'FRESH');
+    runtime.window.dispatchEvent(new Event('focus')); await tick(); assert.equal(calls, 3, 'healthy recent data does not refetch on every focus');
+    stop();
+  }
 });
 
 test('an open Web price subscription receives a newly published price without navigation or manual refresh', async t => {
@@ -455,6 +558,28 @@ function mobileRuntime(role = ROLES.MEMBER_FARMER, requestOverride) {
   return { context, data, queue, requests, stop, change: event => onChange(event),
     network(value) { online = value; networkChange(value); }, app(value) { appChange(value); } };
 }
+
+test('Android deferred refresh preserves safe HTTP diagnostics without leaking server payloads or credentials', async t => {
+  const failure = Object.assign(new Error('Bearer PRIVATE-TOKEN secret server payload'), {
+    status: 429, code: 'MOBILE_SESSION_RATE_LIMITED', referenceId: 'AUTH-20261115-1234ABCD', retryAfterMs: 70000,
+    data: { token: 'PRIVATE-TOKEN' }
+  });
+  const device = mobileRuntime(ROLES.FARM_MANAGER, url => url === '/auth/session' ? Promise.reject(failure) : null);
+  t.after(device.stop);
+  const warnings = [];
+  device.context.console.warn = (...args) => warnings.push(args);
+  await device.stop.initialRefresh;
+  assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
+  assert.equal(device.context.getCloudDataStatus().hasSnapshot, true, 'successful authorized resource reads remain usable');
+  assert.equal(warnings.length, 1);
+  const details = warnings[0][1];
+  assert.equal(details.failures[0].status, 429);
+  assert.equal(details.failures[0].code, 'MOBILE_SESSION_RATE_LIMITED');
+  assert.equal(details.failures[0].referenceId, 'AUTH-20261115-1234ABCD');
+  assert.equal(details.retryAfterMs, 70000);
+  assert.ok(details.resources.includes('session'));
+  assert.doesNotMatch(JSON.stringify(warnings), /PRIVATE-TOKEN|secret server payload|Bearer/);
+});
 
 test('Android secondary failures retain old lists while new fields and prices render and recover automatically', async t => {
   let failing = false;
@@ -698,6 +823,7 @@ test('Android initial loading ends only after a confirmed snapshot, including a 
 });
 
 test('Android initial errors offer recovery while background errors keep the existing snapshot usable', async t => {
+  t.mock.timers.enable({ apis: ['Date'] });
   let fail = true;
   const device = mobileRuntime(ROLES.FARM_MANAGER, url => url === '/api/fields' && fail
     ? Promise.reject(Object.assign(new Error('Temporary outage'), { status: 503 })) : null);
@@ -706,6 +832,11 @@ test('Android initial errors offer recovery while background errors keep the exi
   assert.equal(device.context.getCloudDataStatus().phase, 'ERROR');
   assert.equal(device.context.getCloudDataStatus().hasSnapshot, false);
   fail = false;
+  const readsBefore = device.requests.length;
+  for (let index = 0; index < 25; index++) await device.context.activeCloudRefresh({ force: true });
+  assert.equal(device.requests.length, readsBefore);
+  assert.equal(device.context.getCloudDataStatus().phase, 'ERROR', 'automatic invalidation cannot bypass backoff');
+  t.mock.timers.tick(1000);
   await device.context.activeCloudRefresh({ force: true });
   assert.equal(device.context.getCloudDataStatus().phase, 'READY');
   fail = true;

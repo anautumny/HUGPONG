@@ -12,6 +12,7 @@ import { SUGARCANE_VARIETIES } from '../../domain/sugarcaneVarieties';
 import { authenticatedRequest } from '../../services/apiClient';
 import { createClientRecordId } from '../../utils/secureId';
 import { createOperationSubmission } from '../../domain/operationSubmission';
+import { fieldTakeoverSession, rememberFieldTakeover, forgetFieldTakeover, pruneFieldTakeovers } from '../../domain/operationAuthorization';
 import UnconfirmedOperationNotice from '../../components/operations/UnconfirmedOperationNotice';
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import {
@@ -56,9 +57,9 @@ export default function TakeOverView() {
 
   // Selected field and authorization state
   const [selectedFieldId, setSelectedFieldId] = useState(initialFieldId);
-  const [isAuthorized, setIsAuthorized] = useState(false);
-  const [takeoverGrant, setTakeoverGrant] = useState(null);
-  const [takeoverExpiresAt, setTakeoverExpiresAt] = useState(0);
+  const [takeoverSessions, setTakeoverSessions] = useState({});
+  const takeoverActorKey = JSON.stringify([user?.employeeId || user?.id || '', roleKey, user?.authVersion ?? '']);
+  const takeoverActorRef = useRef(takeoverActorKey);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // Manager Takeover form state
@@ -97,26 +98,16 @@ export default function TakeOverView() {
   }), [user?.employeeId, user?.id, selectedFieldId]);
 
   useEffect(() => {
-    setIsAuthorized(false);
-    setTakeoverGrant(null);
-    setTakeoverExpiresAt(0);
-    setPendingSubmission(null);
-  }, [selectedFieldId, user?.employeeId, user?.id]);
+    if (takeoverActorRef.current !== takeoverActorKey) {
+      setTakeoverSessions({});
+      takeoverActorRef.current = takeoverActorKey;
+    }
+  }, [takeoverActorKey]);
 
   useEffect(() => {
-    if (!takeoverExpiresAt) return undefined;
-    const expire = () => {
-      setIsAuthorized(false);
-      setTakeoverGrant(null);
-      setTakeoverExpiresAt(0);
-      setPendingSubmission(null);
-      setServerError('Manager Takeover authorization expired. Verify your password again to continue.');
-    };
-    const remaining = takeoverExpiresAt - Date.now();
-    if (remaining <= 0) { expire(); return undefined; }
-    const timer = setTimeout(expire, remaining);
-    return () => clearTimeout(timer);
-  }, [takeoverExpiresAt]);
+    setPendingSubmission(null);
+    setServerError(null);
+  }, [selectedFieldId, user?.employeeId, user?.id]);
 
   // Exit confirmation
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
@@ -152,6 +143,25 @@ export default function TakeOverView() {
   const currentField = useMemo(() => {
     return fieldsData.fields.find(f => f.id === selectedFieldId) || null;
   }, [fieldsData.fields, selectedFieldId]);
+
+  const takeoverSession = currentField ? fieldTakeoverSession(takeoverSessions, user, currentField.id) : null;
+  const isAuthorized = isManager && Boolean(takeoverSession);
+  const takeoverGrant = isAuthorized ? takeoverSession.grant : null;
+  const takeoverExpiresAt = isAuthorized ? takeoverSession.expiresAt : 0;
+  useEffect(() => {
+    const deadlines = Object.values(takeoverSessions).map(item => item.expiresAt);
+    if (!deadlines.length) return undefined;
+    const expire = () => {
+      const selected = takeoverSessions[String(selectedFieldId || '').trim().toUpperCase()];
+      if (selected && selected.expiresAt <= Date.now()) {
+        setPendingSubmission(null);
+        setServerError('Manager Takeover authorization expired. Verify your password again to continue.');
+      }
+      setTakeoverSessions(previous => pruneFieldTakeovers(previous, user));
+    };
+    const timer = setTimeout(expire, Math.max(0, Math.min(...deadlines) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [takeoverSessions, takeoverActorKey, selectedFieldId]);
 
   // Synchronize stage and area from currentField when field changes
   useEffect(() => {
@@ -303,7 +313,7 @@ export default function TakeOverView() {
 
     // If supervisor is not authorized yet, prompt auth modal first!
     if (!isAuthorized || !takeoverGrant || takeoverExpiresAt <= Date.now()) {
-      setIsAuthorized(false);
+      setTakeoverSessions(previous => forgetFieldTakeover(previous, selectedFieldId));
       setAuthModalOpen(true);
       return;
     }
@@ -334,6 +344,15 @@ export default function TakeOverView() {
       return;
     }
 
+    if (inputMode === 'group' && submittedLineItems.length === 0) {
+      setServerError('Add an item with quantity and unit. For labor-only work, choose Direct Input and enter the operation quantity and unit; use direct rate 0 when the crew cost is entered separately.');
+      return;
+    }
+    if (inputMode === 'direct' && (!String(directQty).trim() || !Number.isFinite(Number(directQty)) || Number(directQty) <= 0
+      || !canonicalOperationUnit(directUnit) || !String(directRate).trim() || !Number.isFinite(Number(directRate)) || Number(directRate) < 0)) {
+      setServerError('Enter a quantity, select its unit, and enter a valid direct rate. Use 0 for the direct rate when all costs are recorded in labor.');
+      return;
+    }
     if (!confirmed) {
       setPendingSubmission({
         submissionTarget,
@@ -394,7 +413,11 @@ export default function TakeOverView() {
           const nextStage = Math.min(CROP_STAGE_MAX, Number(selectedStageNumber) + 1);
           await authenticatedRequest(`/api/crop-cycles/${encodeURIComponent(cycleId)}/stage`, {
             method: 'PATCH',
-            body: { currentStageNumber: nextStage },
+            body: { currentStageNumber: nextStage, ...(currentField?.cropCycle ? { expectedStage: {
+              currentStageNumber: Number(currentField.cropCycle.currentStageNumber),
+              elapsedMonths: Number(currentField.cropCycle.elapsedMonths || 0),
+              completedAt: currentField.cropCycle.completedAt || null
+            } } : {}) },
             baseVersion: submissionResult?.cycleVersion || currentField?.cropCycle?.updatedAt,
             headers: takeoverGrant ? { 'X-Hugpong-Takeover-Grant': takeoverGrant } : {}
           });
@@ -428,6 +451,17 @@ export default function TakeOverView() {
   };
 
   const confirmExit = () => {
+    if (exitConfirmOpen?.fieldId) {
+      const target = exitConfirmOpen;
+      if (takeoverActorRef.current === target.actorKey) {
+        setTakeoverSessions(previous => previous[target.fieldId]?.grant === target.grant
+          ? forgetFieldTakeover(previous, target.fieldId) : previous);
+        setPendingSubmission(null);
+      }
+      setExitConfirmOpen(false);
+      return;
+    }
+    setTakeoverSessions({});
     setExitConfirmOpen(false);
     navigate('/fields');
   };
@@ -493,7 +527,7 @@ export default function TakeOverView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           {!isAuthorized ? (
             <Button
               variant="secondary"
@@ -504,12 +538,15 @@ export default function TakeOverView() {
             >
               Confirm Password
             </Button>
-          ) : (
+          ) : (<>
             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-bold bg-success-bg dark:bg-success/20 text-success border border-success/30">
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>Supervisor Authorized</span>
             </span>
-          )}
+            <Button variant="secondary" size="sm" disabled={isSubmitting} onClick={() =>
+              setExitConfirmOpen({ fieldId: currentField.id, grant: takeoverGrant, actorKey: takeoverActorKey })
+            }>Exit Field Takeover</Button>
+          </>)}
         </div>
       </div>
 
@@ -524,9 +561,6 @@ export default function TakeOverView() {
             value={selectedFieldId}
             onChange={(e) => {
               setSelectedFieldId(e.target.value);
-              setIsAuthorized(false);
-              setTakeoverGrant(null);
-              setTakeoverExpiresAt(0);
             }}
             options={fieldsData.fields.map(f => {
               const isPersonal = f.memberUserId && (f.memberUserId === user?.id || f.memberUserId === user?.employeeId);
@@ -780,7 +814,7 @@ export default function TakeOverView() {
           </div>
 
           <div className="space-y-2 rounded-xl border border-border p-3">
-            <div className="flex items-center justify-between text-xs font-bold"><span>Crew costs</span><span className="text-primary">{formatCurrency(laborCost)}</span></div>
+            {Number(workersCount || 0) > 0 && Number(newWorker.days || 0) > 0 && String(newWorker.rate ?? '').trim() !== '' && <div className="flex items-center justify-between text-xs font-bold"><span>Crew costs</span><span className="text-primary">{formatCurrency(laborCost)}</span></div>}
             {laborEntries.map((worker, index) => (
               <div key={worker.laborEntryId} className="flex justify-between rounded-lg bg-bg px-3 py-2 text-xs">
                 <span>{worker.workerCount} workers · {worker.days} day × {formatCurrency(worker.rate)}</span>
@@ -801,6 +835,7 @@ export default function TakeOverView() {
           </div>
 
           {/* Cost breakdown */}
+          <p className="text-xs text-hug-muted">For labor-only work, use Direct Input and enter the quantity and unit. Use direct rate 0 when all costs are entered in the crew details.</p>
           {inputMode === 'group' ? (
             <div className="space-y-3 pt-2 border-t border-border/70">
               <div className="flex items-center justify-between">
@@ -976,9 +1011,8 @@ export default function TakeOverView() {
         user={user}
         onAuthorized={(authorizedField, grant, expiresAt) => {
           if (authorizedField?.id !== selectedFieldId || !Number.isFinite(Number(expiresAt)) || Number(expiresAt) <= Date.now()) return;
-          setTakeoverGrant(grant);
-          setTakeoverExpiresAt(Number(expiresAt));
-          setIsAuthorized(true);
+          const authorized = rememberFieldTakeover({}, user, authorizedField.id, grant, expiresAt);
+          setTakeoverSessions(previous => ({ ...pruneFieldTakeovers(previous, user), ...authorized }));
           setAuthModalOpen(false);
         }}
       />
@@ -1001,12 +1035,14 @@ export default function TakeOverView() {
 
       {/* Exit Confirmation Dialog */}
       <ConfirmDialog
-        isOpen={exitConfirmOpen}
+        isOpen={Boolean(exitConfirmOpen)}
         onCancel={() => setExitConfirmOpen(false)}
         onConfirm={confirmExit}
-        title="Exit Manager Takeover Mode?"
-        message="Any unsaved operation inputs will be discarded. The member field will be unselected."
-        confirmText="Exit Manager Takeover"
+        title={exitConfirmOpen?.fieldId ? 'Exit Field Takeover?' : 'Exit Manager Takeover Mode?'}
+        message={exitConfirmOpen?.fieldId
+          ? `End your takeover authorization for ${exitConfirmOpen.fieldId}? Saved operations will remain. You will need to authorize this field again to make further changes.`
+          : 'Any unsaved operation inputs will be discarded. All field authorizations in this takeover workspace will end.'}
+        confirmText={exitConfirmOpen?.fieldId ? 'Exit Takeover' : 'Exit Manager Takeover'}
         cancelText="Stay Here"
         type="warning"
       />

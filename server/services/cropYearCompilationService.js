@@ -2,7 +2,7 @@
 const { reportingMonthLabel } = require('../domain/auditReportLayout');
 
 const crypto = require('crypto');
-const { COLLECTIONS, ROLES, canonicalRole, createAuditHash } = require('../schema/firestoreSchema');
+const { COLLECTIONS, ROLES, canonicalRole, createAuditHash, calendarDate } = require('../schema/firestoreSchema');
 const { validateCanonicalAuditReport } = require('../domain/auditWorkflow');
 const { queueAuditEvent } = require('./auditWriter');
 
@@ -20,7 +20,17 @@ function selection(input = {}) {
   if (!match || Number(match[2]) !== Number(match[1]) + 1) throw fail('Select a Crop Year Cycle in YYYY-YYYY format.');
   const blockFarmId = String(input.blockFarmId || '').trim().toUpperCase();
   if (blockFarmId && !/^[A-Z0-9_-]{1,80}$/.test(blockFarmId)) throw fail('Block Farm selection is invalid.');
-  return { cropYearCycle, blockFarmId: blockFarmId || null };
+  if (input.coverageMode && !['TO_DATE', 'DATE_RANGE'].includes(input.coverageMode)) throw fail('Choose all certified operations or a selected date range.');
+  if (input.coverageMode === 'TO_DATE' && (input.startDate || input.endDate)) throw fail('Date filters require selected date range coverage.');
+  const hasRange = input.coverageMode === 'DATE_RANGE' || Boolean(input.startDate || input.endDate);
+  let range = {};
+  if (hasRange) {
+    try {
+      range = { startDate: calendarDate(input.startDate, 'startDate'), endDate: calendarDate(input.endDate, 'endDate') };
+    } catch (error) { throw fail(error.message); }
+    if (range.startDate > range.endDate) throw fail('The start date must be on or before the end date.');
+  }
+  return { cropYearCycle, blockFarmId: blockFarmId || null, ...range };
 }
 
 function assertSra(user) {
@@ -62,7 +72,17 @@ function buildCompilation(reports, input) {
       && (report.operationSnapshots || []).some(operation => !operationCropYear(operation, report))) {
       throw fail(`Certified report ${report.id} has operations without an unambiguous Crop Year Cycle. Correct its source identity before compiling.`, 409);
     }
-    const selected = (report.operationSnapshots || []).filter(operation => operationCropYear(operation, report) === scope.cropYearCycle);
+    const selected = (report.operationSnapshots || []).filter(operation => {
+      if (operationCropYear(operation, report) !== scope.cropYearCycle) return false;
+      if (!scope.startDate) return true;
+      let date;
+      try { date = calendarDate(String(operation.performedOn || operation.isoDate || operation.date || '').slice(0, 10), 'performedOn'); }
+      catch {
+        if (report.periodKey < scope.startDate.slice(0, 7) || report.periodKey > scope.endDate.slice(0, 7)) return false;
+        throw fail(`Certified report ${report.id} has an operation without a valid activity date. Correct its source before compiling a date range.`, 409);
+      }
+      return date >= scope.startDate && date <= scope.endDate;
+    });
     if (!selected.length) continue;
     if (!report.certifiedAt || !report.certifiedByUserId) throw fail(`Certified report ${report.id} is missing certification attribution.`, 409);
     validateCanonicalAuditReport(report);
@@ -112,7 +132,7 @@ function buildCompilation(reports, input) {
   const monthlySummaries = [...months.values()].sort((a, b) => a.periodKey.localeCompare(b.periodKey)).map(month => ({
     periodKey: month.periodKey, operationCount: month.operationCount, totalCost: round(month.totalCost), blockFarmCount: month.farms.size
   }));
-  const result = { ...scope, status: 'COMPILED', coverage: 'CERTIFIED_REPORTS_TO_DATE', sourceReports: sources,
+  const result = { ...scope, status: 'COMPILED', coverage: scope.startDate ? 'CERTIFIED_DATE_RANGE' : 'CERTIFIED_REPORTS_TO_DATE', sourceReports: sources,
     sourceReportCount: sources.length, duplicateOperationCount, operationCount: operations.size, fieldCount: fields.size,
     memberCount: members.size, blockFarmCount: farms.size, monthCount: months.size,
     periods: monthlySummaries.map(month => month.periodKey), totalCost: round([...operations.values()].reduce((sum, entry) => sum + Number(entry.operation.totalCost), 0)),
@@ -147,7 +167,7 @@ async function compileCropYear(database, user, input, { preview = false, now = n
     const prior = await transaction.get(ref);
     if (prior.exists) return { ...prior.data(), id, replayed: true };
     const compiledByUserId = String(user.employeeId || user.userId || '').trim();
-    const record = { ...summary, compiledAt: now, compiledByUserId, compiledByName: user.name || compiledByUserId, schemaVersion: 1 };
+    const record = { ...summary, compiledAt: now, compiledByUserId, compiledByName: user.name || compiledByUserId, schemaVersion: scope.startDate ? 2 : 1 };
     if (Buffer.byteLength(JSON.stringify(record), 'utf8') > MAX_DOCUMENT_BYTES) throw fail('Compilation is too large. Select one Block Farm.', 413);
     transaction.create(ref, record);
     queueAuditEvent(transaction, database, { eventType: 'CROP_YEAR_AUDIT_COMPILED', actorUserId: compiledByUserId,
@@ -161,7 +181,7 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ 
 function compilationHtml(report) {
   const money = value => Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const table = (headings, rows) => `<table><thead><tr>${headings.map(item => `<th>${escape(item)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(item => `<td>${escape(item)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Crop Year ${escape(report.cropYearCycle)}</title><style>@page{size:A4;margin:16mm}body{font:12px Arial,sans-serif;color:#172b20}h1{font-size:23px}h2{margin-top:24px;font-size:16px}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{text-align:left;border:1px solid #ccd6cc;padding:7px;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}.muted{color:#526358}</style></head><body><h1>HUGPONG Crop Year Compilation</h1><h2>${escape(report.cropYearCycle)} · ${escape(report.blockFarmId || 'All Block Farms')}</h2><p>Certified monthly reports to date. This compilation does not declare that the crop year is complete.</p><p>${escape(report.sourceReportCount)} certified reports · ${escape(report.monthCount)} reporting months · ${escape(report.blockFarmCount)} Block Farms<br>${escape(report.operationCount)} unique operations · ${escape(report.fieldCount)} fields · ${escape(report.memberCount)} members<br>Unique audited area: ${escape(report.hectaresAudited)} ha · Total cost: PHP ${money(report.totalCost)}</p><h2>Monthly breakdown</h2>${table(['Month', 'Farms', 'Operations', 'Cost (PHP)'], report.monthlySummaries.map(row => [reportingMonthLabel(row.periodKey), row.blockFarmCount, row.operationCount, money(row.totalCost)]))}<h2>Block Farm breakdown</h2>${table(['Block Farm', 'Fields', 'Area (ha)', 'Operations', 'Cost (PHP)'], report.farmSummaries.map(row => [row.blockFarmName, row.fieldCount, row.hectaresAudited, row.operationCount, money(row.totalCost)]))}<h2>Certified source reports</h2>${table(['Report', 'Month', 'Certified at', 'Certified by'], report.sourceReports.map(row => [row.reportId, reportingMonthLabel(row.periodKey), row.certifiedAt, row.certifiedByUserId]))}<p class="muted">Compilation: ${escape(report.id)}<br>Compiled by ${escape(report.compiledByName)} (${escape(report.compiledByUserId)}) at ${escape(report.compiledAt)}<br>Area counts each field once using its latest included monthly snapshot. New monthly certifications require a new compilation; saved snapshots remain unchanged.</p></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Crop Year ${escape(report.cropYearCycle)}</title><style>@page{size:A4;margin:16mm}body{font:12px Arial,sans-serif;color:#172b20}h1{font-size:23px}h2{margin-top:24px;font-size:16px}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{text-align:left;border:1px solid #ccd6cc;padding:7px;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}.muted{color:#526358}</style></head><body><h1>HUGPONG Crop Year Compilation</h1><h2>${escape(report.cropYearCycle)} · ${escape(report.blockFarmId || 'All Block Farms')}</h2><p>${report.startDate ? `Certified operations from ${escape(report.startDate)} through ${escape(report.endDate)} (inclusive).` : 'Certified monthly reports to date.'} This compilation does not declare that the crop year is complete.</p><p>${escape(report.sourceReportCount)} certified reports · ${escape(report.monthCount)} reporting months · ${escape(report.blockFarmCount)} Block Farms<br>${escape(report.operationCount)} unique operations · ${escape(report.fieldCount)} fields · ${escape(report.memberCount)} members<br>Unique audited area: ${escape(report.hectaresAudited)} ha · Total cost: PHP ${money(report.totalCost)}</p><h2>Monthly breakdown</h2>${table(['Month', 'Farms', 'Operations', 'Cost (PHP)'], report.monthlySummaries.map(row => [reportingMonthLabel(row.periodKey), row.blockFarmCount, row.operationCount, money(row.totalCost)]))}<h2>Block Farm breakdown</h2>${table(['Block Farm', 'Fields', 'Area (ha)', 'Operations', 'Cost (PHP)'], report.farmSummaries.map(row => [row.blockFarmName, row.fieldCount, row.hectaresAudited, row.operationCount, money(row.totalCost)]))}<h2>Certified source reports</h2>${table(['Report', 'Month', 'Certified at', 'Certified by'], report.sourceReports.map(row => [row.reportId, reportingMonthLabel(row.periodKey), row.certifiedAt, row.certifiedByUserId]))}<p class="muted">Compilation: ${escape(report.id)}<br>Compiled by ${escape(report.compiledByName)} (${escape(report.compiledByUserId)}) at ${escape(report.compiledAt)}<br>Area counts each field once using its latest included monthly snapshot. New monthly certifications require a new compilation; saved snapshots remain unchanged.</p></body></html>`;
 }
 
 module.exports = { selection, assertSra, buildCompilation, compilationOptions, compileCropYear, compilationHtml };

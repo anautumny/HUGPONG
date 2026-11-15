@@ -96,6 +96,7 @@ function harness() {
       if (name.endsWith('/pagination')) return load('utils/pagination.js');
       if (name.endsWith('/ui/Pagination')) return { __esModule: true, default: 'Pagination', usePagination: load('components/ui/Pagination.js').usePagination };
       if (name.endsWith('/notificationIdentity')) return load('domain/notificationIdentity.js');
+      if (name.endsWith('/syncPresentation')) return load('domain/syncPresentation.js');
       if (name.endsWith('/haptics')) return { hapticFeedback: { light: () => {}, success: () => {}, warning: () => {}, error: () => {} } };
       if (name.endsWith('/BlurTargetContext')) return { useBlurTarget: () => ({ requestBlur: () => {}, releaseBlur: () => {} }), BlurTargetProvider: ({ children }) => children };
       if (name.endsWith('/ExpandedSheetContext')) return { useExpandedSheet: () => ({ expanded: false, isExpanded: false, setExpanded: () => {} }), ExpandedSheetContext: { Provider: ({ children }) => children } };
@@ -115,6 +116,7 @@ function harness() {
   }
   return {
     load,
+    unmount() { slots.filter(slot => slot?.cleanup).forEach(slot => slot.cleanup()); },
     replayEffects() {
       slots.filter(slot => slot?.callback).forEach(slot => { slot.cleanup?.(); slot.cleanup = slot.callback(); });
     },
@@ -140,6 +142,107 @@ function find(tree, predicate) {
   }
   return null;
 }
+
+test('Mobile saved-login recovery resumes on reconnect, including connectivity returning during the restore check', async () => {
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  for (const reconnectDuringRestore of [false, true]) {
+    const runtime = harness();
+    let online = false, onNetwork, finishFirst, calls = 0, subscribed = 0, removed = 0;
+    const destinations = [];
+    const animation = () => ({ start() {} });
+    const Splash = runtime.load('screens/auth/SplashScreen.js', {
+      'react-native': { ...native, Image: 'Image', ActivityIndicator: 'Spinner', Dimensions: { get: () => ({ width: 320, height: 640 }) },
+        Animated: { Value: class {}, View: 'AnimatedView', createAnimatedComponent: () => 'AnimatedText', sequence: animation, parallel: animation, spring: animation, timing: animation } },
+      '../../theme': { COLORS: {}, FONT_FAMILY: {} },
+      '../../services/storageService': { getItem: async () => true },
+      '../../data/dataStore': { restoreSessionFromToken: async () => {
+        calls++;
+        return calls === 1 ? new Promise(resolve => { finishFirst = resolve; }) : { success: true, user: { employeeId: 'SAVED-USER' } };
+      } },
+      '../../services/networkService': { getNetworkStatus: () => online, subscribeToNetwork: callback => {
+        subscribed++; onNetwork = callback; callback(online); return () => removed++;
+      } },
+      '../../../assets/icon-foreground.png': 'Logo'
+    }).default;
+    const props = { navigation: { replace: destination => destinations.push(destination) } };
+    const loading = runtime.render(Splash, props);
+    assert.equal(find(loading, node => node.type === 'Spinner').props.size, 'large');
+    assert.equal(find(loading, node => node.type === 'Text' && /Restoring your account|data_restoring_account/.test(node.props.children.join(''))), null);
+    await tick();
+    assert.equal(calls, 1);
+    if (reconnectDuringRestore) { online = true; onNetwork(true); }
+    finishFirst({ success: false, reason: 'SESSION_RESTORE_DEFERRED', error: 'Connect once to verify your saved account.' });
+    await tick();
+    if (!reconnectDuringRestore) {
+      assert.ok(find(runtime.render(Splash, props), node => node.type === 'Text' && node.props.children.includes('Connect once to verify your saved account.')));
+      assert.deepEqual(destinations, []); assert.equal(calls, 1, 'offline restoration does not poll');
+      online = true; onNetwork(true); await tick();
+    }
+    assert.deepEqual(destinations, ['MainTabs']); assert.equal(calls, 2);
+    onNetwork(true); await tick(); assert.equal(calls, 2, 'repeated network events do not repeat the completed repair');
+    runtime.unmount(); onNetwork(true); await tick();
+    assert.equal(calls, 2); assert.equal(subscribed, 1); assert.equal(removed, 1);
+  }
+});
+
+test('Mobile uses one header spinner for manual and automatic refresh, stops offline, and never falsely reports failed reads as synced', async () => {
+  for (const role of ['Farm Member', 'Farm Manager', 'SRA Admin']) {
+    const runtime = harness();
+    let status = { ownerUserId: 'LOCAL-USER', phase: 'READY' }, online = true, pending = 0, synced = true;
+    let accountChanged, networkChanged, accountListeners = 0, networkListeners = 0, starts = 0, stops = 0, retryReads = 0, resolveUpload;
+    const Header = runtime.load('components/AppHeader.js', {
+      '../theme': { COLORS: { primary: '#2D5016' }, FONT_FAMILY: { display: 'TestDisplay' } },
+      'react-native': { ...native, Image: 'Image', useWindowDimensions: () => ({ width: 320, height: 640, fontScale: 1.8 }),
+        Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: 'AnimatedView', timing: () => ({}),
+          loop: () => ({ start() { starts++; }, stop() { stops++; } }) }, Easing: {} },
+      '../data/dataStore': { subscribe: callback => { accountListeners++; accountChanged = callback; return () => {}; },
+        getIsSynced: () => synced, getCloudDataStatus: () => status,
+        getCurrentSession: () => ({ employeeId: 'LOCAL-USER', role }), getPendingSyncCount: () => pending,
+        performMobileSync: async () => resolveUpload ? new Promise(resolve => { resolveUpload = resolve; }) : ({ remainingCount: 0 }),
+        restartCloudSyncIfReady: async () => { retryReads++; status = { ...status, phase: 'READY' }; accountChanged(); return true; } },
+      '../services/networkService': { getNetworkStatus: () => online, getConnectivityDetails: () => ({ status: online ? 'ONLINE' : 'OFFLINE' }),
+        CONNECTIVITY_STATUS: {}, checkConnectivity: async () => true,
+        subscribeToNetwork: callback => { networkListeners++; networkChanged = callback; return () => {}; } },
+      '../utils/dialogs': { safeAlert() {} }, '@react-navigation/native': { useNavigation: () => ({ navigate() {} }) },
+      '../domain/syncPresentation': { syncResultMessage: () => '' }, '../../assets/icon-foreground.png': 'Logo'
+    }).default;
+    const render = () => runtime.render(Header, {});
+    const pill = tree => find(tree, node => node.type === 'TouchableOpacity' && node.props.accessibilityHint === 'Open connection and sync details');
+    let tree = render();
+    assert.equal(tree.type, 'View'); assert.equal(pill(tree).props.accessibilityLabel, 'Online and synchronized');
+    assert.equal(find(pill(tree), node => node.type === 'AnimatedView'), null, 'a synced cloud never shares a native animated wrapper');
+    status = { ...status, phase: 'LOADING' }; accountChanged(); tree = render();
+    assert.equal(pill(tree).props.accessibilityState.busy, true); assert.equal(pill(tree).props.disabled, true);
+    assert.ok(find(tree, node => node.type === 'Text' && node.props.children.includes('Syncing...')), 'busy text remains visible on narrow/large-font screens');
+    assert.ok(find(tree, node => node.type === 'Ionicons' && node.props.name === 'sync-outline'));
+    assert.ok(find(pill(tree), node => node.type === 'AnimatedView'), 'only the syncing symbol rotates');
+    assert.equal(starts, 1); render(); assert.equal(starts, 1, 're-renders do not start duplicate animations');
+    online = false; networkChanged(false); tree = render();
+    assert.equal(stops, 1); assert.match(pill(tree).props.accessibilityLabel, /^Offline/);
+    assert.equal(find(pill(tree), node => node.type === 'AnimatedView'), null, 'offline clouds cannot inherit a partial spinner rotation');
+    online = true; networkChanged(true); status = { ...status, phase: 'ERROR' }; accountChanged(); tree = render();
+    assert.match(pill(tree).props.accessibilityLabel, /Retry synchronization/); assert.equal(pill(tree).props.disabled, false);
+    await pill(tree).props.onPress(); tree = render(); assert.equal(retryReads, 1);
+    assert.equal(pill(tree).props.accessibilityLabel, 'Online and synchronized');
+    assert.equal(find(pill(tree), node => node.type === 'AnimatedView'), null, 'successful refresh returns to a fresh static cloud wrapper');
+    if (role !== 'SRA Admin') {
+      pending = 1; synced = false; accountChanged(); tree = render(); resolveUpload = true;
+      const uploading = pill(tree).props.onPress(); tree = render();
+      const before = starts; assert.equal(pill(tree).props.accessibilityState.busy, true);
+      status = { ...status, phase: 'LOADING' }; accountChanged(); render(); assert.equal(starts, before);
+      pending = 0; synced = true; const complete = resolveUpload; resolveUpload = null; complete({ remainingCount: 0 }); await uploading;
+      tree = render(); assert.equal(pill(tree).props.accessibilityState.busy, true, 'read refresh outlives a finished manual upload');
+      status = { ...status, phase: 'READY' }; accountChanged(); tree = render();
+      assert.equal(pill(tree).props.accessibilityState.busy, false); assert.equal(pill(tree).props.accessibilityLabel, 'Online and synchronized');
+    }
+    status = { ownerUserId: 'OTHER-USER', phase: 'LOADING' }; accountChanged(); tree = render();
+    assert.equal(pill(tree).props.accessibilityState.busy, false, 'an obsolete owner cannot activate the current account spinner');
+    assert.equal(accountListeners, 1); assert.equal(networkListeners, 1);
+  }
+  for (const file of ['navigation/RootNavigator.js', 'components/InitialDataLoading.js', 'components/AppHeader.js', 'components/ui/index.js']) {
+    assert.doesNotMatch(fs.readFileSync(path.join(root, 'mobile/src', file), 'utf8'), /DataRefreshNotice/, 'the extra message row is completely removed');
+  }
+});
 
 test('analytics tabs retain full labels and selection on narrow screens and large system fonts', () => {
   for (const dimensions of [
@@ -172,6 +275,207 @@ test('analytics tabs retain full labels and selection on narrow screens and larg
       assert.equal(find(tree, node => node.props?.accessibilityLabel === label).props.accessibilityState.selected, true);
     }
     assert.equal(Boolean(find(tree, node => node.type === 'Ionicons')), dimensions.width === 768);
+  }
+});
+
+test('takeover authorization is keyboard accessible, preserves password input and displays a guarded busy state', () => {
+  const runtime = harness(); let authorizations = 0, closed = 0, entered;
+  const Dialog = runtime.load('components/TakeoverAuthorizationModal.js', {
+    'react-native': { ...native, ActivityIndicator: 'ActivityIndicator', Platform: { OS: 'android' } },
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }
+  }).default;
+  const props = { visible: true, fieldId: 'FLD-77B8B43482A7F1950213', memberName: 'Test Member', password: ' pass word ', busy: false,
+    onAuthorize: () => authorizations++, onClose: () => closed++, onPasswordChange: value => { entered = value; } };
+  let tree = runtime.render(Dialog, props);
+  assert.ok(find(tree, node => node.type === 'SafeAreaView'));
+  assert.equal(find(tree, node => node.type === 'KeyboardAvoidingView').props.behavior, 'height');
+  const input = find(tree, node => node.type === 'TextInput');
+  assert.equal(input.props.value, props.password); assert.equal(input.props.autoCapitalize, 'none');
+  assert.equal(input.props.autoCorrect, false); assert.equal(input.props.secureTextEntry, true);
+  assert.equal(input.props.autoComplete, 'current-password');
+  input.props.onChangeText(' new password '); assert.equal(entered, ' new password ');
+  input.props.onSubmitEditing(); assert.equal(authorizations, 1);
+  const scroll = find(tree, node => node.type === 'ScrollView'); let position;
+  scroll.props.ref.current = { scrollTo: options => { position = options.y; } };
+  find(tree, node => typeof node.props.onLayout === 'function' && node.type === 'View').props.onLayout({ nativeEvent: { layout: { y: 280 } } });
+  input.props.onFocus(); assert.equal(position, 268, 'the focused password is brought above the keyboard');
+  find(tree, node => node.props.accessibilityLabel === 'Show password').props.onPress();
+  tree = runtime.render(Dialog, props); assert.equal(find(tree, node => node.type === 'TextInput').props.secureTextEntry, false);
+  tree = runtime.render(Dialog, { ...props, busy: true });
+  const submit = find(tree, node => node.props.accessibilityLabel === 'Authorizing Manager Takeover');
+  assert.equal(submit.props.disabled, true); assert.equal(submit.props.accessibilityState.busy, true);
+  assert.ok(find(submit, node => node.type === 'ActivityIndicator')); assert.equal(find(tree, node => node.type === 'TextInput').props.editable, false);
+  tree.props.onRequestClose(); assert.equal(closed, 0, 'Android Back cannot hide an in-flight request');
+  tree = runtime.render(Dialog, { ...props, fieldId: 'FLD-OTHER' });
+  assert.equal(find(tree, node => node.type === 'TextInput').props.secureTextEntry, true, 'visibility resets for another field');
+});
+
+test('Mobile recovery reads coalesce, honor server cooldowns, retain data, and never open a background alert', async () => {
+  const runtime = harness(); const pending = [], alerts = []; let invalidated;
+  const Queue = runtime.load('components/RecoveryReviewQueue.js', {
+    'react-native': { ...native, ActivityIndicator: 'ActivityIndicator', Alert: { alert: (...args) => alerts.push(args) } },
+    '../services/networkService': { getNetworkStatus: () => true },
+    '../services/authService': { fetchPasswordRecoveryReviews: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) },
+    '../data/dataStore': { subscribeToCloudChanges: callback => { invalidated = callback; return () => {}; } }
+  }).default;
+  let tree = runtime.render(Queue, {});
+  assert.equal(pending.length, 1);
+  pending[0].resolve({ data: [{ id: 'REVIEW-CACHED', userId: 'LOCAL-USER', displayName: 'Test Account' }] });
+  await new Promise(resolve => setImmediate(resolve)); tree = runtime.render(Queue, {});
+  assert.ok(JSON.stringify(tree).includes('Test Account'));
+  invalidated({ resources: ['recovery-reviews'] }); invalidated({ resources: ['recovery-reviews'] });
+  assert.equal(pending.length, 2, 'only one read is allowed while the refresh is unresolved');
+  pending[1].reject(Object.assign(new Error('Cooldown'), { status: 429, retryAfterMs: 18000 }));
+  await new Promise(resolve => setImmediate(resolve)); tree = runtime.render(Queue, {});
+  assert.equal(alerts.length, 0); assert.ok(JSON.stringify(tree).includes('Your other work can continue'));
+  assert.ok(JSON.stringify(tree).includes('Test Account'), 'the last successful list stays visible');
+  assert.ok(!JSON.stringify(tree).includes('No password recovery reviews are waiting'));
+  invalidated({ reset: true }); assert.equal(pending.length, 2, 'invalidation cannot bypass Retry-After');
+  runtime.unmount();
+  assert.equal(alerts.length, 0);
+});
+
+test('Web takeover submits a password unchanged once, shows progress and ignores authorization for an old field', async () => {
+  const runtime = harness(); let submitted, resolve, calls = 0, closed = 0; const authorized = [];
+  const Dialog = runtime.load('../../web/react-app/src/components/operations/TakeOverAuthModal.jsx', {
+    '../ui': { Modal: 'Modal', FormField: 'FormField', PasswordInput: 'PasswordInput', Button: 'Button' },
+    'lucide-react': { ShieldAlert: 'ShieldAlert', Lock: 'Lock' },
+    '../../services/operationsService': { verifySupervisorAuth: payload => { calls++; submitted = payload; return new Promise(done => { resolve = done; }); } }
+  }).default;
+  const props = { isOpen: true, field: { id: 'FIELD-A' }, user: { employeeId: 'FM-1' }, onClose: () => closed++, onAuthorized: (...args) => authorized.push(args) };
+  let tree = runtime.render(Dialog, props);
+  find(tree, node => node.type === 'PasswordInput').props.onChange({ target: { value: ' actual password ' } }); tree = runtime.render(Dialog, props);
+  const submit = find(tree.props.footer, node => node.type === 'Button' && node.props.loadingText);
+  const pending = submit.props.onClick({ preventDefault() {} }); await submit.props.onClick({ preventDefault() {} });
+  assert.equal(calls, 1); assert.equal(submitted.password, ' actual password ');
+  tree = runtime.render(Dialog, props);
+  assert.equal(find(tree.props.footer, node => node.type === 'Button' && node.props.loadingText).props.isLoading, true);
+  assert.equal(find(tree, node => node.type === 'PasswordInput').props.disabled, true);
+  tree.props.onClose(); assert.equal(closed, 0);
+  runtime.render(Dialog, { ...props, field: { id: 'FIELD-B' } });
+  resolve({ takeoverGrant: 'OLD-GRANT' }); await pending;
+  assert.equal(authorized.length, 0, 'an obsolete field cannot be authorized by a late response');
+  runtime.unmount();
+});
+
+test('Web recovery reviews defer invalidations during cooldown and preserve their last good list', async () => {
+  const runtime = harness(); const pending = []; let invalidated;
+  const Queue = runtime.load('../../web/react-app/src/components/users/RecoveryReviewQueue.jsx', {
+    'lucide-react': { AlertCircle: 'AlertCircle', CheckCircle2: 'CheckCircle2', Clock3: 'Clock3', RefreshCw: 'RefreshCw', ShieldCheck: 'ShieldCheck', XCircle: 'XCircle' },
+    '../../services/recoveryReviewService': { fetchRecoveryReviews: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) },
+    '../../services/apiClient': { subscribeToResourceInvalidation: (_resources, callback) => { invalidated = callback; return () => {}; } }
+  }).default;
+  runtime.render(Queue, {});
+  pending[0].resolve({ data: [{ id: 'REQ-1', displayName: 'Test Account' }] }); await new Promise(resolve => setImmediate(resolve));
+  runtime.render(Queue, {}); invalidated(); invalidated(); assert.equal(pending.length, 2);
+  pending[1].reject(Object.assign(new Error('Cooldown'), { status: 429, retryAfterMs: 18000 })); await new Promise(resolve => setImmediate(resolve));
+  const tree = runtime.render(Queue, {});
+  assert.ok(JSON.stringify(tree).includes('Your other work can continue')); assert.ok(JSON.stringify(tree).includes('Test Account'));
+  invalidated(); assert.equal(pending.length, 2, 'the Web controller also respects server cooldown'); runtime.unmount();
+});
+
+test('Web notification actions preserve read/clear state, guard duplicate taps, and reconcile older pages', async t => {
+  const runtime = harness(); t.after(() => runtime.unmount());
+  let loader, options, release; const calls = [], navigated = [];
+  const rows = [{ id: 'NEW', title: 'New price', type: 'price' }, { id: 'READ', title: 'Read price' }, { id: 'HIDDEN', title: 'Cleared price' }];
+  const Bell = runtime.load('../../web/react-app/src/components/layout/NotificationBell.jsx', {
+    'lucide-react': Object.fromEntries(['Bell', 'CheckCheck', 'Loader2', 'Trash2', 'X'].map(name => [name, name])),
+    'react-router-dom': { useNavigate: () => path => navigated.push(path) },
+    '../../context/AuthContext': { useAuth: () => ({ user: { employeeId: 'A' } }) },
+    '../../services/apiClient': { subscribeToAuthenticatedLoader: (load, callbacks) => { loader = load; options = callbacks; return () => {}; },
+      authenticatedRead: async () => ({ data: rows, page: { nextCursor: 'older' } }),
+      authenticatedRequest: async () => ({ data: [{ id: 'OLDER-HIDDEN', title: 'Older cleared' }, { id: 'OLDER-READ', title: 'Older read' }], page: {} }) },
+    '../../services/notificationService': { fetchNotificationState: async (_owner, ids) => ({ data: ids.map(id => ({ id, read: id !== 'NEW', dismissed: id.includes('HIDDEN') })) }),
+      updateNotificationState: (owner, ids, action) => { calls.push({ owner, ids, action }); return new Promise(resolve => { release = resolve; }); } }
+  }).default;
+  const render = () => runtime.render(Bell, {});
+  render(); options.onData(await loader({ force: true })); let tree = render();
+  find(tree, node => node.props['aria-label'] === 'Notifications, 1 unread').props.onClick(); tree = render();
+  assert.equal(JSON.stringify(tree).includes('Cleared price'), false);
+  const mark = find(tree, node => node.props['aria-label'] === 'Mark as read: New price');
+  const pending = mark.props.onClick(); mark.props.onClick(); assert.equal(calls.length, 1);
+  tree = render(); assert.equal(find(tree, node => node.props['aria-label'] === 'Mark as read: New price').props.disabled, true);
+  assert.ok(find(tree, node => node.type === 'Loader2'));
+  release({ data: [{ id: 'NEW', read: true }] }); await pending; tree = render();
+  assert.ok(find(tree, node => node.props['aria-label'] === 'Notifications, 0 unread')); assert.deepEqual(navigated, []);
+  options.onData(await loader({ force: true })); tree = render();
+  assert.ok(find(tree, node => node.props['aria-label'] === 'Notifications, 0 unread'), 'a delayed old read projection cannot restore unread state');
+  const clearing = find(tree, node => node.props['aria-label'] === 'Clear notification: New price').props.onClick();
+  release({ data: [{ id: 'NEW', read: true, dismissed: true }] }); await clearing;
+  options.onData(await loader({ force: true })); tree = render(); assert.equal(JSON.stringify(tree).includes('New price'), false);
+  await find(tree, node => node.type === 'button' && node.props.children.includes('Load older notifications')).props.onClick(); tree = render();
+  assert.equal(JSON.stringify(tree).includes('Older cleared'), false); assert.ok(JSON.stringify(tree).includes('Older read'));
+  assert.ok(find(tree, node => node.props['aria-label'] === 'Notifications, 0 unread'));
+});
+
+test('Web notification bulk controls confirm clearing and ignore late results after an account change', async t => {
+  const runtime = harness(); t.after(() => runtime.unmount());
+  const previousWindow = globalThis.window; let confirmed = false;
+  globalThis.window = { confirm: () => confirmed }; t.after(() => { globalThis.window = previousWindow; });
+  let owner = 'A', options, release, activeCalls = 0;
+  const Bell = runtime.load('../../web/react-app/src/components/layout/NotificationBell.jsx', {
+    'lucide-react': Object.fromEntries(['Bell', 'CheckCheck', 'Loader2', 'Trash2', 'X'].map(name => [name, name])),
+    'react-router-dom': { useNavigate: () => () => {} }, '../../context/AuthContext': { useAuth: () => ({ user: { employeeId: owner } }) },
+    '../../services/apiClient': { subscribeToAuthenticatedLoader: (_load, callbacks) => { options = callbacks; return () => {}; } },
+    '../../services/notificationService': { updateAllNotificationState: async (_owner, _action, { isCurrent }) => {
+      activeCalls++; return new Promise(resolve => { release = () => { assert.equal(isCurrent(), false); resolve({ data: [{ id: 'B', read: true, dismissed: true }] }); }; });
+    } }
+  }).default;
+  const render = () => runtime.render(Bell, {});
+  render(); options.onData({ data: [{ id: 'A', title: 'Account A' }], notificationState: [] }); let tree = render();
+  find(tree, node => node.props['aria-label'] === 'Notifications, 1 unread').props.onClick(); tree = render();
+  const clear = find(tree, node => node.type === 'button' && node.props.children.includes('Clear all'));
+  clear.props.onClick(); assert.equal(activeCalls, 0);
+  confirmed = true; const pending = clear.props.onClick(); clear.props.onClick(); assert.equal(activeCalls, 1);
+  owner = 'B'; render(); options.onData({ data: [{ id: 'B', title: 'Account B' }], notificationState: [] }); tree = render();
+  release(); await pending; tree = render();
+  assert.ok(find(tree, node => node.props['aria-label'] === 'Notifications, 1 unread'), 'old account clear cannot remove the new account inbox');
+});
+
+test('Web and Mobile selected-date compilation controls send the same scope and clear an outdated saved selection', async t => {
+  for (const mobile of [false, true]) {
+    const runtime = harness(); t.after(() => runtime.unmount());
+    const previews = [], saves = [];
+    const summary = scope => ({ ...scope, sourceReportCount: 1, monthCount: 1, blockFarmCount: 1, operationCount: 2, fieldCount: 1, memberCount: 1, hectaresAudited: 2, totalCost: 50, monthlySummaries: [], farmSummaries: [], sourceReports: [] });
+    const service = {
+      fetchCropYearOptions: async () => ({ data: { cropYearCycles: ['2026-2027'], blockFarms: [] } }),
+      previewCropYear: async scope => { previews.push({ ...scope }); return { data: summary(scope) }; },
+      fetchCropYearCompilations: async () => ({ data: [] }),
+      compileCropYear: async scope => { saves.push({ ...scope }); return { data: { ...summary(scope), id: 'SAVED-SELECTED-DATES', compiledAt: '2026-11-15T00:00:00Z', compiledByName: 'SRA Admin' } }; },
+    };
+    const Screen = runtime.load(mobile ? 'components/CropYearCompilationScreen.js' : '../../web/react-app/src/components/audit/CropYearCompilationModal.jsx', mobile ? {
+      'react-native': { ...native, ActivityIndicator: 'ActivityIndicator', BackHandler: { addEventListener: () => ({ remove() {} }) } },
+      'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, './ui': { SearchableSelect: 'SearchableSelect', ScreenHeader: 'ScreenHeader' },
+      '../services/networkService': { getNetworkStatus: () => true, subscribeToNetwork: () => () => {} },
+      '../data/dataStore': { subscribeToCloudChanges: () => () => {} }, '../services/cropYearCompilationService': service,
+    } : {
+      'lucide-react': { CalendarRange: 'CalendarRange', Download: 'Download', Printer: 'Printer' },
+      '../ui/Modal': { __esModule: true, default: 'Modal' }, '../ui/Button': { __esModule: true, default: 'Button' }, '../ui/Select': { __esModule: true, default: 'Select' },
+      '../../services/cropYearCompilationService': service, '../../services/apiClient': { subscribeToResourceInvalidation: () => () => {} },
+    }).default;
+    const render = () => runtime.render(Screen, { onClose() {} });
+    render(); await new Promise(resolve => setImmediate(resolve)); render(); await new Promise(resolve => setImmediate(resolve)); let tree = render();
+    const selector = mobile ? find(tree, node => node.type === 'SearchableSelect' && node.props.label === 'Compilation coverage')
+      : find(tree, node => node.type === 'Select' && node.props.options?.some(option => option.value === 'DATE_RANGE'));
+    if (mobile) selector.props.onSelect({ id: 'DATE_RANGE' }); else selector.props.onChange({ target: { value: 'DATE_RANGE' } });
+    tree = render(); const before = previews.length;
+    const setDate = (label, value) => {
+      const node = mobile ? find(tree, item => item.props.accessibilityLabel === `Compilation ${label.toLowerCase()}`)
+        : find(find(tree, item => item.type === 'label' && item.props.children.includes(label)), item => item.type === 'input');
+      if (mobile) node.props.onChangeText(value); else node.props.onChange({ target: { value } });
+      tree = render();
+    };
+    setDate('Start date', '2026-09-10'); setDate('End date', '2026-09-01');
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(previews.length, before, 'incomplete/reversed dates do not issue previews');
+    setDate('End date', '2026-09-20'); await new Promise(resolve => setImmediate(resolve)); tree = render();
+    assert.deepEqual(previews.at(-1), { cropYearCycle: '2026-2027', blockFarmId: '', coverageMode: 'DATE_RANGE', startDate: '2026-09-10', endDate: '2026-09-20' });
+    const compile = mobile ? find(tree, node => node.type === 'TouchableOpacity' && find(node, child => child.type === 'Text' && child.props.children.includes('Compile Selected Dates')))
+      : find(tree, node => node.type === 'Button' && node.props.children.includes('Compile Selected Dates'));
+    assert.equal(compile.props.disabled, false);
+    await (mobile ? compile.props.onPress() : compile.props.onClick()); tree = render();
+    assert.deepEqual(saves[0], previews.at(-1)); assert.ok(JSON.stringify(tree).includes('SAVED-SELECTED-DATES'));
+    setDate('End date', '2026-09-25'); assert.equal(JSON.stringify(tree).includes('SAVED-SELECTED-DATES'), false, 'exports cannot use the prior date-range snapshot');
+    runtime.unmount();
   }
 });
 
@@ -231,16 +535,48 @@ test('Web audit dossier labels use the canonical report month rather than blank 
   }
 });
 
+test('Sync Monitor returns from popup-only entry to Home and does not alert after leaving an in-flight sync', async t => {
+  const runtime = harness(); let hardwareBack, removed = 0, focused = true, index = 0, releases, uploads = 0;
+  t.after(() => runtime.unmount());
+  const navigated = [], alerts = [];
+  const navigation = { canGoBack: () => true, goBack: () => navigated.push('BACK'),
+    getState: () => ({ index, routeNames: ['HomeMain', 'SyncMonitor'] }),
+    navigate: name => { navigated.push(name); focused = false; }, isFocused: () => focused, addListener: () => () => {} };
+  const Screen = runtime.load('screens/SyncMonitorScreen.js', {
+    'react-native': { ...native, ActivityIndicator: 'ActivityIndicator', Alert: { alert: (...args) => alerts.push(args) },
+      BackHandler: { addEventListener: (_event, handler) => { hardwareBack = handler; return { remove: () => removed++ }; } } },
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    '../data/dataStore': { getCurrentSession: () => ({ employeeId: 'A', role: 'Farm Member', name: 'Member' }),
+      getNetworkStatus: () => true, subscribe: () => () => {}, subscribeToCloudChanges: () => () => {},
+      performMobileSync: async () => { uploads++; return new Promise(resolve => { releases = resolve; }); } },
+    '../services/syncEngine': { getOutboxDiagnostics: () => [], getOutboxPressure: () => ({ level: 'normal' }), getOutboxStorageState: () => ({ ready: true }) },
+    '../services/telemetryService': { fetchAgriculturalSyncMonitor: async () => ({ subjects: [] }) },
+  }).default;
+  runtime.render(Screen, { navigation }); await new Promise(resolve => setImmediate(resolve));
+  let tree = runtime.render(Screen, { navigation });
+  const back = find(tree, node => node.props.accessibilityLabel === 'Back');
+  assert.ok(back.props.style.minHeight >= 48); back.props.onPress();
+  assert.deepEqual(navigated, ['HomeMain'], 'parent tab history must not strand a rootless monitor');
+  focused = true; assert.equal(hardwareBack(), true); assert.equal(navigated.at(-1), 'HomeMain');
+  focused = true; index = 1; back.props.onPress(); assert.equal(navigated.at(-1), 'BACK');
+  assert.equal(hardwareBack(), false, 'a normal stack back remains handled by the navigator');
+  const sync = find(tree, node => node.type === 'TouchableOpacity' && find(node, child => child.type === 'Ionicons' && child.props.name === 'sync'));
+  assert.ok(sync);
+  const pending = sync.props.onPress(); sync.props.onPress(); assert.equal(uploads, 1);
+  focused = false; releases({ success: false, remainingCount: 3, reason: 'SERVER_UNAVAILABLE' }); await pending;
+  assert.equal(alerts.length, 0); runtime.unmount(); assert.equal(removed, 1);
+});
+
 test('the Mobile price browser reaches older pages and ignores responses after closing', async () => {
   const runtime = harness();
   let account = { employeeId: 'MEM-1' }, release;
   const calls = [];
-  const first = Array.from({ length: 50 }, (_, index) => ({ id: `PRICE-${index}`, effectiveDate: '2026-09-27', sugarPricePerLkg: index + 1000 }));
+  const first = Array.from({ length: 50 }, (_, index) => ({ id: `PRICE-${index}`, effectiveDate: '2026-09-27', sugarPricePerLkg: index + 1000, sugarPriceChange: -350, molassesPriceChange: -1600 }));
   const pagination = runtime.load('components/ui/Pagination.js');
   const Sheet = runtime.load('components/PriceHistorySheet.js', {
     './AnimatedBottomSheet': 'Sheet', './ui/Pagination': { __esModule: true, default: 'Pagination', usePagination: pagination.usePagination },
     '../data/dataStore': { getCurrentSession: () => account },
-    '../utils/pricePresentation': { priceText: value => String(value) },
+    '../utils/pricePresentation': runtime.load('utils/pricePresentation.js'),
     '../services/authService': { authenticatedRequest: async url => {
       calls.push(url);
       if (calls.length === 1) return { data: first, page: { nextCursor: 'older' } };
@@ -251,6 +587,9 @@ test('the Mobile price browser reaches older pages and ignores responses after c
   runtime.render(Sheet, props); await new Promise(resolve => setImmediate(resolve));
   let tree = runtime.render(Sheet, props);
   assert.equal(find(tree, node => node.type === 'Pagination').props.total, 50);
+  const sugarMovement = find(tree, node => node.type === 'Text' && node.props.children.includes('Sugar change: '));
+  assert.ok(sugarMovement.props.children.some(child => typeof child === 'string' && child.includes('350.00')));
+  assert.ok(sugarMovement.props.children.includes(' vs previous dated publication'));
   const more = find(tree, node => node.type === 'TouchableOpacity' && node.props.children.some(child => child?.props?.children.includes('Load older price records')));
   const pending = more.props.onPress();
   assert.match(calls[1], /cursor=older/);
@@ -261,10 +600,10 @@ test('the Mobile price browser reaches older pages and ignores responses after c
   account = { employeeId: 'OTHER' };
 });
 
-test('Web takeover authorization expires and resets when changing fields or accounts', t => {
+test('Web takeover authorization remains field-scoped while browsing, expires, exits individually and resets on account change', t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const runtime = harness();
-  let user = { employeeId: 'MGR-1' };
+  let user = { employeeId: 'MGR-1', role: 'Farm Manager' };
   const field = { id: 'FLD-1', areaHa: 1, currentCycleId: 'CYC-1', stageNumber: 1 };
   const fields = [field, { ...field, id: 'FLD-2' }];
   const View = runtime.load('../../web/react-app/src/views/operations/TakeOverView.jsx', {
@@ -279,6 +618,7 @@ test('Web takeover authorization expires and resets when changing fields or acco
     '../../domain/sugarcaneVarieties': { SUGARCANE_VARIETIES: [] },
     '../../services/apiClient': {}, '../../utils/secureId': { createClientRecordId: () => 'LOG-TEST' },
     '../../domain/operationSubmission': runtime.load('../../web/react-app/src/domain/operationSubmission.js'),
+    '../../domain/operationAuthorization': runtime.load('../../web/react-app/src/domain/operationAuthorization.js'),
     '../../components/dashboard/CompactDashboardHeader': 'Header',
     '../../components/ui': Object.fromEntries(['FormField', 'Input', 'Select', 'Button', 'StatusBadge', 'Badge', 'ConfirmDialog'].map(name => [name, name])),
     '../../components/operations/TakeOverAuthModal': 'AuthModal',
@@ -306,8 +646,107 @@ test('Web takeover authorization expires and resets when changing fields or acco
   assert.equal(hasActiveBanner(render()), false);
   find(render(), node => node.type === 'AuthModal').props.onAuthorized(fields[1], 'grant-2', Date.now() + 1000);
   assert.equal(hasActiveBanner(render()), true);
-  user = { employeeId: 'MGR-2' };
+  find(render(), node => node.type === 'Button' && node.props.children.includes('Exit Field Takeover')).props.onClick();
+  assert.equal(hasActiveBanner(render()), true, 'opening exit confirmation retains authorization');
+  let exitDialog = find(render(), node => node.type === 'ConfirmDialog' && node.props.title === 'Exit Field Takeover?');
+  assert.equal(exitDialog.props.isOpen, true);
+  assert.match(exitDialog.props.message, /FLD-2/);
+  exitDialog.props.onCancel();
+  assert.equal(hasActiveBanner(render()), true, 'canceling leaves authorization intact');
+  find(render(), node => node.type === 'Button' && node.props.children.includes('Exit Field Takeover')).props.onClick();
+  exitDialog = find(render(), node => node.type === 'ConfirmDialog' && node.props.title === 'Exit Field Takeover?');
+  exitDialog.props.onConfirm();
   assert.equal(hasActiveBanner(render()), false);
+  find(render(), node => node.type === 'Select' && node.props.id === 'takeover-field-selector').props.onChange({ target: { value: 'FLD-1' } });
+  assert.equal(hasActiveBanner(render()), true, 'returning to field 1 retains its earlier authorization after exiting field 2');
+  find(render(), node => node.type === 'Select' && node.props.id === 'takeover-field-selector').props.onChange({ target: { value: 'FLD-2' } });
+  assert.equal(hasActiveBanner(render()), false, 'exited field 2 needs its own new authorization');
+  find(render(), node => node.type === 'AuthModal').props.onAuthorized(fields[1], 'grant-2-new', Date.now() + 1000);
+  assert.equal(hasActiveBanner(render()), true);
+  user = { employeeId: 'MGR-2', role: 'Farm Manager' };
+  assert.equal(hasActiveBanner(render()), false);
+});
+
+test('Web print preview groups direct and milling operations into flat rows across rates and shows full expenditure totals', () => {
+  const runtime = harness();
+  const report = { reportId: 'PRINT-GROUPING-TEST', cropYearCycle: '2026-2027', periodKey: '2026-03', qrHash: 'TEST-HASH',
+    operationSnapshots: [
+      { fieldId: 'A', cropYearCycle: '2026-2027', stageNumber: 3, performedOn: '2026-02-01', operationName: 'Basal Application', areaHa: 1, quantity: { value: 1, unit: 'bag' }, unitCost: 100, totalCost: 100 },
+      { fieldId: 'B', cropYearCycle: '2026-2027', stageNumber: 3, performedOn: '2026-03-01', operationName: 'Basal Application', areaHa: 2, quantity: { value: 1, unit: 'bag' }, unitCost: 100, totalCost: 100 },
+      { fieldId: 'A', cropYearCycle: '2026-2027', stageNumber: 6, performedOn: '2026-03-02', operationName: 'Cane Cutting', areaHa: 1, quantity: { value: 1, unit: 'ton' }, unitCost: 100, totalCost: 100 },
+      { fieldId: 'B', cropYearCycle: '2026-2027', stageNumber: 6, performedOn: '2026-03-03', operationName: 'Cane Cutting', areaHa: 2, quantity: { value: 1, unit: 'ton' }, unitCost: 200, totalCost: 200 }
+    ] };
+  const before = structuredClone(report);
+  const View = runtime.load('../../web/react-app/src/components/audit/PrintableAuditReport.jsx', {
+    'lucide-react': {}, '../ui/Button': 'Button', './QRCodeView': 'QRCode',
+    '../../utils/auditReportLayout': runtime.load('../../web/react-app/src/utils/auditReportLayout.js'),
+    '../../domain/auditWorkflow': runtime.load('../../web/react-app/src/domain/auditWorkflow.js', { pako: mobileRequire('pako') }),
+    '../../utils/formatters': { formatCropYearDisplay: value => value }
+  }).default;
+  const tree = runtime.render(View, { report, isOpenModal: false });
+  const content = node => typeof node === 'object' && node ? (node.props?.children || []).flat(Infinity).map(content).join('') : String(node ?? '');
+  const rows = [];
+  const collect = node => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'tr') rows.push(node);
+    (node.props?.children || []).flat(Infinity).forEach(collect);
+  };
+  collect(find(tree, node => node.type === 'tbody'));
+  const numbered = rows.filter(row => /^\d+$/.test(content(row.props.children.flat(Infinity)[0])));
+  assert.equal(numbered.length, 2, 'one numbered heading per operation');
+  assert.ok(rows.some(row => content(row).includes('TOTAL DIRECT COST (PHP)200.00')));
+  assert.ok(rows.some(row => content(row).includes('TOTAL MILLING EXPENSES (PHP)300.00')));
+  assert.ok(rows.some(row => content(row).includes('TOTAL COST OF PRODUCTION (PHP)500.00')));
+  const cuttingDetails = rows.filter(row => content(row).includes('Cane Cutting') && !numbered.includes(row));
+  assert.equal(cuttingDetails.length, 0, 'price differences cannot create child rows');
+  assert.ok(content(numbered.find(row => content(row).includes('Cane Cutting'))).includes('150.00 (avg)'));
+  assert.equal(content(numbered.find(row => content(row).includes('Basal Application')).props.children.flat(Infinity).at(-1)), '200.00');
+  assert.equal(content(numbered.find(row => content(row).includes('Cane Cutting')).props.children.flat(Infinity).at(-1)), '300.00');
+  assert.deepEqual(report, before);
+});
+
+test('Web and Mobile audit reviews explain missing quantity records and disable compilation', () => {
+  const data = { periodKey: '2026-09', canCompile: false, memberFollowUps: [], missingQuantityCount: 1,
+    missingQuantityOperations: [{ operationLogId: 'LOG-1', fieldId: 'FLD-1', operationName: 'Planting Operations' }] };
+  const web = harness();
+  const WebReview = web.load('../../web/react-app/src/components/audit/AuditMemberReview.jsx', {
+    'lucide-react': {}, '../ui': { TablePagination: 'TablePagination' }
+  }).default;
+  const webTree = web.render(WebReview, { data });
+  assert.ok(find(webTree, node => node.props?.role === 'alert'));
+  assert.ok(JSON.stringify(webTree).includes('Planting Operations'));
+  assert.equal(JSON.stringify(webTree).includes('an empty report cannot'), false);
+  const mobile = harness();
+  const Review = mobile.load('components/AuditMemberReviewSheet.js').default;
+  const tree = mobile.render(Review, { data, onClose() {}, onContinue() {}, onCall() {} });
+  const list = find(tree, node => node.type === 'FlatList');
+  assert.ok(JSON.stringify(list.props.ListHeaderComponent).includes('Planting Operations'));
+  assert.ok(find(tree, node => node.type === 'TouchableOpacity' && node.props.disabled === true));
+});
+
+test('Mobile switching to Direct Input preserves entered values without inventing quantity one or a 1000 price', () => {
+  const source = fs.readFileSync(path.join(root, 'mobile/src/screens/FieldOpsScreen.js'), 'utf8');
+  const ast = babel.parseSync(source, { filename: 'FieldOpsScreen.js', configFile: false, babelrc: false, parserOpts: { plugins: ['jsx'] } });
+  let callback;
+  const visit = node => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'JSXElement' && node.openingElement.name?.name === 'TouchableOpacity'
+      && source.slice(node.start, node.end).includes("t('mode_direct_input'")) {
+      callback = node.openingElement.attributes.find(attribute => attribute.name?.name === 'onPress').value.expression;
+    }
+    Object.values(node).forEach(value => { if (Array.isArray(value)) value.forEach(visit); else if (value && typeof value === 'object') visit(value); });
+  };
+  visit(ast.program);
+  assert.ok(callback);
+  for (const initial of [{ isGroup: true, hectares: '99', subItems: [] },
+    { isGroup: true, inputQty: '4', inputUnit: 'bag', directRate: '875', hectares: '99' }]) {
+    let form = { ...initial };
+    const handler = new Function('logForm', 'setLogForm', `return (${source.slice(callback.start, callback.end)});`)(form, update => { form = update(form); });
+    handler();
+    assert.equal(form.inputQty, initial.inputQty || '');
+    assert.equal(form.directRate, initial.directRate || '');
+    assert.notEqual(form.directRate, '1000');
+  }
 });
 
 function scannerHarness({ permission = { granted: true }, pickImage, readImage, onSettings = async () => {}, onPermissionRefresh = async () => permission, appState = native.AppState } = {}) {

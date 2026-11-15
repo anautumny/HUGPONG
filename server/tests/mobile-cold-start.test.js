@@ -51,6 +51,13 @@ function runtime({ device, gate, failSecureRead = false, role = 'Farm Member', o
     restartCloudSyncIfReady: async () => true, reportMobileActivity: async () => {}, publishTerminalTelemetry: async () => {},
     canReportAgriculturalSyncTelemetry: () => false, performMobileSync: async () => {},
     refreshMobileSessionFromFirebase: async () => { refreshCalls++; if (refreshError) throw refreshError; if (rejected) throw Object.assign(new Error('Rejected'), { status: 401 }); return { user: account }; },
+    refreshMobileSessionForSync: async () => { refreshCalls++; if (refreshError) throw refreshError; if (rejected) throw Object.assign(new Error('Rejected'), { status: 401 }); return { user: account }; },
+    refreshServerSession: async (_token, { expectedUserId }) => {
+      refreshCalls++; assert.equal(expectedUserId, account.employeeId);
+      if (refreshError) throw refreshError;
+      if (rejected) throw Object.assign(new Error('Rejected'), { status: 401 });
+      context.auth.currentUser = { uid: account.employeeId }; return { token: 'renewed-token', user: account };
+    },
     uniqueRecordsById: value => value, fromBlockFarmDocument: (_id, value) => value,
     currentDraftKey: () => context.CURRENT_SESSION.employeeId ? '@hugpong_drafts:' + context.CURRENT_SESSION.employeeId : null,
     currentActorId: () => context.CURRENT_SESSION.employeeId,
@@ -103,6 +110,27 @@ test('repeated process restarts preserve account, assignments, drafts and pendin
     assert.equal(r.context.fields[0].memberUserId, '01000001');
     assert.equal(r.context.draftLogs.length, 1);
     assert.equal(JSON.parse(device.ordinary.get('@hugpong_outbox:01000001'))[0].mutationId, 'PENDING-1');
+  }
+});
+
+test('updating with intact secure credentials repairs a missing Firebase replica without losing the account or pending work', async () => {
+  const r = runtime({ online: true });
+  r.context.auth.currentUser = null;
+  assert.equal((await r.restore()).success, true);
+  assert.equal(r.refreshCalls(), 1); assert.equal(r.context.CURRENT_SESSION.employeeId, r.account.employeeId);
+  assert.equal(r.context.auth.currentUser.uid, r.account.employeeId);
+  assert.equal(r.context.fields[0].id, 'FIELD-1'); assert.equal(r.context.draftLogs[0].id, 'DRAFT-1');
+  assert.equal(r.removals.includes('hugpong_session'), false);
+  assert.equal(r.device.ordinary.has('@hugpong_outbox:01000001'), true);
+});
+
+test('a missing Firebase replica while offline or temporarily unreachable does not erase the saved login', async () => {
+  for (const settings of [{}, { online: true, refreshError: Object.assign(new Error('Temporary outage'), { status: 503 }) }]) {
+    const r = runtime(settings); r.context.auth.currentUser = null;
+    const result = await r.restore();
+    assert.equal(result.success, false); assert.ok(result.error);
+    assert.equal(r.device.secure.has('hugpong_session'), true); assert.equal(r.device.secure.has('hugpong_auth_token'), true);
+    assert.equal(r.removals.length, 0); assert.equal(r.device.ordinary.has('@hugpong_outbox:01000001'), true);
   }
 });
 

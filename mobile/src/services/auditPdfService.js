@@ -1,11 +1,9 @@
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
+import { exportPdfFile } from './pdfFileService';
 import QRCode from 'qrcode';
 import { formatCropYearDisplay } from '../utils/dataHelpers';
 import { auditCropYearCycles } from '../domain/auditWorkflow';
 
-import { auditReportLayout, operationMonth, reportingMonthLabel } from '../utils/auditReportLayout';
+import { auditReportLayout, operationMonth, reportingMonthLabel, auditOperationGroups } from '../utils/auditReportLayout';
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -13,6 +11,7 @@ const escapeHtml = value => String(value ?? '')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#039;');
+const priceText = value => escapeHtml(value).replace(/\n/g, '<br>');
 
 const formatNumber = value => Number(value || 0).toLocaleString('en-PH', {
   minimumFractionDigits: 2,
@@ -78,8 +77,10 @@ function createQrSvg(value) {
   }
 }
 
-function monthCells(placement, area, layout) {
-  return layout.columns.map(month => '<td class="number month">' + (placement === month ? escapeHtml(area) : '') + '</td>').join('');
+function monthCells(placement, area, layout, monthlyAreas) {
+  return layout.columns.map(month => '<td class="number month">' + (monthlyAreas
+    ? (monthlyAreas[month] != null ? Number(monthlyAreas[month]).toFixed(2) : '')
+    : (placement === month ? escapeHtml(area) : '')) + '</td>').join('');
 }
 
 function operationRow(log, operationNumber, placement, totalAuditedHa, layout) {
@@ -88,29 +89,28 @@ function operationRow(log, operationNumber, placement, totalAuditedHa, layout) {
     ? `${escapeHtml(operationName)}<br><span style="font-size:8px;font-weight:600">Child operation: ${escapeHtml(log.childOperationName)}</span>`
     : escapeHtml(operationName);
   const area = Number(log.areaHa || totalAuditedHa).toFixed(2);
-  const totalCost = Number(log.totalCost || log.cost || 0);
+  const totalCost = Number(log.totalCost ?? log.cost ?? 0);
   const quantity = log.quantity?.value != null ? log.quantity.value : (log.quantity != null ? log.quantity : 1);
   const unit = log.quantity?.unit || log.unit || 'ha';
-  const unitCost = Number(log.unitCost || (totalCost / Math.max(Number(quantity) || 1, 0.1)));
-  const costPerHa = Number(log.areaHa) > 0 ? totalCost / Number(log.areaHa) : totalCost;
+  const unitCost = Number(log.unitCost ?? (totalCost / Math.max(Number(quantity) || 1, 0.1)));
 
   if (Array.isArray(log.lineItems) && log.lineItems.length > 0) {
-    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td colspan="${layout.columnCount - 1}" class="bold">${operationNameHtml}</td></tr>`;
+    const group = `<tr class="group-row"><td class="center bold">${operationNumber}</td><td class="bold">${operationNameHtml}</td>${'<td></td>'.repeat(layout.columnCount - 2)}</tr>`;
     const children = log.lineItems.map((item, childIndex) => {
       const childQuantity = item.quantity != null ? item.quantity : 1;
       const childUnit = item.unit || 'bag';
-      const childUnitCost = Number(item.unitCost || (Number(item.subtotal || 0) / Math.max(Number(childQuantity) || 1, 0.1)));
+      const childUnitCost = Number(item.unitCost ?? (Number(item.subtotal || 0) / Math.max(Number(childQuantity) || 1, 0.1)));
       const childSubtotal = Number(item.subtotal != null ? item.subtotal : Number(childQuantity) * childUnitCost);
-      const childCostPerHa = Number(log.areaHa) > 0 ? childSubtotal / Number(log.areaHa) : childSubtotal;
+      const childArea = Number(item.areaHa ?? log.areaHa ?? totalAuditedHa);
       return `<tr>
         <td></td>
         <td class="indent">${escapeHtml(item.description || item.name || `Item ${childIndex + 1}`)}</td>
-        ${monthCells(placement, area, layout)}
-        <td class="number bold">${area}</td>
-        <td class="center">${escapeHtml(childQuantity)}</td>
-        <td class="center">${escapeHtml(childUnit)}</td>
-        <td class="number">${formatNumber(childUnitCost)}</td>
-        <td class="number bold">${formatNumber(childCostPerHa)}</td>
+        ${monthCells(placement, childArea.toFixed(2), layout, item.monthlyAreas)}
+        <td class="number bold">${childArea.toFixed(2)}</td>
+        <td class="center">${item.priceCells ? priceText(item.priceCells.quantityLabel) : escapeHtml(childQuantity)}</td>
+        <td class="center">${item.priceCells ? priceText(item.priceCells.unitLabel) : escapeHtml(childUnit)}</td>
+        <td class="number">${item.priceCells ? priceText(item.priceCells.unitCostLabel) : formatNumber(childUnitCost)}</td>
+        <td class="number bold">${formatNumber(childSubtotal)}</td>
       </tr>`;
     }).join('');
     return group + children;
@@ -119,12 +119,12 @@ function operationRow(log, operationNumber, placement, totalAuditedHa, layout) {
   return `<tr>
     <td class="center bold">${operationNumber}</td>
     <td class="bold">${operationNameHtml}</td>
-    ${monthCells(placement, area, layout)}
+    ${monthCells(placement, area, layout, log.monthlyAreas)}
     <td class="number bold">${area}</td>
-    <td class="center">${escapeHtml(quantity)}</td>
-    <td class="center">${escapeHtml(unit)}</td>
-    <td class="number">${formatNumber(unitCost)}</td>
-    <td class="number bold">${formatNumber(costPerHa)}</td>
+    <td class="center">${log.priceCells ? priceText(log.priceCells.quantityLabel) : escapeHtml(quantity)}</td>
+    <td class="center">${log.priceCells ? priceText(log.priceCells.unitLabel) : escapeHtml(unit)}</td>
+    <td class="number">${log.priceCells ? priceText(log.priceCells.unitCostLabel) : formatNumber(unitCost)}</td>
+    <td class="number bold">${formatNumber(totalCost)}</td>
   </tr>`;
 }
 
@@ -164,14 +164,12 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
   const layout = auditReportLayout(report, operations);
   const paperSize = layout.columns.length > 24 ? 'A3' : 'A4';
 
-  const directOperations = operations.filter(log => !isMillingOperation(log));
-  const millingOperations = operations.filter(isMillingOperation);
-  const directCost = directOperations.reduce((sum, log) => sum + Number(log.totalCost || log.cost || 0), 0);
-  const millingCost = millingOperations.reduce((sum, log) => sum + Number(log.totalCost || log.cost || 0), 0);
-  const directCostPerHa = totalAuditedHa > 0 ? directCost / totalAuditedHa : directCost;
-  const millingCostPerHa = totalAuditedHa > 0 ? millingCost / totalAuditedHa : millingCost;
+  const groupedOperations = auditOperationGroups(report, operations);
+  const directOperations = groupedOperations.filter(log => !isMillingOperation(log));
+  const millingOperations = groupedOperations.filter(isMillingOperation);
+  const directCost = directOperations.reduce((sum, log) => sum + Number(log.totalCost ?? log.cost ?? 0), 0);
+  const millingCost = millingOperations.reduce((sum, log) => sum + Number(log.totalCost ?? log.cost ?? 0), 0);
   const grandTotal = directCost + millingCost;
-  const grandTotalPerHa = totalAuditedHa > 0 ? grandTotal / totalAuditedHa : grandTotal;
   const hash = String(report.qrHash || report.qrSignature || report.integrityHash || '').trim();
   if (!hash) throw new Error('This audit report has no QR integrity code and cannot be exported.');
   const isCertified = String(report.status || '').toUpperCase() === 'CERTIFIED';
@@ -189,12 +187,13 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
     totalAuditedHa, layout
   )).join('');
 
+  const summaryRow = (label, amount, rowClass = 'total-row') => `<tr class="${rowClass}"><td></td><td>${label}</td>${'<td></td>'.repeat(layout.columnCount - 3)}<td class="number">${formatNumber(amount)}</td></tr>`;
   const rows = operations.length === 0
     ? `<tr><td colspan="${layout.columnCount}" class="empty">No operational records compiled in this audit dossier.</td></tr>`
     : `${directRows}
-      <tr class="total-row"><td colspan="${layout.columnCount - 1}">TOTAL DIRECT COST</td><td class="number">${formatNumber(directCostPerHa)}</td></tr>
-      ${millingOperations.length > 0 ? `<tr class="section-row"><td colspan="${layout.columnCount}">Milling Expenses</td></tr>${millingRows}<tr class="total-row"><td colspan="${layout.columnCount - 1}">TOTAL MILLING EXPENSES</td><td class="number">${formatNumber(millingCostPerHa)}</td></tr>` : ''}
-      <tr class="grand-row"><td colspan="${layout.columnCount - 1}">TOTAL COST OF PRODUCTION</td><td class="number">${formatNumber(grandTotalPerHa)}</td></tr>`;
+      ${summaryRow('TOTAL DIRECT COST (PHP)', directCost)}
+      ${millingOperations.length > 0 ? `<tr class="section-row"><td></td><td>Milling Expenses</td>${'<td></td>'.repeat(layout.columnCount - 2)}</tr>${millingRows}${summaryRow('TOTAL MILLING EXPENSES (PHP)', millingCost)}` : ''}
+      ${summaryRow('TOTAL COST OF PRODUCTION (PHP)', grandTotal, 'grand-row')}`;
 
   const yearHeaders = layout.groups.map(group => '<th colspan="' + group.columns.length + '">' + escapeHtml(group.label) + '</th>').join('');
   const monthHeaders = layout.columns.map(month => '<th title="' + escapeHtml(reportingMonthLabel(month)) + '">' + layout.columnLabels[month] + '</th>').join('');
@@ -216,21 +215,21 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
       <style>
         @page { size: ${paperSize} landscape; margin: 8mm; }
         * { box-sizing: border-box; }
-        body { margin: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; line-height: 1.2; }
+        body { margin: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 8px; line-height: 1.2; }
         .sheet { width: 100%; }
         .report-header { display: grid; grid-template-columns: minmax(0, 1fr) 30mm; gap: 5mm; align-items: start; margin-bottom: 3mm; }
         .meta { display: grid; grid-template-columns: 54mm 1fr; gap: 1.5px 4mm; font-size: 9px; font-weight: 700; text-transform: uppercase; }
         .meta .value { font-weight: 800; letter-spacing: .15px; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        th, td { border: .5px solid #000; padding: 1.25px 2px; vertical-align: middle; overflow-wrap: anywhere; }
+        th, td { border: .5px solid #000; padding: 1px 1.5px; vertical-align: middle; overflow-wrap: anywhere; }
         th { background: #edd446; text-align: center; font-weight: 800; text-transform: uppercase; }
         th.no { width: 6mm; }
-        th.operation { width: 42mm; text-align: left; }
+        th.operation { width: 50mm; text-align: left; }
         th.month, td.month { width: 5mm; }
         th.total { width: 12mm; }
-        th.qty { width: 9mm; }
-        th.unit { width: 9mm; }
-        th.unit-cost { width: 15mm; }
+        th.qty { width: 18mm; }
+        th.unit { width: 16mm; }
+        th.unit-cost { width: 23mm; }
         th.cost-ha { width: 18mm; }
         .center { text-align: center; }
         .number { text-align: right; font-family: 'Courier New', monospace; }
@@ -241,7 +240,7 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
         .grand-row td { border-top-width: 1.5px; font-size: 9px; font-weight: 900; letter-spacing: .15px; }
         .empty { padding: 12px; text-align: center; color: #666; font-style: italic; }
         .footnote { margin-top: 2mm; color: #444; font-size: 8px; font-style: italic; }
-        .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12mm; margin-top: 8mm; text-align: center; page-break-inside: avoid; }
+        .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12mm; margin-top: 5mm; text-align: center; page-break-inside: avoid; }
         .signature { border-top: .5px solid #000; padding-top: 2mm; min-height: 16mm; }
         .signature .name { font-size: 9px; font-weight: 800; text-transform: uppercase; }
         .signature .role { margin-top: 4mm; color: #555; font-size: 7.5px; line-height: 1.3; }
@@ -270,9 +269,6 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
             <div class="qr-code">${escapeHtml(hash)}</div>
           </div>
         </section>
-        <p>Coverage: recorded operations only. Plots without monthly records are not counted as audited.</p>
-        <p>${escapeHtml(layout.timelineNote)}</p>
-
         <table>
           <thead>
             <tr>
@@ -283,14 +279,12 @@ export function buildAuditReportHtml(report, { blockFarms = [], currentUser = nu
               <th class="qty" rowspan="2">QTY</th>
               <th class="unit" rowspan="2">UNIT</th>
               <th class="unit-cost" rowspan="2">UNIT COST</th>
-              <th class="cost-ha" rowspan="2">COST PER HECTARE</th>
+              <th class="cost-ha" rowspan="2">OPERATION COST</th>
             </tr>
             <tr>${monthHeaders}</tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-
-        <p class="footnote">* Total recorded expenditure for ${auditedArea} Ha included in this report: <strong>PHP ${formatNumber(grandTotal)}</strong> (Philippine Pesos).</p>
 
         <section class="signatures">
           <div class="signature"><div class="name">${escapeHtml(managerName)}</div><div class="role">Farm Manager / President<br><strong>${escapeHtml(farmName)}</strong></div></div>
@@ -306,31 +300,8 @@ export async function exportAuditReportPdf(report, options = {}) {
   const html = buildAuditReportHtml(report, options);
   const period = report?.periodKey || report?.period || report?.month || report?.reportId || report?.id || 'Report';
   const filename = `HUGPONG_${safeFilePart(period)}_Audit_Report.pdf`;
-  const result = await Print.printToFileAsync({ html, base64: true });
-  let destination = result.uri;
-
-  // Expo Go can render a PDF into its protected Print cache but Android may
-  // reject FileSystem.copyAsync reads from that location. Writing the Base64
-  // result into the app cache produces a shareable file with a stable name.
-  if (result.base64 && FileSystem.cacheDirectory) {
-    destination = `${FileSystem.cacheDirectory}${filename}`;
-    await FileSystem.deleteAsync(destination, { idempotent: true });
-    await FileSystem.writeAsStringAsync(destination, result.base64, {
-      encoding: FileSystem.EncodingType.Base64
-    });
-  }
-
-  if (!destination) throw new Error('The generated PDF file is unavailable.');
-
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(destination, {
-      mimeType: 'application/pdf',
-      dialogTitle: `Save or share ${filename}`,
-      UTI: 'com.adobe.pdf'
-    });
-  } else {
-    await Print.printAsync({ html });
-  }
-
-  return { uri: destination, filename };
+  const wide = auditReportLayout(report).columns.length > 24;
+  // Native Android Print defaults to portrait Letter even with @page CSS.
+  // Explicit 72-PPI dimensions keep the complete monthly grid in landscape.
+  return exportPdfFile(html, filename, wide ? { width: 1191, height: 842 } : { width: 842, height: 595 });
 }

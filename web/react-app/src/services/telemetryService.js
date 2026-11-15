@@ -6,11 +6,15 @@ const UNCHANGED_SYNC_REPORT_MS = 60 * 60 * 1000;
 let lastHeartbeatAt = 0;
 let lastSyncReportAt = 0;
 let lastSyncSignature = '';
+let telemetryRetryNotBefore = 0;
+let telemetryGeneration = 0;
 
 export function resetWebTelemetryState() {
+  telemetryGeneration++;
   lastHeartbeatAt = 0;
   lastSyncReportAt = 0;
   lastSyncSignature = '';
+  telemetryRetryNotBefore = 0;
 }
 
 export function getWebClientInstanceId() {
@@ -24,7 +28,9 @@ export function getWebClientInstanceId() {
 }
 
 export async function reportWebActivity({ force = false, event = 'HEARTBEAT' } = {}) {
+  const generation = telemetryGeneration;
   const now = Date.now();
+  if (now < telemetryRetryNotBefore) return { throttled: true };
   if (!force && now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) return { throttled: true };
   lastHeartbeatAt = now;
   try {
@@ -37,12 +43,16 @@ export async function reportWebActivity({ force = false, event = 'HEARTBEAT' } =
       body: { event, platform: 'WEB' }
     });
   } catch (error) {
+    if (generation !== telemetryGeneration) return null;
+    telemetryRetryNotBefore = Date.now() + Math.max(30000, Number(error?.retryAfterMs) || 0);
     lastHeartbeatAt = 0;
     throw error;
   }
 }
 
 export async function reportWebSync({ pendingMutationCount = 0, failedMutationCount = 0, syncState = 'UNKNOWN', syncSucceeded = false } = {}) {
+  const generation = telemetryGeneration;
+  if (Date.now() < telemetryRetryNotBefore) return { throttled: true };
   let signature = '';
   try {
     let session = null;
@@ -77,6 +87,8 @@ export async function reportWebSync({ pendingMutationCount = 0, failedMutationCo
       }
     });
   } catch (error) {
+    if (generation !== telemetryGeneration) return null;
+    telemetryRetryNotBefore = Date.now() + Math.max(30000, Number(error?.retryAfterMs) || 0);
     if (signature && lastSyncSignature === signature) {
       lastSyncSignature = '';
       lastSyncReportAt = 0;

@@ -1,36 +1,67 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../theme';
 import { AppText as Text } from './Typography';
 import { decidePasswordRecoveryReview, fetchPasswordRecoveryReviews } from '../services/authService';
 import { subscribeToCloudChanges } from '../data/dataStore';
+import { getNetworkStatus } from '../services/networkService';
 
 export default function RecoveryReviewQueue() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
   const [cursor, setCursor] = useState(null);
+  const [error, setError] = useState('');
+  const refresh = useRef({ active: true, generation: 0, running: false, queued: false, timer: null, notBefore: 0, attempts: 0 });
+  const loadRef = useRef(null);
+  const schedule = delay => {
+    const state = refresh.current;
+    clearTimeout(state.timer);
+    if (state.active) state.timer = setTimeout(() => { state.timer = null; state.queued = false; void loadRef.current(); }, Math.max(1, delay));
+  };
 
   const load = async ({ append = false } = {}) => {
+    const state = refresh.current, generation = state.generation;
+    if (!state.active) return;
+    if (state.running) { state.queued = true; return; }
+    if (Date.now() < state.notBefore) { schedule(state.notBefore - Date.now()); return; }
+    if (!getNetworkStatus()) { setError('Recovery reviews require an internet connection.'); setLoading(false); return; }
+    state.running = true;
+    clearTimeout(state.timer); state.timer = null;
     setLoading(true);
     try {
       const response = await fetchPasswordRecoveryReviews({ cursor: append ? cursor : null });
+      if (!state.active || state.generation !== generation) return;
       const next = Array.isArray(response.data) ? response.data : [];
       setReviews(current => append ? [...current, ...next.filter(item => !current.some(existing => existing.id === item.id))] : next);
       setCursor(response.nextCursor || null);
+      setError(''); state.attempts = 0; state.notBefore = 0;
     } catch (error) {
-      Alert.alert('Recovery reviews unavailable', error.message || 'Pending recovery reviews could not be loaded.');
+      if (!state.active || state.generation !== generation || error.code === 'AUTH_CONTEXT_CHANGED') return;
+      setError(error.status === 429 ? 'Recovery reviews will refresh automatically. Your other work can continue.' : error.message || 'Pending recovery reviews could not be loaded.');
+      if (![401, 403].includes(error.status)) {
+        const delay = Math.max(Number(error.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(state.attempts++, 5)));
+        state.notBefore = Date.now() + delay;
+        schedule(delay);
+      }
     } finally {
-      setLoading(false);
+      if (state.active && state.generation === generation) {
+        state.running = false; setLoading(false);
+        if (state.queued) { state.queued = false; schedule(Math.max(100, state.notBefore - Date.now())); }
+      }
     }
   };
+  loadRef.current = load;
 
   useEffect(() => {
+    const state = refresh.current;
+    state.active = true; state.generation++;
     void load();
-    return subscribeToCloudChanges(event => {
-      if (event.reset || event.resources?.includes('recovery-reviews')) void load();
+    const unsubscribe = subscribeToCloudChanges(event => {
+      if (event.reset || event.resources?.includes('recovery-reviews')) void loadRef.current();
     });
+    return () => { state.active = false; state.generation++; state.running = false; clearTimeout(state.timer); unsubscribe(); };
   }, []);
 
   const decide = (review, approve) => {
@@ -77,7 +108,8 @@ export default function RecoveryReviewQueue() {
           {loading ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="refresh" size={18} color={COLORS.primary} />}
         </TouchableOpacity>
       </View>
-      {!loading && reviews.length === 0 && !cursor && <Text style={s.empty}>No password recovery reviews are waiting in your scope.</Text>}
+      {Boolean(error) && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={s.error}>{error}</Text>}
+      {!loading && !error && reviews.length === 0 && !cursor && <Text style={s.empty}>No password recovery reviews are waiting in your scope.</Text>}
       {reviews.map(review => (
         <View key={review.id} style={s.review}>
           <Text style={s.name}>{review.displayName} · {review.userId}</Text>
@@ -104,6 +136,7 @@ const s = StyleSheet.create({
   subtitle: { marginTop: 2, fontSize: 10.5, lineHeight: 15, color: COLORS.textMuted },
   refresh: { width: 34, height: 34, borderRadius: 17, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
   empty: { marginTop: 12, fontSize: 11, color: COLORS.textMuted },
+  error: { marginTop: 12, fontSize: 12, lineHeight: 18, color: COLORS.textSecondary },
   review: { marginTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 12 },
   name: { fontSize: 12.5, fontWeight: '800', color: COLORS.text },
   meta: { marginTop: 2, fontSize: 10.5, color: COLORS.textMuted },

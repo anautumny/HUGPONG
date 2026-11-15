@@ -143,7 +143,7 @@ function operation(overrides = {}) {
     performedOn: '2026-09-16',
     areaHa: 1,
     peopleCount: 2,
-    quantity: null,
+    quantity: { value: 1, unit: 'HA', inputName: 'Land Preparation' },
     totalCost: 100,
     lineItems: [],
     isSupplemental: false,
@@ -899,6 +899,21 @@ test('final-stage completion is persisted authoritatively and replay-safe', asyn
   );
   assert.equal(replay.replayed, true);
   assert.equal(replay.completedAt, completedAt);
+});
+
+test('stage completion accepts an unrelated variety revision while rejecting genuine changed progress', async () => {
+  const db = database();
+  const cycle = db.collections.get(COLLECTIONS.CROP_CYCLES).get(OLD_CYCLE_ID);
+  Object.assign(cycle, { currentStageNumber: 2, elapsedMonths: 1, completedAt: null, variety: 'CP-TEST', updatedAt: '2026-09-17T08:00:00.000Z' });
+  const input = { currentStageNumber: 3, elapsedMonths: 2, expectedStage: { currentStageNumber: 2, elapsedMonths: 1, completedAt: null } };
+  const version = { baseVersion: '2026-09-16T08:00:00.000Z', requireVersion: true };
+  const result = await updateCycleStage(db, OLD_CYCLE_ID, input, USER, '2026-09-17T09:00:00.000Z', version);
+  assert.equal(result.currentStageNumber, 3); assert.equal(result.variety, 'CP-TEST');
+  await assert.rejects(updateCycleStage(db, OLD_CYCLE_ID, { ...input, currentStageNumber: 4 }, USER, undefined, version), { status: 409 });
+  await assert.rejects(updateCycleStage(db, OLD_CYCLE_ID, { currentStageNumber: 4 }, USER, undefined, version), { status: 409 });
+  await assert.rejects(updateCycleStage(db, OLD_CYCLE_ID, { ...input, expectedStage: { ...input.expectedStage, completedAt: undefined } }, USER, undefined, version), { status: 400 });
+  await assert.rejects(updateCycleStage(db, OLD_CYCLE_ID, input, { ...USER, employeeId: '04009999' }, undefined, version), { status: 403 });
+  assert.equal(db.get(COLLECTIONS.CROP_CYCLES, OLD_CYCLE_ID).currentStageNumber, 3);
 });
 
 test('a non-final stage cannot be marked as a completed Crop Year Cycle', async () => {

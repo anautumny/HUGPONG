@@ -14,6 +14,7 @@ import { getNetworkStatus, subscribeToNetwork, setOnReconnectCallback, checkConn
 import {
   loginWithServer,
   refreshMobileSessionFromFirebase,
+  refreshMobileSessionForSync,
   refreshServerSession,
   verifyPasswordWithServer,
   changePasswordWithServer,
@@ -899,13 +900,14 @@ const clearSharedAccountCache = () => removeItems([
   STORAGE_KEYS.ARCHIVE_VIEW_PREFERENCES
 ]);
 
-export const verifyCurrentPassword = async (password, fieldId = null) => {
+export const verifyCurrentPassword = async (password, fieldId = null, { throwOnError = false } = {}) => {
   try {
     return await verifyPasswordWithServer(password, fieldId ? {
       purpose: 'MANAGER_TAKEOVER',
       fieldId: String(fieldId).trim().toUpperCase()
     } : {});
   } catch (error) {
+    if (throwOnError) throw error;
     return false;
   }
 };
@@ -929,6 +931,19 @@ const restoreStoredSession = async () => {
     if (auth?.authStateReady) await auth.authStateReady();
     let recoveredFromServer = false;
     const cachedOwnerId = String(session?.employeeId || session?.id || '').trim();
+    // A package update can leave the encrypted API session intact while the
+    // Firebase client replica is unavailable. Re-establish it through the
+    // existing live API authority before treating this as a signed-out user.
+    if (token && cachedOwnerId && !auth?.currentUser) {
+      if (!getNetworkStatus()) {
+        return { success: false, reason: 'SESSION_RESTORE_DEFERRED', error: 'Connect once to verify your saved account. Your saved work is still on this device.' };
+      }
+      const recovered = await refreshServerSession(token, { expectedUserId: cachedOwnerId });
+      session = recovered.user;
+      token = recovered.token || await getItem(STORAGE_KEYS.AUTH_TOKEN, null, { strict: true });
+      if (!await saveItem(STORAGE_KEYS.SESSION, session)) throw Object.assign(new Error('Your account could not be saved on this device. Please retry.'), { code: 'LOCAL_SESSION_WRITE_FAILED' });
+      recoveredFromServer = true;
+    }
     // Older affected installs may already contain the empty guest profile.
     // Repair only through the existing server-verified Firebase session, and
     // never reuse another account's cached identity or bypass offline auth.
@@ -984,7 +999,7 @@ const restoreStoredSession = async () => {
     notify();
     if (getNetworkStatus() && !recoveredFromServer) {
       try {
-        const refreshed = await refreshMobileSessionFromFirebase();
+        const refreshed = await refreshMobileSessionForSync();
         if (!(refreshed?.user?.employeeId || refreshed?.user?.id)) throw new Error('The saved account could not be verified.');
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
         await saveItem(STORAGE_KEYS.SESSION, CURRENT_SESSION);
@@ -1562,6 +1577,11 @@ export const updateFieldStageAndCycle = async (fieldId, updates, takeoverGrant =
     const cycleUpdate = {
       currentStageNumber: Number(updates.stageNumber || targetField.stageNumber || 1),
       elapsedMonths: Number(updates.month ?? targetField.month ?? 0),
+      ...(previousCycle ? { expectedStage: {
+        currentStageNumber: Number(previousCycle.currentStageNumber),
+        elapsedMonths: Number(previousCycle.elapsedMonths || 0),
+        completedAt: previousCycle.completedAt || null
+      } } : {}),
       ...(Object.prototype.hasOwnProperty.call(updates, 'isCompleted') ? { isCompleted: updates.isCompleted === true } : {})
     };
     const outcome = await commitExplicitMutation('stage_update', {
@@ -1910,6 +1930,10 @@ export const validateLocalDraftContentForSubmission = draft => {
       valid: false,
       error: 'This draft has no operation details. Open Edit and add a quantity and rate, an expense or material item, or labor details before submitting.'
     };
+  }
+  const selectedUnit = source?.quantity?.unit ?? source?.inputUnit ?? source?.directUnit ?? source?.unit;
+  if (!hasLineItems && (!hasQuantity || !String(selectedUnit || '').trim())) {
+    return { valid: false, error: 'This draft needs an operation quantity and unit. Open Edit and choose Direct Input; use direct rate 0 when all costs are recorded in labor. Your draft is preserved.' };
   }
   return { valid: true };
 };
@@ -3109,6 +3133,7 @@ export const listenToCloudSync = () => {
       if (failures.length) {
         if (coreReady && pricesReady && active) setCloudDataStatus(startingUserId, { hasSnapshot: true });
         throw Object.assign(new Error('Some server data could not be updated.'), {
+          causes: failures,
           retryAfterMs: Math.max(...failures.map(error => Number(error?.retryAfterMs) || 0)),
           refreshResources: [...new Set([...(sessionFailure ? ['session'] : []), ...settled.flatMap((result, index) => result.status === 'rejected'
             ? [['block-farms', 'fields', 'crop-cycles', 'logs', 'prices', 'tickets', 'tickets', 'users', 'audit-reports', 'audit-reports', 'audit-events'][index]] : [])])]
@@ -3120,14 +3145,27 @@ export const listenToCloudSync = () => {
       if (active) setCloudDataStatus(startingUserId, { phase: 'READY', hasSnapshot: true });
       return true;
     } catch (error) {
+      if (!active) return false;
       if (active) setCloudDataStatus(startingUserId, { phase: 'ERROR' });
       if (error.status === 401) {
         stop();
         return false;
       }
-      console.warn('[Mobile] Server data refresh was deferred.');
+      // Keep diagnostics useful without logging tokens, account records,
+      // request bodies, or raw server exception messages.
+      const causes = error.causes || [error];
+      console.warn('[Mobile] Server data refresh was deferred.', {
+        failures: causes.map(cause => ({
+          status: Number(cause?.status) || null,
+          code: /^[A-Za-z0-9_/-]{1,80}$/.test(String(cause?.code || '')) ? cause.code : 'REFRESH_FAILED',
+          referenceId: /^(AUTH|SEC|SECU|MOB|WEB)-[A-Z0-9-]{1,80}$/.test(String(cause?.referenceId || '')) ? cause.referenceId : null
+        })),
+        resources: error.refreshResources || resources || [],
+        retryAfterMs: Number(error.retryAfterMs) || 0
+      });
       if (active && ![401, 403].includes(error.status)) {
-        refreshNotBefore = Date.now() + Math.max(0, Number(error?.retryAfterMs) || 0);
+        const delay = Math.max(Number(error?.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(refreshRetryAttempt++, 5)));
+        refreshNotBefore = Date.now() + delay;
         refreshRetryTimer = setTimeout(() => {
           const retryResources = error.refreshResources || resources;
           const next = { force: true, extended: extended || extendedRefreshQueued,
@@ -3136,7 +3174,7 @@ export const listenToCloudSync = () => {
           extendedRefreshQueued = sessionRefreshQueued = fullRefreshQueued = false;
           pendingResources.clear();
           void refresh(next);
-        }, Math.max(refreshNotBefore - Date.now(), Math.min(30000, 1000 * 2 ** Math.min(refreshRetryAttempt++, 5))));
+        }, delay);
       }
       return false;
     } finally {
@@ -3282,7 +3320,7 @@ const scheduleMobileSyncContinuation = (result = {}) => {
   const pacingFloor = Number(result.processedCount || 0) > 0
     ? now + MOBILE_SYNC_BATCH_INTERVAL_MS
     : now + 1000;
-  const resumeAt = result.reason === 'RATE_LIMITED' && Number.isFinite(serverRetryAt)
+  const resumeAt = Number.isFinite(serverRetryAt)
     ? Math.max(pacingFloor, serverRetryAt)
     : Math.max(pacingFloor, earliestRetryAt);
 
@@ -3514,7 +3552,7 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       const syncOwner = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '');
       const generation = cloudSyncGeneration;
       const isCurrent = () => syncOwner === String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '') && generation === cloudSyncGeneration;
-      const refreshed = await refreshMobileSessionFromFirebase({ forceRefresh: true, isCurrent });
+      const refreshed = await refreshMobileSessionForSync({ isCurrent });
       if (!isCurrent()) throw Object.assign(new Error('The signed-in account changed.'), { code: 'AUTH_CONTEXT_CHANGED' });
       if (refreshed?.user) {
         CURRENT_SESSION = { ...normalizeSessionUser(refreshed.user), lastActiveAt: Date.now() };
@@ -3522,15 +3560,25 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
       }
     } catch (error) {
       console.info(`[SYNC] Failed: AUTHENTICATION ${error?.message || 'Session refresh failed'}`);
-      return {
+      const reason = error?.code === 'AUTH_CONTEXT_CHANGED' ? 'AUTH_CONTEXT_CHANGED'
+        : error?.status === 401 || ['auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-disabled'].includes(error?.code) ? 'AUTHENTICATION_REQUIRED'
+        : error?.status === 403 ? 'AUTHORIZATION_FAILURE'
+        : error?.status === 429 ? 'RATE_LIMITED'
+        : error?.isNetworkError || error?.code === 'auth/network-request-failed' ? 'SERVER_UNAVAILABLE'
+        : 'AUTHENTICATION_RECOVERY';
+      const retryable = ['RATE_LIMITED', 'SERVER_UNAVAILABLE', 'AUTHENTICATION_RECOVERY'].includes(reason);
+      const result = {
         success: false,
         attemptedCount: 0,
         processedCount: 0,
-        failedCount: remainingBefore,
+        failedCount: 0,
         remainingCount: remainingBefore,
-        reason: error?.status === 403 ? 'AUTHORIZATION_FAILURE' : 'AUTHENTICATION_RECOVERY',
+        reason,
+        ...(retryable ? { retryAt: new Date(Date.now() + Math.max(30000, Number(error?.retryAfterMs) || 0)).toISOString() } : {}),
         remainingItems: getOutboxQueue()
       };
+      if (retryable) scheduleMobileSyncContinuation(result);
+      return result;
     }
 
     if (trigger === 'MANUAL_SYNC') {

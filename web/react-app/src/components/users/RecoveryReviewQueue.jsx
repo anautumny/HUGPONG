@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock3, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { decideRecoveryReview, fetchRecoveryReviews } from '../../services/recoveryReviewService';
 import { subscribeToResourceInvalidation } from '../../services/apiClient';
@@ -14,25 +14,51 @@ export default function RecoveryReviewQueue() {
   const [processingId, setProcessingId] = useState('');
   const [error, setError] = useState('');
   const [cursor, setCursor] = useState(null);
+  const refresh = useRef({ active: true, generation: 0, running: false, queued: false, timer: null, notBefore: 0, attempts: 0 });
+  const loadRef = useRef(null);
+  const schedule = delay => {
+    const state = refresh.current;
+    clearTimeout(state.timer);
+    if (state.active) state.timer = setTimeout(() => { state.timer = null; state.queued = false; void loadRef.current({ force: true }); }, Math.max(1, delay));
+  };
 
   const load = async ({ force = false, append = false } = {}) => {
+    const state = refresh.current, generation = state.generation;
+    if (!state.active) return;
+    if (state.running) { state.queued = true; return; }
+    if (Date.now() < state.notBefore) { schedule(state.notBefore - Date.now()); return; }
+    state.running = true;
+    clearTimeout(state.timer); state.timer = null;
     setLoading(true);
-    setError('');
     try {
       const response = await fetchRecoveryReviews({ force, cursor: append ? cursor : null });
+      if (!state.active || state.generation !== generation) return;
       const next = Array.isArray(response.data) ? response.data : [];
       setReviews(current => append ? [...current, ...next.filter(item => !current.some(existing => existing.id === item.id))] : next);
       setCursor(response.nextCursor || null);
+      setError(''); state.attempts = 0; state.notBefore = 0;
     } catch (loadError) {
-      setError(loadError.message || 'Recovery reviews could not be loaded.');
+      if (!state.active || state.generation !== generation || loadError.code === 'AUTH_CONTEXT_CHANGED') return;
+      setError(loadError.status === 429 ? 'Recovery reviews will refresh automatically. Your other work can continue.' : loadError.message || 'Recovery reviews could not be loaded.');
+      if (![401, 403].includes(loadError.status)) {
+        const delay = Math.max(Number(loadError.retryAfterMs) || 0, Math.min(30000, 1000 * 2 ** Math.min(state.attempts++, 5)));
+        state.notBefore = Date.now() + delay; schedule(delay);
+      }
     } finally {
-      setLoading(false);
+      if (state.active && state.generation === generation) {
+        state.running = false; setLoading(false);
+        if (state.queued) { state.queued = false; schedule(Math.max(100, state.notBefore - Date.now())); }
+      }
     }
   };
+  loadRef.current = load;
 
   useEffect(() => {
+    const state = refresh.current;
+    state.active = true; state.generation++;
     void load();
-    return subscribeToResourceInvalidation(['recovery-reviews'], () => { void load({ force: true }); });
+    const unsubscribe = subscribeToResourceInvalidation(['recovery-reviews'], () => { void loadRef.current({ force: true }); });
+    return () => { state.active = false; state.generation++; state.running = false; clearTimeout(state.timer); unsubscribe(); };
   }, []);
 
   const decide = async (review, approve) => {
@@ -64,7 +90,7 @@ export default function RecoveryReviewQueue() {
         </button>
       </div>
       {error && <div className="m-4 flex gap-2 rounded-xl border border-danger/30 bg-danger-bg/40 p-3 text-xs font-semibold text-danger"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
-      {!loading && reviews.length === 0 && !cursor && (
+      {!loading && !error && reviews.length === 0 && !cursor && (
         <div className="p-8 text-center text-xs text-hug-muted"><CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-success" /><p className="font-bold text-hug-text">No recovery reviews pending</p></div>
       )}
       <div className="divide-y divide-border/60">
