@@ -60,11 +60,11 @@ jobs:
       - name: Install Mobile dependencies
         run: npm ci --prefix mobile
 
-      - name: Run full release gate
-        run: npm run verify:release
-
       - name: Install Cloudflare build tools
         run: npm ci --prefix cloudflare
+
+      - name: Run full release gate
+        run: npm run verify:release
 
       - name: Validate Cloudflare bundle without deployment
         working-directory: cloudflare
