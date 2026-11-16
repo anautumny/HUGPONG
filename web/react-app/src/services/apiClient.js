@@ -115,12 +115,24 @@ export function affectedResources(path) {
 
 function clearReadCache(resources = []) {
   const affected = new Set(resources);
-  if (!affected.size || affected.has('session')) {
+  if (!affected.size) {
     readRevision += 1;
     resourceReadRevisions.clear();
     inFlightReads.clear();
     readCache.clear();
     return;
+  }
+  // Assignment/session changes invalidate the entire scoped graph. Global
+  // prices and this account's tickets remain reusable unless explicitly changed;
+  // login/logout and role changes still clear every read through the auth boundary.
+  if (affected.has('session')) {
+    ['users', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports',
+      'crop-year-compilations', 'terminal-diagnostics', 'recovery-reviews',
+      'audit-events', 'system-diagnostics', 'notifications'].forEach(resource => affected.add(resource));
+    for (const path of [...readCache.keys(), ...inFlightReads.keys()]) {
+      const resource = resourceName(path);
+      if (!['prices', 'tickets'].includes(resource)) affected.add(resource);
+    }
   }
   for (const resource of affected) resourceReadRevisions.set(resource, (resourceReadRevisions.get(resource) || 0) + 1);
   // Detach pre-change requests only for affected resources. Unrelated pending

@@ -312,7 +312,7 @@ test('Web resource revisions prevent an older response from replacing a newer po
   assert.equal(requests.length, 2);
 });
 
-test('Web global reset, session invalidation and account switching still invalidate every pending read', async () => {
+test('Web global reset, session invalidation and account switching still invalidate pending scoped reads', async () => {
   for (const boundary of ['reset', 'session', 'account']) {
     const requests = [];
     const runtime = webRuntime(url => new Promise(resolve => { requests.push({ url, resolve }); }));
@@ -328,6 +328,71 @@ test('Web global reset, session invalidation and account switching still invalid
     requests[1].resolve({ ok: true, json: async () => ({ success: true, data: [] }) });
     await fresh;
     assert.equal(runtime.peekAuthenticatedRead('/api/fields').data.length, 0, 'empty authoritative results remain valid');
+  }
+});
+
+test('Web assignment invalidation preserves only unrelated prices and account tickets, including pending reads', async () => {
+  const requests = [];
+  const runtime = webRuntime(url => new Promise(resolve => requests.push({ url, resolve })));
+  const paths = ['/api/prices?limit=52', '/api/tickets', '/api/fields', '/api/backups'];
+  const pending = paths.map(url => runtime.authenticatedRead(url));
+  runtime.invalidateAuthenticatedResources(['fields', 'session']);
+  assert.equal(runtime.authenticatedRead(paths[0]), pending[0]);
+  assert.equal(runtime.authenticatedRead(paths[1]), pending[1]);
+  requests.forEach(request => request.resolve({ ok: true, json: async () => ({ success: true, data: [] }) }));
+  await Promise.all(pending);
+  assert.ok(runtime.peekAuthenticatedRead(paths[0]));
+  assert.ok(runtime.peekAuthenticatedRead(paths[1]));
+  assert.equal(runtime.peekAuthenticatedRead(paths[2]), null);
+  assert.equal(runtime.peekAuthenticatedRead(paths[3]), null, 'unlisted resources are conservatively invalidated');
+  runtime.invalidateAuthenticatedResources(['prices', 'session']);
+  assert.equal(runtime.peekAuthenticatedRead(paths[0]), null, 'explicit price changes still refresh prices');
+  assert.ok(runtime.peekAuthenticatedRead(paths[1]));
+  runtime.clearAuthenticatedReadState();
+  assert.equal(runtime.peekAuthenticatedRead(paths[1]), null, 'tickets cannot cross account or role boundaries');
+});
+
+test('Web resumes only the revision already applied to its caches and clears it on account changes', () => {
+  const document = new EventTarget(); document.visibilityState = 'visible';
+  const runtime = webRuntime(async () => {}, { document });
+  const streams = [], timers = new Map();
+  runtime.createChangeStream = options => { streams.push(options); return () => {}; };
+  runtime.setTimeout = callback => { timers.set(callback, callback); return callback; };
+  runtime.clearTimeout = callback => timers.delete(callback);
+  vm.runInContext(read('web/react-app/src/services/realtimeService.js').replace(/^import .*;\r?\n/gm, '').replace('export function', 'function'), runtime);
+  const stop = runtime.startRealtimeSync();
+  const visibility = state => { document.visibilityState = state; document.dispatchEvent(new Event('visibilitychange')); };
+  const firstRevision = 'a'.repeat(64);
+  assert.equal(streams[0].initialRevision, null);
+  streams[0].onChange({ reset: true, revision: firstRevision });
+  visibility('hidden'); visibility('visible');
+  assert.equal(streams[1].initialRevision, null, 'unflushed events cannot suppress a necessary reset');
+  for (const callback of [...timers.values()]) { timers.delete(callback); callback(); }
+  visibility('hidden'); visibility('visible');
+  assert.equal(streams[2].initialRevision, firstRevision);
+  runtime.clearAuthenticatedReadState();
+  visibility('hidden'); visibility('visible');
+  assert.equal(streams[3].initialRevision, null);
+  stop();
+});
+
+test('both stream transports skip only unchanged resets when seeded with an applied revision', async t => {
+  for (const initialRevision of ['a'.repeat(64), 'invalid', null]) {
+    let writer;
+    const body = new ReadableStream({ start(controller) { writer = controller; } });
+    const events = [];
+    const stop = transport()({ initialRevision, connect: async () => ({ ok: true, body }), onChange: event => events.push(event) });
+    t.after(stop);
+    const revision = 'a'.repeat(64);
+    writer.enqueue(new TextEncoder().encode([
+      { reset: true, revision },
+      { resources: ['fields'], revision },
+      { reset: true, revision: 'b'.repeat(64) }
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('')));
+    await until(() => events.some(event => event.revision === 'b'.repeat(64)));
+    assert.equal(events.length, initialRevision === revision ? 2 : 3);
+    assert.ok(events.some(event => event.resources?.includes('fields')), 'resource events remain deliverable even with the same revision');
+    stop();
   }
 });
 

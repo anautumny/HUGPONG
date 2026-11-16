@@ -1,12 +1,12 @@
 // Shared transport contract with Mobile. One owner per authenticated client;
 // screens continue subscribing to the existing API/store, never to Firestore.
-export function createChangeStream({ connect, onChange, onUnauthorized = () => {}, retryMs = 1000 }) {
+export function createChangeStream({ connect, onChange, onUnauthorized = () => {}, retryMs = 1000, initialRevision = null }) {
   let stopped = false;
   let controller = null;
   let retryTimer = null;
   let watchdog = null;
   let attempt = 0;
-  let lastRevision = null;
+  let lastRevision = /^[a-f0-9]{64}$/.test(initialRevision || '') ? initialRevision : null;
 
   async function run() {
     if (stopped) return;

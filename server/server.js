@@ -22,6 +22,7 @@ const FirestoreSessionStore = require('./services/firestoreSessionStore');
 const { startOperationalCleanup } = require('./services/operationalCleanupService');
 const { invalidateAccountAssignments } = require('./services/accountAuthorization');
 const { createScopedReadCache } = require('./services/scopedReadCache');
+const { invalidateOperationDisplayCache } = require('./services/operationQueryService');
 const { createChangeFeed } = require('./services/changeFeed');
 const { COLLECTIONS } = require('./schema/firestoreSchema');
 const { requireAuth, invalidateAuthenticatedAccounts } = require('./middleware/auth');
@@ -64,6 +65,7 @@ const app = express();
 const scopedReadCache = createScopedReadCache();
 const changeFeed = createChangeFeed({ database: db, singleWriter: cloudflareRuntime, invalidate: (resources = []) => {
   scopedReadCache.invalidate(resources);
+  invalidateOperationDisplayCache(db, resources);
   if (!resources.length || resources.some(resource => ['session', 'users', 'fields', 'block-farms'].includes(resource))) {
     invalidateAccountAssignments(db);
     invalidateAuthenticatedAccounts();

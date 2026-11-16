@@ -17,6 +17,9 @@ export function startRealtimeSync() {
   const resume = () => {
     if (stopStream || navigator.onLine === false || document.visibilityState === 'hidden') return;
     stopStream = createChangeStream({
+      // This revision advances only after cache invalidation is applied. An
+      // unchanged reconnect needs no second reset; a missed revision still does.
+      initialRevision: webClientHeaders()['x-hugpong-sync-revision'] || null,
       connect: signal => fetch('/api/sync/events', {
         headers: { ...webClientHeaders(), Accept: 'text/event-stream' },
         credentials: 'include', cache: 'no-store', signal

@@ -19,13 +19,16 @@ const { attachTakeoverAuthorization } = require('../middleware/takeoverAuthoriza
 router.get('/', requireAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
+    const displayOptions = { cacheDisplay: true,
+      freshDisplay: String(req.headers?.['cache-control'] || '').includes('no-cache') };
     // Keep installed older APKs and explicit newest-N dashboard reads complete.
     // Current clients opt into cursors and assemble all pages before publishing.
     if (req.query.paged !== '1') {
-      const data = await listOperationRecords(db, req.session.user, { status: req.query.status, limit: req.query.limit });
+      const data = await listOperationRecords(db, req.session.user, { ...displayOptions, status: req.query.status, limit: req.query.limit });
       return res.json({ success: true, count: data.length, data });
     }
     const result = await listOperationPage(db, req.session.user, {
+      ...displayOptions,
       status: req.query.status,
       limit: req.query.limit,
       cursor: req.query.cursor
