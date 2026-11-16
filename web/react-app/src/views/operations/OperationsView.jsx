@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import useConfirmation from '../../components/ui/useConfirmation';
 import { ROLE_KEYS } from '../../utils/authRouting';
 import {
   subscribeToOperationsData,
@@ -154,6 +155,7 @@ function AuditCoverageBadge({ coverage }) {
 
 export default function OperationsView() {
   const { user, roleKey } = useAuth();
+  const [requestConfirmation, confirmationDialog] = useConfirmation(user);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const targetUrlFieldId = searchParams.get('fieldId') || searchParams.get('takeOverFieldId') || '';
@@ -503,9 +505,14 @@ export default function OperationsView() {
     const nextStage = completesCycle ? 6 : currentStage + 1;
     const capability = getOperationCapabilities(user, field, takeoverSession);
     if (!capability.canCreate) return;
-    const confirmed = window.confirm(completesCycle
-      ? 'Mark Stage 6 and this Crop Year Cycle as complete?'
-      : `Mark Stage ${currentStage} as complete and make Stage ${nextStage} available?`);
+    const confirmed = await requestConfirmation({
+      title: completesCycle ? 'Complete Crop Year Cycle?' : `Complete Stage ${currentStage}?`,
+      message: completesCycle
+        ? `Mark Stage 6 and the Crop Year Cycle for Field ${field.id} as complete?`
+        : `Mark Stage ${currentStage} as complete for Field ${field.id} and make Stage ${nextStage} available?`,
+      confirmText: completesCycle ? 'Complete Cycle' : 'Complete Stage',
+      type: 'primary'
+    });
     if (!confirmed) return;
 
     setCompletingStageFieldId(field.id);
@@ -703,7 +710,9 @@ export default function OperationsView() {
   // Handle Archive Confirmation
   const handleApproveCycleClosure = async ({ field, cycle }) => {
     if (cycleDecisionFieldId) return;
-    if (!window.confirm(`Approve Field ${field.id} and start its next Crop Year Cycle? The server will first verify that every submitted operation is compiled.`)) return;
+    if (!await requestConfirmation({ title: 'Approve new Crop Year Cycle?',
+      message: `Approve Field ${field.id} and start its next Crop Year Cycle? The server will first verify that every submitted operation is compiled.`,
+      confirmText: 'Approve Cycle', type: 'primary' })) return;
     setCycleDecisionFieldId(field.id);
     setUpdateSuccess('');
     try {
@@ -720,7 +729,9 @@ export default function OperationsView() {
     if (cycleDecisionFieldId) return;
     const selected = pendingCycleClosures.filter(item => selectedCycleClosureIds.has(item.cycle.id));
     if (!selected.length) return;
-    if (!window.confirm(`Approve ${selected.length} selected field${selected.length === 1 ? '' : 's'}? Each field will be checked separately for complete audit coverage.`)) return;
+    if (!await requestConfirmation({ title: 'Approve selected Crop Year Cycles?',
+      message: `Approve ${selected.length} selected field${selected.length === 1 ? '' : 's'}? Each field will be checked separately for complete audit coverage.`,
+      confirmText: 'Approve Selected', type: 'primary' })) return;
     setCycleDecisionFieldId('BATCH');
     setUpdateSuccess('');
     const approved = [];
@@ -1646,6 +1657,7 @@ export default function OperationsView() {
       />
 
       {/* 4. Archive Confirmation Dialog */}
+      {confirmationDialog}
       <ConfirmDialog
         isOpen={Boolean(archiveTarget)}
         onCancel={() => setArchiveTarget(null)}

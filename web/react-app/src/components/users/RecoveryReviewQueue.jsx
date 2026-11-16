@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock3, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { decideRecoveryReview, fetchRecoveryReviews } from '../../services/recoveryReviewService';
 import { subscribeToResourceInvalidation } from '../../services/apiClient';
+import { useAuth } from '../../context/AuthContext';
+import useConfirmation from '../ui/useConfirmation';
 
 function formatTime(value) {
   const date = new Date(value);
@@ -9,6 +11,8 @@ function formatTime(value) {
 }
 
 export default function RecoveryReviewQueue() {
+  const { user } = useAuth();
+  const [requestConfirmation, confirmationDialog] = useConfirmation(user);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState('');
@@ -62,9 +66,13 @@ export default function RecoveryReviewQueue() {
   }, []);
 
   const decide = async (review, approve) => {
-    const confirmed = window.confirm(approve
-      ? `Confirm that you met ${review.displayName} in person, checked valid identification, and confirmed the registered mobile number. Approve a 15-minute password reset window?`
-      : `Reject the assisted recovery request for ${review.displayName}?`);
+    const confirmed = await requestConfirmation({
+      title: approve ? 'Approve password recovery?' : 'Reject password recovery?',
+      message: approve
+        ? `Confirm that you met ${review.displayName} in person, checked valid identification, and confirmed the registered mobile number. Approve a 15-minute password reset window?`
+        : `Reject the assisted recovery request for ${review.displayName}?`,
+      confirmText: approve ? 'Approve Recovery' : 'Reject Request', type: approve ? 'primary' : 'danger'
+    });
     if (!confirmed) return;
     setProcessingId(review.id);
     setError('');
@@ -112,6 +120,7 @@ export default function RecoveryReviewQueue() {
         ))}
       </div>
       {cursor && <button type="button" disabled={loading || Boolean(processingId)} onClick={() => void load({ force: true, append: true })} className="m-4 rounded-xl border border-border px-4 py-2 text-xs font-bold text-primary disabled:opacity-50">{loading ? 'Loading…' : 'Load more recovery reviews'}</button>}
+      {confirmationDialog}
     </section>
   );
 }

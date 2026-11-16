@@ -15,6 +15,8 @@ export default function Modal({
   preventEscapeClose = false,
   isLoading = false,
   closeOnBackdrop = false,
+  ariaLabelledBy,
+  ariaDescribedBy,
   className = ''
 }) {
   const modalRef = useRef(null);
@@ -112,7 +114,8 @@ export default function Modal({
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={title ? 'modal-title' : undefined}
+        aria-labelledby={ariaLabelledBy || (title ? 'modal-title' : undefined)}
+        aria-describedby={ariaDescribedBy}
         tabIndex={-1}
         className={`
           bg-white dark:bg-surface rounded-2xl w-full p-5 sm:p-6 shadow-2xl border border-border

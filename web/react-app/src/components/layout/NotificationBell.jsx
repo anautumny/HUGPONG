@@ -2,11 +2,13 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Bell, CheckCheck, Loader2, Trash2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import useConfirmation from '../ui/useConfirmation';
 import { subscribeToAuthenticatedLoader, authenticatedRead, authenticatedRequest } from '../../services/apiClient';
 import { fetchNotificationState, updateNotificationState, updateAllNotificationState } from '../../services/notificationService';
 
 export default function NotificationBell() {
   const { user } = useAuth();
+  const [requestConfirmation, confirmationDialog] = useConfirmation(user);
   const userId = user?.employeeId || user?.id || '';
   const currentOwner = useRef(userId);
   currentOwner.current = userId;
@@ -76,9 +78,10 @@ export default function NotificationBell() {
     if (shouldOpen) { setOpen(false); navigate(item.type === 'price' ? '/prices' : '/users'); }
   });
 
-  const bulk = action => {
+  const bulk = async action => {
     if (working.current) return;
-    if (action === 'dismiss' && !window.confirm('Clear all notifications? This clears your notification list and keeps the underlying records.')) return;
+    if (action === 'dismiss' && !await requestConfirmation({ title: 'Clear all notifications?',
+      message: 'This clears your notification list and keeps the underlying records.', confirmText: 'Clear All', type: 'danger' })) return;
     return run(`${action}:all`, async current => {
       const result = await updateAllNotificationState(userId, action, { isCurrent: current });
       if (current()) { applyState(result.data); if (action === 'dismiss') setCursor(null); }
@@ -136,5 +139,6 @@ export default function NotificationBell() {
       </div>)}
       {cursor && <button type="button" onClick={older} disabled={Boolean(busy)} className="text-xs text-primary p-2 disabled:opacity-50">{busy === 'older' ? 'Loading older notifications...' : 'Load older notifications'}</button>}
     </div>}
+    {confirmationDialog}
   </div>;
 }

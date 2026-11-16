@@ -95,6 +95,8 @@ function harness() {
       };
       if (name.endsWith('/pagination')) return load('utils/pagination.js');
       if (name.endsWith('/ui/Pagination')) return { __esModule: true, default: 'Pagination', usePagination: load('components/ui/Pagination.js').usePagination };
+      if (name.endsWith('/ui/useConfirmation')) return load('../../web/react-app/src/components/ui/useConfirmation.jsx');
+      if (name === './ConfirmDialog') return { __esModule: true, default: 'ConfirmDialog' };
       if (name.endsWith('/notificationIdentity')) return load('domain/notificationIdentity.js');
       if (name.endsWith('/syncPresentation')) return load('domain/syncPresentation.js');
       if (name.endsWith('/haptics')) return { hapticFeedback: { light: () => {}, success: () => {}, warning: () => {}, error: () => {} } };
@@ -361,6 +363,7 @@ test('Web takeover submits a password unchanged once, shows progress and ignores
 test('Web recovery reviews defer invalidations during cooldown and preserve their last good list', async () => {
   const runtime = harness(); const pending = []; let invalidated;
   const Queue = runtime.load('../../web/react-app/src/components/users/RecoveryReviewQueue.jsx', {
+    '../../context/AuthContext': { useAuth: () => ({ user: { employeeId: 'REVIEWER' } }) },
     'lucide-react': { AlertCircle: 'AlertCircle', CheckCircle2: 'CheckCircle2', Clock3: 'Clock3', RefreshCw: 'RefreshCw', ShieldCheck: 'ShieldCheck', XCircle: 'XCircle' },
     '../../services/recoveryReviewService': { fetchRecoveryReviews: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) },
     '../../services/apiClient': { subscribeToResourceInvalidation: (_resources, callback) => { invalidated = callback; return () => {}; } }
@@ -410,8 +413,6 @@ test('Web notification actions preserve read/clear state, guard duplicate taps, 
 
 test('Web notification bulk controls confirm clearing and ignore late results after an account change', async t => {
   const runtime = harness(); t.after(() => runtime.unmount());
-  const previousWindow = globalThis.window; let confirmed = false;
-  globalThis.window = { confirm: () => confirmed }; t.after(() => { globalThis.window = previousWindow; });
   let owner = 'A', options, release, activeCalls = 0;
   const Bell = runtime.load('../../web/react-app/src/components/layout/NotificationBell.jsx', {
     'lucide-react': Object.fromEntries(['Bell', 'CheckCheck', 'Loader2', 'Trash2', 'X'].map(name => [name, name])),
@@ -425,8 +426,12 @@ test('Web notification bulk controls confirm clearing and ignore late results af
   render(); options.onData({ data: [{ id: 'A', title: 'Account A' }], notificationState: [] }); let tree = render();
   find(tree, node => node.props['aria-label'] === 'Notifications, 1 unread').props.onClick(); tree = render();
   const clear = find(tree, node => node.type === 'button' && node.props.children.includes('Clear all'));
-  clear.props.onClick(); assert.equal(activeCalls, 0);
-  confirmed = true; const pending = clear.props.onClick(); clear.props.onClick(); assert.equal(activeCalls, 1);
+  const canceled = clear.props.onClick(); tree = render(); assert.equal(activeCalls, 0);
+  find(tree, node => node.type === 'ConfirmDialog').props.onCancel(); await canceled;
+  assert.equal(activeCalls, 0, 'Cancel keeps notification records untouched');
+  const pending = clear.props.onClick(); tree = render();
+  find(tree, node => node.type === 'ConfirmDialog').props.onConfirm(); await Promise.resolve();
+  await clear.props.onClick(); assert.equal(activeCalls, 1);
   owner = 'B'; render(); options.onData({ data: [{ id: 'B', title: 'Account B' }], notificationState: [] }); tree = render();
   release(); await pending; tree = render();
   assert.ok(find(tree, node => node.props['aria-label'] === 'Notifications, 1 unread'), 'old account clear cannot remove the new account inbox');

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import Modal from './Modal';
 import Button from './Button';
 import { AlertTriangle, AlertCircle, Info, HelpCircle } from 'lucide-react';
@@ -15,6 +15,8 @@ export default function ConfirmDialog({
   isLoading = false,
   loadingText
 }) {
+  const titleId = useId();
+  const messageId = useId();
   const typeConfig = {
     danger: {
       icon: AlertTriangle,
@@ -68,7 +70,9 @@ export default function ConfirmDialog({
       isOpen={isOpen}
       onClose={onCancel}
       size="sm"
-      preventBackdropClose={isLoading}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={messageId}
+      isLoading={isLoading}
       preventEscapeClose={isLoading}
       footer={footer}
     >
@@ -80,10 +84,10 @@ export default function ConfirmDialog({
         </div>
 
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-bold text-hug-text tracking-tight">
+          <h3 id={titleId} className="text-base font-bold text-hug-text tracking-tight">
             {title}
           </h3>
-          <p className="text-xs sm:text-sm text-hug-muted mt-1 leading-relaxed whitespace-pre-line">
+          <p id={messageId} className="text-xs sm:text-sm text-hug-text2 mt-1 leading-relaxed whitespace-pre-line">
             {message}
           </p>
         </div>
