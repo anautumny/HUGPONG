@@ -6,8 +6,9 @@ import { useTheme } from '../context/ThemeContext';
 import ConsentBanner from '../components/common/ConsentBanner';
 import androidRelease from '../config/androidRelease.json';
 
-// Same-origin attachment response starts the download without navigating away.
-const ANDROID_APK_URL = androidRelease.downloadUrl ? `/downloads/android/${encodeURIComponent(androidRelease.version)}` : '';
+// Use the verified release artifact directly. GitHub supplies its attachment
+// filename and resumable delivery without a second download proxy.
+const ANDROID_APK_URL = androidRelease.downloadUrl || '';
 
 export default function LandingView() {
   const { isAuthenticated } = useAuth();

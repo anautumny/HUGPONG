@@ -172,7 +172,11 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
 
   function stream(req, res) {
     startListener();
-    invalidate([]);
+    // The single-writer Worker invalidates on every commit and on hydration.
+    // Opening/reopening an authorized client stream changes no records; clearing
+    // shared caches here repeats other clients' reads and cancels in-flight reuse.
+    // Node instances retain the conservative catch-up guard across writers.
+    if (!singleWriter) invalidate([]);
     res.status(200);
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'private, no-store, no-transform',
       Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });

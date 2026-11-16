@@ -54,6 +54,39 @@ function sink(feed) {
   return { events, close: () => res.emit('close') };
 }
 
+test('Worker stream reconnects preserve scoped read reuse while committed mutations still invalidate it', async t => {
+  const { createScopedReadCache } = require('../services/scopedReadCache');
+  const cache = createScopedReadCache();
+  const feed = createChangeFeed({ database: require('./helpers/memoryFirestore').memoryFirestore(), singleWriter: true,
+    invalidate: resources => cache.invalidate(resources) });
+  t.after(feed.stop); await feed.hydrate();
+  let queries = 0;
+  function load(owner) {
+    const request = { method: 'GET', originalUrl: '/api/fields', headers: {},
+      authUser: { employeeId: owner, canonicalRole: 'FARM_MANAGER', authVersion: 1 } };
+    const response = { statusCode: 200, set() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; } };
+    cache.middleware(request, response, () => { queries++; response.json({ success: true, data: [{ owner }] }); });
+    assert.equal(response.body.data[0].owner, owner);
+  }
+  for (const owner of ['FM-1', 'FM-2']) load(owner);
+  for (let reconnect = 0; reconnect < 20; reconnect++) {
+    const client = sink(feed);
+    assert.equal(client.events[0].reset, true);
+    load('FM-1'); load('FM-2'); client.close();
+  }
+  assert.equal(queries, 2, 'new authenticated streams do not discard other owners cached queries');
+  await feed.publish(['fields']); load('FM-1'); load('FM-2');
+  assert.equal(queries, 4, 'canonical changes still refresh both scoped representations');
+});
+
+test('Node stream opening retains conservative cross-instance cache invalidation', t => {
+  const invalidations = [];
+  const feed = createChangeFeed({ database: revisionDatabase(), invalidate: resources => invalidations.push(resources) });
+  t.after(feed.stop); const client = sink(feed);
+  assert.ok(invalidations.some(resources => resources.length === 0));
+  client.close();
+});
+
 test('one Firestore listener per API instance fans out cross-instance revisions and empty snapshots', async t => {
   const database = revisionDatabase();
   const invalidations = [];
