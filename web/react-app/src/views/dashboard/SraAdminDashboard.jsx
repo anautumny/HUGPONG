@@ -19,6 +19,7 @@ import MetricSummaryRow from '../../components/dashboard/MetricSummaryRow';
 import RecentOperationsTable from '../../components/dashboard/RecentOperationsTable';
 import AttentionItemsCard from '../../components/dashboard/AttentionItemsCard';
 import PublishPriceModal from '../../components/prices/PublishPriceModal';
+import { pendingUserAttention } from '../../domain/pendingUserAttention';
 import { formatHectares, formatCurrency } from '../../utils/formatters';
 
 export default function SraAdminDashboard({ data = {}, user = {} }) {
@@ -30,6 +31,8 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
     fields = [],
     auditReports = [],
     recentOperations = [],
+    pendingUsers = [],
+    pendingUsersError = null,
     isLoading = false
   } = data;
 
@@ -47,7 +50,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
 
   // Derive regulatory attention items
   const attentionItems = useMemo(() => {
-    const items = [];
+    const items = pendingUserAttention(pendingUsers, pendingUsersError);
 
     if (!currentPrice) {
       items.push({
@@ -83,7 +86,7 @@ export default function SraAdminDashboard({ data = {}, user = {} }) {
     }
 
     return items;
-  }, [currentPrice, pendingAudits, blockFarms]);
+  }, [currentPrice, pendingAudits, blockFarms, pendingUsers, pendingUsersError]);
 
   const headerActions = [
     {

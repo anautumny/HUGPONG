@@ -11,6 +11,7 @@ import {
 import CompactDashboardHeader from '../../components/dashboard/CompactDashboardHeader';
 import MetricSummaryRow from '../../components/dashboard/MetricSummaryRow';
 import AttentionItemsCard from '../../components/dashboard/AttentionItemsCard';
+import { pendingUserAttention } from '../../domain/pendingUserAttention';
 
 function accountNameList(accounts) {
   const names = accounts.map(account => account.displayName).filter(Boolean);
@@ -25,6 +26,8 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     systemDiagnostics = {},
     activityMonitoringError = null,
     systemDiagnosticsError = null,
+    pendingUsers = [],
+    pendingUsersError = null,
     isLoading = false
   } = data;
 
@@ -44,7 +47,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
   const attentionAccounts = terminalDiagnostics.filter(subject => subject.activity?.attentionStatus === 'NEEDS_ATTENTION');
   const criticalAccounts = terminalDiagnostics.filter(subject => subject.activity?.attentionStatus === 'CRITICAL');
   const activityAlertCount = attentionAccounts.length + criticalAccounts.length;
-  const platformAttentionCount = activityAlertCount + openTickets.length;
+  const platformAttentionCount = activityAlertCount + openTickets.length + pendingUsers.length;
   const platformStatus = monitoringUnavailable
     ? { label: 'Monitoring unavailable', tone: 'border-danger/30 bg-danger-bg/40 text-danger' }
     : criticalAccounts.length > 0
@@ -58,7 +61,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
 
   // Platform attention items
   const attentionItems = useMemo(() => {
-    const items = [];
+    const items = pendingUserAttention(pendingUsers, pendingUsersError);
 
     if (monitoringUnavailable) {
       items.push({
@@ -105,7 +108,7 @@ export default function SuperAdminDashboard({ data = {}, user = {} }) {
     }
 
     return items;
-  }, [openTickets, attentionAccounts, criticalAccounts, monitoringUnavailable, activityMonitoringError, systemDiagnosticsError]);
+  }, [openTickets, attentionAccounts, criticalAccounts, monitoringUnavailable, activityMonitoringError, systemDiagnosticsError, pendingUsers, pendingUsersError]);
 
   const headerActions = [
     {

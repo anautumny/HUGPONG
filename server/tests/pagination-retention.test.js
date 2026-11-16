@@ -79,14 +79,16 @@ test('free-tier cleanup covers sessions, recovery, rate limits, and both diagnos
 
   const now = Date.parse('2026-09-29T00:00:00.000Z');
   const records = new Map(EXPIRATION_POLICIES.map(policy => [policy.collection, [
-    { id: 'expired', [policy.field]: new Date(now - 1) },
-    { id: 'future', [policy.field]: new Date(now + DAY_MS) }
+    { id: 'expired', [policy.field]: policy.milliseconds ? now - 1 : new Date(now - 1) },
+    { id: 'future', [policy.field]: policy.milliseconds ? now + DAY_MS : new Date(now + DAY_MS) }
   ]]));
   const database = {
     collection(name) {
       return {
         where(field, operator, cutoff) {
           assert.equal(operator, '<=');
+          const policy = EXPIRATION_POLICIES.find(value => value.collection === name);
+          assert.equal(typeof cutoff, policy.milliseconds ? 'number' : 'object');
           return {
             limit(limit) {
               return {

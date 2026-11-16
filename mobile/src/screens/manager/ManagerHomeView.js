@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, RADIUS, SHADOW, SPACING } from '../../theme';
-import { operationLogs } from '../../data/dataStore';
+import { operationLogs, pendingUsers } from '../../data/dataStore';
 import { sortOperationsNewestFirst } from '../../utils/dataHelpers';
 import { useTranslation } from '../../services/i18n';
 import { fetchAgriculturalSyncMonitor } from '../../services/telemetryService';
@@ -38,6 +38,7 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
   const managerUserId = session.employeeId || session.id || '';
   const managedFarms = blockFarms.filter(farm => farm.managerUserId === managerUserId);
   const managedFarmIds = new Set(managedFarms.map(farm => farm.id));
+  const pendingCount = (pendingUsers || []).filter(user => managedFarmIds.has(user.requestedBlockFarmId || user.affiliatedBlockFarmId || user.assignment?.blockFarmId)).length;
   const managedFields = fields.filter(field => managedFarmIds.has(field.blockFarmId));
   const managedFieldIds = new Set(managedFields.map(field => field.id));
   const totalHectares = managedFields.reduce((sum, field) => sum + Number(field.ha || 0), 0);
@@ -109,6 +110,17 @@ export default function ManagerHomeView({ session = {}, fields = [], cropCycles 
         </View>
         <Text style={s.cycleDescription}>{cropCycleDescription}</Text>
       </View>
+
+      {pendingCount > 0 && (
+        <TouchableOpacity style={s.syncCard} onPress={() => navigation.navigate('Field Ops', { screen: 'SchedMain', params: { openPendingUsers: true } })} activeOpacity={0.8}>
+          <View style={s.syncIcon}><Ionicons name="people-outline" size={21} color={COLORS.primary} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.syncTitle}>{pendingCount} Pending User{pendingCount === 1 ? '' : 's'}</Text>
+            <Text style={s.syncSub}>Review account approvals and phone verification requests.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity style={s.syncCard} onPress={() => navigation.navigate('SyncMonitor')} activeOpacity={0.8}>
         <View style={s.syncIcon}><Ionicons name="pulse-outline" size={21} color={COLORS.primary} /></View>

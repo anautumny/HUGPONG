@@ -98,7 +98,7 @@ const RELATED_RESOURCES = Object.freeze({
   logs: ['logs', 'fields', 'crop-cycles', 'audit-events'],
   prices: ['prices', 'audit-events', 'notifications'],
   tickets: ['tickets', 'audit-events'],
-  users: ['users', 'fields', 'block-farms', 'audit-events', 'notifications'],
+  users: ['users', 'fields', 'crop-cycles', 'block-farms', 'audit-events', 'notifications'],
   'audit-reports': ['audit-reports', 'audit-events'],
   'crop-year-compilations': ['crop-year-compilations'],
   'recovery-reviews': ['recovery-reviews', 'users'],

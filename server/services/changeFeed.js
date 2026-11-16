@@ -49,10 +49,17 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
   let pending = {};
   let listenerRetryAttempt = 0;
   let writeRetryAttempt = 0;
+  const knownRevisions = new Set();
 
   function revision() {
     return createHash('sha256').update(JSON.stringify(Object.entries(revisions).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
   }
+
+  function rememberRevision() {
+    knownRevisions.add(revision());
+    while (knownRevisions.size > 128) knownRevisions.delete(knownRevisions.values().next().value);
+  }
+  rememberRevision();
 
   function emit(resources) {
     invalidate(resources);
@@ -66,7 +73,9 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
       const next = snapshot.exists ? snapshot.data().revisions || {} : {};
       const resources = [...new Set([...Object.keys(revisions), ...Object.keys(next)])]
         .filter(key => revisions[key] !== next[key]);
+      rememberRevision();
       revisions = next;
+      rememberRevision();
       // Empty/deleted revision snapshots invalidate replicas too.
       if (resources.length) emit(resources);
     }, () => {
@@ -89,7 +98,9 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
     // All Worker API traffic is routed through one named Durable Object. Its
     // successful canonical commits can fan out directly, without gRPC/polling.
     if (singleWriter) {
+      rememberRevision();
       revisions = { ...revisions, ...batch };
+      rememberRevision();
       emit(Object.keys(batch));
     }
     writeRetryAttempt = 0;
@@ -201,7 +212,12 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
     // Load balancers can send an invalidation-driven GET to an instance whose
     // listener has not caught up yet. Never serve that instance's old data or
     // assignment/auth cache to a client that has already seen a newer revision.
-    if (/^[a-f0-9]{64}$/.test(observed) && observed !== revision()) invalidate([]);
+    // The Worker routes every commit and stream through one Durable Object;
+    // it cannot lag another API writer, and hydration starts with empty caches.
+    // On Node hosts, recognized older tokens are normal while events travel to
+    // clients. They must not clear everyone's caches on each concurrent GET.
+    if (!singleWriter && /^[a-f0-9]{64}$/.test(observed)
+      && observed !== revision() && !knownRevisions.has(observed)) invalidate([]);
     next();
   }
 
@@ -211,6 +227,7 @@ function createChangeFeed({ database, invalidate = () => {}, logger = console, r
       if (!singleWriter || !ref) return;
       const snapshot = await ref.get();
       revisions = snapshot.exists ? snapshot.data().revisions || {} : {};
+      rememberRevision();
       invalidate([]);
     }, stop() {
     stopped = true;

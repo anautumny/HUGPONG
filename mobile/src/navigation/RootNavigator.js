@@ -257,7 +257,6 @@ function MainTabs({ navigation }) {
 
   const reconnectResult = reconnectNotice?.result || {};
   const reconnectRemaining = Math.max(0, Number(reconnectResult.remainingCount || 0));
-  const reconnectNeedsManualSync = reconnectPhase === 'MANUAL_REQUIRED' && reconnectRemaining > 0;
   const reconnectIncomplete = reconnectPhase === 'COMPLETE' && reconnectRemaining > 0;
 
   if (!sessionUserId) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.background }}><ActivityIndicator color={COLORS.primary} /></View>;
@@ -410,18 +409,14 @@ function MainTabs({ navigation }) {
             <Text style={modalStyles.desc}>
               {reconnectPhase === 'RECONNECTING'
                 ? t('reconnect_checking_msg', 'HUGPONG is checking the server and preparing your saved changes.')
-                : reconnectNeedsManualSync
-                  ? t('reconnect_manual_msg', 'Automatic sync is off. Open Sync Monitor and tap Sync Now to upload your saved changes.')
-                  : reconnectPhase === 'MANUAL_REQUIRED'
-                    ? t('reconnect_no_pending_msg', 'Automatic sync is off, and there are no saved changes waiting to sync.')
-                    : reconnectPhase === 'FAILED'
-                      ? t('reconnect_failed_msg', 'The connection is back, but synchronization could not finish. Open Sync Monitor and tap Sync Now to try again.')
-                      : reconnectIncomplete
-                        ? `${reconnectRemaining} ${t('reconnect_waiting_msg', 'saved change(s) are still waiting. Open Sync Monitor to review and retry them.')}`
-                        : t('reconnect_synced_msg', 'Automatic sync is on. Synchronization is complete and your saved changes are up to date.')}
+                : reconnectPhase === 'FAILED'
+                  ? t('reconnect_failed_msg', 'The connection is back, but synchronization could not finish. Open Sync Monitor and tap Sync Now to try again.')
+                  : reconnectIncomplete
+                    ? `${reconnectRemaining} ${t('reconnect_waiting_msg', 'saved change(s) are still waiting. Open Sync Monitor to review and retry them.')}`
+                    : t('reconnect_synced_msg', 'Synchronization is complete and your saved changes are up to date.')}
             </Text>
 
-            {reconnectPhase !== 'RECONNECTING' && (reconnectNeedsManualSync || reconnectIncomplete || reconnectPhase === 'FAILED') ? (
+            {reconnectPhase !== 'RECONNECTING' && (reconnectIncomplete || reconnectPhase === 'FAILED') ? (
               <>
                 <TouchableOpacity style={modalStyles.btn} onPress={handleOpenSyncMonitor} activeOpacity={0.85}>
                   <Ionicons name="sync" size={17} color="#FFF" />

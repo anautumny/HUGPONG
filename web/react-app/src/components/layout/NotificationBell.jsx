@@ -13,6 +13,7 @@ export default function NotificationBell() {
   const lifecycle = useRef(0);
   const working = useRef('');
   const dismissed = useRef(new Set());
+  const inboxOwner = useRef('');
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [read, setRead] = useState(new Set());
@@ -33,6 +34,7 @@ export default function NotificationBell() {
     const version = ++lifecycle.current;
     let active = true;
     working.current = ''; dismissed.current = new Set();
+    inboxOwner.current = '';
     setItems([]); setRead(new Set()); setOpen(false); setCursor(null); setError(''); setBusy(''); setLoading(Boolean(userId));
     if (!userId) return () => { lifecycle.current++; };
     const stop = subscribeToAuthenticatedLoader(async ({ force }) => {
@@ -44,6 +46,7 @@ export default function NotificationBell() {
       resources: ['notifications'],
       onData: result => {
         if (!active || lifecycle.current !== version) return;
+        inboxOwner.current = userId;
         applyState(result.notificationState || []);
         setItems((result.data || []).filter(item => !dismissed.current.has(item.id)));
         setCursor(result.page?.nextCursor || null); setError(''); setLoading(false);
@@ -94,7 +97,9 @@ export default function NotificationBell() {
     setCursor(result.page?.nextCursor || null);
   });
 
-  const unread = items.filter(item => !read.has(item.id)).length;
+  const visibleItems = inboxOwner.current === userId ? items : [];
+  const unread = visibleItems.filter(item => !read.has(item.id)).length;
+  if (!userId) return null;
   const actionClass = 'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-xs font-semibold hover:bg-bg disabled:opacity-50 disabled:cursor-not-allowed';
   return <div className="relative">
     <button type="button" className="relative p-2 rounded-xl border border-border bg-surface" aria-label={`Notifications, ${unread} unread`} aria-expanded={open} onClick={() => setOpen(value => !value)}>
@@ -109,14 +114,14 @@ export default function NotificationBell() {
         <button type="button" className={actionClass} disabled={loading || Boolean(busy) || (!unread && !cursor)} onClick={() => bulk('read')}>
           {busy === 'read:all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}Mark all as read
         </button>
-        <button type="button" className={`${actionClass} text-danger`} disabled={loading || Boolean(busy) || (!items.length && !cursor)} onClick={() => bulk('dismiss')}>
+        <button type="button" className={`${actionClass} text-danger`} disabled={loading || Boolean(busy) || (!visibleItems.length && !cursor)} onClick={() => bulk('dismiss')}>
           {busy === 'dismiss:all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Clear all
         </button>
       </div>
       {error && <p role="alert" className="text-xs text-danger mb-2">{error}</p>}
       {loading && <p role="status" className="text-xs text-hug-muted flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading notifications...</p>}
-      {!items.length && !loading && !error && <p className="text-xs text-hug-muted">No notifications.</p>}
-      {items.map(item => <div key={item.id} className={`rounded-lg border-b border-border py-2 ${read.has(item.id) ? 'opacity-70' : ''}`}>
+      {!visibleItems.length && !loading && !error && <p className="text-xs text-hug-muted">No notifications.</p>}
+      {visibleItems.map(item => <div key={item.id} className={`rounded-lg border-b border-border py-2 ${read.has(item.id) ? 'opacity-70' : ''}`}>
         <button type="button" disabled={Boolean(busy)} onClick={() => mark(item, 'read', true)} className="text-left w-full p-2 rounded-lg hover:bg-bg disabled:cursor-wait">
           <p className="font-semibold text-xs">{item.title}</p><p className="text-xs text-hug-muted mt-1">{item.body}</p>
         </button>

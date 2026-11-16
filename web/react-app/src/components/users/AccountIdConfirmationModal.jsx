@@ -79,6 +79,12 @@ export default function AccountIdConfirmationModal({ account = null, onAcknowled
             <dd className="text-right font-bold text-hug-text">{account.phone}</dd>
           </div>
         )}
+        {account?.approvalFieldId && (
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-hug-muted">Assigned field</dt>
+            <dd className="text-right font-bold text-hug-text">{account.approvalFieldId}</dd>
+          </div>
+        )}
       </dl>
 
       <p className="text-xs leading-relaxed text-hug-muted">

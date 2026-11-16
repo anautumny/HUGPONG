@@ -133,13 +133,11 @@ test('Phase 7 removes SRA renewal, fabricated mobile prices, and pending operati
   assert.match(analyticsScreen, /Incomplete Circular/);
   assert.match(priceReference, /Lkg/);
   assert.match(priceReference, /unit: 'MT'/);
-  assert.match(home, /priceText\(latest\.sugarPricePerLkg, latest\.sugarPriceStatus, 'Lkg'\)/);
-  assert.match(home, /priceText\(latest\.molassesPricePerMetricTon, latest\.molassesPriceStatus, 'MT'\)/);
+  assert.match(home, /getSystemNotifications\(session\)/);
+  assert.doesNotMatch(home, /New SRA Price Circular Broadcast|priceNotifId/);
   assert.doesNotMatch(home, /latest\.(?:price|molasses|week|date)\b/);
-  assert.match(home, /latest\.sugarPricePerLkg/);
-  assert.match(home, /latest\.molassesPricePerMetricTon/);
-  assert.match(home, /latest\.weekLabel/);
-  assert.match(home, /latest\.effectiveDate/);
+  assert.match(priceReference, /sugarPricePerLkg/);
+  assert.match(priceReference, /molassesPricePerMetricTon/);
   assert.doesNotMatch(operationsView, /Pending Verification|operation[^\n]*status === 'PENDING'/);
   assert.doesNotMatch(managerDashboard, /pendingOps|Pending Operation Record/);
 });

@@ -40,6 +40,29 @@ test('Worker routing preserves API boundaries, legacy redirects and trusted prox
   assert.equal(trusted.headers.get('cookie'), 'hugpong.sid=test-only');
 });
 
+test('only notification producers wake delivery scans; uploads, telemetry, login and state reads do not', async () => {
+  const { needsBackgroundWake } = await import('../../cloudflare/src/routing.mjs');
+  for (const path of ['/api/notifications/state/query', '/api/notifications/state/query/', '/api/notifications//state/query?view=inbox',
+    '/api/notifications/state', '/api/logs', '/api/terminal-diagnostics/activity', '/api/terminal-diagnostics/sync', '/auth/login', '/auth/mobile-session', '/auth/push-device']) {
+    assert.equal(needsBackgroundWake(new Request(`https://hugpong.org${path}`, { method: 'POST' })), false);
+  }
+  for (const path of ['/api/prices', '/api/users/approve', '/api/users/04000001/verify-phone', '/auth/register', '/auth/request-phone-verification-review']) {
+    assert.equal(needsBackgroundWake(new Request(`https://hugpong.org${path}`, { method: 'POST' })), true);
+  }
+  assert.equal(needsBackgroundWake(new Request('https://hugpong.org/api/notifications/inbox')), false);
+  assert.equal(needsBackgroundWake(new Request('https://hugpong.org/api/users/04000001', { method: 'PATCH' })), true);
+});
+
+test('idle durable alarm performs one empty queue read and sleeps until retention work', async () => {
+  let reads = 0;
+  const query = { where() { return this; }, orderBy() { return this; }, limit() { return this; },
+    async get() { reads++; return { docs: [] }; } };
+  const database = { collection: () => query }, storage = alarmStorage();
+  const tasks = createDurableRuntimeTasks(database, storage, { now: () => 100000 });
+  await tasks.initialize(); await tasks.drain();
+  assert.equal(reads, 1); assert.equal(storage.alarm, storage.values.get('cleanupAt'));
+});
+
 test('preflight mode rejects all submissions before routing and active mode preserves the existing API', async () => {
   const { preflightRejection } = await import('../../cloudflare/src/routing.mjs');
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) {
@@ -89,8 +112,10 @@ test('single-authority commits fan out after persistence without starting a gRPC
 test('bounded notification pages resume after restart and retain receipt state across the entire fanout', async () => {
   const database = memoryFirestore();
   for (let index = 0; index < 3; index++) {
-    const user = { employeeId: `MEM-${index}`, role: ROLES.MEMBER_FARMER, status: 'ACTIVE', authVersion: 1 };
+    const user = { employeeId: `MEM-${index}`, role: ROLES.MEMBER_FARMER, status: 'ACTIVE', authVersion: 1,
+      notificationStartedAt: '2026-01-01T00:00:00.000Z' };
     database.records.set(`users/${user.employeeId}`, user);
+    await require('../services/notificationSubscriptions').openNotificationSubscription(database, user, `install-${index}`, { freshLogin: true });
     await registerPushDevice(database, user, { token: `ExpoPushToken[test-${index}]`, clientInstanceId: `install-${index}` });
   }
   const id = 'test-notification';

@@ -5,15 +5,19 @@ const crypto = require('node:crypto');
 const { db } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
 const { COLLECTIONS, nowIso } = require('../schema/firestoreSchema');
-const { notificationInbox } = require('../services/systemNotificationService');
+const { notificationInbox, ensureNotificationStart } = require('../services/systemNotificationService');
 const { pageLimit } = require('../services/cursorPagination');
+const { openNotificationSubscription } = require('../services/notificationSubscriptions');
 
 router.get('/inbox', requireAuth, async (req, res) => {
   try {
     const user = req.authUser || req.session.user;
     const userId = user.employeeId || user.userId;
-    const account = await db.collection(COLLECTIONS.USERS).doc(userId).get();
-    const result = await notificationInbox(db, { ...account.data(), employeeId: userId }, {
+    const account = req.authAccount || (await db.collection(COLLECTIONS.USERS).doc(userId).get()).data();
+    if (!account || account.status !== 'ACTIVE') return res.status(403).json({ success: false, error: 'An active account is required.' });
+    const notificationStartedAt = account.notificationStartedAt || await ensureNotificationStart(db, userId);
+    await openNotificationSubscription(db, { ...account, employeeId: userId }, req.headers['x-client-instance-id']);
+    const result = await notificationInbox(db, { ...account, notificationStartedAt, employeeId: userId }, {
       cursor: req.query.cursor, limit: pageLimit(req.query.limit)
     });
     return res.json({ success: true, ...result });

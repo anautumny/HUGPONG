@@ -514,6 +514,38 @@ test('Web pending review shows the actual affiliated farm for an existing accoun
   assert.equal(JSON.stringify(tree).includes('Unassigned Farm'), false);
 });
 
+test('Web pending approval offers deferred assignment and reveals field inputs only for immediate assignment', async () => {
+  const runtime = harness();
+  const submissions = [];
+  const Queue = runtime.load('../../web/react-app/src/components/users/PendingApprovalsQueue.jsx', {
+    'lucide-react': Object.fromEntries(['UserCheck', 'CheckCircle2', 'Clock', 'Phone', 'MapPin', 'AlertCircle', 'Check', 'ChevronLeft', 'ChevronRight'].map(name => [name, name])),
+    '../ui/Button': { __esModule: true, default: 'Button' },
+    '../../domain/assignmentPresentation': { accountBlockFarmId: account => account.requestedBlockFarmId },
+    '../../domain/phoneVerification': { DEFAULT_PHONE_VERIFICATION_REASON: 'CHECKED', PHONE_VERIFICATION_REASONS: [], isOtherPhoneVerificationReason: () => false },
+  }).default;
+  const props = {
+    pendingUsers: [{ id: '04000077', status: 'PENDING', name: 'Member', canonicalRole: 'MEMBER_FARMER', requestedBlockFarmId: 'BF-A', phoneVerified: true }],
+    blockFarms: [{ id: 'BF-A', name: 'Farm' }], currentUser: { canonicalRole: 'FARM_MANAGER' },
+    onApproveUser: async (...args) => { submissions.push(args); return { success: true }; }
+  };
+  let tree = runtime.render(Queue, props);
+  assert.equal(find(tree, node => node.type === 'input'), null);
+  await find(tree, node => node.type === 'Button').props.onClick();
+  assert.equal(submissions[0][2].fieldAssignmentMode, 'LATER');
+  tree = runtime.render(Queue, props);
+  find(tree, node => node.type === 'button' && node.props.children.includes('Approve and assign field')).props.onClick();
+  tree = runtime.render(Queue, props);
+  const input = find(tree, node => node.type === 'input');
+  assert.ok(input);
+  assert.equal(find(tree, node => node.type === 'Button').props.disabled, true);
+  input.props.onChange({ target: { value: '1.50' } });
+  tree = runtime.render(Queue, props);
+  assert.equal(find(tree, node => node.type === 'Button').props.disabled, false);
+  await find(tree, node => node.type === 'Button').props.onClick();
+  assert.equal(submissions[1][2].fieldAssignmentMode, 'NOW');
+  assert.equal(submissions[1][2].fieldAreaHa, 1.5);
+});
+
 test('Web audit dossier labels use the canonical report month rather than blank or stale legacy aliases', () => {
   const runtime = harness();
   const Dossier = runtime.load('../../web/react-app/src/components/audit/AuditDossierCard.jsx', {
@@ -908,7 +940,9 @@ test('Mobile Home immediately renders read/dismiss changes and keeps them after 
     '../services/networkService': { getNetworkStatus: () => true, subscribeToNetwork: () => () => {} },
     '../services/syncEngine': { getOutboxQueue: () => [] },
     '../services/recoveryNotificationService': { requestApplicationNotificationPermission: async () => ({ supported: true, granted: true }) },
-    '../services/systemNotificationService': { getSystemNotifications: () => [] },
+    '../services/systemNotificationService': { getSystemNotifications: () => [{
+      id: 'PRICE-1', type: 'price', title: 'SRA price updated', body: 'An eligible publication.', createdAt: '2026-09-27T12:00:00.000Z'
+    }] },
     '../services/notificationStateService': {
       createAccountNotificationState: (userId, isCurrent, onChange) => service.createNotificationStateClient({ userId, isCurrent, onChange,
         readCache: async () => null, writeCache: async () => true,

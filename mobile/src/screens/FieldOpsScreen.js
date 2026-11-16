@@ -1334,9 +1334,18 @@ export default function FieldOpsScreen({ navigation, route }) {
   const [showProvisionUserModal, setShowProvisionUserModal] = useState(false);
   const [pendingActionLoading, setPendingActionLoading] = useState(false);
   const [pendingFarmSelections, setPendingFarmSelections] = useState({});
+  const [pendingFieldAssignmentModes, setPendingFieldAssignmentModes] = useState({});
+  const [pendingFieldAreas, setPendingFieldAreas] = useState({});
   const [pendingVerificationReasonCodes, setPendingVerificationReasonCodes] = useState({});
   const [pendingVerificationReasonDetails, setPendingVerificationReasonDetails] = useState({});
   const [pendingVerificationDecisions, setPendingVerificationDecisions] = useState({});
+  useEffect(() => {
+    if (route?.params?.openPendingUsers) {
+      setPendingUsersList([...pendingUsers]);
+      setShowPendingModal(true);
+      navigation.setParams({ openPendingUsers: undefined });
+    }
+  }, [route?.params?.openPendingUsers, navigation]);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calDate, setCalDate] = useState(new Date());
   const [takeoverSessions, setTakeoverSessions] = useState({});
@@ -7874,7 +7883,12 @@ export default function FieldOpsScreen({ navigation, route }) {
                   || (actorRole === 'FARM_MANAGER' && targetRole === 'MEMBER_FARMER' && managerOwnsReviewFarm);
                 const verificationReasonCode = pendingVerificationReasonCodes[pendingKey] || DEFAULT_PHONE_VERIFICATION_REASON;
                 const verificationReasonDetails = pendingVerificationReasonDetails[pendingKey] || '';
-                const verificationDecision = pendingVerificationDecisions[pendingKey] || 'NOW';
+                const verificationDecision = requiresPhoneVerification ? (pendingVerificationDecisions[pendingKey] || 'NOW') : 'NOW';
+                const canAssignField = isPendingRegistration && targetRole === 'MEMBER_FARMER' && actorRole === 'FARM_MANAGER';
+                const fieldAssignmentMode = pendingFieldAssignmentModes[pendingKey] || 'LATER';
+                const assigningFieldNow = canAssignField && fieldAssignmentMode === 'NOW' && (!requiresPhoneVerification || verificationDecision !== 'LATER');
+                const fieldAreaHa = Number(pendingFieldAreas[pendingKey]);
+                const invalidFieldArea = assigningFieldNow && (!Number.isFinite(fieldAreaHa) || fieldAreaHa < 0.01 || fieldAreaHa > 500);
                 return (
                 <View key={u.contact} style={{
                   backgroundColor: '#fff',
@@ -7939,6 +7953,39 @@ export default function FieldOpsScreen({ navigation, route }) {
                     <Text style={{ color: '#B45309', fontSize: 10.5, marginBottom: 8 }}>Select the member's Block Farm before approval.</Text>
                   )}
                   </>}
+
+                  {canAssignField && (!requiresPhoneVerification || verificationDecision !== 'LATER') && (
+                    <View style={{ marginTop: 8, gap: 6 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>Field assignment after approval</Text>
+                      {[
+                        { value: 'LATER', label: 'Approve and assign later' },
+                        { value: 'NOW', label: 'Approve and assign field' }
+                      ].map(option => {
+                        const selected = fieldAssignmentMode === option.value;
+                        return (
+                          <TouchableOpacity key={option.value} disabled={pendingActionLoading}
+                            accessibilityRole="radio" accessibilityState={{ selected }}
+                            onPress={() => setPendingFieldAssignmentModes(current => ({ ...current, [pendingKey]: option.value }))}
+                            style={{ borderWidth: 1, borderColor: selected ? COLORS.primary : COLORS.border, backgroundColor: selected ? COLORS.primaryBg : '#fff', borderRadius: RADIUS.md, padding: 10 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: selected ? COLORS.primary : COLORS.textSecondary }}>{option.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                      {assigningFieldNow ? (
+                        <View style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 10, gap: 6 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: COLORS.text }}>Add field for {u.name}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.text }}>Plot area (ha)</Text>
+                          <TextInput value={pendingFieldAreas[pendingKey] || ''} keyboardType="decimal-pad"
+                            accessibilityLabel={`Plot area in hectares for ${u.name}`} editable={!pendingActionLoading}
+                            placeholder="1.50" placeholderTextColor={COLORS.textMuted}
+                            onChangeText={value => setPendingFieldAreas(current => ({ ...current, [pendingKey]: value }))}
+                            style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 10, color: COLORS.text, fontSize: 12 }} />
+                          {invalidFieldArea && <Text style={{ fontSize: 10.5, color: '#B45309' }}>Enter an area between 0.01 and 500 hectares.</Text>}
+                          <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>The field belongs to this member in the selected Block Farm. A Field ID and first Crop Year Cycle are created on approval.</Text>
+                        </View>
+                      ) : <Text style={{ fontSize: 10.5, color: COLORS.textMuted }}>Activate the account now. Add its field later in the field registry.</Text>}
+                    </View>
+                  )}
 
                   {requiresPhoneVerification && (
                     <View style={{ backgroundColor: '#FFF7E6', borderWidth: 1, borderColor: '#F3C969', borderRadius: RADIUS.md, padding: 10, marginTop: 4 }}>
@@ -8015,6 +8062,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <TouchableOpacity
                       disabled={pendingActionLoading
+                        || invalidFieldArea
                         || (isPendingRegistration && verificationDecision !== 'LATER' && !selectedPendingFarmId)
                         || (requiresPhoneVerification && (!canVerifyPhone
                           || (isOtherPhoneVerificationReason(verificationReasonCode) && verificationReasonDetails.trim().length < 10)))}
@@ -8022,7 +8070,8 @@ export default function FieldOpsScreen({ navigation, route }) {
                         setPendingActionLoading(true);
                         try {
                           const res = await approvePendingRegistration(u.contact, {
-                            area: u.area,
+                            fieldAssignmentMode,
+                            ...(assigningFieldNow ? { fieldAreaHa } : {}),
                             blockFarmId: selectedPendingFarmId,
                             verificationReasonCode,
                             verificationReasonDetails,
@@ -8051,7 +8100,7 @@ export default function FieldOpsScreen({ navigation, route }) {
                       }}
                       style={{
                         flex: 1.4,
-                        backgroundColor: (!isPendingRegistration || verificationDecision === 'LATER' || selectedPendingFarmId)
+                        backgroundColor: !invalidFieldArea && (!isPendingRegistration || verificationDecision === 'LATER' || selectedPendingFarmId)
                           && (!requiresPhoneVerification || (canVerifyPhone
                             && (!isOtherPhoneVerificationReason(verificationReasonCode) || verificationReasonDetails.trim().length >= 10)))
                           ? COLORS.primary
@@ -8075,13 +8124,13 @@ export default function FieldOpsScreen({ navigation, route }) {
                         <>
                           <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
                           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
-                            {requiresPhoneVerification
+                            {assigningFieldNow ? (requiresPhoneVerification ? 'Verify, Approve & Assign Field' : 'Approve & Assign Field') : requiresPhoneVerification
                               ? (canVerifyPhone
                                 ? (isPendingRegistration
                                   ? (verificationDecision === 'LATER' ? 'Verify Phone Only' : 'Verify & Approve')
                                   : 'Verify Phone')
                                 : 'Awaiting Authorized Review')
-                              : (canonicalRole(session?.role) === 'SRA_ADMIN' ? 'Approve & Assign Farm' : 'Approve & Assign Plot')}
+                              : (canAssignField ? 'Approve & Assign Later' : 'Approve Application')}
                           </Text>
                         </>
                       )}

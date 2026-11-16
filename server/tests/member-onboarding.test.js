@@ -50,7 +50,7 @@ test('member registration is optional-farm while approval requires an SRA-confir
   assert.match(usersRoute, /Assign a Block Farm before approving this Farm Member/);
   assert.match(usersRoute, /affiliatedBlockFarmId/);
   assert.match(pendingQueue, /Assign Block Farm/);
-  assert.match(pendingQueue, /onApproveUser\(user, selectedFarmId\)/);
+  assert.match(pendingQueue, /onApproveUser\(user, selectedFarmId, \{/);
 });
 
 test('approved affiliation is visible on Web and Mobile before a field is allocated', () => {

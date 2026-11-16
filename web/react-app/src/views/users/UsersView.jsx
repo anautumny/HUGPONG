@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Users, UserPlus, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 import { subscribeToUsersData, toggleUserStatus, approveOrProvisionUser, updateUser, verifyUserPhone } from '../../services/usersService';
 import { subscribeToFieldsData } from '../../services/fieldsService';
 import UserTable from '../../components/users/UserTable';
@@ -30,7 +31,11 @@ export default function UsersView() {
   const [error, setError] = useState(null);
 
   // Tab State: 'directory' | 'pending' | 'recovery'
-  const [activeTab, setActiveTab] = useState('directory');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') === 'pending' ? 'pending' : 'directory');
+  useEffect(() => {
+    if (searchParams.get('tab') === 'pending') setActiveTab('pending');
+  }, [searchParams]);
 
   // Modal & Dialog States
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -105,7 +110,7 @@ export default function UsersView() {
 
   // Handle Approve Pending User
   const handleApprovePending = async (pendingUser, blockFarmId, verification = {}) => {
-    const { acceptUserNow = true, ...reasonPayload } = verification;
+    const { acceptUserNow = true, fieldAssignmentMode = 'LATER', fieldAreaHa, ...reasonPayload } = verification;
     const verificationPayload = pendingUser.phoneVerified ? {} : reasonPayload;
     const shouldApproveNow = pendingUser.status === 'PENDING' && acceptUserNow;
     const result = shouldApproveNow
@@ -113,6 +118,8 @@ export default function UsersView() {
         id: pendingUser.id,
         role: pendingUser.canonicalRole || 'MEMBER_FARMER',
         blockFarmId,
+        fieldAssignmentMode,
+        ...(fieldAssignmentMode === 'NOW' ? { fieldAreaHa } : {}),
         ...verificationPayload
       }, pendingUser.updatedAt)
       : await verifyUserPhone(pendingUser.id, verificationPayload, pendingUser.updatedAt);

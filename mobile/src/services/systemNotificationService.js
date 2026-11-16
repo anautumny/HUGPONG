@@ -7,7 +7,13 @@ import { getApplicationNotificationModule, getRecoveryPushToken, requestApplicat
 let inboxOwner = '';
 let inbox = [];
 const userIdOf = session => String(session?.employeeId || session?.id || '');
-export const getSystemNotifications = session => userIdOf(session) === inboxOwner ? inbox : [];
+const eligible = (event, session) => {
+  const from = Date.parse(session?.notificationStartedAt || '');
+  const created = Date.parse(event?.createdAt || '');
+  return Number.isFinite(from) && Number.isFinite(created) && created >= from;
+};
+export const getSystemNotifications = session => userIdOf(session) && userIdOf(session) === inboxOwner
+  ? inbox.filter(event => eligible(event, session)) : [];
 
 // One application owner uses the existing change feed/native module. No polling.
 export function startSystemNotifications({ getSession, subscribe, subscribeToCloudChanges, refreshResources, onChange, onOpen }) {
@@ -16,23 +22,49 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
   let generation = 0, owner = '', identity = '', binding = '', seen = new Set(), loaded = false, baselineKnown = false;
   const scheduled = new Set();
   let retryNotBefore = 0;
+  let nativeCleanup = Promise.resolve(), needsNativeUnregister = false;
   const current = (id, version) => !stopped && owner === id && generation === version && userIdOf(getSession()) === id;
   const schedule = (delay = 100) => { clearTimeout(timer); if (!stopped) timer = setTimeout(sync, Math.max(delay, retryNotBefore - Date.now())); };
-  const persistSeen = id => saveItem(`@hugpong_system_alerts_${id}`, [...seen].slice(-500));
+  const persistSeen = id => saveItem(`@hugpong_system_alerts_v2_${id}`, [...seen].slice(-500));
+  async function clearOtherAccountAlerts(id, version) {
+    if (!Notifications) return;
+    try {
+      const [pending, displayed] = await Promise.all([
+        Notifications.getAllScheduledNotificationsAsync?.() || [], Notifications.getPresentedNotificationsAsync?.() || []
+      ]);
+      if (!current(id, version)) return;
+      const stale = data => ['system-update', 'planner-reminder'].includes(data?.hugpongType)
+        && (!id || data.recipientUserId !== id);
+      await Promise.all([
+        ...pending.filter(item => stale(item.content?.data)).map(item => Notifications.cancelScheduledNotificationAsync(item.identifier)),
+        ...displayed.filter(item => stale(item.request?.content?.data)).map(item => Notifications.dismissNotificationAsync(item.request.identifier))
+      ]);
+    } catch { /* The in-app ownership gate still clears immediately if native cleanup is unavailable. */ }
+  }
   async function hydrate(id, version) {
-    const [cached, presented] = await Promise.all([getItem(`@hugpong_system_inbox_${id}`, []), getItem(`@hugpong_system_alerts_${id}`, null)]);
+    const [cached, presented] = await Promise.all([getItem(`@hugpong_system_inbox_v2_${id}`, []), getItem(`@hugpong_system_alerts_v2_${id}`, null)]);
     if (!current(id, version)) return;
-    inbox = Array.isArray(cached) ? cached : [];
+    inbox = Array.isArray(cached) ? cached.filter(event => eligible(event, getSession())) : [];
     seen = new Set(Array.isArray(presented) ? presented : []);
     baselineKnown = Array.isArray(presented);
     loaded = true; onChange();
   }
   function checkOwner() {
     const session = getSession(), id = userIdOf(session);
-    const next = `${id}:${session?.authVersion || ''}:${session?.phoneVerified}:${session?.requiresPasswordChange}`;
+    const next = `${id}:${session?.notificationStartedAt || ''}:${session?.authVersion || ''}:${session?.phoneVerified}:${session?.requiresPasswordChange}`;
     if (next === identity) return;
+    needsNativeUnregister ||= Boolean(owner && owner !== id);
     identity = next; generation++; owner = id; inboxOwner = id; retryNotBefore = 0;
     inbox = []; seen = new Set(); loaded = false; scheduled.clear(); binding = '';
+    const version = generation;
+    nativeCleanup = nativeCleanup.catch(() => {}).then(async () => {
+      if (!current(id, version)) return;
+      if (needsNativeUnregister && Notifications?.unregisterForNotificationsAsync) {
+        try { await Notifications.unregisterForNotificationsAsync(); needsNativeUnregister = false; }
+        catch { /* Remote logout and the foreground ownership gate remain active. */ }
+      }
+      await clearOtherAccountAlerts(id, version);
+    });
     if (id) void hydrate(id, generation).then(() => schedule());
   }
   async function sync() {
@@ -42,6 +74,7 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
     running = true;
     const id = owner, version = generation;
     try {
+      await nativeCleanup;
       if (!loaded) await hydrate(id, version);
       if (!current(id, version)) return;
       if (Notifications) try {
@@ -70,33 +103,38 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
         events.push(...result.data);
         cursor = result.page?.hasMore ? result.page.nextCursor : null;
       } while (cursor && events.length < 50);
-      inbox = events.slice(0, 50);
+      inbox = events.filter(event => eligible(event, getSession())).slice(0, 50);
       // First installation establishes an inbox baseline, without playing a
       // month of old alerts. Later reconnects alert only unseen events.
       if (!baselineKnown) { inbox.forEach(event => seen.add(event.id)); baselineKnown = true; await persistSeen(id); }
-      await saveItem(`@hugpong_system_inbox_${id}`, inbox);
+      await saveItem(`@hugpong_system_inbox_v2_${id}`, inbox);
       if (!current(id, version)) return;
       onChange();
       if (Notifications && inbox.length) {
-        const [displayed, state] = await Promise.all([
+        const [displayed, permission] = await Promise.all([
           Notifications.getPresentedNotificationsAsync(),
-          authenticatedRequest('/api/notifications/state/query', { method: 'POST', body: { expectedUserId: id, ids: inbox.map(event => event.id) } })
+          Notifications.getPermissionsAsync()
         ]);
         if (!current(id, version)) return;
         for (const item of displayed) {
           const data = item.request?.content?.data || {};
           if (data.recipientUserId === id && data.notificationId) seen.add(data.notificationId);
         }
+        const candidates = inbox.filter(event => !seen.has(event.id) && !scheduled.has(event.id));
+        const state = permission.status === 'granted' && candidates.length
+          ? await authenticatedRequest('/api/notifications/state/query', { method: 'POST', body: { expectedUserId: id, ids: candidates.map(event => event.id) } })
+          : { data: [] };
+        if (!current(id, version)) return;
         const read = new Set((state.data || []).filter(item => item.read || item.dismissed).map(item => item.id));
-        const permission = await Notifications.getPermissionsAsync();
-        if (permission.status === 'granted') for (const event of inbox) {
+        read.forEach(notificationId => seen.add(notificationId));
+        if (permission.status === 'granted') for (const event of candidates) {
           if (!current(id, version)) return;
           if (seen.has(event.id) || scheduled.has(event.id) || read.has(event.id)) continue;
           scheduled.add(event.id);
           try {
             await Notifications.scheduleNotificationAsync({ identifier: event.id,
               content: { title: event.title, body: event.body, sound: 'default',
-                data: { hugpongType: 'system-update', notificationId: event.id, recipientUserId: id, resources: event.resources } },
+                data: { hugpongType: 'system-update', notificationId: event.id, recipientUserId: id, createdAt: event.createdAt, resources: event.resources } },
               trigger: Platform.OS === 'android' ? { channelId: 'system-updates' } : null });
           } catch (error) { scheduled.delete(event.id); throw error; }
         }
@@ -117,7 +155,10 @@ export function startSystemNotifications({ getSession, subscribe, subscribeToClo
   }
   async function received(notification, opened = false) {
     const data = notification?.request?.content?.data || {};
+    if (data.hugpongType === 'password-recovery-review') return !userIdOf(getSession());
+    if (data.hugpongType === 'planner-reminder') return Boolean(owner && data.recipientUserId === owner && owner === userIdOf(getSession()));
     if (data.hugpongType !== 'system-update' || data.recipientUserId !== userIdOf(getSession())) return false;
+    if (!owner || !eligible(data, getSession())) return false;
     const id = owner, version = generation;
     if (!loaded) await hydrate(id, version);
     if (!current(id, version)) return false;

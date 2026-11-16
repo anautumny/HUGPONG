@@ -129,10 +129,14 @@ async function requireAuth(req, res, next) {
       requiresPasswordChange: account.requiresPasswordChange === true,
       passwordChanged: Boolean(account.passwordChangedAt) || account.requiresPasswordChange !== true,
       authVersion: currentVersion,
+      notificationStartedAt: account.notificationStartedAt || null,
+      notificationSessionKey: presented.notificationSessionKey || null,
       platform: requestPlatform,
       authenticatedAt: presented.authenticatedAt || new Date().toISOString()
     };
     req.authUser = user;
+    // Internal verified snapshot; do not serialize this account document.
+    req.authAccount = account;
     req.authorizationVerified = true;
     if (req.session) req.session.user = user;
     return next();

@@ -129,7 +129,7 @@ function applyConnectivity(next, forceReconnect = false) {
     publishReconnectStatus('RECONNECTING');
     Promise.resolve(onReconnectCallback('NETWORK_RESTORED'))
       .then(result => {
-        publishReconnectStatus(result?.reason === 'AUTO_SYNC_DISABLED' ? 'MANUAL_REQUIRED' : 'COMPLETE', result);
+        publishReconnectStatus('COMPLETE', result);
       })
       .catch(error => {
         publishReconnectStatus('FAILED', {

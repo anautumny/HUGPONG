@@ -27,6 +27,7 @@ function issueToken(user, roleKey) {
     requiresPasswordChange: user.requiresPasswordChange === true,
     passwordChanged: user.passwordChanged === true,
     authVersion: Number(user.authVersion || 1),
+    notificationSessionKey: user.notificationSessionKey || null,
     platform: String(user.platform || '').trim().toLowerCase(),
     issuedAt: now,
     expiresAt

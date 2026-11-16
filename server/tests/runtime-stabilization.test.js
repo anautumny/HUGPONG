@@ -279,7 +279,7 @@ test('automatic sync requires both NetInfo reachability and the configured gatew
   assert.match(networkService, /NETWORK_RESTORED/);
 });
 
-test('reconnection reports progress and honors the persisted automatic-sync preference', () => {
+test('reconnection reports progress and synchronization cannot be disabled in profile settings', () => {
   const profile = read('mobile/src/screens/ProfileScreen.js');
   const mobileTranslations = read('mobile/src/services/i18n.js');
   const webAppShell = read('web/react-app/src/components/layout/AppShell.jsx');
@@ -287,12 +287,10 @@ test('reconnection reports progress and honors the persisted automatic-sync pref
 
   assert.match(networkService, /subscribeToReconnectStatus/);
   assert.match(networkService, /publishReconnectStatus\('RECONNECTING'\)/);
-  assert.match(networkService, /AUTO_SYNC_DISABLED' \? 'MANUAL_REQUIRED' : 'COMPLETE'/);
-  assert.match(dataStore, /autoSyncEnabled: true/);
-  assert.match(dataStore, /isAutomaticSyncEnabled/);
-  assert.match(dataStore, /userInitiatedTrigger/);
-  assert.match(dataStore, /reason: 'AUTO_SYNC_DISABLED'/);
-  assert.match(profile, /updateSecurityPreferences\(\{ autoSyncEnabled: enabled \}\)/);
+  assert.match(networkService, /publishReconnectStatus\('COMPLETE', result\)/);
+  assert.doesNotMatch(dataStore, /isAutomaticSyncEnabled|AUTO_SYNC_DISABLED|userInitiatedTrigger/);
+  assert.doesNotMatch(profile, /autoSync|handleAutoSyncChange|profile_auto_sync/);
+  assert.doesNotMatch(rootNavigator, /MANUAL_REQUIRED|reconnectNeedsManualSync/);
   assert.match(rootNavigator, /Restoring Connection/);
   assert.match(rootNavigator, /Open Sync Monitor/);
   assert.match(mobileTranslations, /reconnect_synced_msg/);

@@ -17,19 +17,24 @@ import { authenticatedRequest, subscribeToAuthenticatedResource } from './apiCli
  */
 export function subscribeToUsersData({ user, onUpdate, onError }) {
   let records = [];
+  let reviewRecords = [];
+  let reviewLoaded = false;
   let nextCursor = null;
   let hasMore = false;
   let loadingMore = false;
+  const actorRole = String(user?.canonicalRole || user?.roleKey || user?.role || '').toUpperCase().replace(/ /g, '_');
+  const needsSeparateReviewQueue = ['SUPER_ADMIN', 'SUPERADMIN'].includes(actorRole);
 
   const present = () => {
-    const mapped = records
+    const reviewIds = new Set(reviewRecords.map(record => record.id));
+    const mapped = Array.from(new Map([...records, ...reviewRecords].filter(Boolean).map(record => [record.id, record])).values())
       .filter(record => record && typeof record === 'object')
       .map(record => fromUser(String(record.id || record.employeeId || '').trim(), record))
       .filter(record => record.id)
       .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
     onUpdate({
       users: mapped.filter(record => record.status !== 'PENDING'),
-      pendingUsers: mapped.filter(record => record.reviewQueueEligible === true),
+      pendingUsers: mapped.filter(record => record.reviewQueueEligible === true && (!reviewLoaded || reviewIds.has(record.id))),
       hasMore,
       isLoadingMore: loadingMore,
       isLoading: false,
@@ -37,7 +42,7 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
     });
   };
 
-  const unsubscribe = subscribeToAuthenticatedResource('/api/users?limit=50', {
+  const unsubscribeDirectory = subscribeToAuthenticatedResource('/api/users?limit=50', {
     onData: response => {
       records = Array.isArray(response?.data) ? response.data : [];
       nextCursor = response.page?.nextCursor || null;
@@ -49,6 +54,17 @@ export function subscribeToUsersData({ user, onUpdate, onError }) {
       if (onError) onError(error);
     }
   });
+  // The manager/SRA directory response already includes every scoped review.
+  // Super Admin alone uses a paginated directory and needs a separate queue.
+  const unsubscribeReview = needsSeparateReviewQueue ? subscribeToAuthenticatedResource('/api/users?reviewQueue=true', {
+    onData: response => {
+      reviewRecords = Array.isArray(response?.data) ? response.data : [];
+      reviewLoaded = true;
+      present();
+    },
+    onError
+  }) : () => {};
+  const unsubscribe = () => { unsubscribeDirectory(); unsubscribeReview(); };
   unsubscribe.loadMore = async () => {
     if (!hasMore || !nextCursor || loadingMore) return;
     loadingMore = true;

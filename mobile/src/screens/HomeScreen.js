@@ -1,6 +1,5 @@
 import PriceReferenceCard from '../components/PriceReferenceCard';
 import { getSystemNotifications } from '../services/systemNotificationService';
-import { priceText } from '../utils/pricePresentation';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Platform, ActivityIndicator, Alert, Linking, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -62,12 +61,12 @@ const formatChartMonth = (val) => {
 
 const generateDynamicNotifications = (session, customDrafts, customLogs, readIds = new Set(), dismissedIds = new Set()) => {
   const notifs = [];
-  const sortedPrices = getSortedPrices();
   const allLogs = customLogs || operationLogs || [];
   const allDrafts = customDrafts || draftLogs || [];
 
   const userRole = session?.role || 'Farm Member';
   const userId = session?.employeeId || session?.id || '';
+  if (!userId) return [];
   const managedFarmIds = new Set(blockFarms.filter(farm => farm.managerUserId === userId).map(farm => farm.id));
   const managerFieldIds = fields.filter(field => managedFarmIds.has(field.blockFarmId)).map(field => field.id);
 
@@ -139,34 +138,12 @@ const generateDynamicNotifications = (session, customDrafts, customLogs, readIds
     });
   }
 
-  // 2. New SRA Price Circular Notification
-  if (sortedPrices.length > 0) {
-    const latest = sortedPrices[0];
-    const prev = sortedPrices[1];
-    const diff = latest.sugarPriceChange;
-    const diffStr = diff != null && diff !== 0 ? ` (${diff > 0 ? '+' : ''}₱${diff.toLocaleString()} vs previous)` : '';
-    const priceNotifId = `notif-price-${latest.id || latest.effectiveDate || 'latest'}`;
-
-    if (!dismissedIds.has(priceNotifId)) {
-      notifs.push({
-        id: priceNotifId,
-        type: 'price',
-        icon: 'trending-up',
-        color: '#267326',
-        title: 'New SRA Price Circular Broadcast',
-        msg: `Raw Sugar: ${priceText(latest.sugarPricePerLkg, latest.sugarPriceStatus, 'Lkg')}${diffStr}. Molasses: ${priceText(latest.molassesPricePerMetricTon, latest.molassesPriceStatus, 'MT')} (${latest.weekLabel}).`,
-        time: latest.effectiveDate,
-        createdAt: latest.effectiveDate,
-        unread: !readIds.has(priceNotifId),
-      });
-    }
-  }
-
   // 3. Unsubmitted Drafts Alert (Only for Member and their Farm Manager)
   if (userRole === 'Farm Member' || userRole === 'Farm Manager') {
     const scopedDrafts = userRole === 'Farm Member'
       ? allDrafts.filter(d => fields.some(field => field.memberUserId === userId && field.id === d.fieldId))
-      : allDrafts.filter(d => managerFieldIds.includes(d.fieldId) || d.authorName === session?.name);
+      : allDrafts.filter(d => managerFieldIds.includes(d.fieldId)
+        || String(d.createdByUserId || d.submittedByUserId || '') === String(userId));
 
     const draftId = notificationEventId('unsubmitted-drafts', scopedDrafts);
     if (scopedDrafts.length > 0 && !dismissedIds.has(draftId)) {
@@ -212,7 +189,11 @@ export default function HomeScreen({ navigation, route }) {
   const [dismissedNotifIds, setDismissedNotifIds] = useState(new Set());
   const [pendingNotificationChanges, setPendingNotificationChanges] = useState(0);
   const notificationClientRef = useRef(null);
-  const [notifs, setNotifs] = useState(() => generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs));
+  const [notificationSnapshot, setNotificationSnapshot] = useState(() => ({
+    ownerUserId: getCurrentSession()?.employeeId || getCurrentSession()?.id || '',
+    items: generateDynamicNotifications(getCurrentSession(), draftLogs, operationLogs)
+  }));
+  const notifs = notificationSnapshot.ownerUserId === (session?.employeeId || session?.id || '') ? notificationSnapshot.items : [];
   const notificationPage = usePagination(notifs, { resetKey: showNotifs });
   
   const [isOnline, setIsOnline] = useState(getNetworkStatus());
@@ -261,7 +242,8 @@ export default function HomeScreen({ navigation, route }) {
   }, [session?.employeeId, session?.id]);
 
   useEffect(() => {
-    setNotifs(generateDynamicNotifications(session, draftLogs, operationLogs, readNotifIds, dismissedNotifIds));
+    setNotificationSnapshot({ ownerUserId: session?.employeeId || session?.id || '',
+      items: generateDynamicNotifications(session, draftLogs, operationLogs, readNotifIds, dismissedNotifIds) });
   }, [session, readNotifIds, dismissedNotifIds]);
 
   const updateNotificationState = (ids, action) => {
@@ -312,7 +294,8 @@ export default function HomeScreen({ navigation, route }) {
       setSyncedState(getIsSynced());
       setSessionState({ ...sess });
       setFieldsState([...fields]);
-      setNotifs(generateDynamicNotifications(sess, draftLogs, operationLogs, readNotifIds, dismissedNotifIds));
+      setNotificationSnapshot({ ownerUserId: sess?.employeeId || sess?.id || '',
+        items: generateDynamicNotifications(sess, draftLogs, operationLogs, readNotifIds, dismissedNotifIds) });
       setPriceData({
         livePrice: currentPrice.value,
         liveMol: currentMarketObservation.value,

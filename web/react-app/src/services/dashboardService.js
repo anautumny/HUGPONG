@@ -23,7 +23,7 @@ const emptyDashboard = () => ({
   prices: [], currentPrice: null, previousPrice: null,
   fields: [], scopedFields: [], blockFarms: [], assignedBlockFarm: null,
   operations: [], recentOperations: [], cropCycles: [],
-  supportTickets: [], auditReports: [], terminalDiagnostics: [],
+  supportTickets: [], auditReports: [], terminalDiagnostics: [], pendingUsers: [], pendingUsersError: null,
   activityMonitoringError: null, systemDiagnosticsError: null
 });
 
@@ -44,7 +44,9 @@ function terminalDiagnostic(data) {
 
 async function dashboardRead(label, path, force) {
   try {
-    return await authenticatedRead(path, { force });
+    // Revision events already evict the affected resource from apiClient.
+    // Keep unrelated fresh reads when another dashboard tile changes.
+    return await authenticatedRead(path);
   } catch (error) {
     const missingIndex = /failed[_ -]?precondition|requires an index/i.test(String(error?.message || ''));
     const detail = error?.isNetworkError
@@ -78,14 +80,17 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
   const previous = new Map();
   return subscribeToAuthenticatedLoader(async ({ force, retryOnly }) => {
     if (roleKey === ROLE_KEYS.SUPER_ADMIN) {
-      const { values: [ticketsResult, diagnosticsState, telemetryState], refreshError, errors } = await settleResourceReads([
+      const { values: [ticketsResult, diagnosticsState, telemetryState, pendingResult], refreshError, errors } = await settleResourceReads([
         () => dashboardRead('Support tickets', '/api/tickets', force),
         () => dashboardRead('System diagnostics', '/api/system-diagnostics', force),
-        () => dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force)
+        () => dashboardRead('Terminal diagnostics', '/api/terminal-diagnostics', force),
+        () => dashboardRead('Pending users', '/api/users?reviewQueue=true', force)
       ], previous, { retryOnly });
       return {
         ...emptyDashboard(),
         refreshError,
+        pendingUsers: pendingResult.data || [],
+        pendingUsersError: errors[3]?.message || null,
         supportTickets: sortNewestFirst(
           (ticketsResult.data || []).map(ticket => fromTicket(ticket.id, ticket)),
           ['createdAt']
@@ -99,7 +104,7 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
 
     const includeAudits = roleKey === ROLE_KEYS.SRA_ADMIN;
     const includeActivityMonitoring = roleKey === ROLE_KEYS.FARM_MANAGER;
-    const { values: [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult], refreshError, errors } = await settleResourceReads([
+    const { values: [pricesResult, fieldsResult, farmsResult, cyclesResult, logsResult, auditsResult, activityResult, pendingResult], refreshError, errors } = await settleResourceReads([
       () => dashboardRead('Published prices', '/api/prices?limit=2', force),
       () => dashboardRead('Fields', '/api/fields', force),
       () => dashboardRead('Block farms', '/api/block-farms', force),
@@ -110,7 +115,8 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
         : Promise.resolve({ data: [] }),
       () => includeActivityMonitoring
         ? dashboardRead('Member activity', '/api/terminal-diagnostics', force)
-        : Promise.resolve({ data: { subjects: [] } })
+        : Promise.resolve({ data: { subjects: [] } }),
+      () => dashboardRead('Pending users', '/api/users?reviewQueue=true', force)
     ], previous, { retryOnly, groups: [[1, 2, 3, 4]] });
 
     const prices = sortNewestFirst(
@@ -138,6 +144,8 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       ...emptyDashboard(),
       prices,
       refreshError,
+      pendingUsers: pendingResult.data || [],
+      pendingUsersError: errors[7]?.message || null,
       currentPrice: prices[0] || null,
       previousPrice: prices[1] || null,
       fields,
@@ -157,9 +165,9 @@ export function subscribeToDashboardData({ roleKey, user, onUpdate, onError }) {
       if (onError) onError(error);
     },
     resources: roleKey === ROLE_KEYS.SUPER_ADMIN
-      ? ['tickets', 'terminal-diagnostics']
+      ? ['tickets', 'terminal-diagnostics', 'users']
       : roleKey === ROLE_KEYS.FARM_MANAGER
-        ? ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'terminal-diagnostics']
-        : ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports']
+        ? ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'terminal-diagnostics', 'users']
+        : ['prices', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports', 'users']
   });
 }

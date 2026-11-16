@@ -49,7 +49,8 @@ function normalizedTicket(document) {
 }
 
 async function presentTickets(tickets) {
-  const ids = [...new Set(tickets.map(ticket => String(ticket.createdByUserId || '').trim()).filter(Boolean))];
+  const ids = [...new Set(tickets.filter(ticket => !ticket.requesterName || !canonicalRole(ticket.requesterRole))
+    .map(ticket => String(ticket.createdByUserId || '').trim()).filter(Boolean))];
   const entries = await Promise.all(ids.map(async userId => {
     const snapshot = await db.collection(COLLECTIONS.USERS).doc(userId).get();
     return [userId, snapshot.exists ? snapshot.data() : null];

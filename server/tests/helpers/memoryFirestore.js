@@ -1,7 +1,7 @@
 'use strict';
 
 // Serialized, atomic transactions for behavioral tests; never initializes Firebase.
-function memoryFirestore(seed = {}) {
+function memoryFirestore(seed = {}, { readCounts } = {}) {
   const records = new Map(Object.entries(seed).map(([key, value]) => [key, structuredClone(value)]));
   let pending = Promise.resolve();
   const snapshot = ref => ({ id: ref.id, ref, exists: records.has(ref.path), data: () => structuredClone(records.get(ref.path)) });
@@ -36,18 +36,22 @@ function memoryFirestore(seed = {}) {
           if (orders.length) rows.sort((a, b) => compare(a, orders.map(([field]) => field === '__name__' ? b.id : b.data()[field])));
           if (after) rows = rows.filter(row => compare(row, after) > 0);
           rows = rows.slice(0, maximum);
+          readCounts?.push({ collection: name, documents: Math.max(1, rows.length) });
           return { docs: rows, empty: !rows.length, size: rows.length };
         }
       });
       return { ...query(), doc(id) {
         const ref = { id, path: `${name}/${id}` };
-        ref.get = async () => snapshot(ref);
+        ref.get = async () => { readCounts?.push({ collection: name, documents: 1 }); return snapshot(ref); };
         ref.set = async (value, options) => records.set(ref.path, options?.merge ? { ...records.get(ref.path), ...structuredClone(value) } : structuredClone(value));
         ref.delete = async () => records.delete(ref.path);
         return ref;
       } };
     },
-    async getAll(...refs) { return refs.map(snapshot); },
+    async getAll(...refs) {
+      refs.forEach(ref => readCounts?.push({ collection: ref.path.split('/')[0], documents: 1 }));
+      return refs.map(snapshot);
+    },
     runTransaction(work) {
       const run = pending.then(async () => {
         const writes = [];

@@ -37,13 +37,57 @@ test('sync preflight preserves queued work and distinguishes temporary failures 
   }
 });
 
-test('session retry scheduling honors cooldown instead of a rapid refresh loop', () => {
+test('automatic uploads run on every lifecycle trigger despite a legacy disabled preference', async () => {
+  const source = read('mobile/src/data/dataStore.js');
+  const begin = source.indexOf('export const performMobileSync =');
+  const end = source.indexOf('export const fetchAuditHistoryPage', begin);
+  for (const trigger of ['APP_START', 'AUTH_RESTORED', 'NETWORK_RESTORED', 'APP_FOREGROUND', 'POST_MUTATION', 'OUTBOX_CONTINUATION']) {
+    let queue = [{ mutationId: 'SAVED-LOG', type: 'operation_log', status: 'queued' }];
+    let flushes = 0;
+    const context = vm.createContext({ console: { info() {} }, Date,
+      SECURITY_PREFERENCES: { autoSyncEnabled: false }, isAutomaticSyncEnabled: () => false,
+      CURRENT_SESSION: { employeeId: 'A' }, auth: { currentUser: { uid: 'A' } }, cloudSyncGeneration: 1,
+      mobileSyncPromise: null, IS_SYNCED: false,
+      getOutboxStorageState: () => ({ ready: true }), getOutboxCount: () => queue.length,
+      getOutboxQueue: () => queue, getNetworkStatus: () => true,
+      refreshMobileSessionForSync: async () => ({}),
+      flushOutboxToApi: async () => { flushes++; queue = []; return { success: true, processedCount: 1, responses: {} }; },
+      reconcileSuccessfulMutations: async () => {}, getPendingSyncCount: () => queue.length,
+      notify() {}, scheduleMobileSyncContinuation() {}, canReportAgriculturalSyncTelemetry: () => false
+    });
+    vm.runInContext(source.slice(begin, end).replace('export const', 'const') + ';globalThis.sync = performMobileSync;', context);
+    const result = await context.sync(trigger);
+    assert.equal(result.success, true, trigger);
+    assert.equal(flushes, 1, trigger);
+    assert.equal(result.remainingCount, 0, trigger);
+  }
+});
+
+test('legacy auto-sync preferences are discarded during hydration and cannot be restored by settings updates', () => {
+  const source = read('mobile/src/data/dataStore.js');
+  const begin = source.indexOf('export let SECURITY_PREFERENCES');
+  const end = source.indexOf('export const resetLocalCache', begin);
+  const context = vm.createContext({ notify() {} });
+  vm.runInContext(source.slice(begin, end).replace(/export /g, '') + ';globalThis.update = updateSecurityPreferences;globalThis.read = getSecurityPreferences;', context);
+  context.update({ autoSyncEnabled: false, sessionAlert: false });
+  assert.equal('autoSyncEnabled' in context.read(), false);
+  assert.equal(context.read().sessionAlert, false);
+  context.STORAGE_KEYS = { PREFS: 'prefs' };
+  context.stored = { prefs: { autoSyncEnabled: false, sessionAlert: true } };
+  const hydrationBegin = source.indexOf('    if (stored[STORAGE_KEYS.PREFS]) {');
+  const hydrationEnd = source.indexOf('// Hydrate cached price circulars', hydrationBegin);
+  vm.runInContext(source.slice(hydrationBegin, hydrationEnd), context);
+  assert.equal('autoSyncEnabled' in context.read(), false);
+  assert.equal(context.read().sessionAlert, true);
+});
+
+test('session retry scheduling honors cooldown even when an older install saved auto sync as off', () => {
   const source = read('mobile/src/data/dataStore.js');
   const begin = source.indexOf('const scheduleMobileSyncContinuation =');
   const end = source.indexOf('const canonicalStageName', begin);
   let delay;
   const context = vm.createContext({ Date, mobileSyncContinuationTimer: null, MOBILE_SYNC_BATCH_INTERVAL_MS: 75000,
-    cancelMobileSyncContinuation() {}, isAutomaticSyncEnabled: () => true, getNetworkStatus: () => true,
+    cancelMobileSyncContinuation() {}, isAutomaticSyncEnabled: () => false, getNetworkStatus: () => true,
     getOutboxCount: () => 1, AppState: { currentState: 'active' }, CURRENT_SESSION: { employeeId: 'A' },
     auth: { currentUser: { uid: 'A' } }, getOutboxQueue: () => [{ mutationId: 'STAGE', status: 'queued' }],
     setTimeout: (_callback, milliseconds) => { delay = milliseconds; return 1; },

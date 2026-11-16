@@ -71,8 +71,8 @@ export {
 } from '../utils/dataHelpers';
 
 export const commitExplicitMutation = async (type, payload, options = {}) => {
-  const sraOnlineOnlyMutations = new Set(['audit_qr_import', 'audit_certification', 'audit_return', 'price', 'user_approve']);
   const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
+  const sraOnlineOnlyMutations = new Set(['audit_qr_import', 'audit_certification', 'audit_return', 'price', 'user_approve']);
   const bypassOfflineOutbox = activeRole === ROLES.SRA_ADMIN || sraOnlineOnlyMutations.has(type);
   if (bypassOfflineOutbox) {
     if (!getNetworkStatus()) {
@@ -315,7 +315,6 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   if (idx === -1) return { success: false, message: 'Applicant not found in pending list.' };
 
   const applicant = pendingUsers[idx];
-  const activeRole = canonicalRole(CURRENT_SESSION?.canonicalRole || CURRENT_SESSION?.role || CURRENT_SESSION?.roleKey);
   const targetRole = canonicalRole(applicant.canonicalRole || applicant.role) || ROLES.MEMBER_FARMER;
   const isPendingRegistration = String(applicant.status || '').toUpperCase() === 'PENDING';
   const acceptUserNow = options.acceptUserNow !== false;
@@ -373,85 +372,52 @@ export const approvePendingRegistration = async (contact, options = {}) => {
   const assignedFarm = blockFarms.find(farm => farm.id === options.blockFarmId || farm.name === applicant.blockFarm);
   if (!assignedFarm) return { success: false, message: 'Select an existing Block Farm before approving this registration.' };
 
-  if ([ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole) || targetRole !== ROLES.MEMBER_FARMER) {
-    try {
-      const approvalOutcome = await commitExplicitMutation('user_approve', {
-        id: empId,
-        role: targetRole,
-        blockFarmId: assignedFarm.id,
-        ...verificationPayload
-      }, { baseVersion: applicant.updatedAt || 'UNVERSIONED' });
-      const approved = approvalOutcome.response;
-      const publicAccount = fromUserDocument(empId, approved?.data || applicant);
-      const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
-      if (existingIndex >= 0) users[existingIndex] = publicAccount;
-      else users.push(publicAccount);
-      pendingUsers.splice(idx, 1);
-      await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
-      await saveItem(STORAGE_KEYS.USERS, users);
-      notifyDataUpdate();
-      return {
-        success: true,
-        applicant,
-        accountId: approved?.accountId || approved?.data?.id || empId,
-        blockFarmId: assignedFarm.id,
-        fieldId: null
-      };
-    } catch (error) {
-      return { success: false, message: error.message || 'Server approval failed.' };
-    }
-  }
-
-  // The API creates the canonical Field ID after approval details are validated.
-  const rawHa = options.area || applicant.area;
-  const assignedHa = parseFloat(String(rawHa || '').replace(/[^0-9.]/g, ''));
-  if (!Number.isFinite(assignedHa) || assignedHa <= 0) {
-    return { success: false, message: 'A valid field area is required before approving this registration.' };
-  }
-
-  // Approval must happen before field creation because only ACTIVE members can
-  // be assigned to a canonical field. The affiliation keeps the member visible
-  // to the responsible manager even if plot enrollment is completed later.
-  let approvedAccountId = empId;
-  let approvedData = null;
+  const fieldAssignmentMode = options.fieldAssignmentMode || 'LATER';
   try {
     const approvalOutcome = await commitExplicitMutation('user_approve', {
       id: empId,
-      role: 'MEMBER_FARMER',
+      role: targetRole,
       blockFarmId: assignedFarm.id,
+      fieldAssignmentMode,
+      ...(fieldAssignmentMode === 'NOW' ? { fieldAreaHa: options.fieldAreaHa } : {}),
       ...verificationPayload
     }, { baseVersion: applicant.updatedAt || 'UNVERSIONED' });
     const approved = approvalOutcome.response;
-    approvedAccountId = approved?.accountId || approved?.data?.id || empId;
-    approvedData = approved?.data || applicant;
-    const publicAccount = fromUserDocument(empId, approvedData);
+    const publicAccount = fromUserDocument(empId, approved?.data || applicant);
     const existingIndex = users.findIndex(user => user.employeeId === empId || user.id === empId);
     if (existingIndex >= 0) users[existingIndex] = publicAccount;
     else users.push(publicAccount);
+    if (approved?.field) {
+      const serverField = approved.field;
+      const serverCycle = approved.cycle;
+      const localField = {
+        ...fromFieldDocument(serverField.id, serverField, serverCycle),
+        blockFarm: assignedFarm.name || '', memberName: publicAccount.name,
+        member: publicAccount.name, memberContact: publicAccount.contact || '', synced: true
+      };
+      const fieldIndex = fields.findIndex(field => field.id === localField.id);
+      if (fieldIndex >= 0) fields[fieldIndex] = localField;
+      else fields.push(localField);
+      if (serverCycle) {
+        const cycle = fromCycleDocument(serverCycle.id, serverCycle);
+        const cycleIndex = cropCycles.findIndex(item => item.id === cycle.id);
+        if (cycleIndex >= 0) cropCycles[cycleIndex] = cycle;
+        else cropCycles.push(cycle);
+        await saveItem(STORAGE_KEYS.CROP_CYCLES, cropCycles);
+      }
+      await saveItem(STORAGE_KEYS.FIELDS, fields);
+    }
+    pendingUsers.splice(idx, 1);
+    await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
+    await saveItem(STORAGE_KEYS.USERS, users);
+    notifyDataUpdate();
+    return {
+      success: true, applicant, accountId: approved?.accountId || approved?.data?.id || empId,
+      blockFarmId: assignedFarm.id, fieldId: approved?.fieldId || null
+    };
   } catch (error) {
     return { success: false, message: error.message || 'Server approval failed.' };
   }
-
-  const fieldResult = await saveFieldPlot({
-    blockFarmId: assignedFarm.id,
-    memberUserId: empId,
-    ha: assignedHa,
-    status: 'ACTIVE'
-  }, true);
-
-  pendingUsers.splice(idx, 1);
-  await saveItem(STORAGE_KEYS.PENDING_USERS, pendingUsers);
-  await saveItem(STORAGE_KEYS.USERS, users);
-
-  notifyDataUpdate();
-  return {
-    success: true,
-    applicant,
-    accountId: approvedAccountId,
-    blockFarmId: assignedFarm.id,
-    fieldId: fieldResult.success ? fieldResult.field.id : null,
-    warning: fieldResult.success ? null : (fieldResult.message || 'The account was approved, but its field plot still needs to be assigned.')
-  };
 };
 
 export const provisionUserAccount = async payload => {
@@ -2696,15 +2662,15 @@ export let SECURITY_PREFERENCES = {
   pinEnabled: false,
   twoFactor: false,
   sessionAlert: true,
-  autoSyncEnabled: true,
   lastPasswordChange: '2026-05-01'
 };
 
 export const getSecurityPreferences = () => ({ ...SECURITY_PREFERENCES });
-export const isAutomaticSyncEnabled = () => SECURITY_PREFERENCES.autoSyncEnabled !== false;
 
 export const updateSecurityPreferences = (updates) => {
-  SECURITY_PREFERENCES = { ...SECURITY_PREFERENCES, ...updates };
+  // Automatic synchronization is system behavior, including on older installs.
+  const { autoSyncEnabled: _retiredAutoSyncPreference, ...preferences } = { ...SECURITY_PREFERENCES, ...updates };
+  SECURITY_PREFERENCES = preferences;
   notify();
   return SECURITY_PREFERENCES;
 };
@@ -2834,7 +2800,12 @@ export const listenToCloudSync = () => {
     setCloudDataStatus(startingUserId, { phase: 'LOADING' });
     clearTimeout(refreshRetryTimer);
     try {
-      const needsResource = path => !resources || resources.includes(path.split('/')[2]?.split('?')[0]) || resources.includes('session');
+      const sessionScope = user => JSON.stringify([
+        user?.employeeId || user?.id, canonicalRole(user?.canonicalRole || user?.roleKey || user?.role),
+        user?.blockFarmId || null, user?.fieldId || null, user?.authVersion || 1
+      ]);
+      let scopeChanged = false;
+      const needsResource = path => !resources || scopeChanged || resources.includes(path.split('/')[2]?.split('?')[0]);
       const readReplica = async path => {
         if (!needsResource(path) && replicaResponses.has(path)) return replicaResponses.get(path);
         const response = await authenticatedRequest(path);
@@ -2846,7 +2817,9 @@ export const listenToCloudSync = () => {
         try {
           const result = await authenticatedRequest('/auth/session');
           if (!active || startingUserId !== String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '')) return false;
-          CURRENT_SESSION = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+          const updatedSession = { ...CURRENT_SESSION, ...normalizeSessionUser(result.user) };
+          scopeChanged = sessionScope(CURRENT_SESSION) !== sessionScope(updatedSession);
+          CURRENT_SESSION = updatedSession;
         } catch (error) {
           if ([401, 403].includes(error?.status) || error?.code === 'AUTH_CONTEXT_CHANGED') throw error;
           // Each following endpoint still checks the live account on the API.
@@ -2854,7 +2827,7 @@ export const listenToCloudSync = () => {
           sessionFailure = error;
         }
       }
-      const includeExtended = extended
+      const includeExtended = scopeChanged || extended
         || Date.now() - lastExtendedRefreshAt >= CLOUD_EXTENDED_REFRESH_INTERVAL_MS;
       const canReadUserDirectory = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, ROLES.SUPER_ADMIN].includes(activeRole);
       const canReadAuditReports = [ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(activeRole);
@@ -3232,7 +3205,24 @@ export const listenToCloudSync = () => {
       void refresh({ force: true, extended: true, session: true });
     }
   });
-  unsubscribeMutations = subscribeToServerMutations(path => scheduleRefresh({ resources: [path.split('/')[2], 'audit-events', 'session'] }));
+  unsubscribeMutations = subscribeToServerMutations(path => {
+    // Match the server's dependent resources while its revision event is in
+    // transit. A log upload does not require a profile or price-history read.
+    const dependencies = {
+      users: ['users', 'fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports', 'recovery-reviews', 'session', 'notifications'],
+      fields: ['fields', 'block-farms', 'crop-cycles', 'logs', 'audit-reports', 'session'],
+      'block-farms': ['block-farms', 'fields', 'users', 'crop-cycles', 'logs', 'audit-reports', 'session'],
+      'crop-cycles': ['crop-cycles', 'fields', 'logs', 'audit-reports'],
+      logs: ['logs', 'fields', 'crop-cycles', 'audit-reports'],
+      'audit-reports': ['audit-reports', 'logs', 'crop-year-compilations'],
+      'crop-year-compilations': ['crop-year-compilations'],
+      'recovery-reviews': ['recovery-reviews', 'users', 'session'],
+      prices: ['prices', 'notifications'], tickets: ['tickets'],
+      'terminal-diagnostics': ['terminal-diagnostics'], diagnostics: ['diagnostics']
+    };
+    const resources = dependencies[path.split('/')[2]];
+    scheduleRefresh(resources ? { resources: [...resources, 'audit-events'] } : { reset: true });
+  });
   resumeStream();
   appStateSubscription = AppState.addEventListener('change', nextState => {
     const returnedToForeground = appState !== 'active' && nextState === 'active';
@@ -3298,7 +3288,7 @@ const cancelMobileSyncContinuation = () => {
 
 const scheduleMobileSyncContinuation = (result = {}) => {
   cancelMobileSyncContinuation();
-  if (!isAutomaticSyncEnabled() || !getNetworkStatus() || getOutboxCount() === 0) return false;
+  if (!getNetworkStatus() || getOutboxCount() === 0) return false;
   if (AppState.currentState && AppState.currentState !== 'active') return false;
 
   const ownerUserId = String(CURRENT_SESSION?.employeeId || CURRENT_SESSION?.id || '').trim();
@@ -3499,21 +3489,6 @@ export const performMobileSync = async (trigger = 'MANUAL_SYNC') => {
         attemptedCount: 0, processedCount: 0, failedCount: 1, remainingCount: getOutboxCount(), responses: {} };
     }
     const remainingBefore = getOutboxCount();
-    const userInitiatedTrigger = trigger === 'MANUAL_SYNC' || trigger === 'AUDIT_PRECHECK';
-    if (!userInitiatedTrigger && !isAutomaticSyncEnabled()) {
-      return {
-        success: remainingBefore === 0,
-        skipped: true,
-        autoSyncEnabled: false,
-        attemptedCount: 0,
-        processedCount: 0,
-        failedCount: 0,
-        remainingCount: remainingBefore,
-        reason: 'AUTO_SYNC_DISABLED',
-        responses: {},
-        remainingItems: getOutboxQueue()
-      };
-    }
     if (remainingBefore === 0) {
       IS_SYNCED = true;
       if (CURRENT_SESSION) CURRENT_SESSION.pendingLogs = 0;
@@ -3704,12 +3679,11 @@ export const loadMoreAuditEvents = async ({ limit = 50 } = {}) => {
 // Register automatic sync on network reconnection
 setOnReconnectCallback(async trigger => {
   const result = await performMobileSync(trigger || 'NETWORK_RESTORED');
-  // Reconnecting always refreshes authoritative reads. The preference only
-  // controls whether locally queued writes are uploaded automatically.
+  // Reconnecting always uploads eligible saved work and refreshes authoritative reads.
   if (typeof activeCloudRefresh === 'function') {
     await activeCloudRefresh({ force: true });
   }
-  return { ...result, autoSyncEnabled: isAutomaticSyncEnabled() };
+  return result;
 });
 
 let offlineStoragePromise = null;
@@ -3833,7 +3807,8 @@ const hydrateOfflineStorage = async () => {
       supportTickets.push(...sortNewestFirst(stored[STORAGE_KEYS.TICKETS], ['createdAt']));
     }
     if (stored[STORAGE_KEYS.PREFS]) {
-      SECURITY_PREFERENCES = { ...SECURITY_PREFERENCES, ...stored[STORAGE_KEYS.PREFS] };
+      const { autoSyncEnabled: _retiredAutoSyncPreference, ...preferences } = stored[STORAGE_KEYS.PREFS];
+      SECURITY_PREFERENCES = { ...SECURITY_PREFERENCES, ...preferences };
     }
 
     // Hydrate cached price circulars

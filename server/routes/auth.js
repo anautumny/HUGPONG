@@ -8,7 +8,7 @@ const { normalizeLoginIdentifier } = require('../domain/loginIdentifier');
 const { resolveAccountAssignments } = require('../services/accountAuthorization');
 const { db, auth } = require('../firebase-admin');
 const { requireAuth } = require('../middleware/auth');
-const { issueToken } = require('../security/token');
+const { issueToken, verifyToken } = require('../security/token');
 const { hashPassword, verifyPassword, validatePassword } = require('../security/password');
 const { publicUser } = require('../security/userProjection');
 const { buildFirebaseClaims } = require('../security/firebaseClaims');
@@ -45,7 +45,8 @@ const {
   completeAssistedRecovery
 } = require('../services/assistedPasswordRecoveryService');
 const { normalizeExpoPushToken } = require('../services/mobilePushService');
-const { registerPushDevice, unregisterPushDevice } = require('../services/systemNotificationService');
+const { registerPushDevice, unregisterPushDevice, ensureNotificationStart } = require('../services/systemNotificationService');
+const { openNotificationSubscription, closeNotificationSubscription } = require('../services/notificationSubscriptions');
 
 const VERIFICATION_CODE_SEND_LIMIT = 3;
 const VERIFICATION_CODE_WINDOW_MS = 60 * 60 * 1000;
@@ -240,6 +241,7 @@ async function buildSessionUser(userId, user) {
     requiresPasswordChange,
     passwordChanged: Boolean(user.passwordChangedAt) || !requiresPasswordChange,
     authVersion: authVersionOf(user),
+    notificationStartedAt: user.notificationStartedAt || null,
     authenticatedAt: nowIso()
   };
 }
@@ -307,6 +309,9 @@ router.post('/mobile-session', async (req, res) => {
       return res.status(403).json({ success: false, error: platformRestrictionMessage(sessionUser.canonicalRole, 'mobile') });
     }
     sessionUser.platform = 'mobile';
+    sessionUser.notificationStartedAt = snapshot.data().notificationStartedAt || await ensureNotificationStart(db, snapshot.id);
+    const subscription = await openNotificationSubscription(db, sessionUser, req.headers['x-client-instance-id']);
+    sessionUser.notificationSessionKey = subscription?.sessionKey || null;
     if (req.session) req.session.user = sessionUser;
     return res.json({ success: true, authenticated: true, user: sessionUser, ...(await issueCredentials(sessionUser)) });
   } catch (error) {
@@ -596,6 +601,9 @@ router.post('/login', (req, res, next) => {
       });
     }
     sessionUser.platform = clientPlatform;
+    sessionUser.notificationStartedAt = matchedUser.notificationStartedAt || await ensureNotificationStart(db, matchedUser.id);
+    const subscription = await openNotificationSubscription(db, sessionUser, req.headers['x-client-instance-id'], { freshLogin: true });
+    sessionUser.notificationSessionKey = subscription.sessionKey;
     await establishSession(req, sessionUser);
     const credentials = await issueCredentials(sessionUser);
     recordActivity(db, {
@@ -622,6 +630,7 @@ router.post('/push-device', requireAuth, async (req, res) => {
   try {
     const user = req.authUser || req.session.user;
     if (user.platform !== 'mobile') return res.status(403).json({ success: false, error: 'Mobile authentication is required.' });
+    await openNotificationSubscription(db, user, req.headers['x-client-instance-id']);
     const data = await registerPushDevice(db, user, { token: req.body?.token, clientInstanceId: req.headers['x-client-instance-id'] });
     return res.json({ success: true, data });
   } catch (error) { return res.status(error.status || 500).json({ success: false, error: error.message }); }
@@ -1192,7 +1201,18 @@ router.get('/session', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
+  // Revoke this installation's push binding on the logout endpoint itself,
+  // even when a client's separate unregister request was interrupted.
+  const token = String(req.headers?.authorization || '').replace(/^Bearer /, '');
+  const user = req.session?.user || verifyToken(token);
+  if (db && user) {
+    try {
+      const closed = await closeNotificationSubscription(db, user, req.headers['x-client-instance-id']);
+      if (closed) await unregisterPushDevice(db, user, req.headers['x-client-instance-id']);
+    }
+    catch { return res.status(503).json({ success: false, error: 'Device sign-out could not be completed. Please retry.' }); }
+  }
   if (!req.session || typeof req.session.destroy !== 'function') return res.json({ success: true, message: 'Signed out locally.' });
   req.session.destroy(error => {
     if (error) return res.status(500).json({ success: false, error: 'Could not log out.' });

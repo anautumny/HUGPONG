@@ -11,6 +11,15 @@ let applicationPermissionRequest = null;
 let systemNotificationHandler = null;
 export function setSystemNotificationHandler(handler) { systemNotificationHandler = handler; }
 
+export async function isRequestedRecoveryNotification(notification) {
+  const data = notification?.request?.content?.data || {};
+  if (data.hugpongType !== MANAGED_TYPE) return false;
+  try {
+    const request = await getItem(STORAGE_KEYS.PASSWORD_RECOVERY_REVIEW, null);
+    return Boolean(request?.claimToken && request.reviewId === data.reviewId && Date.parse(request.expiresAt || '') > Date.now());
+  } catch { return false; }
+}
+
 const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
 function getNotificationModule() {
@@ -19,8 +28,10 @@ function getNotificationModule() {
   if (!notificationHandlerReady) {
     notificationModule.setNotificationHandler({
       handleNotification: async notification => {
-        const show = notification?.request?.content?.data?.hugpongType !== 'system-update'
-          || await systemNotificationHandler?.(notification) === true;
+        const type = notification?.request?.content?.data?.hugpongType;
+        const managed = ['system-update', 'planner-reminder', MANAGED_TYPE].includes(type);
+        const show = managed && (type !== MANAGED_TYPE || await isRequestedRecoveryNotification(notification))
+          && await systemNotificationHandler?.(notification) === true;
         return ({
         shouldShowBanner: show,
         shouldShowList: show,

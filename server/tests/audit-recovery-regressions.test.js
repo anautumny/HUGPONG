@@ -217,14 +217,16 @@ test('notification inbox batches reviewer lookups and members perform no target-
   }
   seed['block_farms/FARM-1'] = { managerUserId: 'FM-1' };
   const db = memoryFirestore(seed); let batches = 0, singles = 0;
+  await require('../services/notificationSubscriptions').openNotificationSubscription(db,
+    { employeeId: 'FM-1' }, 'manager-device', { freshLogin: true, now: Date.now() - 1000 });
   const getAll = db.getAll.bind(db), collection = db.collection.bind(db);
   db.getAll = async (...refs) => { batches++; return getAll(...refs); };
   db.collection = name => {
     const query = collection(name), doc = query.doc.bind(query);
     query.doc = id => { const ref = doc(id), get = ref.get; ref.get = async () => { singles++; return get(); }; return ref; }; return query;
   };
-  const member = await notificationInbox(db, { employeeId: 'MEMBER-X', role: ROLES.MEMBER_FARMER, status: 'ACTIVE' });
+  const member = await notificationInbox(db, { employeeId: 'MEMBER-X', role: ROLES.MEMBER_FARMER, status: 'ACTIVE', notificationStartedAt: '2026-01-01T00:00:00.000Z' });
   assert.equal(member.data.length, 0); assert.equal(batches, 0); assert.equal(singles, 0);
-  const manager = await notificationInbox(db, { employeeId: 'FM-1', role: ROLES.FARM_MANAGER, status: 'ACTIVE' });
+  const manager = await notificationInbox(db, { employeeId: 'FM-1', role: ROLES.FARM_MANAGER, status: 'ACTIVE', notificationStartedAt: '2026-01-01T00:00:00.000Z' });
   assert.equal(manager.data.length, 50); assert.equal(batches, 2); assert.equal(singles, 0);
 });

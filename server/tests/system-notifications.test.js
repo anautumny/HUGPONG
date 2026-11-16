@@ -10,8 +10,10 @@ const { decoratePriceHistory, buildPriceAnalytics } = require('../services/price
 const { registerPushDevice, unregisterPushDevice, dispatchNotification, notificationInbox,
   canReceiveNotification, startNotificationDelivery, RETENTION_MS } = require('../services/systemNotificationService');
 const { sendExpoPushNotification, checkExpoPushReceipt } = require('../services/mobilePushService');
+const { openNotificationSubscription } = require('../services/notificationSubscriptions');
 const now = () => Date.now();
-const actor = (id, role = ROLES.MEMBER_FARMER) => ({ employeeId: id, role, status: 'ACTIVE', authVersion: 1 });
+const actor = (id, role = ROLES.MEMBER_FARMER) => ({ employeeId: id, role, status: 'ACTIVE', authVersion: 1,
+  createdAt: '2026-01-01T00:00:00.000Z', notificationStartedAt: '2026-01-01T00:00:00.000Z' });
 
 async function event(database, eventType = 'SRA_PRICE_PUBLISHED', entityId = 'PRICE-NEW', createdAt = new Date().toISOString()) {
   await database.runTransaction(async tx => queueAuditEvent(tx, database, {
@@ -22,8 +24,23 @@ async function event(database, eventType = 'SRA_PRICE_PUBLISHED', entityId = 'PR
 
 async function device(database, userId, token = 'ExpoPushToken[system-test-token]') {
   database.records.set(`users/${userId}`, actor(userId));
+  await openNotificationSubscription(database, actor(userId), `device-${userId}`, { freshLogin: true });
   await registerPushDevice(database, actor(userId), { token, clientInstanceId: `device-${userId}` });
 }
+
+test('push dispatch skips 1,000 disabled installations at query time', async () => {
+  const readCounts = [];
+  const database = memoryFirestore(Object.fromEntries(Array.from({ length: 1000 }, (_, index) => [
+    `${COLLECTIONS.MOBILE_PUSH_DEVICES}/retired-${index}`, { enabled: false, userId: 'OLD-USER' }
+  ])), { readCounts });
+  await device(database, 'MEMBER-1');
+  const notification = await event(database);
+  readCounts.length = 0; let sent = 0;
+  await dispatchNotification(database, notification.id, { send: async () => { sent++; return { success: true, ticketId: 'ONE' }; } });
+  assert.equal(sent, 1);
+  assert.equal(readCounts.filter(read => read.collection === COLLECTIONS.MOBILE_PUSH_DEVICES)
+    .reduce((sum, read) => sum + read.documents, 0), 2, 'one selected device and one final binding check');
+});
 
 test('price publication, audit and durable notification intent are atomic and replay-safe', async () => {
   const database = memoryFirestore();
@@ -70,6 +87,7 @@ test('review notifications reuse the authoritative role and farm scope, and deci
 test('a phone token has one account owner; logout unregisters only the current installation', async () => {
   const database = memoryFirestore();
   await device(database, 'MEMBER-1');
+  await openNotificationSubscription(database, actor('MEMBER-2'), 'device-MEMBER-2', { freshLogin: true });
   await registerPushDevice(database, actor('MEMBER-2'), { token: 'ExpoPushToken[system-test-token]', clientInstanceId: 'device-MEMBER-2' });
   const devices = [...database.records].filter(([key]) => key.startsWith('mobile_push_devices/'));
   assert.equal(devices.length, 1);
@@ -140,6 +158,7 @@ test('fanout reaches devices beyond the first page without continuous database p
 
 test('offline catch-up inbox is durable, scoped, paginated and expires only operational notification copies', async () => {
   const database = memoryFirestore();
+  await openNotificationSubscription(database, actor('MEMBER-1'), 'device-MEMBER-1', { freshLogin: true, now: now() - 1000 });
   await event(database, 'SRA_PRICE_PUBLISHED', 'OLDER', new Date(now() - RETENTION_MS - 1).toISOString());
   await event(database, 'SRA_PRICE_PUBLISHED', 'NEW-1');
   await event(database, 'SRA_PRICE_PUBLISHED', 'NEW-2');

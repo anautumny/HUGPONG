@@ -24,6 +24,8 @@ const { queueAuditEvent } = require('../services/auditWriter');
 const { accountUpdateActions, assertAccountUpdateAllowed } = require('../domain/accountUpdatePolicy');
 const { normalizeStructuredName, hasStructuredNameInput } = require('../domain/personName');
 const { pageLimit, decodeCursor, encodeCursor } = require('../services/cursorPagination');
+const { approvalFieldAssignment } = require('../services/approvalFieldAssignment');
+const { assertFieldFitsBlockFarm } = require('../domain/landArea');
 const {
   resolvePhoneVerificationReason,
   assertPhoneVerificationAuthority
@@ -100,6 +102,30 @@ router.get('/', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_ADMIN, R
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
     const actorId = String(req.session.user.employeeId || '').trim();
+    const reviewQueueOnly = req.query.reviewQueue === 'true';
+    if (reviewQueueOnly) {
+      // Review badges must not load the entire directory or every member plot.
+      // Both predicates use automatic single-field indexes.
+      const [pending, manualReviews] = await Promise.all([
+        db.collection(COLLECTIONS.USERS).where('status', '==', 'PENDING').get(),
+        db.collection(COLLECTIONS.USERS).where('phoneVerificationReviewRequestedByUser', '==', true).get()
+      ]);
+      const candidates = Array.from(new Map([...pending.docs, ...manualReviews.docs].map(doc => [doc.id, doc])).values())
+        .map(doc => ({ ...publicUser(doc.data(), doc.id), accountActions: accountUpdateActions(actorRole, doc.data().role) }))
+        .filter(user => user.reviewQueueEligible === true)
+        .filter(user => actorRole !== ROLES.SRA_ADMIN || canonicalRole(user.role) !== ROLES.SUPER_ADMIN)
+        .filter(user => actorRole !== ROLES.FARM_MANAGER || canonicalRole(user.role) === ROLES.MEMBER_FARMER);
+      const [projected, permittedFarmIds] = await Promise.all([
+        resolveDirectoryAssignmentsFromDatabase(db, candidates),
+        actorRole === ROLES.FARM_MANAGER ? managerFarmIds(actorId) : Promise.resolve(null)
+      ]);
+      const data = projected.filter(user => !permittedFarmIds || permittedFarmIds.includes(
+        String(user.requestedBlockFarmId || user.affiliatedBlockFarmId || user.assignment?.blockFarmId || '').trim().toUpperCase()
+      )).sort((left, right) => String(left.displayName || left.name || '').localeCompare(String(right.displayName || right.name || ''))
+        || String(left.id).localeCompare(String(right.id)));
+      return res.json({ success: true, count: data.length, data,
+        page: { limit: pageLimit(req.query.limit), hasMore: false, nextCursor: null } });
+    }
     let documents = [];
     let page = { limit: pageLimit(req.query.limit), hasMore: false, nextCursor: null };
     if (actorRole === ROLES.FARM_MANAGER) {
@@ -162,8 +188,15 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
     if (!db) return res.status(503).json({ success: false, error: 'Database is unavailable.' });
     const mutationContext = readMutationContext(req);
     const actorRole = canonicalRole(req.session.user.role || req.session.user.roleKey);
+    const fieldAssignmentMode = String(req.body.fieldAssignmentMode || 'LATER').trim().toUpperCase();
+    if (!['LATER', 'NOW'].includes(fieldAssignmentMode)) {
+      return res.status(400).json({ success: false, error: 'Choose whether to assign a field now or later.' });
+    }
     let role = canonicalRole(req.body.role || ROLES.MEMBER_FARMER);
     if (!role) throw new Error('role must be a canonical HUGPONG role.');
+    if (fieldAssignmentMode === 'NOW' && (actorRole !== ROLES.FARM_MANAGER || role !== ROLES.MEMBER_FARMER || !req.body.id)) {
+      return res.status(403).json({ success: false, error: 'Only the assigned Farm Manager may approve and assign a Farm Member field.' });
+    }
     if (actorRole === ROLES.FARM_MANAGER && role !== ROLES.MEMBER_FARMER) {
       return res.status(403).json({ success: false, error: 'Farm Managers may approve only Farm Member accounts.' });
     }
@@ -184,7 +217,18 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         if (actorRole === ROLES.FARM_MANAGER) {
           await assertManagerUserScope(actorId, userId, current.affiliatedBlockFarmId);
         }
-        return res.json({ success: true, replayed: true, accountId: userId, data: publicUser(current, userId) });
+        if (fieldAssignmentMode === 'NOW' && !current.approvalFieldId) {
+          return res.status(409).json({ success: false, error: 'Account is already approved. Assign its field through the Field Registry.' });
+        }
+        const fieldSnapshot = current.approvalFieldId
+          ? await db.collection(COLLECTIONS.FIELDS).doc(current.approvalFieldId).get() : null;
+        const field = fieldSnapshot?.exists && fieldSnapshot.data().blockFarmId === current.affiliatedBlockFarmId
+          && fieldSnapshot.data().memberUserId === userId ? { id: fieldSnapshot.id, ...fieldSnapshot.data() } : null;
+        const cycleSnapshot = field?.currentCycleId
+          ? await db.collection(COLLECTIONS.CROP_CYCLES).doc(field.currentCycleId).get() : null;
+        return res.json({ success: true, replayed: true, accountId: userId, data: publicUser(current, userId),
+          fieldId: current.approvalFieldId || null, field,
+          cycle: cycleSnapshot?.exists ? { id: cycleSnapshot.id, ...cycleSnapshot.data() } : null });
       }
       if (current.status !== 'PENDING') return res.status(409).json({ success: false, error: 'Account already exists and is not pending approval.' });
       if (canonicalRole(current.role) !== role) return res.status(400).json({ success: false, error: 'Pending account role cannot be changed during approval.' });
@@ -226,6 +270,8 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
           selectedBlockFarmId: affiliatedBlockFarmId
         });
       }
+      const fieldAssignment = fieldAssignmentMode === 'NOW'
+        ? approvalFieldAssignment(req.body, affiliatedBlockFarmId, userId, now) : null;
       const approved = {
         ...current,
         status: 'ACTIVE',
@@ -242,6 +288,7 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         disabledAt: null,
         approvedByUserId: String(req.session.user.employeeId || '').trim(),
         approvedAt: now,
+        ...(role === ROLES.MEMBER_FARMER ? { approvalFieldId: fieldAssignment?.field.id || null, fieldAssignmentMode } : {}),
         updatedAt: now
       };
       await db.runTransaction(async batch => {
@@ -267,11 +314,25 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
             assignmentSnapshot = liveFarm;
           }
         }
+        if (fieldAssignment) {
+          const farmFields = await batch.get(db.collection(COLLECTIONS.FIELDS).where('blockFarmId', '==', affiliatedBlockFarmId));
+          const memberFields = await batch.get(db.collection(COLLECTIONS.FIELDS).where('memberUserId', '==', userId));
+          if (memberFields.docs.some(doc => doc.data().status === 'ACTIVE' && doc.data().blockFarmId !== affiliatedBlockFarmId)) {
+            throw Object.assign(new Error('Member already has an active field in a different Block Farm.'), { status: 409 });
+          }
+          const farm = await batch.get(db.collection(COLLECTIONS.BLOCK_FARMS).doc(affiliatedBlockFarmId));
+          assertFieldFitsBlockFarm({
+            declaredAreaHa: farm.data().declaredAreaHa ?? farm.data().declaredHa,
+            fields: farmFields.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+            requestedAreaHa: fieldAssignment.field.areaHa, blockFarmId: affiliatedBlockFarmId
+          });
+        }
         const accountUpdate = {
           status: approved.status,
           affiliatedBlockFarmId: approved.affiliatedBlockFarmId,
           approvedByUserId: approved.approvedByUserId,
           approvedAt: approved.approvedAt,
+          ...(role === ROLES.MEMBER_FARMER ? { approvalFieldId: approved.approvalFieldId, fieldAssignmentMode } : {}),
           phoneVerifiedAt: approved.phoneVerifiedAt,
           phoneVerificationStatus: approved.phoneVerificationStatus,
           phoneVerificationMethod: approved.phoneVerificationMethod,
@@ -286,6 +347,17 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
         };
         if (latestSnapshot.updateTime) batch.update(userRef, accountUpdate, { lastUpdateTime: latestSnapshot.updateTime });
         else batch.update(userRef, accountUpdate);
+        if (fieldAssignment) {
+          const { id: fieldId, ...field } = fieldAssignment.field;
+          const { id: cycleId, ...cycle } = fieldAssignment.cycle;
+          batch.create(db.collection(COLLECTIONS.FIELDS).doc(fieldId), field);
+          batch.create(db.collection(COLLECTIONS.CROP_CYCLES).doc(cycleId), cycle);
+          queueAuditEvent(batch, db, {
+            eventType: 'FIELD_CREATED', actorUserId: actorId, entityType: 'FIELD', entityId: fieldId,
+            blockFarmId: affiliatedBlockFarmId,
+            details: `Created field ${fieldId} and its first Crop Year Cycle during member approval.`, createdAt: now
+          });
+        }
         queueManagerFarmAssignment(
           batch,
           db,
@@ -312,7 +384,9 @@ router.post('/approve', requireAuth, requireRole([ROLES.FARM_MANAGER, ROLES.SRA_
           []
         )[0]
         : approvedUser;
-      return res.json({ success: true, accountId: userId, data });
+      return res.json({ success: true, accountId: userId, data,
+        fieldId: fieldAssignment?.field.id || null, field: fieldAssignment?.field || null,
+        cycle: fieldAssignment?.cycle || null });
     }
     if (!developmentSeedId) assertNoClientIdentity(req.body, ['id', 'userId', 'employeeId'], 'User');
     const phone = requiredString(req.body.phone, 'phone', { max: 20 }).replace(/\D/g, '');

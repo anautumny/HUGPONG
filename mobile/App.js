@@ -41,6 +41,7 @@ import {
   clearLastRecoveryNotificationResponse,
   getLastRecoveryNotificationResponse,
   recoveryNotificationData,
+  isRequestedRecoveryNotification,
   requestApplicationNotificationPermission,
   subscribeToRecoveryNotificationResponses
 } from './src/services/recoveryNotificationService';
@@ -83,8 +84,10 @@ function HugpongApp() {
   const openPlannerReminder = useCallback((response) => {
     const data = plannerNotificationData(response);
     if (!data?.plannedDate) return;
+    const session = getCurrentSession();
+    if (!data.recipientUserId || data.recipientUserId !== String(session?.employeeId || session?.id || '')) return;
     if (!navigationRef.isReady()) {
-      pendingPlannerDate.current = data.plannedDate;
+      pendingPlannerDate.current = { plannedDate: data.plannedDate, recipientUserId: data.recipientUserId };
       return;
     }
     navigationRef.navigate('MainTabs', {
@@ -93,8 +96,10 @@ function HugpongApp() {
     });
   }, []);
 
-  const openRecoveryReview = useCallback((response) => {
+  const openRecoveryReview = useCallback(async (response) => {
     if (!recoveryNotificationData(response)) return;
+    if (!await isRequestedRecoveryNotification(response?.notification)) return;
+    if (getCurrentSession()?.employeeId || getCurrentSession()?.id) return;
     if (!navigationRef.isReady() || navigationRef.getCurrentRoute()?.name === 'Splash') {
       pendingRecoveryReview.current = true;
       return;
@@ -163,12 +168,15 @@ function HugpongApp() {
           requestApplicationNotificationPermission().catch(() => {});
           if (pendingRecoveryReview.current && navigationRef.getCurrentRoute()?.name !== 'Splash') {
             pendingRecoveryReview.current = false;
+            if (getCurrentSession()?.employeeId || getCurrentSession()?.id) return;
             navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });
             return;
           }
           if (!pendingPlannerDate.current) return;
-          const plannedDate = pendingPlannerDate.current;
+          const { plannedDate, recipientUserId } = pendingPlannerDate.current;
           pendingPlannerDate.current = null;
+          const session = getCurrentSession();
+          if (recipientUserId !== String(session?.employeeId || session?.id || '')) return;
           navigationRef.navigate('MainTabs', {
             screen: 'Planner',
             params: { screen: 'CalcMain', params: { selectedDate: plannedDate } }
@@ -177,6 +185,7 @@ function HugpongApp() {
         onStateChange={() => {
           if (!pendingRecoveryReview.current || navigationRef.getCurrentRoute()?.name === 'Splash') return;
           pendingRecoveryReview.current = false;
+          if (getCurrentSession()?.employeeId || getCurrentSession()?.id) return;
           navigationRef.navigate('ForgotPassword', { checkRecoveryReview: true });
         }}
       >

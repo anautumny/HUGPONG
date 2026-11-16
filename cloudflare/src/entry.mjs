@@ -15,7 +15,7 @@ import '../../server/node_modules/firebase-admin/lib/firestore/index.js';
 import taskService from '../../server/services/durableRuntimeTasks.js';
 import security from '../../server/services/httpSecurityHeaders.js';
 import background from '../../server/services/backgroundTasks.js';
-import { isGatewayPath, trustedProxyRequest, preflightRejection, preserveDownloadLength } from './routing.mjs';
+import { isGatewayPath, trustedProxyRequest, preflightRejection, preserveDownloadLength, needsBackgroundWake } from './routing.mjs';
 
 // protobufjs generates its SDK-owned serialization functions lazily. Workers
 // permits this during startup only. Precompile descriptors, never record data.
@@ -46,7 +46,7 @@ export class HugpongGateway extends DurableObject {
 
   async fetch(request) {
     await this.ready;
-    const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
+    const mutation = needsBackgroundWake(request);
     const rejection = preflightRejection(request, this.env.GATEWAY_MODE);
     if (rejection) return rejection;
     // Arm before the canonical mutation. A process failure cannot depend on an

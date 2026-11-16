@@ -120,7 +120,8 @@ async function enrichAmendmentEditors(database, records) {
     });
   }
   const editorIds = Array.from(new Set(records.flatMap(record =>
-    (record.amendments || []).map(amendment => String(amendment.amendedByUserId || '').trim())
+    (record.amendments || []).filter(amendment => !amendment.amendedByName || !amendment.amendedByRole)
+      .map(amendment => String(amendment.amendedByUserId || '').trim())
   ).filter(Boolean)));
   const usersById = new Map();
   for (let index = 0; index < editorIds.length; index += 100) {

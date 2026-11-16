@@ -28,6 +28,7 @@ const COLLECTIONS = Object.freeze({
   NOTIFICATION_STATES: 'notification_states',
   NOTIFICATION_EVENTS: 'notification_events',
   NOTIFICATION_DELIVERIES: 'notification_deliveries',
+  NOTIFICATION_SUBSCRIPTIONS: 'notification_subscriptions',
   MOBILE_PUSH_DEVICES: 'mobile_push_devices',
   PASSWORD_RECOVERY_CHALLENGES: 'password_recovery_challenges',
   PASSWORD_RECOVERY_REVIEWS: 'password_recovery_reviews',

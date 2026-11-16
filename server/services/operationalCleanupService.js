@@ -14,12 +14,16 @@ const EXPIRATION_POLICIES = Object.freeze([
   Object.freeze({ collection: COLLECTIONS.OTP_CHALLENGES, field: 'deleteAfter' }),
   Object.freeze({ collection: COLLECTIONS.MUTATION_RECEIPTS, field: 'deleteAfter' }),
   Object.freeze({ collection: COLLECTIONS.DIAGNOSTIC_EVENTS, field: 'deleteAfter' }),
-  Object.freeze({ collection: COLLECTIONS.TERMINAL_DIAGNOSTICS, field: 'deleteAfter' })
+  Object.freeze({ collection: COLLECTIONS.TERMINAL_DIAGNOSTICS, field: 'deleteAfter' }),
+  Object.freeze({ collection: COLLECTIONS.NOTIFICATION_EVENTS, field: 'deleteAfter' }),
+  Object.freeze({ collection: COLLECTIONS.NOTIFICATION_DELIVERIES, field: 'deleteAfter' }),
+  Object.freeze({ collection: COLLECTIONS.NOTIFICATION_SUBSCRIPTIONS, field: 'deleteAfter' }),
+  Object.freeze({ collection: COLLECTIONS.MOBILE_PUSH_DEVICES, field: 'expiresAtMs', milliseconds: true })
 ]);
 
 async function deleteExpiredPage(database, policy, cutoff, batchSize) {
   const snapshot = await database.collection(policy.collection)
-    .where(policy.field, '<=', cutoff)
+    .where(policy.field, '<=', policy.milliseconds ? cutoff.getTime() : cutoff)
     .limit(batchSize)
     .get();
   if (snapshot.empty || snapshot.docs.length === 0) return 0;

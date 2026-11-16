@@ -244,6 +244,26 @@ test('permanently denied permission is not requested again and Expo Go never ini
   assert.equal((await load('mobile/src/services/recoveryNotificationService.js', mocks).requestApplicationNotificationPermission()).reason, 'EXPO_GO');
 });
 
+test('recovery notifications require this device active request and cannot interrupt a signed-in account', async () => {
+  let handler, signedIn = false;
+  let request = { reviewId: 'OWN-REVIEW', claimToken: 'LOCAL-SECRET', expiresAt: new Date(Date.now() + 60000).toISOString() };
+  const service = load('mobile/src/services/recoveryNotificationService.js', {
+    'react-native': { AppState: { currentState: 'active' }, Platform: { OS: 'ios' } },
+    'expo-constants': { appOwnership: 'standalone' },
+    './storageService': { STORAGE_KEYS: { PASSWORD_RECOVERY_REVIEW: 'review' }, getItem: async () => request },
+    'expo-notifications': { setNotificationHandler(value) { handler = value.handleNotification; }, AndroidNotificationPriority: { HIGH: 2 } }
+  });
+  service.setSystemNotificationHandler(() => !signedIn);
+  service.getApplicationNotificationModule();
+  const notification = id => ({ request: { content: { data: { hugpongType: 'password-recovery-review', reviewId: id } } } });
+  assert.equal((await handler(notification('OWN-REVIEW'))).shouldShowBanner, true);
+  assert.equal((await handler(notification('OTHER-REVIEW'))).shouldShowBanner, false);
+  signedIn = true;
+  assert.equal((await handler(notification('OWN-REVIEW'))).shouldShowBanner, false);
+  signedIn = false; request = null;
+  assert.equal((await handler(notification('OWN-REVIEW'))).shouldShowBanner, false);
+});
+
 test('initial unknown network and fresh login do not announce restored; a real offline/online transition does', async () => {
   const network = load('mobile/src/services/networkService.js', {
     './authService': { probeServerConnectivity: async () => true },

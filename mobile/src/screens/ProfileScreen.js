@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, ScrollView, TouchableOpacity, StyleSheet, Alert, Switch, Platform, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../theme';
 import AppHeader from '../components/AppHeader';
 import { ScreenHeader } from '../components/ui';
 import LegalPolicyModal from '../components/LegalPolicyModal';
-import { subscribe, getIsSynced, getCurrentSession, setSynced, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, refreshSupportTicketsFromServer, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports, getSecurityPreferences, updateSecurityPreferences } from '../data/dataStore';
+import { subscribe, getIsSynced, getCurrentSession, setSynced, fields, operationLogs, draftLogs, supportTickets, submitSupportTicket, addSupportTicketMessage, refreshSupportTicketsFromServer, resetLocalCache, authenticateUser, performMobileSync, logoutUser, blockFarms, getSortedPrices, auditReports } from '../data/dataStore';
 import {
   getNetworkStatus,
   getConnectivityDetails,
@@ -55,7 +55,6 @@ export default function ProfileScreen({ navigation }) {
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [lastSync, setLastSync] = useState('Today, 8:05 AM');
   const [langExpanded, setLangExpanded] = useState(false);
-  const [autoSync, setAutoSync] = useState(getSecurityPreferences().autoSyncEnabled !== false);
   const [showTicketsModal, setShowTicketsModal] = useState(false);
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [ticketTab, setTicketTab] = useState('active');
@@ -127,7 +126,6 @@ export default function ProfileScreen({ navigation }) {
       const sess = getCurrentSession();
       setSessionState({ ...sess });
       setSyncedState(getIsSynced());
-      setAutoSync(getSecurityPreferences().autoSyncEnabled !== false);
       setDataVersion(v => v + 1);
     });
     const unsubscribeNetwork = subscribeToNetwork((online) => {
@@ -144,7 +142,6 @@ export default function ProfileScreen({ navigation }) {
       setSessionState({ ...getCurrentSession() });
       setSyncedState(getIsSynced());
       setIsOnline(getNetworkStatus());
-      setAutoSync(getSecurityPreferences().autoSyncEnabled !== false);
       setDataVersion(v => v + 1);
     }, [])
   );
@@ -172,11 +169,6 @@ export default function ProfileScreen({ navigation }) {
     if (!showTicketsModal || ticketTab === 'submit' || !isOnline) return;
     refreshTickets({ silent: true });
   }, [showTicketsModal, ticketTab, isOnline, refreshTickets]);
-
-  const handleAutoSyncChange = enabled => {
-    setAutoSync(enabled);
-    updateSecurityPreferences({ autoSyncEnabled: enabled });
-  };
 
   const doSync = async () => {
     if (!isOnline) {
@@ -250,9 +242,9 @@ export default function ProfileScreen({ navigation }) {
       t('cache_clear_confirm_msg', 'Clear downloaded data? Saved drafts, pending submissions, and signed-in accounts will be kept.'),
       [
         { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-        { 
-          text: t('profile_cache', 'Clear Local Cache'), 
-          style: 'destructive', 
+        {
+          text: t('profile_cache', 'Clear Local Cache'),
+          style: 'destructive',
           onPress: async () => {
             setIsClearingCache(true);
             try {
@@ -263,7 +255,7 @@ export default function ProfileScreen({ navigation }) {
             } finally {
               setIsClearingCache(false);
             }
-          } 
+          }
         },
       ]
     );
@@ -290,9 +282,9 @@ export default function ProfileScreen({ navigation }) {
         t('signout_unsynced_msg', 'You have pending unsynced records. Signing out without syncing may cause data loss. Please sync first or proceed anyway.'),
         [
           { text: t('btn_sync_now', 'Sync First'), onPress: doSync },
-          { 
-            text: t('signout_btn_anyway', 'Sign Out Anyway'), 
-            style: 'destructive', 
+          {
+            text: t('signout_btn_anyway', 'Sign Out Anyway'),
+            style: 'destructive',
             onPress: completeSignOut
           },
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
@@ -304,9 +296,9 @@ export default function ProfileScreen({ navigation }) {
         t('signout_confirm_msg', 'Are you sure you want to sign out?'),
         [
           { text: t('btn_cancel', 'Cancel'), style: 'cancel' },
-          { 
-            text: t('profile_logout', 'Sign Out'), 
-            style: 'destructive', 
+          {
+            text: t('profile_logout', 'Sign Out'),
+            style: 'destructive',
             onPress: completeSignOut
           },
         ]
@@ -673,18 +665,18 @@ export default function ProfileScreen({ navigation }) {
         </View>
         <View style={s.card}>
           {[
-            { 
+            {
               key: 'farm_agency',
-              icon: 'business', 
+              icon: 'business',
               label: session?.role === 'SRA Admin' ? t('profile_regulatory_agency', 'Regulatory Agency') : (session?.role === 'Farm Manager' ? t('profile_supervising_farm', 'Supervising Farm') : t('profile_block_farm', 'Block Farm')),
               value: session?.role === 'SRA Admin' ? 'Sugar Regulatory Administration (SRA)' : blockFarmDisplayName(assignedFarmId, blockFarms, t('profile_unassigned', 'Unassigned'))
             },
-            { 
+            {
               key: 'field_scope',
-              icon: 'map', 
+              icon: 'map',
               label: session?.role === 'SRA Admin'
                 ? t('profile_admin_scope', 'Administrative Scope')
-                : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')), 
+                : (session?.role === 'Farm Manager' ? t('profile_supervised_scope', 'Supervised Scope') : t('my_fields', 'My Field(s)')),
               value: (() => {
                 if (session?.role === 'SRA Admin') {
                   return adminScopeDetails || t('profile_no_audit_records', 'No synchronized scope records');
@@ -826,24 +818,9 @@ export default function ProfileScreen({ navigation }) {
           <Text style={s.sectionHeaderTitle}>{t('profile_section_sync')}</Text>
         </View>
         <View style={s.card}>
-          {(session?.role === 'Farm Member' || session?.role === 'Farm Manager') && (
-            <View style={s.settingRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.settingLabel}>{t('profile_auto_sync', 'Automatic Cloud Sync')}</Text>
-                <Text style={s.settingSubLabel}>{t('profile_auto_sync_sub')}</Text>
-              </View>
-              <Switch
-                value={autoSync}
-                onValueChange={handleAutoSyncChange}
-                trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-                thumbColor={autoSync ? COLORS.primary : '#f4f3f4'}
-              />
-            </View>
-          )}
-
           {(session?.role === 'Farm Manager' || session?.role === 'Farm Member') && (
-            <TouchableOpacity 
-              style={s.settingRow} 
+            <TouchableOpacity
+              style={s.settingRow}
               onPress={() => navigation.navigate('SyncMonitor')}
             >
               <View style={{ flex: 1 }}>
@@ -945,7 +922,7 @@ export default function ProfileScreen({ navigation }) {
 
       </ScrollView>
 
-      
+
     </SafeAreaView>
   );
 }
@@ -1065,13 +1042,13 @@ const s = StyleSheet.create({
   // Tickets Modal Styles
   ticketOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   ticketContainer: { backgroundColor: COLORS.surface, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, maxHeight: '92%', height: '92%' },
-  ticketHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: SPACING.lg, 
-    paddingVertical: SPACING.md, 
-    borderBottomWidth: 1, 
+  ticketHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
     backgroundColor: COLORS.surface
   },
@@ -1079,7 +1056,7 @@ const s = StyleSheet.create({
   ticketTitle: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   ticketSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   ticketCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F4EC', alignItems: 'center', justifyContent: 'center' },
-  
+
   ticketTabWrap: { paddingHorizontal: SPACING.lg, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.background },
   ticketSegmentTrack: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: COLORS.surfaceSubtle, borderRadius: RADIUS.full, padding: 3, gap: 4 },
   ticketTabBtn: { flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 7, paddingHorizontal: 2, minHeight: 56, borderRadius: RADIUS.full },

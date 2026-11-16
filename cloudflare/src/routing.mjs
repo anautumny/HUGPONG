@@ -9,6 +9,16 @@ export function isGatewayPath(path) {
   return /^\/(?:api|auth|health|downloads)(?:\/|$)/.test(path) || legacyPaths.has(path);
 }
 
+export function needsBackgroundWake(request) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return false;
+  const path = new URL(request.url).pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+  // These producers can enqueue the three durable notification audit types.
+  // Log uploads, telemetry, token renewal and inbox state cannot create delivery
+  // intents. Retention keeps its own durable alarm even without these wakeups.
+  return /^\/api\/(?:prices|users)(?:\/|$)/.test(path)
+    || (request.method === 'POST' && ['/auth/register', '/auth/request-phone-verification-review'].includes(path));
+}
+
 export function preflightRejection(request, mode) {
   if (!['preflight', 'active'].includes(mode)) throw new Error('GATEWAY_MODE must be preflight or active.');
   const read = ['GET', 'HEAD', 'OPTIONS'].includes(request.method);

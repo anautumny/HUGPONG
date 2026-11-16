@@ -189,14 +189,6 @@ app.use((req, res, next) => {
 });
 
 // ── Mount Primary API Routes ────────────────────────────────
-app.use('/auth', (req, res, next) => {
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(String(req.method || '').toUpperCase())) {
-    res.once('finish', () => {
-      if (res.statusCode >= 200 && res.statusCode < 400) invalidateAuthenticatedAccounts();
-    });
-  }
-  next();
-});
 app.use(changeFeed.revalidateRequest);
 app.use(changeFeed.mutationMiddleware);
 app.use('/auth', authRoutes);
@@ -211,34 +203,8 @@ app.get('/api/sync/events', changeFeed.stream);
 // Mutations always reach their authoritative route and clear this presentation
 // cache after success; database validation and writes are never cached.
 app.use('/api', scopedReadCache.middleware);
-// Assignment projections are a short server-side cache. Any successful
-// mutation that can change ownership or affiliation invalidates the entire
-// bounded cache immediately; the TTL remains a fallback for out-of-process
-// administrative changes.
-app.use('/api', (req, res, next) => {
-  const method = String(req.method || '').toUpperCase();
-  const resource = String(req.path || '').split('/').filter(Boolean)[0] || '';
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)
-    && ['users', 'fields', 'block-farms'].includes(resource)) {
-    res.once('finish', () => {
-      if (res.statusCode >= 200 && res.statusCode < 400) {
-        invalidateAccountAssignments(db);
-        if (resource === 'users') invalidateAuthenticatedAccounts();
-        scopedReadCache.invalidate();
-      }
-    });
-  } else if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    res.once('finish', () => {
-      if (res.statusCode < 200 || res.statusCode >= 400) return;
-      if (['terminal-diagnostics', 'diagnostics', 'notifications'].includes(resource)) {
-        scopedReadCache.invalidate([resource]);
-      } else {
-        scopedReadCache.invalidate();
-      }
-    });
-  }
-  next();
-});
+// The change feed invalidates dependent resources and authorization projections
+// before acknowledging committed mutations. Unrelated reads retain their cache.
 app.use('/api/prices', priceRoutes);
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/users', userRoutes);

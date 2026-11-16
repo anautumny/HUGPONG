@@ -8,6 +8,7 @@ const CHANNEL_ID = 'planner-reminders';
 const MANAGED_TYPE = 'planner-reminder';
 let lastFingerprint = '';
 let activeSync = null;
+let requestedOwner = '';
 
 const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 
@@ -60,13 +61,16 @@ async function runSync(fields, session, requestPermission) {
   if (!Notifications) return { scheduled: 0, unsupported: true, reason: 'EXPO_GO' };
   const entries = eligiblePlannerEntries(fields, session);
   const userId = String(session?.employeeId || session?.userId || session?.id || '');
+  const current = () => requestedOwner === userId;
+  if (!current()) return { scheduled: 0, superseded: true };
   const fingerprint = `${userId}:${entries.map(entry => `${entry.id}:${entry.plannedDate}`).sort().join('|')}`;
   if (!requestPermission && fingerprint === lastFingerprint) return { scheduled: 0, unchanged: true };
 
-  const granted = await ensurePermission(Notifications, requestPermission);
-  if (!granted) return { scheduled: 0, permissionGranted: false };
-
   await cancelManagedNotifications(Notifications);
+  if (!current()) return { scheduled: 0, superseded: true };
+  const granted = userId ? await ensurePermission(Notifications, requestPermission) : false;
+  if (!current()) return { scheduled: 0, superseded: true };
+  if (!userId || !granted) { lastFingerprint = ''; return { scheduled: 0, permissionGranted: granted }; }
   lastFingerprint = fingerprint;
   if (!userId || entries.length === 0) return { scheduled: 0, permissionGranted: true };
 
@@ -78,6 +82,7 @@ async function runSync(fields, session, requestPermission) {
   let scheduled = 0;
 
   for (const [dateKey, dateEntries] of Object.entries(byDate)) {
+    if (!current()) return { scheduled, superseded: true };
     const dayOf = notificationDate(dateKey, 7);
     const dayBefore = new Date(dayOf);
     dayBefore.setDate(dayBefore.getDate() - 1);
@@ -85,6 +90,7 @@ async function runSync(fields, session, requestPermission) {
     const fieldsForDate = uniqueFields(dateEntries);
     const baseData = {
       hugpongType: MANAGED_TYPE,
+      recipientUserId: userId,
       plannedDate: dateKey,
       fieldIds: fieldsForDate.join(',')
     };
@@ -102,7 +108,7 @@ async function runSync(fields, session, requestPermission) {
       scheduled += 1;
     }
 
-    if (dayOf > now) {
+    if (current() && dayOf > now) {
       await Notifications.scheduleNotificationAsync({
         identifier: `planner-day-${dateKey}-${userId}`,
         content: {
@@ -119,13 +125,14 @@ async function runSync(fields, session, requestPermission) {
 }
 
 export function syncPlannerDeviceNotifications(fields, session, options = {}) {
+  requestedOwner = String(session?.employeeId || session?.userId || session?.id || '');
   const start = () => runSync(fields, session, options.requestPermission === true)
     .catch(error => {
       console.warn('[Planner Notifications] Reminder refresh was deferred.');
       return { scheduled: 0, error };
     })
     .finally(() => { activeSync = null; });
-  if (activeSync) return activeSync.then(start);
+  if (activeSync) { activeSync = activeSync.then(start); return activeSync; }
   activeSync = start();
   return activeSync;
 }

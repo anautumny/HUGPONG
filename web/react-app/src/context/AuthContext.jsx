@@ -185,7 +185,7 @@ export function AuthProvider({ children }) {
     const resolvedRole = roleKeyFromUser(data.user, data.roleKey);
     if (resolvedRole === 'member') {
       try {
-        await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+        await fetch('/auth/logout', { method: 'POST', credentials: 'include', headers: webClientHeaders() });
       } finally {
         clearSession();
       }
@@ -306,7 +306,7 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     sessionRequests.current.invalidate();
     try {
-      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include', headers: webClientHeaders() });
     } catch (e) {
       console.warn('[AuthContext] Remote sign-out was not acknowledged.');
     } finally {

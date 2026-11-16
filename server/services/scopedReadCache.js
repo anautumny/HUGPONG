@@ -7,7 +7,10 @@ function identityKey(req) {
   const user = req.authUser || req.session?.user || {};
   return [
     String(user.employeeId || user.userId || user.uid || '').trim(),
-    String(user.canonicalRole || user.roleKey || user.role || '').trim()
+    String(user.canonicalRole || user.roleKey || user.role || '').trim(),
+    String(user.authVersion || ''),
+    String(user.blockFarmId || ''),
+    String(user.fieldId || '')
   ].join('|');
 }
 
@@ -16,6 +19,8 @@ function createScopedReadCache({
   maxEntries = DEFAULT_SCOPED_READ_MAX_ENTRIES
 } = {}) {
   const entries = new Map();
+  const pending = new Map();
+  const resourceVersions = new Map();
   let generation = 0;
 
   function prune(now = Date.now()) {
@@ -26,14 +31,18 @@ function createScopedReadCache({
   }
 
   function invalidate(resources = []) {
-    generation += 1;
     const affected = new Set(resources);
     if (!affected.size) {
+      generation += 1;
       entries.clear();
-      return;
+    } else {
+      for (const resource of affected) resourceVersions.set(resource, (resourceVersions.get(resource) || 0) + 1);
+      for (const [key, entry] of entries) {
+        if (affected.has(entry.resource)) entries.delete(key);
+      }
     }
-    for (const [key, entry] of entries) {
-      if (affected.has(entry.resource)) entries.delete(key);
+    for (const entry of [...pending.values()]) {
+      if (!affected.size || affected.has(entry.resource)) entry.finish();
     }
   }
 
@@ -58,6 +67,7 @@ function createScopedReadCache({
       .replace(/^\/api\//, '')
       .split(/[/?#]/, 1)[0];
     const requestGeneration = generation;
+    const requestVersion = resourceVersions.get(resource) || 0;
     const cached = entries.get(key);
     if (cached && cached.expiresAt > now) {
       res.set('X-HUGPONG-Read-Cache', 'HIT');
@@ -66,9 +76,30 @@ function createScopedReadCache({
     }
     if (cached) entries.delete(key);
 
+    // Requests still pass authentication independently. Only their identical,
+    // authorized presentation reads share work while the first query finishes.
+    const ongoing = pending.get(key);
+    if (ongoing) return ongoing.done.then(() => {
+      if (!res.destroyed && !res.writableEnded) return middleware(req, res, next);
+    });
+    let release;
+    const entry = { resource, finished: false, done: new Promise(resolve => { release = resolve; }), finish() {
+      entry.finished = true;
+      if (pending.get(key) === entry) pending.delete(key);
+      clearTimeout(entry.timer);
+      release();
+    } };
+    // An abandoned handler must never strand another caller behind it.
+    entry.timer = setTimeout(entry.finish, 30_000);
+    entry.timer.unref?.();
+    if (pending.size < maxEntries) pending.set(key, entry);
+    res.once?.('finish', entry.finish);
+    res.once?.('close', entry.finish);
+
     const originalJson = res.json.bind(res);
     res.json = body => {
-      if (requestGeneration === generation
+      if (!entry.finished && requestGeneration === generation
+        && requestVersion === (resourceVersions.get(resource) || 0)
         && res.statusCode >= 200 && res.statusCode < 300
         && body?.success !== false) {
         prune();
@@ -81,9 +112,10 @@ function createScopedReadCache({
         res.set('X-HUGPONG-Read-Cache', 'MISS');
         res.set('Cache-Control', 'private, no-store');
       }
+      entry.finish();
       return originalJson(body);
     };
-    return next();
+    try { return next(); } catch (error) { entry.finish(); throw error; }
   }
 
   return {

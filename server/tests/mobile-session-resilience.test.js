@@ -24,6 +24,8 @@ async function request({ tokenError, databaseError, signingError, status = 'ACTI
     auth: { verifyIdToken: async () => { if (tokenError) throw tokenError; return { uid: 'LOCAL-USER', authVersion: 1 }; } },
     authVersionOf: account => account.authVersion,
     buildSessionUser: async () => ({ employeeId: 'LOCAL-USER', canonicalRole: 'MEMBER_FARMER' }),
+    ensureNotificationStart: async () => '2026-01-01T00:00:00.000Z',
+    openNotificationSubscription: async () => true,
     isRoleAllowedOnPlatform: () => true,
     issueCredentials: async () => { if (signingError) throw signingError; return { token: 'local-test-token' }; }
   });

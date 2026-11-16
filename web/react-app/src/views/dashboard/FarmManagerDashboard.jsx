@@ -16,6 +16,7 @@ import RecentOperationsTable from '../../components/dashboard/RecentOperationsTa
 import AttentionItemsCard from '../../components/dashboard/AttentionItemsCard';
 import { formatHectares } from '../../utils/formatters';
 import { SUGARCANE_STAGES } from '../../constants/cropStages';
+import { pendingUserAttention } from '../../domain/pendingUserAttention';
 
 function accountNameList(accounts) {
   const names = accounts.map(account => account.displayName).filter(Boolean);
@@ -53,6 +54,8 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     cropCycles = [],
     terminalDiagnostics = [],
     activityMonitoringError = null,
+    pendingUsers = [],
+    pendingUsersError = null,
     isLoading = false
   } = data;
 
@@ -101,7 +104,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
 
   // Derive attention items
   const attentionItems = useMemo(() => {
-    const items = [];
+    const items = pendingUserAttention(pendingUsers, pendingUsersError);
 
     if (criticalAccounts.length > 0) {
       items.push({
@@ -159,7 +162,7 @@ export default function FarmManagerDashboard({ data = {}, user = {} }) {
     }
 
     return items;
-  }, [assignedBlockFarm, scopedFields, farmName, attentionAccounts, criticalAccounts, activityMonitoringError]);
+  }, [assignedBlockFarm, scopedFields, farmName, attentionAccounts, criticalAccounts, activityMonitoringError, pendingUsers, pendingUsersError]);
 
   const headerActions = [
     {

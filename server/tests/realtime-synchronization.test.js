@@ -89,6 +89,27 @@ test('a request carrying a revision unseen by its API instance invalidates stale
   client.close();
 });
 
+test('older observed revisions do not repeatedly flush fresh caches while Node clients catch up', async t => {
+  const database = revisionDatabase(), invalidations = [];
+  const feed = createChangeFeed({ database, invalidate: resources => invalidations.push(resources) });
+  t.after(feed.stop); const client = sink(feed); await tick();
+  const old = client.events[0].revision;
+  await feed.publish(['prices']); invalidations.length = 0;
+  for (let index = 0; index < 20; index++) feed.revalidateRequest({ headers: { 'x-hugpong-sync-revision': old } }, null, () => {});
+  assert.equal(invalidations.length, 0);
+  feed.revalidateRequest({ headers: { 'x-hugpong-sync-revision': 'f'.repeat(64) } }, null, () => {});
+  assert.equal(invalidations.length, 1, 'an unknown potentially newer Node revision still forces reauthorization');
+  client.close();
+});
+
+test('single-writer Worker never flushes shared caches in response to client revision headers', t => {
+  let invalidations = 0;
+  const feed = createChangeFeed({ singleWriter: true, invalidate: () => invalidations++ });
+  t.after(feed.stop);
+  for (let index = 0; index < 20; index++) feed.revalidateRequest({ headers: { 'x-hugpong-sync-revision': 'f'.repeat(64) } }, null, () => {});
+  assert.equal(invalidations, 0);
+});
+
 test('listener errors close streams and reattach; failed revision writes retry without losing later resources', async t => {
   const database = revisionDatabase();
   const feed = createChangeFeed({ database, retryMs: 5, logger: { warn() {} } });
@@ -442,6 +463,51 @@ test('Web shared reads deduplicate; remote changes during loads supersede stale 
   assert.equal(runtime.peekAuthenticatedRead('/api/fields').data.length, 0);
 });
 
+test('Android field/session refreshes reuse unrelated data until the authorized assignment changes', async t => {
+  let changed = false;
+  const device = mobileRuntime(ROLES.FARM_MANAGER, url => changed && url === '/auth/session'
+    ? Promise.resolve({ success: true, user: { employeeId: 'MANAGER-1', role: ROLES.FARM_MANAGER, fieldId: '', blockFarmId: 'FARM-2' } }) : null);
+  t.after(device.stop); await device.stop.initialRefresh;
+  let before = device.requests.length, notifications = device.context.notifications;
+  device.change({ resources: ['fields', 'session'] });
+  await until(() => device.context.notifications > notifications);
+  assert.deepEqual(device.requests.slice(before).sort(), ['/api/fields', '/auth/session']);
+  changed = true; before = device.requests.length; notifications = device.context.notifications;
+  device.change({ resources: ['fields', 'session'] });
+  await until(() => device.context.notifications > notifications);
+  const refreshed = device.requests.slice(before);
+  for (const url of ['/api/block-farms', '/api/fields', '/api/crop-cycles', '/api/logs', '/api/prices?limit=52', '/api/users?limit=50', '/api/tickets']) {
+    assert.ok(refreshed.includes(url), `${url} must refresh after assignment changes`);
+  }
+});
+
+test('Android local log mutations refresh the dependent field graph without reloading profiles or prices', async t => {
+  const device = mobileRuntime(ROLES.FARM_MANAGER); t.after(device.stop);
+  await device.stop.initialRefresh;
+  const before = device.requests.length, notifications = device.context.notifications;
+  device.mutation('/api/logs');
+  await until(() => device.context.notifications > notifications);
+  const requests = device.requests.slice(before);
+  assert.deepEqual(requests.sort(), ['/api/fields', '/api/crop-cycles', '/api/logs', '/api/audit-reports?view=manager&limit=50', '/api/audit-events?limit=50'].sort());
+});
+
+test('Web dashboard telemetry changes fetch only the affected tile', async t => {
+  const requests = [], updates = [];
+  const runtime = webRuntime(async url => { requests.push(url); return { ok: true, json: async () => ({ success: true,
+    data: url === '/api/terminal-diagnostics' ? { subjects: [] } : [] }) }; }, {
+    ROLE_KEYS: { SUPER_ADMIN: 'superadmin', SRA_ADMIN: 'admin', FARM_MANAGER: 'manager' },
+    sortNewestFirst: rows => rows, sortOperationsNewestFirst: rows => rows, sortCropYearsNewestFirst: rows => rows, uniqueRecordsById: rows => rows
+  });
+  for (const entity of ['Price', 'Field', 'BlockFarm', 'Operation', 'Report', 'Ticket']) runtime[`from${entity}`] = (id, row) => ({ ...row, id });
+  vm.runInContext(read('web/react-app/src/services/dashboardService.js').replace(/^import[\s\S]*?;\r?$/gm, '').replace(/export /g, ''), runtime);
+  const stop = runtime.subscribeToDashboardData({ roleKey: 'manager', user: { employeeId: 'FM-1' }, onUpdate: value => updates.push(value) });
+  t.after(stop); await until(() => updates.length === 1);
+  const before = requests.length;
+  runtime.invalidateAuthenticatedResources(['terminal-diagnostics']);
+  await until(() => updates.length === 2);
+  assert.deepEqual(requests.slice(before), ['/api/terminal-diagnostics']);
+});
+
 test('Android notification queries do not trigger refresh; business mutations still do', async () => {
   const calls = [], mutations = [];
   const context = {
@@ -504,7 +570,7 @@ test('Web and Android stream parser implementations stay identical and ignore he
 });
 
 function mobileRuntime(role = ROLES.MEMBER_FARMER, requestOverride) {
-  let onChange, appChange, networkChange;
+  let onChange, appChange, networkChange, mutationChange;
   let online = true;
   const requests = [];
   const owner = role === ROLES.MEMBER_FARMER ? 'MEMBER-1' : 'MANAGER-1';
@@ -528,7 +594,7 @@ function mobileRuntime(role = ROLES.MEMBER_FARMER, requestOverride) {
     getPendingSyncCount: () => queue.length, notify: () => { context.notifications++; }, notifications: 0,
     AppState: { currentState: 'active', addEventListener: (_name, callback) => { appChange = callback; return { remove() {} }; } },
     subscribeToNetwork: callback => { networkChange = callback; return () => {}; },
-    subscribeToServerMutations: () => () => {}, setServerReadRevision() {},
+    subscribeToServerMutations: callback => { mutationChange = callback; return () => {}; }, setServerReadRevision() {},
     startRealtimeSync: callback => { onChange = callback; return () => {}; },
     normalizeSessionUser: value => value,
     cleanupDuplicateLogs: value => value, sortOperationsNewestFirst: value => value, sortNewestFirst: value => value,
@@ -555,7 +621,7 @@ function mobileRuntime(role = ROLES.MEMBER_FARMER, requestOverride) {
     .replace(/export const /g, 'var ');
   vm.runInContext(source, context);
   const stop = context.listenToCloudSync();
-  return { context, data, queue, requests, stop, change: event => onChange(event),
+  return { context, data, queue, requests, stop, change: event => onChange(event), mutation: path => mutationChange(path),
     network(value) { online = value; networkChange(value); }, app(value) { appChange(value); } };
 }
 
@@ -682,6 +748,7 @@ test('Web role dashboards render independent updates while keeping a failed fiel
         : url === '/api/crop-cycles' ? [{ id: `CYCLE-${version}` }]
         : url === '/api/tickets' ? [{ id: `TICKET-${version}` }]
         : url === '/api/terminal-diagnostics' ? { subjects: [{ id: `DEVICE-${version}` }] }
+        : url === '/api/users?reviewQueue=true' ? [{ id: `PENDING-${version}`, reviewQueueEligible: true }]
         : url === '/api/system-diagnostics' ? { version } : [];
       return { ok: !failure, status: failure ? 503 : 200, json: async () => failure ? { success: false, error: 'Temporary endpoint outage' } : { success: true, data } };
     }, { ROLE_KEYS: { SUPER_ADMIN: 'superadmin', SRA_ADMIN: 'admin', FARM_MANAGER: 'manager' },
@@ -690,8 +757,9 @@ test('Web role dashboards render independent updates while keeping a failed fiel
     vm.runInContext(read('web/react-app/src/services/dashboardService.js').replace(/^import[\s\S]*?;\r?$/gm, '').replace(/export /g, ''), runtime);
     const stop = runtime.subscribeToDashboardData({ roleKey, user: { employeeId: 'LOCAL-USER' }, onUpdate: value => updates.push(value) });
     t.after(stop); await until(() => updates.length === 1);
+    assert.equal(updates[0].pendingUsers[0].id, 'PENDING-V1');
     failing = true; version = 'V2';
-    runtime.window.dispatchEvent(new runtime.CustomEvent('hugpong:server-mutation', { detail: { resources: ['prices', 'terminal-diagnostics'] } }));
+    runtime.invalidateAuthenticatedResources(['prices', 'terminal-diagnostics', 'users', roleKey === 'superadmin' ? 'tickets' : 'fields', 'crop-cycles']);
     await until(() => updates.length === 2);
     if (roleKey === 'superadmin') {
       assert.equal(updates[1].terminalDiagnostics[0].id, 'DEVICE-V2'); assert.equal(updates[1].supportTickets[0].id, 'TICKET-V1');
@@ -699,7 +767,13 @@ test('Web role dashboards render independent updates while keeping a failed fiel
       assert.equal(updates[1].currentPrice.id, 'PRICE-V2'); assert.equal(updates[1].fields[0].id, 'FIELD-V1');
       assert.equal(updates[1].cropCycles[0].id, 'CYCLE-V1', 'a partial field graph cannot mix revisions');
     }
-    assert.ok(updates[1].error); stop();
+    assert.ok(updates[1].error);
+    assert.equal(updates[1].pendingUsers[0].id, 'PENDING-V2');
+    version = 'V3';
+    runtime.invalidateAuthenticatedResources(['users']);
+    await until(() => updates.length === 3);
+    assert.equal(updates[2].pendingUsers[0].id, 'PENDING-V3');
+    stop();
   }
 });
 

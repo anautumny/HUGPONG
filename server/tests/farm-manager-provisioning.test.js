@@ -14,6 +14,7 @@ class MemoryRef {
 
   async get() {
     const value = this.database.records.get(this.collection)?.get(this.id);
+    this.database.readCounts?.push({ collection: this.collection, documents: 1 });
     return {
       exists: value !== undefined,
       id: this.id,
@@ -36,8 +37,8 @@ class MemoryQuery {
   }
 
   where(field, operator, value) {
-    assert.equal(operator, '==');
-    return new MemoryQuery(this.database, this.collection, [...this.filters, { field, value }]);
+    assert.ok(['==', 'in'].includes(operator));
+    return new MemoryQuery(this.database, this.collection, [...this.filters, { field, operator, value }]);
   }
 
   limit() {
@@ -46,7 +47,9 @@ class MemoryQuery {
 
   async get() {
     const rows = [...(this.database.records.get(this.collection) || new Map()).entries()]
-      .filter(([, value]) => this.filters.every(filter => value[filter.field] === filter.value));
+      .filter(([, value]) => this.filters.every(filter => filter.operator === 'in'
+        ? filter.value.includes(value[filter.field]) : value[filter.field] === filter.value));
+    this.database.readCounts?.push({ collection: this.collection, documents: Math.max(1, rows.length) });
     return {
       empty: rows.length === 0,
       docs: rows.map(([id, value]) => ({
@@ -72,6 +75,10 @@ class MemoryDb {
 
   collection(name) {
     return new MemoryQuery(this, name);
+  }
+
+  async getAll(...refs) {
+    return Promise.all(refs.map(ref => ref.get()));
   }
 
   batch() {
@@ -131,7 +138,7 @@ function responseCapture() {
   };
 }
 
-function loadApproveHandler(database) {
+function loadApproveHandler(database, routePathname = '/approve', method = 'post') {
   const firebasePath = require.resolve('../firebase-admin');
   const routePath = require.resolve('../routes/users');
   const previousFirebase = require.cache[firebasePath];
@@ -145,7 +152,7 @@ function loadApproveHandler(database) {
   const router = require('../routes/users');
   if (previousFirebase) require.cache[firebasePath] = previousFirebase;
   else delete require.cache[firebasePath];
-  return router.stack.find(layer => layer.route?.path === '/approve' && layer.route.methods.post).route.stack.at(-1).handle;
+  return router.stack.find(layer => layer.route?.path === routePathname && layer.route.methods[method]).route.stack.at(-1).handle;
 }
 
 function approvalRecheckFixture() {
@@ -165,6 +172,130 @@ function approvalRecheckFixture() {
   };
   return { database, request };
 }
+
+test('assign later approves the member and affiliation without creating a field or cycle', async () => {
+  const { database, request } = approvalRecheckFixture();
+  request.body.fieldAssignmentMode = 'LATER';
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 200);
+  const member = database.records.get('users').get('04000077');
+  assert.equal(member.status, 'ACTIVE');
+  assert.equal(member.affiliatedBlockFarmId, 'BF-001');
+  assert.equal(member.approvalFieldId, null);
+  assert.equal(database.records.get('fields')?.size || 0, 0);
+  assert.equal(database.records.get('crop_cycles')?.size || 0, 0);
+});
+
+test('approve and assign creates one canonical field and initial cycle, including on retry', async () => {
+  const { database, request } = approvalRecheckFixture();
+  Object.assign(request.body, { fieldAssignmentMode: 'NOW', fieldAreaHa: 1.5 });
+  database.records.get('block_farms').get('BF-001').declaredAreaHa = 2;
+  const handler = loadApproveHandler(database);
+  const response = responseCapture();
+  await handler(request, response);
+  assert.equal(response.statusCode, 200);
+  const fieldId = response.payload.fieldId;
+  const field = database.records.get('fields').get(fieldId);
+  const cycle = database.records.get('crop_cycles').get(field.currentCycleId);
+  assert.equal(field.memberUserId, '04000077');
+  assert.equal(field.blockFarmId, 'BF-001');
+  assert.equal(field.areaHa, 1.5);
+  assert.equal(cycle.fieldId, fieldId);
+  assert.equal(cycle.currentStageNumber, 1);
+  assert.equal(database.records.get('users').get('04000077').approvalFieldId, fieldId);
+  const retry = responseCapture();
+  await handler(request, retry);
+  assert.equal(retry.payload.replayed, true);
+  assert.equal(retry.payload.fieldId, fieldId);
+  assert.equal(retry.payload.cycle.id, field.currentCycleId);
+  assert.equal(database.records.get('fields').size, 1);
+  assert.equal(database.records.get('crop_cycles').size, 1);
+});
+
+test('invalid immediate assignment leaves the account pending with no partial records', async () => {
+  for (const fieldAreaHa of [undefined, '', 0, -1, '1ha', 501]) {
+    const { database, request } = approvalRecheckFixture();
+    Object.assign(request.body, { fieldAssignmentMode: 'NOW', fieldAreaHa });
+    const response = responseCapture();
+    await loadApproveHandler(database)(request, response);
+    assert.equal(response.statusCode, 400, String(fieldAreaHa));
+    assert.equal(database.records.get('users').get('04000077').status, 'PENDING');
+    assert.equal(database.records.has('fields'), false);
+    assert.equal(database.records.has('crop_cycles'), false);
+    assert.equal(database.records.has('audit_logs'), false);
+  }
+});
+
+test('immediate approval enforces remaining farm area before any writes', async () => {
+  const { database, request } = approvalRecheckFixture();
+  database.records.get('block_farms').get('BF-001').declaredAreaHa = 2;
+  database.records.set('fields', new Map([['EXISTING', { blockFarmId: 'BF-001', areaHa: 1, status: 'ACTIVE' }]]));
+  Object.assign(request.body, { fieldAssignmentMode: 'NOW', fieldAreaHa: 1.5 });
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 409);
+  assert.match(response.payload.error, /remaining declared area/);
+  assert.equal(database.records.get('users').get('04000077').status, 'PENDING');
+  assert.equal(database.records.get('fields').size, 1);
+  assert.equal(database.records.has('crop_cycles'), false);
+});
+
+test('district approval cannot bypass Farm Manager authority for immediate field creation', async () => {
+  const { database, request } = approvalRecheckFixture();
+  request.session.user = { employeeId: '02000001', role: 'SRA_ADMIN' };
+  Object.assign(request.body, { fieldAssignmentMode: 'NOW', fieldAreaHa: 1 });
+  const response = responseCapture();
+  await loadApproveHandler(database)(request, response);
+  assert.equal(response.statusCode, 403);
+  assert.equal(database.records.get('users').get('04000077').status, 'PENDING');
+});
+
+test('the review queue includes pending accounts beyond directory pagination and explicit manual phone reviews', async () => {
+  const records = Object.fromEntries(Array.from({ length: 55 }, (_, index) => [String(4000000 + index), {
+    displayName: `Active ${index}`, role: 'MEMBER_FARMER', status: 'ACTIVE', phoneVerifiedAt: 'verified'
+  }]));
+  records['04000077'] = { displayName: 'Z Pending', role: 'MEMBER_FARMER', status: 'PENDING' };
+  records['04000078'] = { displayName: 'Z Manual Review', role: 'MEMBER_FARMER', status: 'ACTIVE',
+    phoneVerificationStatus: 'PENDING_VERIFICATION', phoneVerificationRequestedAt: 'requested', phoneVerificationReviewRequestedByUser: true };
+  records['04000079'] = { displayName: 'Awaiting Selection', role: 'MEMBER_FARMER', status: 'ACTIVE', phoneVerificationStatus: 'AWAITING_SELECTION' };
+  const database = new MemoryDb({ users: records });
+  const response = responseCapture();
+  await loadApproveHandler(database, '/', 'get')({
+    query: { reviewQueue: 'true', limit: '50' }, session: { user: { employeeId: '01000001', role: 'SUPER_ADMIN' } }
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload.data.map(user => user.id).sort(), ['04000077', '04000078']);
+  assert.equal(response.payload.page.hasMore, false);
+});
+
+test('the manager review queue excludes pending members of another Block Farm', async () => {
+  const { database } = approvalRecheckFixture();
+  database.records.get('users').set('04000088', { role: 'MEMBER_FARMER', status: 'PENDING', requestedBlockFarmId: 'BF-OTHER' });
+  const response = responseCapture();
+  await loadApproveHandler(database, '/', 'get')({
+    query: { reviewQueue: 'true' }, session: { user: { employeeId: '03000001', role: 'FARM_MANAGER' } }
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload.data.map(user => user.id), ['04000077']);
+});
+
+test('pending review reads stay bounded with a thousand unrelated active accounts', async () => {
+  const { database } = approvalRecheckFixture();
+  for (let index = 0; index < 1000; index++) database.records.get('users').set(String(4000000 + index), {
+    role: 'MEMBER_FARMER', status: 'ACTIVE', phoneVerifiedAt: 'verified', displayName: `Active ${index}`
+  });
+  database.readCounts = [];
+  const response = responseCapture();
+  await loadApproveHandler(database, '/', 'get')({
+    query: { reviewQueue: 'true' }, session: { user: { employeeId: '02000001', role: 'SRA_ADMIN' } }
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.data.length, 1);
+  assert.equal(database.readCounts.filter(read => read.collection === 'users').reduce((sum, read) => sum + read.documents, 0), 2,
+    'only the pending result and empty manual-review query are read, not 1001 directory documents');
+  assert.equal(database.readCounts.reduce((sum, read) => sum + read.documents, 0), 4);
+});
 
 test('pending approval cannot reactivate an account disabled just before its atomic commit', async () => {
   const { database, request } = approvalRecheckFixture();

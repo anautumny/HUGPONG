@@ -27,11 +27,12 @@ const {
 
 async function withAuthoritativeAreas(blockFarms) {
   if (!blockFarms.length) return [];
-  const farmIds = new Set(blockFarms.map(farm => String(farm.id || '').trim()).filter(Boolean));
-  const fieldsSnapshot = await db.collection(COLLECTIONS.FIELDS).get();
-  const farmFields = fieldsSnapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() }))
-    .filter(field => farmIds.has(String(field.blockFarmId || '').trim()));
+  const farmIds = [...new Set(blockFarms.map(farm => String(farm.id || '').trim()).filter(Boolean))];
+  // Area totals must cover every field in the returned farms, without reading
+  // fields belonging to other farms. Ten IDs also supports older query adapters.
+  const snapshots = await Promise.all(Array.from({ length: Math.ceil(farmIds.length / 10) }, (_, index) =>
+    db.collection(COLLECTIONS.FIELDS).where('blockFarmId', 'in', farmIds.slice(index * 10, index * 10 + 10)).get()));
+  const farmFields = snapshots.flatMap(snapshot => snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
   return attachBlockFarmAreaSummaries(blockFarms, farmFields);
 }
 

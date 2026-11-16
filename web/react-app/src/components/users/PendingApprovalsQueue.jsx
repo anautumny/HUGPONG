@@ -19,6 +19,8 @@ export default function PendingApprovalsQueue({
   const [processingAction, setProcessingAction] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [farmSelections, setFarmSelections] = useState({});
+  const [fieldAssignmentModes, setFieldAssignmentModes] = useState({});
+  const [fieldAreas, setFieldAreas] = useState({});
   const [verificationReasonCodes, setVerificationReasonCodes] = useState({});
   const [verificationReasonDetails, setVerificationReasonDetails] = useState({});
   const [verificationDecisions, setVerificationDecisions] = useState({});
@@ -59,7 +61,14 @@ export default function PendingApprovalsQueue({
     const selectedFarmId = farmSelections[user.id] ?? user.requestedBlockFarmId ?? '';
     const isPendingRegistration = user.status === 'PENDING';
     const targetRole = user.canonicalRole || 'MEMBER_FARMER';
-    const acceptUserNow = verificationDecisions[user.id] !== 'LATER';
+    const acceptUserNow = user.phoneVerified || verificationDecisions[user.id] !== 'LATER';
+    const fieldAssignmentMode = fieldAssignmentModes[user.id] || 'LATER';
+    const fieldAreaHa = Number(fieldAreas[user.id]);
+    if (isPendingRegistration && acceptUserNow && fieldAssignmentMode === 'NOW'
+      && (!Number.isFinite(fieldAreaHa) || fieldAreaHa < 0.01 || fieldAreaHa > 500)) {
+      setActionError('Enter a field area between 0.01 and 500 hectares.');
+      return;
+    }
     if (isPendingRegistration && acceptUserNow && ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole) && !selectedFarmId) {
       setActionError(`Select a Block Farm before approving this ${targetRole === 'FARM_MANAGER' ? 'Farm Manager' : 'Farm Member'}.`);
       return;
@@ -79,13 +88,15 @@ export default function PendingApprovalsQueue({
     setProcessingAction('approve');
     setActionError(null);
     try {
-      const result = requiresPhoneVerification
-        ? await onApproveUser(user, selectedFarmId, {
+      const result = await onApproveUser(user, selectedFarmId, {
+        ...(requiresPhoneVerification ? {
           verificationReasonCode,
-          verificationReasonDetails: verificationReasonDetail || undefined,
-          acceptUserNow
-        })
-        : await onApproveUser(user, selectedFarmId);
+          verificationReasonDetails: verificationReasonDetail || undefined
+        } : {}),
+        acceptUserNow,
+        fieldAssignmentMode,
+        ...(fieldAssignmentMode === 'NOW' ? { fieldAreaHa } : {})
+      });
       if (!result?.success) setActionError(result?.error || 'The registration could not be approved.');
     } catch (error) {
       setActionError(error.message || 'The registration could not be approved.');
@@ -127,10 +138,13 @@ export default function PendingApprovalsQueue({
           const isPendingRegistration = p.status === 'PENDING';
           const verificationReasonCode = verificationReasonCodes[p.id] || DEFAULT_PHONE_VERIFICATION_REASON;
           const verificationDetail = verificationReasonDetails[p.id] || '';
-          const verificationDecision = verificationDecisions[p.id] || 'NOW';
+          const verificationDecision = requiresPhoneVerification ? (verificationDecisions[p.id] || 'NOW') : 'NOW';
           const canVerify = canVerifyUser(p);
           const targetRole = p.canonicalRole || 'MEMBER_FARMER';
           const requiresFarmAssignment = isPendingRegistration && ['MEMBER_FARMER', 'FARM_MANAGER'].includes(targetRole);
+          const canAssignField = isPendingRegistration && targetRole === 'MEMBER_FARMER' && actorRole === 'FARM_MANAGER';
+          const fieldAssignmentMode = fieldAssignmentModes[p.id] || 'LATER';
+          const assigningFieldNow = canAssignField && fieldAssignmentMode === 'NOW' && (!requiresPhoneVerification || verificationDecision !== 'LATER');
 
           return (
             <div
@@ -173,6 +187,36 @@ export default function PendingApprovalsQueue({
                       </span>
                     )}
                   </label>
+                )}
+
+                {canAssignField && (!requiresPhoneVerification || verificationDecision !== 'LATER') && (
+                  <fieldset className="mt-3 max-w-xl">
+                    <legend className="text-xs font-semibold text-hug-text">Field assignment after approval</legend>
+                    <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                      {[
+                        { value: 'LATER', label: 'Approve and assign later' },
+                        { value: 'NOW', label: 'Approve and assign field' }
+                      ].map(option => (
+                        <button key={option.value} type="button" disabled={isProcessing}
+                          aria-pressed={fieldAssignmentMode === option.value}
+                          onClick={() => { setFieldAssignmentModes(current => ({ ...current, [p.id]: option.value })); setActionError(null); }}
+                          className={`rounded-xl border px-3 py-2.5 text-left text-xs font-semibold ${fieldAssignmentMode === option.value ? 'border-primary bg-primary-bg text-primary' : 'border-border bg-surface text-hug-muted'}`}>
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    {assigningFieldNow ? (
+                      <div className="mt-3 rounded-xl border border-border p-3">
+                        <p className="text-xs font-semibold text-hug-text">Add field for {p.displayName || p.name}</p>
+                        <label className="mt-2 block text-xs font-semibold text-hug-text" htmlFor={`pending-field-area-${p.id}`}>Plot area (ha)</label>
+                        <input id={`pending-field-area-${p.id}`} type="number" min="0.01" max="500" step="0.01"
+                          value={fieldAreas[p.id] || ''} disabled={isProcessing} placeholder="1.50"
+                          onChange={event => { setFieldAreas(current => ({ ...current, [p.id]: event.target.value })); setActionError(null); }}
+                          className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-hug-text" />
+                        <p className="mt-2 text-xs text-hug-muted">The field belongs to this member in the selected Block Farm. A Field ID and first Crop Year Cycle are created on approval.</p>
+                      </div>
+                    ) : <p className="mt-2 text-xs text-hug-muted">Activate the account now. Add its field later in the Farm &amp; Field Registry.</p>}
+                  </fieldset>
                 )}
 
                 <div className="flex items-center gap-3 text-xs text-hug-muted mt-1.5 flex-wrap">
@@ -282,16 +326,17 @@ export default function PendingApprovalsQueue({
                   onClick={() => handleApprove(p)}
                   isLoading={isProcessing && processingAction === 'approve'}
                   disabled={isProcessing
+                    || (assigningFieldNow && (!Number.isFinite(Number(fieldAreas[p.id])) || Number(fieldAreas[p.id]) < 0.01 || Number(fieldAreas[p.id]) > 500))
                     || (requiresFarmAssignment && verificationDecision !== 'LATER' && !selectedFarmId)
                     || (requiresPhoneVerification && (!canVerify
                       || (isOtherPhoneVerificationReason(verificationReasonCode) && verificationDetail.trim().length < 10)))}
                   icon={Check}
                 >
-                  {requiresPhoneVerification
+                  {assigningFieldNow ? (requiresPhoneVerification ? 'Verify, Approve & Assign Field' : 'Approve & Assign Field') : requiresPhoneVerification
                     ? (isPendingRegistration
                       ? (verificationDecision === 'LATER' ? 'Verify Phone Only' : 'Verify & Approve')
                       : 'Verify Phone')
-                    : 'Approve Application'}
+                    : (canAssignField ? 'Approve & Assign Later' : 'Approve Application')}
                 </Button>
               </div>
             </div>

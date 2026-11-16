@@ -5,11 +5,31 @@ const { COLLECTIONS, ROLES, canonicalRole } = require('../schema/firestoreSchema
 const { assertPhoneVerificationAuthority } = require('../domain/phoneVerificationPolicy');
 const { normalizeExpoPushToken, sendExpoPushNotification, checkExpoPushReceipt } = require('./mobilePushService');
 const { encodeCursor, decodeCursor } = require('./cursorPagination');
+const { notificationEligibleFrom, eventIsEligible } = require('../domain/notificationEligibility');
+const { subscriptionRef, coversEvent, notificationSubscriptions } = require('./notificationSubscriptions');
 
 const RETENTION_MS = 28 * 24 * 60 * 60 * 1000;
 const CHANNEL_ID = 'system-updates';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const userIdOf = user => String(user?.employeeId || user?.userId || user?.id || '').trim();
+
+// Lazily initialize existing accounts; never backfill broadcasts from before
+// the account's first authenticated notification subscription.
+async function ensureNotificationStart(database, userId, now = new Date().toISOString()) {
+  const ref = database.collection(COLLECTIONS.USERS).doc(userId);
+  return database.runTransaction(async transaction => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists || snapshot.data().status !== 'ACTIVE') {
+      throw Object.assign(new Error('An active account is required.'), { status: 403 });
+    }
+    const account = snapshot.data();
+    if (notificationEligibleFrom(account) !== null) return account.notificationStartedAt;
+    const createdAt = Date.parse(account.createdAt || '');
+    const startedAt = new Date(Math.max(Date.parse(now), Number.isFinite(createdAt) ? createdAt : 0)).toISOString();
+    transaction.update(ref, { notificationStartedAt: startedAt });
+    return startedAt;
+  });
+}
 
 function notificationFromAudit(event) {
   const shared = { sourceEventId: event.id, entityId: event.entityId, createdAt: event.createdAt };
@@ -43,6 +63,7 @@ async function canReceiveNotification(database, event, actor) {
   const userId = userIdOf(actor);
   const role = canonicalRole(actor?.role || actor?.canonicalRole);
   if (!userId || actor?.status !== 'ACTIVE') return false;
+  if (!eventIsEligible(event, actor)) return false;
   if (event.type === 'price') return [ROLES.MEMBER_FARMER, ROLES.FARM_MANAGER, ROLES.SRA_ADMIN].includes(role);
   if (event.type === 'verification-result') return userId === event.entityId;
   if (event.type !== 'verification-request') return false;
@@ -68,15 +89,38 @@ async function registerPushDevice(database, user, { token, clientInstanceId }) {
   }
   const id = hash(normalized);
   const ref = database.collection(COLLECTIONS.MOBILE_PUSH_DEVICES).doc(id);
-  await ref.set({ userId, token: normalized, clientInstanceId, enabled: true,
-    authVersion: Number(user.authVersion || 1), updatedAt: new Date().toISOString() });
+  await database.runTransaction(async transaction => {
+    const [previous, subscription] = await Promise.all([
+      transaction.get(ref), transaction.get(subscriptionRef(database, user, clientInstanceId))
+    ]);
+    if (!subscription.exists || subscription.data().activeFrom == null || subscription.data().expiresAtMs <= Date.now()
+      || subscription.data().authVersion !== Number(user.authVersion || 1)
+      || (user.notificationSessionKey && user.notificationSessionKey !== subscription.data().sessionKey)) {
+      throw Object.assign(new Error('Sign in again to enable device notifications.'), { status: 409 });
+    }
+    const current = previous.data() || {};
+    const now = new Date().toISOString();
+    const sameBinding = current.enabled && current.userId === userId && current.authVersion === Number(user.authVersion || 1)
+      && current.notificationSessionKey === subscription.data().sessionKey;
+    transaction.set(ref, { userId, token: normalized, clientInstanceId, enabled: true,
+      registeredAt: sameBinding ? (current.registeredAt || now) : now,
+      notificationSessionKey: subscription.data().sessionKey,
+      expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      authVersion: Number(user.authVersion || 1), updatedAt: now });
+  });
   return { registered: true };
 }
 
 async function unregisterPushDevice(database, user, clientInstanceId) {
   const matches = await database.collection(COLLECTIONS.MOBILE_PUSH_DEVICES).where('userId', '==', userIdOf(user)).get();
   for (const doc of matches.docs) {
-    if (doc.data().clientInstanceId === clientInstanceId) await doc.ref.set({ enabled: false }, { merge: true });
+    if (doc.data().clientInstanceId === clientInstanceId) await database.runTransaction(async transaction => {
+      const latest = await transaction.get(doc.ref);
+      if (latest.data()?.userId === userIdOf(user) && latest.data()?.clientInstanceId === clientInstanceId) {
+        if (user.notificationSessionKey && latest.data()?.notificationSessionKey !== user.notificationSessionKey) return;
+        transaction.update(doc.ref, { enabled: false });
+      }
+    });
   }
 }
 
@@ -86,8 +130,11 @@ function publicNotification(event) {
 }
 
 async function notificationInbox(database, actor, { cursor, limit = 50, now = Date.now() } = {}) {
+  const eligibleFrom = notificationEligibleFrom(actor);
+  if (eligibleFrom === null || actor?.status !== 'ACTIVE') return { data: [], eligibleFrom: null, page: { hasMore: false, nextCursor: null } };
+  const subscriptions = await notificationSubscriptions(database, actor);
   let query = database.collection(COLLECTIONS.NOTIFICATION_EVENTS)
-    .where('createdAt', '>=', new Date(now - RETENTION_MS).toISOString()).orderBy('createdAt', 'desc').orderBy('__name__', 'desc');
+    .where('createdAt', '>=', new Date(Math.max(now - RETENTION_MS, eligibleFrom)).toISOString()).orderBy('createdAt', 'desc').orderBy('__name__', 'desc');
   const after = decodeCursor(cursor);
   if (after) query = query.startAfter(after.value, after.id);
   // Bounded scan and an explicit continuation, including pages with no authorized rows.
@@ -118,10 +165,11 @@ async function notificationInbox(database, actor, { cursor, limit = 50, now = Da
   const data = [];
   for (const doc of scanned) {
     const event = { id: doc.id, ...doc.data() };
-    if (event.expiresAtMs > now && await canReceiveNotification(scopedDatabase, event, actor)) data.push(publicNotification(event));
+    if (event.expiresAtMs > now && subscriptions.some(subscription => coversEvent(subscription, event))
+      && await canReceiveNotification(scopedDatabase, event, actor)) data.push(publicNotification(event));
   }
   const last = scanned.at(-1);
-  return { data, page: { hasMore: snapshot.docs.length > limit,
+  return { data, eligibleFrom: new Date(eligibleFrom).toISOString(), page: { hasMore: snapshot.docs.length > limit,
     nextCursor: snapshot.docs.length > limit && last ? encodeCursor(last.data().createdAt, last.id) : null } };
 }
 
@@ -146,12 +194,13 @@ async function dispatchNotification(database, eventId, { send = sendExpoPushNoti
   let pages = 0;
   try {
     do {
-      let query = database.collection(COLLECTIONS.MOBILE_PUSH_DEVICES).orderBy('__name__');
+      let query = database.collection(COLLECTIONS.MOBILE_PUSH_DEVICES).where('enabled', '==', true).orderBy('__name__');
       if (cursor) query = query.startAfter(cursor);
       const devices = await query.limit(pageSize).get();
       for (const doc of devices.docs) {
         const device = doc.data();
-        if (!device.enabled) continue;
+        if (!device.enabled || !Number.isFinite(device.expiresAtMs) || device.expiresAtMs <= now
+          || !eventIsEligible(event, { notificationStartedAt: device.registeredAt })) continue;
         const account = await database.collection(COLLECTIONS.USERS).doc(device.userId).get();
         if (!account.exists || Number(account.data().authVersion || 1) !== device.authVersion
           || canonicalRole(account.data().role) === ROLES.SUPER_ADMIN) continue;
@@ -184,10 +233,17 @@ async function dispatchNotification(database, eventId, { send = sendExpoPushNoti
         // Recheck binding immediately before send: account switching must not
         // reuse an earlier page's token ownership.
         const current = await doc.ref.get();
-        if (!current.data()?.enabled || current.data().userId !== device.userId) continue;
+        if (!current.data()?.enabled || current.data().userId !== device.userId
+          || current.data().registeredAt !== device.registeredAt || current.data().authVersion !== device.authVersion) continue;
+        const subscription = await subscriptionRef(database, { employeeId: device.userId }, device.clientInstanceId).get();
+        if (!subscription.exists || subscription.data().activeFrom == null || subscription.data().expiresAtMs <= now
+          || subscription.data().authVersion !== device.authVersion || subscription.data().sessionKey !== device.notificationSessionKey
+          || !coversEvent(subscription.data(), event, true)) continue;
+        const deliveryExpiresAt = Math.min(event.expiresAtMs, device.expiresAtMs, subscription.data().expiresAtMs);
         const result = await send(device.token, { title: event.title, body: event.body, channelId: CHANNEL_ID,
-          ttl: Math.max(1, Math.min(2419200, Math.floor((event.expiresAtMs - now) / 1000))), tag: event.id,
-          data: { hugpongType: 'system-update', notificationId: event.id, recipientUserId: device.userId, resources: event.resources } });
+          ttl: Math.max(1, Math.min(2419200, Math.floor((deliveryExpiresAt - now) / 1000))), tag: event.id,
+          data: { hugpongType: 'system-update', notificationId: event.id, recipientUserId: device.userId,
+            createdAt: event.createdAt, resources: event.resources } });
         const permanent = ['DeviceNotRegistered', 'MessageTooBig', 'PUSH_TOKEN_INVALID'].includes(result.code);
         await receiptRef.set({ eventId, deviceId: doc.id, userId: device.userId, accepted: result.success === true,
           permanent, ticketId: result.ticketId || null, errorCode: result.code || null,
@@ -256,5 +312,5 @@ function startNotificationDelivery(database, { logger = console, retryMs = 1000,
   return { stop() { stopped = true; clearTimeout(timer); clearTimeout(listenerRetry); unsubscribe?.(); } };
 }
 
-module.exports = { RETENTION_MS, CHANNEL_ID, notificationFromAudit, queueSystemNotification, canReceiveNotification,
+module.exports = { RETENTION_MS, CHANNEL_ID, notificationFromAudit, queueSystemNotification, canReceiveNotification, ensureNotificationStart,
   registerPushDevice, unregisterPushDevice, notificationInbox, dispatchNotification, startNotificationDelivery };

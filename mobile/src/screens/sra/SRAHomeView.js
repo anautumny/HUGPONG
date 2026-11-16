@@ -9,7 +9,7 @@ import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_FAMILY, SPACING, RADIUS, SHADOW } from '../../theme';
 import { useTranslation } from '../../services/i18n';
-import { blockFarms, auditReports, resolveBlockFarmManager } from '../../data/dataStore';
+import { blockFarms, auditReports, pendingUsers, resolveBlockFarmManager } from '../../data/dataStore';
 import { AUDIT_STATUS, canonicalAuditStatus } from '../../domain/auditWorkflow';
 import { uniqueRecordsById } from '../../utils/dataHelpers';
 import { AppText as Text } from '../../components/Typography';
@@ -71,6 +71,16 @@ function SRAHomeView({ session = {}, fields = [], navigation }) {
           <Metric value={complianceRate == null ? t('no_data', 'No data') : `${complianceRate}%`} label={t('compliance_lbl', 'Compliance')} />
         </View>
       </View>
+
+      {pendingUsers?.length > 0 && (
+        <TouchableOpacity style={s.plotItem} onPress={() => navigation.navigate('Field Ops', { screen: 'SchedMain', params: { openPendingUsers: true } })} activeOpacity={0.8}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.plotName}>{pendingUsers.length} Pending User{pendingUsers.length === 1 ? '' : 's'}</Text>
+            <Text style={s.plotMeta}>Review account approvals and phone verification requests.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      )}
 
       {/* ── Supervised Block Farms ── */}
       <View style={s.sectionHeader}>

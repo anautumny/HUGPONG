@@ -15,10 +15,13 @@ async function until(condition) {
   assert.fail('Expected asynchronous notification transition did not complete.');
 }
 
-function runtime({ baseline = true, permission = true, override = null, nativeFailure = false, timers = {} } = {}) {
-  let session = { employeeId: 'MEMBER-1', phoneVerified: true, requiresPasswordChange: false, authVersion: 1 };
+function runtime({ baseline = true, permission = true, override = null, nativeFailure = false, timers = {}, legacyInbox = [], pendingNative = [], displayedNative = [] } = {}) {
+  let session = { employeeId: 'MEMBER-1', phoneVerified: true, requiresPasswordChange: false, authVersion: 1,
+    notificationStartedAt: '2026-01-01T00:00:00.000Z' };
   let online = true, dataCallback, cloudCallback, networkCallback, appCallback, handler;
-  const records = new Map(baseline ? [['@hugpong_system_alerts_MEMBER-1', []]] : []);
+  const records = new Map(baseline ? [['@hugpong_system_alerts_v2_MEMBER-1', []]] : []);
+  records.set('@hugpong_system_inbox_MEMBER-1', legacyInbox);
+  const cancelled = [], dismissed = []; let unregistered = 0;
   const scheduled = [], channels = [], refreshes = [], requests = [], callbacks = [];
   let events = [{ id: 'PRICE-NEW', type: 'price', title: 'SRA price updated', body: 'Test-only message', resources: ['prices'], createdAt: new Date().toISOString() }];
   const native = {
@@ -26,7 +29,11 @@ function runtime({ baseline = true, permission = true, override = null, nativeFa
       channels.push({ id, options });
       if (nativeFailure) throw new Error('Native push unavailable');
     },
-    getPresentedNotificationsAsync: async () => [], getPermissionsAsync: async () => ({ status: permission ? 'granted' : 'denied' }),
+    getAllScheduledNotificationsAsync: async () => pendingNative,
+    cancelScheduledNotificationAsync: async id => { cancelled.push(id); },
+    dismissNotificationAsync: async id => { dismissed.push(id); },
+    unregisterForNotificationsAsync: async () => { unregistered++; },
+    getPresentedNotificationsAsync: async () => displayedNative, getPermissionsAsync: async () => ({ status: permission ? 'granted' : 'denied' }),
     scheduleNotificationAsync: async value => scheduled.push(value), getLastNotificationResponseAsync: async () => null,
     addNotificationReceivedListener: callback => { callbacks[0] = callback; return { remove() {} }; },
     addNotificationResponseReceivedListener: callback => { callbacks[1] = callback; return { remove() {} }; }
@@ -59,9 +66,9 @@ function runtime({ baseline = true, permission = true, override = null, nativeFa
     subscribe: callback => { dataCallback = callback; return () => {}; },
     subscribeToCloudChanges: callback => { cloudCallback = callback; return () => {}; },
     refreshResources: async value => refreshes.push([...value]), onChange() {}, onOpen() {} });
-  return { records, scheduled, channels, refreshes, requests, stop,
+  return { records, scheduled, channels, refreshes, requests, stop, cancelled, dismissed, unregistered: () => unregistered,
     inbox: () => context.getSystemNotifications(session),
-    cloud: event => cloudCallback(event), setEvents: value => { events = value; },
+    cloud: event => cloudCallback(event), setEvents: value => { events = value.map(event => ({ createdAt: new Date().toISOString(), ...event })); },
     switchAccount(id) { session = { ...session, employeeId: id }; dataCallback(); },
     network(value) { online = value; networkCallback(value); },
     foreground() { appCallback('active'); },
@@ -86,14 +93,59 @@ test('Android catches missed events on reconnect and presents each unseen event 
   assert.ok(client.refreshes.some(resources => resources.includes('prices')));
 });
 
+test('native notification state reads include only unseen alert candidates and skip unchanged inboxes', async t => {
+  const stateQueries = [];
+  const client = runtime({ override: (url, options) => {
+    if (url === '/api/notifications/state/query') stateQueries.push([...options.body.ids]);
+  } }); t.after(client.stop);
+  await until(() => client.scheduled.length === 1);
+  client.cloud({ resources: ['notifications'] });
+  await until(() => client.requests.filter(url => url.startsWith('/api/notifications/inbox')).length === 2);
+  assert.deepEqual(stateQueries, [['PRICE-NEW']]);
+  client.setEvents([{ id: 'NEXT-PRICE', resources: ['prices'] }, ...client.inbox()]);
+  client.cloud({ resources: ['notifications'] });
+  await until(() => client.scheduled.length === 2);
+  assert.deepEqual(stateQueries, [['PRICE-NEW'], ['NEXT-PRICE']]);
+});
+
 test('Android deduplicates native foreground alerts and rejects a different account recipient', async t => {
   const client = runtime(); t.after(client.stop);
   await until(() => client.inbox().length === 1);
-  const data = { hugpongType: 'system-update', notificationId: 'NATIVE-1', recipientUserId: 'MEMBER-1', resources: ['prices'] };
+  const data = { hugpongType: 'system-update', notificationId: 'NATIVE-1', recipientUserId: 'MEMBER-1', createdAt: new Date().toISOString(), resources: ['prices'] };
   assert.equal(await client.present(data), true);
   assert.equal(await client.present(data), false);
   assert.equal(await client.present({ ...data, recipientUserId: 'OTHER-MEMBER', notificationId: 'OTHER' }), false);
-  assert.ok(client.records.get('@hugpong_system_alerts_MEMBER-1').includes('NATIVE-1'));
+  assert.ok(client.records.get('@hugpong_system_alerts_v2_MEMBER-1').includes('NATIVE-1'));
+});
+
+test('historical native events and legacy inbox caches cannot enter a new account inbox', async t => {
+  const client = runtime({ legacyInbox: [{ id: 'OLD-CACHED-PRICE', createdAt: '2025-01-01T00:00:00.000Z' }] });
+  t.after(client.stop);
+  client.setEvents([{ id: 'BEFORE-LOGIN', createdAt: '2025-01-01T00:00:00.000Z' }]);
+  await until(() => client.requests.some(url => url.startsWith('/api/notifications/inbox')));
+  assert.equal(client.inbox().length, 0);
+  assert.equal(client.scheduled.length, 0);
+  assert.equal(await client.present({ hugpongType: 'system-update', recipientUserId: 'MEMBER-1', notificationId: 'HISTORICAL', createdAt: '2025-01-01T00:00:00.000Z' }), false);
+  assert.equal(await client.present({ hugpongType: 'system-update', recipientUserId: 'MEMBER-1', notificationId: 'UNDATED' }), false);
+});
+
+test('logout clears account and legacy planner alerts, unregisters native push and rejects late notifications', async t => {
+  const pendingNative = [
+    { identifier: 'OWN-PLAN', content: { data: { hugpongType: 'planner-reminder', recipientUserId: 'MEMBER-1' } } },
+    { identifier: 'LEGACY-PLAN', content: { data: { hugpongType: 'planner-reminder' } } },
+    { identifier: 'RECOVERY', content: { data: { hugpongType: 'password-recovery-review' } } }
+  ];
+  const displayedNative = [{ request: { identifier: 'OWN-ALERT', content: { data: { hugpongType: 'system-update', recipientUserId: 'MEMBER-1' } } } }];
+  const client = runtime({ pendingNative, displayedNative }); t.after(client.stop);
+  await until(() => client.cancelled.includes('LEGACY-PLAN'));
+  assert.equal(client.cancelled.includes('OWN-PLAN'), false);
+  client.switchAccount('');
+  await until(() => client.cancelled.includes('OWN-PLAN') && client.dismissed.includes('OWN-ALERT'));
+  assert.equal(client.unregistered(), 1);
+  assert.equal(client.cancelled.includes('RECOVERY'), false, 'an explicitly requested recovery is independent of application sign-in');
+  assert.equal(client.inbox().length, 0);
+  assert.equal(await client.present({ hugpongType: 'system-update', recipientUserId: 'MEMBER-1', notificationId: 'LATE', createdAt: new Date().toISOString() }), false);
+  assert.equal(await client.present({ hugpongType: 'planner-reminder', recipientUserId: 'MEMBER-1' }), false);
 });
 
 test('disabled OS permissions or missing native configuration do not block the in-app inbox', async t => {
@@ -125,7 +177,7 @@ test('Android inbox failures retain a retry deadline despite repeated change eve
 
 test('a fresh installation establishes a baseline without replaying old notification sounds', async t => {
   const client = runtime({ baseline: false }); t.after(client.stop);
-  await until(() => client.inbox().length === 1 && client.records.has('@hugpong_system_alerts_MEMBER-1'));
+  await until(() => client.inbox().length === 1 && client.records.has('@hugpong_system_alerts_v2_MEMBER-1'));
   assert.equal(client.scheduled.length, 0);
 });
 
@@ -142,8 +194,8 @@ test('a delayed old-account inbox cannot overwrite the next account or its cache
   client.setEvents([{ id: 'ACCOUNT-TWO', title: 'Own update', resources: ['prices'] }]);
   release({ success: true, data: [{ id: 'PRIVATE-OLD-ACCOUNT' }], page: {} });
   await until(() => client.inbox()[0]?.id === 'ACCOUNT-TWO');
-  assert.equal(client.records.has('@hugpong_system_inbox_MEMBER-1'), false);
-  assert.equal(client.records.get('@hugpong_system_inbox_MEMBER-2')[0].id, 'ACCOUNT-TWO');
+  assert.equal(client.records.has('@hugpong_system_inbox_v2_MEMBER-1'), false);
+  assert.equal(client.records.get('@hugpong_system_inbox_v2_MEMBER-2')[0].id, 'ACCOUNT-TWO');
 });
 
 test('Android build configuration validates the package/project and rejects service account credentials', () => {

@@ -97,6 +97,7 @@ test('dashboard, sidebar, drawer and bottom links open routes allowed for their 
       ['components/layout/MobileBottomNav.jsx', {}],
       [`views/dashboard/${dashboard}.jsx`, { data: {
         auditReports: [{ status: 'PENDING_REVIEW' }], supportTickets: [{ status: 'OPEN' }],
+        pendingUsers: [{ id: '04000077', status: 'PENDING' }],
         terminalDiagnostics: [
           { displayName: 'Member A', activity: { attentionStatus: 'CRITICAL' } },
           { displayName: 'Member B', activity: { attentionStatus: 'NEEDS_ATTENTION' } },
