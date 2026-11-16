@@ -236,4 +236,4 @@ Back up at least every 24 hours and perform a recovery drill at least every 30 d
 
 **Key terms:** A **Block Farm** groups fields. A **Field Plot** is an individual agricultural area. A **Crop Year Cycle** identifies the production cycle. A **Draft** is unsubmitted preparation. An **Amendment** is a tracked correction. An **Audit Snapshot** preserves report values. A **QR Reference** identifies a report for official retrieval. **ha** means hectares; **PHP** means Philippine peso.
 
-**Edition note:** This guide reflects source reviewed on 16 November 2026, including revised approval choices, account-scoped notifications, and always-on sync. Those revisions still require the matching Web/API deployment and Android update. Confirm deployment alignment before presenting this edition as the manual for an installed or published release.
+**Edition note:** This guide covers HUGPONG 1.1.3, published on 16 November 2026, including revised approval choices, account-scoped notifications, and always-on sync. Use the updated Web Console and install Android 1.1.3 to follow these workflows. Labels can vary with role, language, assignment, and connection.
