@@ -38,3 +38,9 @@ Live verification passed for public pages and exact Web entry, dashboard, user-m
 The final release record is `output/release-1.1.3-deployment.json`. The current user manual and copy-ready text now identify 1.1.3 as published; no application source changed during that documentation update.
 
 No Android device was connected for the release smoke test. Physical installation, signed-in multi-role walkthroughs and push delivery remain device acceptance work. No production business records were created for a simulated test matrix, and no client drafts or queued work were cleared.
+
+## Same-day cache and download follow-up
+
+The user reported the direct GitHub download works after a phone rejected the website-downloaded installer. The website's main button now uses the verified GitHub artifact directly. Android 14 read-only emulator checks passed for a clean 1.1.3 install, an update from 1.1.2 and app launch. The exact phone-specific delivery/installer mechanism remains unconfirmed.
+
+Sync stream opening/reopening no longer clears unrelated shared caches on the single-writer Worker; mutation and hydration invalidation remain. The follow-up passed 954 server and 75 Web tests and live asset/readiness/download checks, then deployed as Cloudflare version `f77b68f3-da82-4fa2-a866-af0de1410beb`, source `96e80a0c774920b39f786d54886008e8e8a39fb8`. The Android artifact is unchanged. See [startup and download follow-up](STARTUP_READ_AND_DOWNLOAD_FOLLOWUP_2026-11-16.md) and [installer investigation](ANDROID_INSTALL_DIAGNOSTIC_2026-11-16.md).

@@ -1,6 +1,6 @@
 # Startup reads and Android download follow-up
 
-16 November 2026. Status: implemented locally; verification and Web/API rollout pending. Android artifact remains the verified 1.1.3 APK.
+16 November 2026. Status: deployed to Web/API. Android artifact remains the verified 1.1.3 APK.
 
 ## Report and interpretation
 
@@ -24,4 +24,10 @@ No Android application source or binary change is needed for this follow-up. The
 
 ## Verification and limits
 
-Pending full local gate and live Web/API verification. Do not treat a startup count or a mock budget as proof of actual daily production consumption. Compare additional reads after the latest APK has loaded and settled, separating active navigation/submissions from idle time and other clients or Firebase-console activity.
+The full local release gate passed **954 server tests and 75 Web tests**, security/configuration/client-binding audits, Web production build and Android bundle export. The Android application source and published APK did not change.
+
+Source commit: `96e80a0c774920b39f786d54886008e8e8a39fb8`. Active Cloudflare version: `f77b68f3-da82-4fa2-a866-af0de1410beb`; previous `8d9f2f00-0c24-407c-a876-617039124005` remains available. Live entry bytes match the verified Web build, the direct 1.1.3 artifact returns HTTP 200 with its exact expected length, readiness returns HTTP 200, and anonymous field reads remain HTTP 401.
+
+Evidence: `output/startup-read-followup-release-gate-2026-11-16.txt`, `output/startup-read-followup-cloudflare-deploy-2026-11-16.txt`, and `output/startup-read-followup-live-2026-11-16.json`. GitHub source verification run `43842958689` was in progress when the live check completed; the complete local release gate had already passed.
+
+Do not treat a startup count or a mock budget as proof of actual daily production consumption. Compare additional reads after the latest APK has loaded and settled, separating active navigation/submissions from idle time and other clients or Firebase-console activity. Sustained 1,000 reads per ten minutes while genuinely idle remains an unresolved measurement until that comparison is available.
