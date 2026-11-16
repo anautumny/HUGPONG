@@ -32,4 +32,6 @@ Initial loading and offline catch-up still cost reads proportional to the author
 
 The full local release gate passed 962 server tests and 79 Web tests, deployment configuration, secret exposure, runtime authority and client binding audits, the Web production build, and Android production bundle export. The Cloudflare test emulator requires access to its local AppData registry; the gate was rerun successfully with that access. Evidence: `output/read-reuse-release-gate-2026-11-16.txt` and `output/read-reuse-targeted-2026-11-16.txt`.
 
-Live deployment verification will be recorded after completion.
+Deployed from source commit `650e6bd7` to the existing `hugpong` Cloudflare service. Active version: `89681537-47e0-4796-8724-0728464f04f7`; previous version `a73af002-a0c8-4743-9a12-2098e95c11eb` remains available for rollback. The live entry `/assets/index-BQF4vt-H.js` matches the tested build byte for byte; readiness returns HTTP 200 and anonymous field access returns HTTP 401. No production record mutations or workload scans were performed for verification. Evidence: `output/read-reuse-cloudflare-deploy-2026-11-16.txt` and `output/read-reuse-live-verification-2026-11-16.json`.
+
+An initial automatic approval review rejected the source push because it could not verify the destination. Read-only checks confirmed `origin` is `https://github.com/anautumny/HUGPONG`, matching the published Android release repository, and `main` tracks `origin/main`. The retry with that evidence was approved and completed; deployment was then approved and completed.
